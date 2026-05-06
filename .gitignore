@@ -1,0 +1,17 @@
+target/
+**/*.rs.bk
+Cargo.lock.bak
+*.pdb
+.env
+.env.local
+data/
+*.db
+*.log
+installer/wix/target/
+installer/wix/*.wixobj
+installer/wix/*.wixpdb
+installer/wix/*.msi
+.idea/
+.vscode/
+*.swp
+.DS_Store
