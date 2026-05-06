@@ -1,0 +1,29 @@
+[package]
+name = "api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pharma-api"
+path = "src/main.rs"
+
+[dependencies]
+pharma-core = { path = "../core" }
+db = { path = "../db" }
+auth = { path = "../auth" }
+telemetry = { path = "../telemetry" }
+tokio.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+utoipa-swagger-ui.workspace = true
+axum-prometheus.workspace = true
+chrono.workspace = true

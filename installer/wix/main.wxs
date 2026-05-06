@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  pharma-server — WiX installer skeleton (cargo-wix v3 / WiX v3 toolset).
+  This is a minimal stub. Full installer must:
+    - Install pharma-service.exe to C:\Program Files\PharmaServer\
+    - Register Windows service (sc create / WiX ServiceInstall)
+    - Provision data dir C:\ProgramData\PharmaServer\data
+    - Open inbound firewall rule on configured port
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="*"
+             Name="Pharma Server"
+             Manufacturer="Pablo Alvarez"
+             Version="0.1.0"
+             UpgradeCode="11111111-1111-1111-1111-111111111111"
+             Language="1033">
+        <Package InstallerVersion="450"
+                 Compressed="yes"
+                 InstallScope="perMachine" />
+
+        <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+        <MediaTemplate EmbedCab="yes" />
+
+        <Feature Id="MainFeature" Title="Pharma Server" Level="1">
+            <ComponentGroupRef Id="ServiceComponents" />
+        </Feature>
+
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="ProgramFiles64Folder">
+                <Directory Id="INSTALLFOLDER" Name="PharmaServer" />
+            </Directory>
+            <Directory Id="CommonAppDataFolder">
+                <Directory Id="DATAFOLDER" Name="PharmaServer" />
+            </Directory>
+        </Directory>
+
+        <ComponentGroup Id="ServiceComponents" Directory="INSTALLFOLDER">
+            <!-- TODO: add pharma-service.exe + ServiceInstall + ServiceControl here -->
+        </ComponentGroup>
+    </Product>
+</Wix>

@@ -1,0 +1,15 @@
+bind = "0.0.0.0:8080"
+
+[db]
+path = "./data/surreal"
+namespace = "pharma"
+database = "main"
+
+[jwt]
+secret = "change-me-in-production"
+issuer = "pharma-server"
+ttl_seconds = 3600
+
+[otlp]
+endpoint = ""
+service_name = "pharma-api"

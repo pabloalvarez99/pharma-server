@@ -1,0 +1,18 @@
+[package]
+name = "service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pharma-service"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-service.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+telemetry = { path = "../telemetry" }

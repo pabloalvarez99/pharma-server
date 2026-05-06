@@ -1,0 +1,20 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pharma"
+path = "src/main.rs"
+
+[dependencies]
+pharma-core = { path = "../core" }
+db = { path = "../db" }
+auth = { path = "../auth" }
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+telemetry = { path = "../telemetry" }
+serde_json.workspace = true
