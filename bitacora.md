@@ -64,3 +64,39 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
   - `4b4d667` docs(readme): add Windows service smoke + MSI install/uninstall sections
 - **CI**: run 25525854049 verde con MSI fix commit. README-only commit run en curso (no afecta build).
 - **Estado scaffold tras este chunk**: M3 MSI cerrado. Pendiente: `pharma tenant-create` / `user-create`, OTLP wiring, `/health/ready` real DB ping, firmar MSI con cert (sin firma → SmartScreen warning).
+
+---
+
+## 2026-05-07 — CLI tenant/user create + /health/ready DB ping + OTLP wiring
+
+- **Qué**: tres ítems pendientes del scaffold cerrados.
+- **`pharma tenant-create <name> [--slug <slug>]`**:
+  - `crates/cli/src/main.rs`: `CREATE tenant SET name = $name, slug = $slug RETURN AFTER`, parse `TenantRow` con `surrealdb::sql::Thing` para id.
+  - Auto-slug fallback (`slugify`: lowercase + non-alnum→`-` + trim `-`).
+- **`pharma user-create --tenant <slug> --email <e> [--roles a,b] [--password <p>]`**:
+  - Lookup tenant por slug → record id, hash password con argon2id (`auth::password::hash`), `CREATE user SET tenant=$tenant, email=$email, password=$hash, roles=$roles`.
+  - `resolve_password`: prioridad `--password` > `PHARMA_PASSWORD` env > prompt interactivo `rpassword::prompt_password` con confirmación.
+  - Dep nueva: `rpassword = "7"` (workspace).
+- **`/health/ready` DB ping**:
+  - `crates/api/src/lib.rs`: `AppState` ahora carga `db: Option<Arc<db::Db>>`. `api::run` conecta SurrealDB en startup; si falla, log warn y arranca con `None` (ready devolverá `degraded`).
+  - `crates/api/src/health.rs`: `ready` ejecuta `handle.query("RETURN 1")`. OK → 200 `{"status":"ok","checks":{"db":"ok"}}`. Err o `db: None` → 503 `degraded`.
+  - Test fix: `crates/api/tests/auth.rs` AppState literal añade `db: None`.
+- **OTLP wiring**:
+  - `crates/telemetry/src/lib.rs`: nueva `init_with_otlp(name, &OtlpConfig)` además de `init(name)`. Si `endpoint` set y no vacío → construye `opentelemetry_otlp::SpanExporter::builder().with_tonic().with_endpoint(...)` + `TracerProvider` con `runtime::Tokio` BatchSpanProcessor + `Resource service.name`. Layer `tracing_opentelemetry::layer().with_tracer(...)` al subscriber chain (vía `Option<Layer>`).
+  - `telemetry::shutdown()` llama `opentelemetry::global::shutdown_tracer_provider()`.
+  - `crates/api/src/main.rs` y `crates/service/src/main.rs` ahora usan `init_with_otlp` y llaman `telemetry::shutdown()` al exit.
+  - Endpoint vacío en `config/default.toml` → tratado como disabled (filter `!s.is_empty()`). Activar con `PHARMA__OTLP__ENDPOINT=http://localhost:4317`.
+  - Deps wiring (workspace ya las tenía): `tracing-opentelemetry 0.28`, `opentelemetry 0.27`, `opentelemetry_sdk 0.27` (rt-tokio), `opentelemetry-otlp 0.27` (grpc-tonic).
+- **Smokes locales**:
+  - `pharma tenant-create "Demo Pharmacy" --slug demo` → `tenant created: id=tenant:9hd373893eo8361wntp4 slug=demo` ✓
+  - `PHARMA_PASSWORD=secret123 pharma user-create --tenant demo --email admin@demo.test --roles admin,pharmacist` → user creado con record id ✓
+  - `curl /health/ready` → 200 `{"status":"ok","checks":{"db":"ok"}}` ✓
+- **Gotchas (→ vault `brain/pharma-server-gotchas.md`)**:
+  - `opentelemetry_sdk::trace::Builder::with_config(...)` deprecated en 0.27 → usar `with_resource(resource)` directo.
+  - `Layered<...>` no implementa `try_init` cuando se anida con `if let`. Solución: pasar `Option<Layer>` al chain (`tracing_subscriber::registry().with(option_layer)`); tracing-subscriber tiene impl `Layer for Option<L>`.
+  - Empty string como endpoint OTLP causa `invalid URI empty string` en tonic. Filtrar `!is_empty()` antes.
+- **Commits**:
+  - `43d5b7a` feat(cli,api): tenant-create + user-create + /health/ready DB ping
+  - `b71b6ff` feat(telemetry): wire OTLP gRPC tracing exporter
+- **CI**: 25526940533 verde ✓ (commit `43d5b7a`). 25527505152 (OTLP) en curso (deps grandes ~30min build).
+- **Estado scaffold tras este chunk**: cerrados `tenant-create`, `user-create`, `/health/ready` DB ping, OTLP wiring. Pendiente real: firmar MSI con cert (SmartScreen), `/health/metrics` Prometheus, login endpoint que emita JWT, integration tests con DB temporal, MIGRATE en MSI postinstall (hoy CLI manual).
