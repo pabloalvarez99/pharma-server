@@ -8,8 +8,7 @@
     - Data dir %ProgramData%\PharmaServer\
     - Inbound firewall rule on TCP 8080
 
-  Build:
-    cargo wix --no-build --nocapture        # after `cargo build --release -p service`
+  Build via cargo-wix; see project README.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
@@ -77,7 +76,7 @@
         </ComponentGroup>
 
         <ComponentGroup Id="DataDirComponents" Directory="DATAFOLDER">
-            <Component Id="PharmaDataDir" Guid="*">
+            <Component Id="PharmaDataDir" Guid="7E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E71">
                 <CreateFolder />
             </Component>
         </ComponentGroup>
