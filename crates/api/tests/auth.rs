@@ -18,6 +18,7 @@ fn state() -> api::AppState {
     api::AppState {
         started_at: chrono::Utc::now(),
         jwt: jwt_cfg(),
+        db: None,
     }
 }
 

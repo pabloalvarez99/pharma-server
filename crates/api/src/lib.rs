@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
@@ -12,6 +12,7 @@ mod routes;
 pub struct AppState {
     pub started_at: chrono::DateTime<chrono::Utc>,
     pub jwt: pharma_core::config::JwtConfig,
+    pub db: Option<Arc<db::Db>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -24,9 +25,18 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    let db_handle = match db::connect(&cfg.db).await {
+        Ok(h) => Some(Arc::new(h)),
+        Err(e) => {
+            tracing::warn!(error = %e, "db connect failed, /health/ready will report degraded");
+            None
+        }
+    };
+
     let state = AppState {
         started_at: chrono::Utc::now(),
         jwt: cfg.jwt.clone(),
+        db: db_handle,
     };
 
     let app = build_router(state);

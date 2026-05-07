@@ -17,7 +17,7 @@ struct ReadyResponse {
 
 #[derive(Serialize)]
 struct ReadyChecks {
-    db: &'static str,
+    db: String,
 }
 
 pub fn router() -> Router<AppState> {
@@ -34,12 +34,27 @@ async fn live(State(s): State<AppState>) -> Json<LiveResponse> {
     })
 }
 
-async fn ready() -> (StatusCode, Json<ReadyResponse>) {
+async fn ready(State(s): State<AppState>) -> (StatusCode, Json<ReadyResponse>) {
+    let (status_code, overall, db_status) = match &s.db {
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "degraded",
+            "unavailable".to_string(),
+        ),
+        Some(handle) => match handle.query("RETURN 1").await {
+            Ok(_) => (StatusCode::OK, "ok", "ok".to_string()),
+            Err(e) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "degraded",
+                format!("error: {e}"),
+            ),
+        },
+    };
     (
-        StatusCode::OK,
+        status_code,
         Json(ReadyResponse {
-            status: "ok",
-            checks: ReadyChecks { db: "skipped" },
+            status: overall,
+            checks: ReadyChecks { db: db_status },
         }),
     )
 }

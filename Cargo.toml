@@ -72,6 +72,7 @@ windows-service = "0.7"
 
 # cli
 clap = { version = "4", features = ["derive"] }
+rpassword = "7"
 
 # time
 chrono = { version = "0.4", features = ["serde"] }
