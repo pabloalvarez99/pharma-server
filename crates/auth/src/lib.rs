@@ -1,5 +1,5 @@
-use pharma_core::config::JwtConfig;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use pharma_core::config::JwtConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,7 +12,12 @@ pub struct Claims {
     pub exp: i64,
 }
 
-pub fn issue(cfg: &JwtConfig, sub: &str, tenant_id: &str, roles: Vec<String>) -> anyhow::Result<String> {
+pub fn issue(
+    cfg: &JwtConfig,
+    sub: &str,
+    tenant_id: &str,
+    roles: Vec<String>,
+) -> anyhow::Result<String> {
     let now = chrono::Utc::now().timestamp();
     let claims = Claims {
         sub: sub.to_string(),
@@ -32,18 +37,16 @@ pub fn issue(cfg: &JwtConfig, sub: &str, tenant_id: &str, roles: Vec<String>) ->
 
 pub fn verify(cfg: &JwtConfig, token: &str) -> anyhow::Result<Claims> {
     let mut v = Validation::default();
-    v.set_issuer(&[cfg.issuer.clone()]);
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(cfg.secret.as_bytes()),
-        &v,
-    )?;
+    v.set_issuer(std::slice::from_ref(&cfg.issuer));
+    let data = decode::<Claims>(token, &DecodingKey::from_secret(cfg.secret.as_bytes()), &v)?;
     Ok(data.claims)
 }
 
 pub mod password {
     use argon2::{
-        password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+        password_hash::{
+            rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+        },
         Argon2,
     };
 
@@ -58,6 +61,8 @@ pub mod password {
 
     pub fn verify(pw: &str, hash: &str) -> anyhow::Result<bool> {
         let parsed = PasswordHash::new(hash).map_err(|e| anyhow::anyhow!("argon2: {e}"))?;
-        Ok(Argon2::default().verify_password(pw.as_bytes(), &parsed).is_ok())
+        Ok(Argon2::default()
+            .verify_password(pw.as_bytes(), &parsed)
+            .is_ok())
     }
 }

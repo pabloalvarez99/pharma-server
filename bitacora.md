@@ -32,7 +32,7 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
   - `234ee1b` refactor(api): expose lib::run; service hosts api in-process
   - `737ad79` feat(scaffold): initial pharma-server workspace
   - `95a60aa` chore: initial commit
-- **Commit de este chunk**: pendiente — se hará al cierre con mensaje `chore: scaffold project memory (CLAUDE.md, bitacora, vault hooks)`.
+- **Commit de este chunk**: `8e80f62` — `chore: scaffold project memory (CLAUDE.md, bitacora, vault hooks)`. Pushed a `origin/feature/pharma-server-scaffold`.
 - **Próximos pasos sugeridos** (no compromiso):
   1. Implementar `pharma tenant-create` y `pharma user-create` (CLI stubs).
   2. Llenar `installer/wix/main.wxs` `ServiceComponents` con ServiceInstall + ServiceControl + firewall rule.

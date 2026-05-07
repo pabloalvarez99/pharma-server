@@ -28,12 +28,18 @@ pub fn router() -> Router<AppState> {
 
 async fn live(State(s): State<AppState>) -> Json<LiveResponse> {
     let uptime = (chrono::Utc::now() - s.started_at).num_seconds();
-    Json(LiveResponse { status: "ok", uptime_secs: uptime })
+    Json(LiveResponse {
+        status: "ok",
+        uptime_secs: uptime,
+    })
 }
 
 async fn ready() -> (StatusCode, Json<ReadyResponse>) {
     (
         StatusCode::OK,
-        Json(ReadyResponse { status: "ok", checks: ReadyChecks { db: "skipped" } }),
+        Json(ReadyResponse {
+            status: "ok",
+            checks: ReadyChecks { db: "skipped" },
+        }),
     )
 }

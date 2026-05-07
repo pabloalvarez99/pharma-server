@@ -72,5 +72,8 @@ struct Root {
 }
 
 async fn root() -> Json<Root> {
-    Json(Root { name: "pharma-server", version: env!("CARGO_PKG_VERSION") })
+    Json(Root {
+        name: "pharma-server",
+        version: env!("CARGO_PKG_VERSION"),
+    })
 }

@@ -64,8 +64,8 @@ pub async fn apply_one(db: &Db, path: &Path) -> anyhow::Result<MigrationOutcome>
     if is_applied(db, &id).await? {
         return Ok(MigrationOutcome { id, applied: false });
     }
-    let sql = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let sql =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     db.query(sql)
         .await
         .with_context(|| format!("executing {}", path.display()))?
