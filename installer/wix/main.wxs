@@ -1,28 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  pharma-server — WiX installer skeleton (cargo-wix v3 / WiX v3 toolset).
-  This is a minimal stub. Full installer must:
-    - Install pharma-service.exe to C:\Program Files\PharmaServer\
-    - Register Windows service (sc create / WiX ServiceInstall)
-    - Provision data dir C:\ProgramData\PharmaServer\data
-    - Open inbound firewall rule on configured port
+  pharma-server — WiX installer (cargo-wix / WiX v3 toolset).
+
+  Installs:
+    - pharma-service.exe to %ProgramFiles%\PharmaServer\
+    - Windows service "PharmaServer" (auto-start, LocalSystem)
+    - Data dir %ProgramData%\PharmaServer\
+    - Inbound firewall rule on TCP 8080
+
+  Build:
+    cargo wix --no-build --nocapture        # after `cargo build --release -p service`
 -->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
     <Product Id="*"
              Name="Pharma Server"
              Manufacturer="Pablo Alvarez"
-             Version="0.1.0"
-             UpgradeCode="11111111-1111-1111-1111-111111111111"
+             Version="$(var.Version)"
+             UpgradeCode="5E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E6F"
              Language="1033">
         <Package InstallerVersion="450"
                  Compressed="yes"
-                 InstallScope="perMachine" />
+                 InstallScope="perMachine"
+                 Description="Pharma Server $(var.Version)"
+                 Manufacturer="Pablo Alvarez" />
 
-        <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+        <MajorUpgrade DowngradeErrorMessage="A newer version of Pharma Server is already installed." />
         <MediaTemplate EmbedCab="yes" />
 
         <Feature Id="MainFeature" Title="Pharma Server" Level="1">
             <ComponentGroupRef Id="ServiceComponents" />
+            <ComponentGroupRef Id="DataDirComponents" />
         </Feature>
 
         <Directory Id="TARGETDIR" Name="SourceDir">
@@ -35,7 +43,43 @@
         </Directory>
 
         <ComponentGroup Id="ServiceComponents" Directory="INSTALLFOLDER">
-            <!-- TODO: add pharma-service.exe + ServiceInstall + ServiceControl here -->
+            <Component Id="PharmaServiceExe" Guid="*">
+                <File Id="PharmaServiceExeFile"
+                      Name="pharma-service.exe"
+                      Source="$(var.CargoTargetBinDir)\pharma-service.exe"
+                      KeyPath="yes" />
+
+                <ServiceInstall Id="PharmaServiceInstall"
+                                Name="PharmaServer"
+                                DisplayName="Pharma Server"
+                                Description="Pharma Server API host (axum + SurrealDB)."
+                                Type="ownProcess"
+                                Start="auto"
+                                ErrorControl="normal"
+                                Vital="yes"
+                                Account="LocalSystem"
+                                Interactive="no" />
+
+                <ServiceControl Id="PharmaServiceControl"
+                                Name="PharmaServer"
+                                Start="install"
+                                Stop="both"
+                                Remove="uninstall"
+                                Wait="yes" />
+
+                <fire:FirewallException Id="PharmaApiInbound"
+                                        Name="Pharma Server API"
+                                        Port="8080"
+                                        Protocol="tcp"
+                                        Profile="all"
+                                        Scope="any" />
+            </Component>
+        </ComponentGroup>
+
+        <ComponentGroup Id="DataDirComponents" Directory="DATAFOLDER">
+            <Component Id="PharmaDataDir" Guid="*">
+                <CreateFolder />
+            </Component>
         </ComponentGroup>
     </Product>
 </Wix>

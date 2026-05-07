@@ -18,3 +18,12 @@ anyhow.workspace = true
 telemetry = { path = "../telemetry" }
 api = { path = "../api" }
 pharma-core = { path = "../core" }
+
+[package.metadata.wix]
+name = "pharma-server"
+product-name = "Pharma Server"
+upgrade-guid = "5E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E6F"
+path-guid = "6E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E70"
+include = ["../../installer/wix/main.wxs"]
+extensions = ["WixUtilExtension", "WixFirewallExtension"]
+no-build = false
