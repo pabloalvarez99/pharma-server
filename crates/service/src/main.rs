@@ -73,14 +73,19 @@ mod win {
 
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async move {
-            // TODO: launch api server here once api exposes a library entry. For scaffold,
-            // we simply wait for the stop signal.
-            tracing::info!("pharma-service running (scaffold stub)");
+            let cfg = api::load_or_default();
+            tracing::info!("pharma-service starting api");
+            let api_handle = tokio::spawn(async move {
+                if let Err(e) = api::run(cfg).await {
+                    tracing::error!(error = %e, "api exited with error");
+                }
+            });
             tokio::task::spawn_blocking(move || {
                 let _ = shutdown_rx.recv();
             })
             .await
             .ok();
+            api_handle.abort();
         });
 
         status_handle.set_service_status(ServiceStatus {
