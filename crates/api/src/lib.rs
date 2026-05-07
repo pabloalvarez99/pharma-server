@@ -4,21 +4,32 @@ use axum::{routing::get, Json, Router};
 use serde::Serialize;
 
 mod health;
+mod middleware;
 mod openapi;
+mod routes;
 
 #[derive(Clone)]
 pub struct AppState {
     pub started_at: chrono::DateTime<chrono::Utc>,
+    pub jwt: pharma_core::config::JwtConfig,
 }
 
-pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
-    let state = AppState { started_at: chrono::Utc::now() };
-
-    let app = Router::new()
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
         .route("/", get(root))
         .merge(health::router())
         .merge(openapi::router())
-        .with_state(state);
+        .merge(routes::router())
+        .with_state(state)
+}
+
+pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    let state = AppState {
+        started_at: chrono::Utc::now(),
+        jwt: cfg.jwt.clone(),
+    };
+
+    let app = build_router(state);
 
     let addr: SocketAddr = cfg.bind.parse()?;
     tracing::info!(%addr, "pharma-api listening");

@@ -27,3 +27,8 @@ utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 axum-prometheus.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true }
+http-body-util = "0.1"
+hyper = "1"

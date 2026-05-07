@@ -168,6 +168,8 @@ dependencies = [
  "axum-prometheus",
  "chrono",
  "db",
+ "http-body-util",
+ "hyper",
  "pharma-core",
  "serde",
  "serde_json",
