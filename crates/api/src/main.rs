@@ -1,6 +1,8 @@
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    telemetry::init("pharma-api")?;
     let cfg = api::load_or_default();
-    api::run(cfg).await
+    telemetry::init_with_otlp("pharma-api", &cfg.otlp)?;
+    let result = api::run(cfg).await;
+    telemetry::shutdown();
+    result
 }

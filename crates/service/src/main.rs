@@ -44,7 +44,8 @@ mod win {
     }
 
     fn run_service() -> windows_service::Result<()> {
-        let _ = telemetry::init("pharma-service");
+        let cfg = api::load_or_default();
+        let _ = telemetry::init_with_otlp("pharma-service", &cfg.otlp);
 
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
@@ -73,7 +74,6 @@ mod win {
 
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async move {
-            let cfg = api::load_or_default();
             tracing::info!("pharma-service starting api");
             let api_handle = tokio::spawn(async move {
                 if let Err(e) = api::run(cfg).await {
@@ -87,6 +87,8 @@ mod win {
             .ok();
             api_handle.abort();
         });
+
+        telemetry::shutdown();
 
         status_handle.set_service_status(ServiceStatus {
             service_type: SERVICE_TYPE,
