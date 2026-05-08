@@ -41,6 +41,21 @@ enum Cmd {
         #[arg(long)]
         password: Option<String>,
     },
+    /// List tenants.
+    TenantList {
+        /// Output as JSON instead of table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List users (optionally filtered by tenant slug).
+    UserList {
+        /// Tenant slug filter.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Output as JSON instead of table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print effective configuration.
     Config,
 }
@@ -145,6 +160,68 @@ async fn main() -> anyhow::Result<()> {
                 row.id, row.email, row.tenant, row.roles
             );
             tracing::info!(user_id = %row.id, tenant = %tenant, %email, "user created");
+        }
+        Cmd::TenantList { json } => {
+            let cfg = pharma_core::config::AppConfig::load()?;
+            let db_handle = db::connect(&cfg.db).await?;
+            let mut res = db_handle
+                .query("SELECT * FROM tenant ORDER BY slug")
+                .await
+                .context("SELECT tenant")?;
+            let rows: Vec<TenantRow> = res.take(0)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                println!("{:<40}  {:<24}  NAME", "ID", "SLUG");
+                for r in &rows {
+                    println!("{:<40}  {:<24}  {}", r.id.to_string(), r.slug, r.name);
+                }
+                println!("({} tenants)", rows.len());
+            }
+        }
+        Cmd::UserList { tenant, json } => {
+            let cfg = pharma_core::config::AppConfig::load()?;
+            let db_handle = db::connect(&cfg.db).await?;
+            let rows: Vec<UserRow> = if let Some(slug) = tenant {
+                let mut tq = db_handle
+                    .query("SELECT * FROM tenant WHERE slug = $slug LIMIT 1")
+                    .bind(("slug", slug.clone()))
+                    .await
+                    .context("lookup tenant by slug")?;
+                let tenant_row: Option<TenantRow> = tq.take(0)?;
+                let tenant_row =
+                    tenant_row.ok_or_else(|| anyhow!("tenant with slug '{slug}' not found"))?;
+                let mut res = db_handle
+                    .query("SELECT * FROM user WHERE tenant = $tenant ORDER BY email")
+                    .bind(("tenant", tenant_row.id.clone()))
+                    .await
+                    .context("SELECT user by tenant")?;
+                res.take(0)?
+            } else {
+                let mut res = db_handle
+                    .query("SELECT * FROM user ORDER BY email")
+                    .await
+                    .context("SELECT user")?;
+                res.take(0)?
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+            } else {
+                println!(
+                    "{:<40}  {:<32}  {:<24}  ROLES",
+                    "ID", "EMAIL", "TENANT"
+                );
+                for r in &rows {
+                    println!(
+                        "{:<40}  {:<32}  {:<24}  {}",
+                        r.id.to_string(),
+                        r.email,
+                        r.tenant.to_string(),
+                        r.roles.join(",")
+                    );
+                }
+                println!("({} users)", rows.len());
+            }
         }
         Cmd::Config => {
             let cfg = pharma_core::config::AppConfig::load()?;

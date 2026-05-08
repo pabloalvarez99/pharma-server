@@ -134,3 +134,15 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Builder API**: `PrometheusMetricLayerBuilder` requiere `.with_default_metrics()` (o `.with_metrics_from_fn(...)`) antes de `build_pair()` — sin esa transición de estado, error E0599 "method `build_pair` not found".
 - **Tests**: 5 passed (sin cambios).
 - **Pendiente**: proteger `/metrics` con auth (hoy abierto), buckets custom afinados a SLO real.
+
+## 2026-05-08 — CLI tenant-list + user-list
+
+- **Qué**: comandos read-only `pharma tenant-list` y `pharma user-list [--tenant <slug>]`, ambos con `--json` opcional.
+- **Por qué**: completar admin surface CLI sin abrir GUI; cerrar gap obvio tras tenant-create/user-create.
+- **Implementación** (`crates/cli/src/main.rs`):
+  - `TenantList { json }` → `SELECT * FROM tenant ORDER BY slug`, output tabla `ID  SLUG  NAME` o JSON pretty.
+  - `UserList { tenant, json }` → si `--tenant`, lookup tenant por slug + `SELECT * FROM user WHERE tenant = $tenant`; sin filtro, `SELECT * FROM user`. Output tabla `ID  EMAIL  TENANT  ROLES` o JSON pretty.
+  - Reutiliza `TenantRow` / `UserRow` ya definidos.
+- **Gotcha clippy**: `println!("{:<40} {}", "ID", "NAME")` con literal final dispara `clippy::print_literal` (`-D warnings` lo convierte en error). Fix: inlinear el último literal en la format string → `println!("{:<40} NAME", "ID")`.
+- **Verificación**: `cargo build --workspace --release` (27m46s, OK), `cargo fmt --check` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean tras fix print_literal, `cargo test --workspace` 5 passed.
+- **Pendiente**: paginación / filtros adicionales (`--role`, `--limit`) si surface crece.
