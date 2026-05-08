@@ -78,6 +78,29 @@ async fn me_with_valid_token_returns_claims() {
 }
 
 #[tokio::test]
+async fn login_without_db_returns_503() {
+    let app = api::build_router(state());
+    let body = serde_json::to_vec(&serde_json::json!({
+        "tenant": "acme",
+        "email": "a@b.cl",
+        "password": "x",
+    }))
+    .unwrap();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/login")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
 async fn health_live_does_not_require_token() {
     let app = api::build_router(state());
     let res = app

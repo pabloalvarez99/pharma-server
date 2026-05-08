@@ -27,6 +27,8 @@ utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 axum-prometheus.workspace = true
 chrono.workspace = true
+surrealdb.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true }

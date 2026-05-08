@@ -100,3 +100,23 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
   - `b71b6ff` feat(telemetry): wire OTLP gRPC tracing exporter
 - **CI**: 25526940533 verde ✓ (commit `43d5b7a`). 25527505152 (OTLP) en curso (deps grandes ~30min build).
 - **Estado scaffold tras este chunk**: cerrados `tenant-create`, `user-create`, `/health/ready` DB ping, OTLP wiring. Pendiente real: firmar MSI con cert (SmartScreen), `/health/metrics` Prometheus, login endpoint que emita JWT, integration tests con DB temporal, MIGRATE en MSI postinstall (hoy CLI manual).
+
+## 2026-05-08 — POST /api/login (JWT issue + session row)
+
+- **Qué**: endpoint `POST /api/login` que valida credenciales y emite JWT.
+- **Request**: `{"tenant": "<slug>", "email": "<e>", "password": "<p>"}`.
+- **Response 200**: `{"token": "<jwt>", "token_type": "Bearer", "expires_in": <ttl_seconds>}`.
+- **Errores**: 401 `{"error":"invalid credentials"}` (tenant inexistente, user inexistente, password mismatch, `active=false`); 503 `{"error":"service unavailable"}` (db `None`, query falla, JWT issue falla).
+- **Flujo**: SELECT tenant by slug → SELECT user by `tenant + email` (con `Option<bool>` para `active` para tolerar rows pre-existentes sin default aplicado) → `auth::password::verify` argon2id → `auth::issue` (HS256) → CREATE session SET user, tenant, jti=`uuid::v4`, expires_at (best-effort, log warn si falla pero token emitido).
+- **Archivos**:
+  - `crates/api/src/routes.rs`: handler `login`, structs `LoginRequest/Response/UserRow/TenantRow`, enum `LoginError` con `IntoResponse`.
+  - `crates/api/Cargo.toml`: deps nuevas `surrealdb` + `uuid` (workspace).
+  - `crates/api/tests/auth.rs`: test `login_without_db_returns_503`.
+- **Smoke local**:
+  - `pharma tenant-create "Smoke" --slug smoke` + `PHARMA_PASSWORD=passw0rd pharma user-create --tenant smoke --email smoke@x.cl --roles admin` ✓
+  - `curl -X POST http://127.0.0.1:8080/api/login -d '{"tenant":"smoke",...}'` → 200 con token ✓
+  - `curl /api/me -H "Authorization: Bearer $TOK"` → 200 con sub/tenant_id/roles ✓
+  - bad password → 401 ✓ ; tenant inexistente → 401 ✓
+- **Gotcha**: SurrealDB devuelve `active: None` al deserializar si la columna no estaba poblada en CREATE pre-este-deploy; serde decode `expected boolean, found None`. Fix: `Option<bool>` + `#[serde(default)]`. Treat `Some(false)` como inactivo, `None` o `Some(true)` como activo.
+- **Tests**: 5 passed (4 prev + nuevo). Clippy clean. Fmt clean.
+- **Pendiente**: refresh token, revocación de session (set `revoked=true`), rate limit por tenant+email, login lockout.
