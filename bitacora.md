@@ -146,3 +146,20 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Gotcha clippy**: `println!("{:<40} {}", "ID", "NAME")` con literal final dispara `clippy::print_literal` (`-D warnings` lo convierte en error). Fix: inlinear el último literal en la format string → `println!("{:<40} NAME", "ID")`.
 - **Verificación**: `cargo build --workspace --release` (27m46s, OK), `cargo fmt --check` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean tras fix print_literal, `cargo test --workspace` 5 passed.
 - **Pendiente**: paginación / filtros adicionales (`--role`, `--limit`) si surface crece.
+
+## 2026-05-08 — Integration tests con DB temporal (SurrealKv tempdir)
+
+- **Qué**: 4 tests integración nuevos en `crates/api/tests/integration_db.rs` que arrancan SurrealKv real sobre `tempfile::TempDir`, corren migraciones, siembran tenant + user, e invocan handlers axum vía `tower::ServiceExt::oneshot`.
+- **Por qué**: cubrir end-to-end `/health/ready`, `/api/login` y `/api/login → /api/me` con DB real; los unit tests existentes con `db: None` solo validaban paths degradados (503, 401).
+- **Helper**: `spawn_test_db()` → tempdir + `db::connect` + `db::run_migrations("../../migrations")` + retiene `TempDir` en struct para cleanup auto al drop. `seed_tenant_and_user(db, slug, email, password)` ejecuta `CREATE tenant`/`CREATE user` con `auth::password::hash`.
+- **Tests**:
+  - `health_ready_with_db_returns_200` → 200 con `checks.db == "ok"`.
+  - `login_with_valid_creds_returns_jwt` → 200 + payload con `token`, `token_type=Bearer`, `expires_in>0`.
+  - `login_with_bad_password_returns_401` → 401.
+  - `login_then_me_round_trip` → login → token → `Bearer <token>` en `/api/me` → 200 con `sub`, `tenant_id`, `roles[0]=admin`.
+- **Dev-deps**: `tempfile = "3"` añadido a `crates/api/Cargo.toml` (ya teníamos `http-body-util` y `tower`).
+- **CWD migrations**: `cargo test` corre con cwd = manifest dir (`crates/api/`), por eso `MIGRATIONS_DIR = "../../migrations"`.
+- **Aislamiento**: cada test crea su propio tempdir, evita el SurrealKv file lock entre tests paralelos.
+- **fmt gotcha**: tras fix `clippy::print_literal` en `cli/main.rs` (línea con `println!(...)` multilínea) `cargo fmt` re-junta a una sola línea — dejar la nueva forma single-line.
+- **Verificación**: `cargo build --workspace --release` OK · `cargo fmt --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` 9 passed (5 auth + 4 integration_db).
+- **Pendiente**: tests para session row creada por login, revoked path (logout), `/metrics` content-type smoke, performance smoke con N=100 logins.

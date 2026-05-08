@@ -34,3 +34,4 @@ uuid.workspace = true
 tower = { workspace = true }
 http-body-util = "0.1"
 hyper = "1"
+tempfile = "3"

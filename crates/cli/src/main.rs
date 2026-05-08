@@ -207,10 +207,7 @@ async fn main() -> anyhow::Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else {
-                println!(
-                    "{:<40}  {:<32}  {:<24}  ROLES",
-                    "ID", "EMAIL", "TENANT"
-                );
+                println!("{:<40}  {:<32}  {:<24}  ROLES", "ID", "EMAIL", "TENANT");
                 for r in &rows {
                     println!(
                         "{:<40}  {:<32}  {:<24}  {}",
