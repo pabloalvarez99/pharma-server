@@ -26,7 +26,7 @@ Versiones leídas de `Cargo.toml` (workspace). MSRV vs pin: `rust-version = 1.85
 - tokio 1.41 · tracing 0.1 · tracing-opentelemetry 0.28 · opentelemetry 0.27 · opentelemetry-otlp 0.27 · axum-prometheus 0.7
 - tokio-cron-scheduler 0.13 · async-nats 0.38 (ambos sin uso real todavía)
 - windows-service 0.7 · clap 4 · config 0.14 · chrono 0.4 · thiserror 2 · anyhow 1
-- MSI: cargo-wix + WiX v3 (skeleton en `installer/wix/main.wxs`, ServiceInstall TODO)
+- MSI: cargo-wix 0.3.9 + WiX v3.14 (`installer/wix/main.wxs` con `ServiceInstall` + `ServiceControl` + firewall TCP 8080; smoke install/uninstall verificado)
 - CI: GitHub Actions windows-latest (`.github/workflows/ci.yml`)
 
 Crates (`Cargo.toml` raíz):
@@ -38,9 +38,9 @@ Crates (`Cargo.toml` raíz):
 | `api` | Axum HTTP server. Bin `pharma-api`. Expone `lib::run` para que service lo embeba |
 | `auth` | JWT issue/verify (HS256, validación issuer) + argon2id password hash/verify |
 | `jobs` | Cron scheduler (vacío hoy) |
-| `telemetry` | `tracing_subscriber` JSON + EnvFilter. OTLP wiring TODO |
+| `telemetry` | `tracing_subscriber` JSON + EnvFilter + OTLP gRPC tonic exporter (opt-in vía `PHARMA__OTLP__ENDPOINT`) |
 | `service` | Windows service host, name `PharmaServer`, type `OWN_PROCESS`. Bin `pharma-service` |
-| `cli` | Admin CLI. Bin `pharma`. Comandos: `migrate`, `config`, `tenant-create` (TODO), `user-create` (TODO) |
+| `cli` | Admin CLI. Bin `pharma`. Comandos: `migrate`, `config`, `tenant-create`, `user-create` (argon2id, password vía flag/`PHARMA_PASSWORD`/prompt) |
 
 ## Reglas siempre activas
 
