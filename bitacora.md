@@ -120,3 +120,17 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Gotcha**: SurrealDB devuelve `active: None` al deserializar si la columna no estaba poblada en CREATE pre-este-deploy; serde decode `expected boolean, found None`. Fix: `Option<bool>` + `#[serde(default)]`. Treat `Some(false)` como inactivo, `None` o `Some(true)` como activo.
 - **Tests**: 5 passed (4 prev + nuevo). Clippy clean. Fmt clean.
 - **Pendiente**: refresh token, revocación de session (set `revoked=true`), rate limit por tenant+email, login lockout.
+
+## 2026-05-08 — /metrics Prometheus endpoint
+
+- **Qué**: endpoint `GET /metrics` formato exposición Prometheus, prefijo `pharma_`.
+- **Implementación** (`crates/api/src/lib.rs`):
+  - `PrometheusMetricLayerBuilder::new().with_prefix("pharma").with_ignore_patterns(&["/metrics","/health/live","/health/ready"]).with_default_metrics().build_pair()`.
+  - Mount `/metrics` + `.layer(prom_layer)` en `run()` (NO en `build_router` para no romper tests; recorder global solo puede instalarse una vez por proceso).
+  - Handler captura clone de `PrometheusHandle` y devuelve `handle.render()`.
+- **Métricas expuestas**: `pharma_http_requests_total{method,status,endpoint}`, `pharma_http_requests_pending`, `pharma_http_requests_duration_seconds_{bucket,sum,count}` (default histogram buckets).
+- **Smoke**: 3× `GET /` + 1× `POST /api/login` → `/metrics` muestra series correctas, sin entradas para `/metrics` ni `/health/*` (ignored).
+- **Gotcha**: `metrics_exporter_prometheus::install_recorder()` panica si llamada ≥2 veces en el mismo proceso. Por eso instalación queda fuera de `build_router` (tests construyen router múltiples veces). Tests no tocan `/metrics`.
+- **Builder API**: `PrometheusMetricLayerBuilder` requiere `.with_default_metrics()` (o `.with_metrics_from_fn(...)`) antes de `build_pair()` — sin esa transición de estado, error E0599 "method `build_pair` not found".
+- **Tests**: 5 passed (sin cambios).
+- **Pendiente**: proteger `/metrics` con auth (hoy abierto), buckets custom afinados a SLO real.

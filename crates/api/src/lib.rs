@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{routing::get, Json, Router};
+use axum_prometheus::PrometheusMetricLayerBuilder;
 use serde::Serialize;
 
 mod health;
@@ -39,7 +40,21 @@ pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
         db: db_handle,
     };
 
-    let app = build_router(state);
+    let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
+        .with_prefix("pharma")
+        .with_ignore_patterns(&["/metrics", "/health/live", "/health/ready"])
+        .with_default_metrics()
+        .build_pair();
+
+    let app = build_router(state)
+        .route(
+            "/metrics",
+            get(move || {
+                let h = prom_handle.clone();
+                async move { h.render() }
+            }),
+        )
+        .layer(prom_layer);
 
     let addr: SocketAddr = cfg.bind.parse()?;
     tracing::info!(%addr, "pharma-api listening");
