@@ -29,6 +29,7 @@ axum-prometheus.workspace = true
 chrono.workspace = true
 surrealdb.workspace = true
 uuid.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { workspace = true }

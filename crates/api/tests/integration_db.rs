@@ -167,6 +167,146 @@ async fn login_with_bad_password_returns_401() {
 }
 
 #[tokio::test]
+async fn v1_alias_login_and_me_work() {
+    let t = spawn_test_db().await;
+    seed_tenant_and_user(&t.db, "acme", "alice@acme.cl", "s3cret-pw").await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "tenant": "acme", "email": "alice@acme.cl", "password": "s3cret-pw",
+    }))
+    .unwrap();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/login")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn bad_credentials_use_error_envelope() {
+    let t = spawn_test_db().await;
+    seed_tenant_and_user(&t.db, "acme", "alice@acme.cl", "right-pw").await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+
+    let body = serde_json::to_vec(&serde_json::json!({
+        "tenant": "acme", "email": "alice@acme.cl", "password": "wrong",
+    }))
+    .unwrap();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/login")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "BAD_CREDENTIALS");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Credenciales"));
+}
+
+#[tokio::test]
+async fn mutation_writes_audit_log_row() {
+    let t = spawn_test_db().await;
+    seed_tenant_and_user(&t.db, "acme", "alice@acme.cl", "s3cret-pw").await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+
+    // Login to obtain a token (claims drive audit attribution).
+    let login_body = serde_json::to_vec(&serde_json::json!({
+        "tenant": "acme", "email": "alice@acme.cl", "password": "s3cret-pw",
+    }))
+    .unwrap();
+    let login_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/login")
+                .header("content-type", "application/json")
+                .body(Body::from(login_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = login_res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let token = json["token"].as_str().unwrap().to_string();
+
+    // Authenticated POST (unknown path → 404, still audited because layer wraps the router).
+    let _ = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/__audit_probe")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"probe":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Audit insert is detached; poll briefly.
+    #[derive(serde::Deserialize)]
+    struct Count {
+        c: i64,
+    }
+    let mut found = 0;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut q =
+            t.db.query("SELECT count() AS c FROM audit_log WHERE path = $p GROUP ALL")
+                .bind(("p", "/api/v1/__audit_probe"))
+                .await
+                .unwrap();
+        let rows: Vec<Count> = q.take(0).unwrap();
+        if let Some(r) = rows.first() {
+            if r.c >= 1 {
+                found = r.c;
+                break;
+            }
+        }
+    }
+    assert!(found >= 1, "expected an audit_log row for the mutation");
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        method: String,
+        path: String,
+        payload_hash: Option<String>,
+        tenant: surrealdb::sql::Thing,
+    }
+    let mut q = t
+        .db
+        .query("SELECT method, path, payload_hash, tenant FROM audit_log WHERE path = $p LIMIT 1")
+        .bind(("p", "/api/v1/__audit_probe"))
+        .await
+        .unwrap();
+    let rows: Vec<Row> = q.take(0).unwrap();
+    let row = rows.first().expect("audit row");
+    assert_eq!(row.method, "POST");
+    assert_eq!(row.path, "/api/v1/__audit_probe");
+    assert_eq!(row.tenant.tb, "tenant");
+    assert!(row.payload_hash.as_deref().unwrap().len() == 64);
+}
+
+#[tokio::test]
 async fn login_then_me_round_trip() {
     let t = spawn_test_db().await;
     seed_tenant_and_user(&t.db, "acme", "alice@acme.cl", "s3cret-pw").await;

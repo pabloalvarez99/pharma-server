@@ -1,11 +1,10 @@
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{header, request::Parts, StatusCode},
+    http::{header, request::Parts},
     response::{IntoResponse, Response},
-    Json,
 };
-use serde_json::json;
 
+use crate::error::ApiError;
 use crate::AppState;
 
 #[derive(Debug, Clone)]
@@ -19,25 +18,20 @@ impl std::ops::Deref for AuthUser {
 }
 
 #[derive(Debug)]
-pub struct AuthError {
-    pub status: StatusCode,
-    pub message: &'static str,
-}
+pub struct AuthError(ApiError);
 
 impl AuthError {
-    pub const MISSING: Self = Self {
-        status: StatusCode::UNAUTHORIZED,
-        message: "missing bearer token",
-    };
-    pub const INVALID: Self = Self {
-        status: StatusCode::UNAUTHORIZED,
-        message: "invalid or expired token",
-    };
+    pub fn missing() -> Self {
+        Self(ApiError::unauthorized_missing_token())
+    }
+    pub fn invalid() -> Self {
+        Self(ApiError::unauthorized_invalid_token())
+    }
 }
 
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
+        self.0.into_response()
     }
 }
 
@@ -55,10 +49,10 @@ where
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.strip_prefix("Bearer "))
-            .ok_or(AuthError::MISSING)?;
+            .ok_or_else(AuthError::missing)?;
         let claims = auth::verify(&app_state.jwt, token).map_err(|e| {
             tracing::debug!(error = %e, "jwt verification failed");
-            AuthError::INVALID
+            AuthError::invalid()
         })?;
         Ok(AuthUser(claims))
     }

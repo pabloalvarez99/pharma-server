@@ -9,10 +9,11 @@ members = [
     "crates/telemetry",
     "crates/service",
     "crates/cli",
+    "crates/domain",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 license = "Proprietary"
@@ -86,4 +87,15 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 0
-debug = 1
+# `line-tables-only` keeps backtraces but shrinks PDBs ~10x. Required: the full
+# surrealdb dependency graph in debug=1 overflows MSVC's per-PDB size limit
+# (LNK1140) and fills the disk. Workspace crates still get line info.
+debug = "line-tables-only"
+
+# Third-party deps don't need debug info at all — biggest PDB/disk win.
+[profile.dev.package."*"]
+debug = false
+
+# Tests inherit dev; keep them linkable on Windows MSVC.
+[profile.test.package."*"]
+debug = false

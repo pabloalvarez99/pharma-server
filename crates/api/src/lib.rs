@@ -10,10 +10,13 @@ use axum::{
 use axum_prometheus::PrometheusMetricLayerBuilder;
 use serde::Serialize;
 
+pub mod error;
 mod health;
 mod middleware;
 mod openapi;
 mod routes;
+
+pub use middleware::{audit, role};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -30,6 +33,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health::router())
         .merge(openapi::router())
         .merge(routes::router())
+        .layer(audit::layer(state.clone()))
         .with_state(state)
 }
 

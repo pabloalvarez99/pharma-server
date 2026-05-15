@@ -173,6 +173,7 @@ dependencies = [
  "pharma-core",
  "serde",
  "serde_json",
+ "sha2",
  "surrealdb",
  "telemetry",
  "tempfile",
@@ -1478,6 +1479,25 @@ checksum = "bb2dfc7a18dffd3ef60a442b72a827126f1557d914620f8fc4d1049916da43c1"
 dependencies = [
  "trice",
  "urlencoding",
+]
+
+[[package]]
+name = "domain"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "db",
+ "pharma-core",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "surrealdb",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "uuid",
 ]
 
 [[package]]
