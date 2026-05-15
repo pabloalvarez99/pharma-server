@@ -128,6 +128,31 @@ impl ApiError {
     }
 }
 
+impl From<domain::DomainError> for ApiError {
+    fn from(e: domain::DomainError) -> Self {
+        use domain::DomainError as D;
+        let status = match &e {
+            D::NotFound => StatusCode::NOT_FOUND,
+            D::Conflict(_) => StatusCode::CONFLICT,
+            D::Invalid(_) => StatusCode::BAD_REQUEST,
+            D::InsufficientStock => StatusCode::UNPROCESSABLE_ENTITY,
+            D::Forbidden => StatusCode::FORBIDDEN,
+            D::IdempotencyReplay => StatusCode::CONFLICT,
+            D::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+            D::Db(_) | D::Other(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        // DB/internal: log detail, return opaque Spanish copy.
+        let message = match &e {
+            D::Db(_) | D::Other(_) => {
+                tracing::error!(error = %e, "domain internal error");
+                "Error interno del servidor.".to_string()
+            }
+            other => other.to_string(),
+        };
+        Self::new(status, e.code(), message)
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let env = ErrorEnvelope {

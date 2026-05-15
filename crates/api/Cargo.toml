@@ -12,6 +12,7 @@ path = "src/main.rs"
 pharma-core = { path = "../core" }
 db = { path = "../db" }
 auth = { path = "../auth" }
+domain = { path = "../domain" }
 telemetry = { path = "../telemetry" }
 tokio.workspace = true
 axum.workspace = true
@@ -29,6 +30,7 @@ axum-prometheus.workspace = true
 chrono.workspace = true
 surrealdb.workspace = true
 uuid.workspace = true
+csv.workspace = true
 sha2 = "0.10"
 
 [dev-dependencies]

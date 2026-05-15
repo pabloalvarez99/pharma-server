@@ -205,3 +205,21 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Verificación**: `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` verde (api lib 12, auth 5, integration_db 7 incl `mutation_writes_audit_log_row`, `bad_credentials_use_error_envelope`, `v1_alias_login_and_me_work`).
 - **Commit**: `00c9ef6 feat(domain,api): Fase 1 erp-parity foundation`.
 - **Pendiente**: Fase 2 Catalog (migración 0003, product/category/barcode endpoints).
+
+---
+
+## 2026-05-15 — Fase 2 erp-parity: Catalog (epic feature/erp-parity)
+
+- **Qué**: catálogo productos/categorías/códigos. Migración `0003_catalog.surql`, crate `domain::catalog` (model/repo/service), endpoints `/api/v1` products+categories+etiquetas, tests integración Mem.
+- **Migración 0003** (SCHEMAFULL, append-only): `category`, `product`, `product_barcode` tenant-scoped (índice compuesto líder por `tenant`); `barcode_catalog` + `therapeutic_category_mapping` GLOBALES sin tenant (catálogo Chile compartido — decisión Fase 0). Índices product: `(tenant,slug)` UNIQUE + `(tenant,active|category|laboratory|external_id|stock)`.
+- **domain::catalog** dir-module: `model.rs` (DTOs/inputs `ToSchema`, money `#[serde(with="rust_decimal::serde::str")]` + `#[schema(value_type=String)]`), `repo.rs` (queries tenant-scoped puras), `service.rs` (slug auto, validación categoría, bulk-price, stock). Reemplaza `catalog.rs` flat.
+- **Endpoints** `/api/v1`: products GET(filtros search/category/active/low_stock)·POST·GET/PATCH/DELETE :id·POST :id/stock·import(CSV multipart)·export(CSV)·bulk-price·stats; categories GET/POST·GET/PATCH/DELETE :id; etiquetas/search. Lecturas = AuthUser; mutaciones = `role::layer(["admin","owner"])`.
+- **Decisiones §4 nuevas** (vault `brain/pharma-server-decisions.md`): (1) DELETE = soft-delete `active=false` (auditoría ISP, refs futuras order_item/stock_movement). (2) Swagger UI diferido a Fase 8; anotar `ToSchema`/`utoipa::path` ahora. (3) `POST products/:id/stock` escribe `product.stock` directo; `stock_movement` auditado llega Fase 3. (4) `POST products/update-prices` → **501** (depende `supplier_price_list`, Fase 5). (5) `stats.expired`=0 hasta `product_batch` (Fase 3).
+- **Gotcha decimal binding**: `rust_decimal` con feature `serde-with-str` serializa Decimal como string → SurrealQL `decimal` schema rechaza el bind (`FieldCheck ... check:"decimal"`). Fix durable: helpers `dec_val`/`dec_opt` en `repo.rs` convierten a `surrealdb::sql::Number::from(d).into()` (Value nativo). Round-trip verificado en test `decimal_round_trips_through_db`.
+- **Gotcha clippy result_large_err**: `DomainError::Db(surrealdb::Error)` infla `DomainResult` (>128B) → lint en cada fn repo. Fix: `Db(Box<surrealdb::Error>)` + `impl From<surrealdb::Error>` manual (thiserror `#[from]` no auto-boxea).
+- **kv-mem test-only**: `surrealdb = { workspace=true, features=["kv-mem"] }` en `[dev-dependencies]` de `domain` (no infla binario shippeado; feature unifica solo en build de tests).
+- **Tests** (`crates/domain/tests/catalog.rs`, Mem + migraciones reales): slug auto+colisión, decimal round-trip + JSON string, filtros + soft-delete, bulk-price percent/amount + round, stats agregados, category CRUD + link + validación, **aislamiento por tenant**. 7 pass + 1 unit slugify.
+- **Versión**: 0.1.1 → 0.1.2 (patch por fase, regla 11).
+- **Deps**: workspace `axum` += `multipart`; `csv = "1.3"`; `api` += `domain`.
+- **Verificación**: `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` verde (domain 7+1, api 12, auth 5, integration_db 7) · `cargo build --workspace --release` OK.
+- **Pendiente**: Fase 3 Inventory (migración 0004, stock_movement/product_batch/falta, ABC, reorder, FEFO).

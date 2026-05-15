@@ -15,6 +15,7 @@ mod health;
 mod middleware;
 mod openapi;
 mod routes;
+mod v1;
 
 pub use middleware::{audit, role};
 
@@ -33,6 +34,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health::router())
         .merge(openapi::router())
         .merge(routes::router())
+        .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
         .with_state(state)
 }

@@ -18,9 +18,17 @@ pub enum DomainError {
     #[error("not implemented")]
     NotImplemented,
     #[error("db: {0}")]
-    Db(#[from] surrealdb::Error),
+    Db(Box<surrealdb::Error>),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+// Boxed so `DomainResult` stays small (`surrealdb::Error` is a large enum;
+// otherwise clippy::result_large_err fires across every repo fn).
+impl From<surrealdb::Error> for DomainError {
+    fn from(e: surrealdb::Error) -> Self {
+        Self::Db(Box::new(e))
+    }
 }
 
 impl DomainError {
