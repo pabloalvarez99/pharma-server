@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use axum::{
     extract::State,
     http::{header, StatusCode},
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::get,
     Json, Router,
 };
@@ -26,6 +26,7 @@ pub struct AppState {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
+        .route("/app", get(app_index))
         .merge(health::router())
         .merge(openapi::router())
         .merge(routes::router())
@@ -69,8 +70,7 @@ pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
                         match authorize_metrics(&s, &headers) {
                             Ok(()) => h.render().into_response(),
                             Err((status, msg)) => {
-                                (status, Json(serde_json::json!({ "error": msg })))
-                                    .into_response()
+                                (status, Json(serde_json::json!({ "error": msg }))).into_response()
                             }
                         }
                     }
@@ -158,6 +158,10 @@ async fn root() -> Json<Root> {
         name: "pharma-server",
         version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+async fn app_index() -> Html<&'static str> {
+    Html(include_str!("../static/index.html"))
 }
 
 #[cfg(test)]
