@@ -3,6 +3,42 @@
 Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
 **Estado**: scaffold inicial · branch `feature/pharma-server-scaffold` · no producción todavía.
 
+## Producto / Visión comercial
+
+**Meta**: ERP **profesional para farmacias**, vendible como licencia on-prem (MSI + soporte). Comprador: farmacias independientes y cadenas chicas que quieren todo local, sin SaaS, sin cloud, sin lock-in.
+
+Pilares de venta (no negociables):
+- **Instalación 1 click** (MSI firmado, sin dependencias externas, sin Docker, sin Postgres aparte).
+- **Offline-first**: opera sin internet. LAN-only. Datos siempre en la farmacia.
+- **Multi-tenant** (una instalación, N sucursales/locales o N clientes en SaaS-en-VPS opcional).
+- **Cumplimiento local CL**: boleta electrónica SII, libro de controlados ISP/DEIS, recetas magistrales, vencimientos, lotes, trazabilidad.
+- **Auditoría completa**: cada cambio de stock/precio/venta queda en log inmutable.
+- **Performance**: POS responde <100ms incluso con 50k SKUs. SurrealKv embedded = sin red en hot path.
+- **Vendor-agnostic**: exporta CSV/JSON sin formatos propietarios. El cliente es dueño de sus datos.
+
+Módulos objetivo (roadmap producto, no scaffold):
+1. **Inventario**: SKU, lote, vencimiento, stock por bodega, alertas mínimos.
+2. **POS / Ventas**: tickets, medios de pago, devoluciones, descuentos, convenios isapre.
+3. **Compras**: OC, recepción, costo promedio ponderado.
+4. **Recetas**: receta retenida, receta cheque, controlados (Ley 20.000).
+5. **Caja**: apertura/cierre, arqueo, diferencias.
+6. **Reportes**: ventas, márgenes, rotación, ABC, vencimientos próximos.
+7. **Integraciones (opt-in)**: SII (DTE), ISP, transbank/getnet, balanza, lector códigos.
+8. **Backup**: snapshot SurrealKv programado + restore guiado.
+9. **Usuarios/roles**: cajero, químico, admin, dueño. Permisos por módulo.
+
+Modelo de negocio (referencia, no decidido):
+- Licencia por instalación + mantención anual (incluye updates + soporte).
+- Tier por nº de cajas/usuarios concurrentes.
+- Soporte premium (SLA) como add-on.
+
+Reglas de diseño derivadas:
+- **No agregar dependencia cloud** sin opción de operar offline.
+- **No romper compat de DB** sin migración automática (cliente NO debe perder datos al actualizar).
+- **UI desacoplada**: el server expone API HTTP/JSON estable y versionada (`/api/v1/...`). Frontend (POS, admin) es cliente separado.
+- **Errores en español** en respuestas user-facing (códigos en inglés OK para devs).
+- **Performance budget**: endpoints POS <50ms p99 en hardware mínimo (i3 + SSD + 8GB).
+
 ## Scope de este repo (IMPORTANTE)
 
 Este repo (`pharma-server`) es **exclusivamente para el servidor Rust on-prem genérico**. Producto a empaquetar como MSI y vender a farmacias que quieren todo local (sin cloud, vendor-agnostic, offline-first).
