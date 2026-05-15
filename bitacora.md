@@ -185,3 +185,23 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Gotcha disco**: build full debug pasó de PDB limit (LNK1140) y luego ENOSPC sobre target/ (12G). `cargo clean` (-9.6GiB) + `cargo test --release`. Sustituir debug compiles por `--release` en este host hasta migrar a disco más grande / `target/` separado.
 - **Verificación**: `cargo build --workspace --release` OK · `cargo fmt --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace --release` 14 passed (5 unit lib + 5 auth + 4 integration_db).
 - **Pendiente**: documentar token rotation flow, CLI helper `pharma metrics-token --rotate`, MSI install puede generar token aleatorio al installtime y persistirlo en config local.
+
+---
+
+## 2026-05-15 — Fase 1 erp-parity foundation (epic feature/erp-parity)
+
+- **Qué**: arranque del epic ERP-parity (portar API+dominio de Tu Farmacia → pharma-server). Branch `feature/erp-parity` desde scaffold HEAD. Plan completo en `docs/erp-parity-prompt.md` (31 modelos, 87 rutas, 9 fases).
+- **Por qué**: pharma-server debe alcanzar paridad funcional ERP con la app live de Tu Farmacia, vendible como MSI on-prem genérico. No se porta frontend Next.js — solo API HTTP/JSON versionada `/api/v1`.
+- **Decisiones §4 (10) documentadas** en vault `brain/pharma-server-decisions.md` (sección "ERP-parity epic"): barcode_catalog global, rust_decimal money, CLP hardcode, SII stub 501, OCR stub 501, idempotency_key TTL 24h, FEFO lotes, backup `.surql.gz`, LIVE diferido, tests Surreal Mem.
+- **Crate nuevo `domain`**: 10 submódulos bounded-context (catalog, inventory, sales, purchasing, finance, customers, prescriptions, operations, settings, reports) + `DomainError` (thiserror, `.code()` SCREAMING_SNAKE) + `money` (rust_decimal, CURRENCY_CLP, IVA_DEFAULT_PERCENT). Solo scaffold (cada fase llena su contexto).
+- **Error envelope** (`crates/api/src/error.rs`): `{ error: { code, message, details? } }`. Códigos EN SCREAMING_SNAKE (contrato estable), mensajes ES user-facing. `ApiError` + helpers. `LoginError`/`AuthError` refactorizados sobre él (eliminado enum LoginError ad-hoc).
+- **Versionado API**: rutas canónicas `/api/v1/{me,login}`; alias `/api/{me,login}` mantenido 1 release por compat.
+- **RequireRole** (`middleware/role.rs`): verifica JWT + intersección de roles vs allowlist `&'static [&'static str]`. 403 FORBIDDEN envelope. Patrón `Stack<Extension<AllowedRoles>, FromFnLayer>` para no monomorfizar por call site.
+- **AuditLayer** (`middleware/audit.rs`): POST/PATCH/PUT/DELETE → `tokio::spawn` insert detached en `audit_log` (nunca bloquea response path). Hash sha256 del body. Best-effort: DB caída / sin JWT → request sigue, row skip + warn.
+- **Migración** `0002_audit_log.surql`: `audit_log` SCHEMAFULL multi-tenant (tenant record<tenant>, user option<record<user>>, method, path, status, payload_hash, ip, user_agent, created_at) + índices compuestos `(tenant,created_at)`, `(user,created_at)`, `(path,created_at)`. Append-only enforce a nivel app.
+- **docs/parity-prisma-models.md**: inventario completo 31 modelos Prisma (campos/tipos/índices/relaciones) + cheatsheet Postgres→SurrealDB + overlay multi-tenant.
+- **Fix build durable (resuelve gotcha LNK1140/disco previo)**: `[profile.dev] debug = "line-tables-only"` + `[profile.dev.package."*"] debug = false` + `[profile.test.package."*"] debug = false`. El grafo debug completo de surrealdb desbordaba el límite por-PDB de MSVC (LNK1140) y llenaba disco (C: quedó con 82MB libres). Esto reduce PDBs ~10x manteniendo backtraces en crates del workspace. Sustituye el workaround `--release-only`: ahora `cargo test --workspace` debug linkea bien.
+- **Versión**: `workspace.package.version` 0.1.0 → 0.1.1 (patch por fase, regla 11).
+- **Verificación**: `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` verde (api lib 12, auth 5, integration_db 7 incl `mutation_writes_audit_log_row`, `bad_credentials_use_error_envelope`, `v1_alias_login_and_me_work`).
+- **Commit**: `00c9ef6 feat(domain,api): Fase 1 erp-parity foundation`.
+- **Pendiente**: Fase 2 Catalog (migración 0003, product/category/barcode endpoints).
