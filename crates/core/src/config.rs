@@ -6,6 +6,14 @@ pub struct AppConfig {
     pub db: DbConfig,
     pub jwt: JwtConfig,
     pub otlp: OtlpConfig,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

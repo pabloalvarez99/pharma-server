@@ -84,6 +84,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         started_at: chrono::Utc::now(),
         jwt: jwt_cfg(),
         db: Some(db),
+        metrics_token: None,
     }
 }
 

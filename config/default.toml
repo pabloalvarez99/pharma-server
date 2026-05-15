@@ -13,3 +13,7 @@ ttl_seconds = 3600
 [otlp]
 endpoint = ""
 service_name = "pharma-api"
+
+[metrics]
+# Empty = /metrics returns 401. Set via PHARMA__METRICS__TOKEN in prod.
+token = ""

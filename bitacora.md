@@ -163,3 +163,25 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **fmt gotcha**: tras fix `clippy::print_literal` en `cli/main.rs` (línea con `println!(...)` multilínea) `cargo fmt` re-junta a una sola línea — dejar la nueva forma single-line.
 - **Verificación**: `cargo build --workspace --release` OK · `cargo fmt --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` 9 passed (5 auth + 4 integration_db).
 - **Pendiente**: tests para session row creada por login, revoked path (logout), `/metrics` content-type smoke, performance smoke con N=100 logins.
+
+## 2026-05-14 — /metrics protegido con bearer token compartido
+
+- **Qué**: endpoint `/metrics` ahora requiere `Authorization: Bearer <token>` con token vía config. Antes: abierto, expone counters a cualquiera en LAN.
+- **Por qué**: cerrar surface; producto se despliega en LAN de farmacia, scrapers (Prometheus) viven en misma red → bearer compartido suficiente (no necesitan JWT rotativo).
+- **Modelo**: token-shared en `[metrics] token = ""` (`crates/core/src/config.rs` añade `MetricsConfig { token: Option<String> }` con `#[serde(default)]`). Empty string → tratado como `None` → 401. Producción inyecta vía `PHARMA__METRICS__TOKEN`.
+- **Implementación** (`crates/api/src/lib.rs`):
+  - Campo `metrics_token: Option<String>` en `AppState`.
+  - `/metrics` movido a sub-router con `.with_state(state.clone())` para extraer `State<AppState>`.
+  - Handler: `authorize_metrics(state, headers) -> Result<(), (StatusCode, &'static str)>` valida bearer.
+  - Comparación con `constant_time_eq` (XOR loop, side-channel resistant) para evitar timing leak.
+  - Si `metrics_token == None` → log `warn!` al arrancar + `/metrics` siempre 401 ("metrics endpoint not configured"). Cerrado-por-defecto seguro.
+- **Tests nuevos** (`#[cfg(test)] mod tests` en `lib.rs`, 5 unit):
+  - `metrics_no_token_configured_returns_401`
+  - `metrics_missing_header_returns_401`
+  - `metrics_wrong_token_returns_401`
+  - `metrics_correct_token_ok`
+  - `constant_time_eq_works`
+- **Gotcha clippy**: primera versión devolvía `Result<(), axum::response::Response>` → `clippy::result_large_err` (`-D warnings` lo convierte en error: variant ≥128 bytes). Fix: devolver `Result<(), (StatusCode, &'static str)>` y construir Response en el handler caller.
+- **Gotcha disco**: build full debug pasó de PDB limit (LNK1140) y luego ENOSPC sobre target/ (12G). `cargo clean` (-9.6GiB) + `cargo test --release`. Sustituir debug compiles por `--release` en este host hasta migrar a disco más grande / `target/` separado.
+- **Verificación**: `cargo build --workspace --release` OK · `cargo fmt --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace --release` 14 passed (5 unit lib + 5 auth + 4 integration_db).
+- **Pendiente**: documentar token rotation flow, CLI helper `pharma metrics-token --rotate`, MSI install puede generar token aleatorio al installtime y persistirlo en config local.
