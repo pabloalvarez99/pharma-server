@@ -212,7 +212,9 @@ async fn adjust_stock(
 ) -> Result<Json<ProductDto>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
-    Ok(Json(service::adjust_stock(&db, &t, &id, adj).await?))
+    Ok(Json(
+        service::adjust_stock(&db, &t, &id, adj, Some(&claims.sub)).await?,
+    ))
 }
 
 async fn bulk_price(

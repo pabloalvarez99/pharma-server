@@ -3,11 +3,12 @@
 //! claims/tenant, call `domain::*::service`, map `DomainError` → envelope.
 
 pub mod catalog;
+pub mod inventory;
 
 use axum::Router;
 
 use crate::AppState;
 
 pub fn router(state: AppState) -> Router<AppState> {
-    catalog::router(state)
+    catalog::router(state.clone()).merge(inventory::router(state))
 }
