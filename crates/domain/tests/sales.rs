@@ -2,8 +2,10 @@
 //! POS atomic-sale tx end-to-end: stock check, multi-stmt write, replay
 //! idempotency, settings upsert.
 
+use chrono::{Duration, Utc};
 use domain::catalog::{model::*, service as catalog};
 use domain::customers::{model::*, service as customers};
+use domain::inventory::{model as inv_model, service as inventory};
 use domain::sales::{model::*, service as sales};
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -318,4 +320,170 @@ async fn pos_sale_tenant_isolation() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "NOT_FOUND");
+}
+
+// --- FEFO batch-tracked sales ---------------------------------------------
+
+#[tokio::test]
+async fn pos_sale_batch_tracked_fefo_decrements_earliest_expiry() {
+    let (db, tenant, admin) = setup().await;
+    // Product is batch-tracked. Two lots: lot A expires sooner, lot B later.
+    // FEFO must consume A's full 4 then dip into B for 1.
+    let p = catalog::create_product(&db, &tenant, np("Amoxicilina 500", "3000", 0))
+        .await
+        .unwrap();
+    let lot_a = inventory::create_batch(
+        &db,
+        &tenant,
+        inv_model::NewBatch {
+            product: p.id.clone(),
+            batch_code: "A-001".into(),
+            expiry_date: Utc::now() + Duration::days(30),
+            stock: 4,
+            cost: Some(dec("1500")),
+            notes: None,
+        },
+        Some(&admin),
+    )
+    .await
+    .unwrap();
+    let lot_b = inventory::create_batch(
+        &db,
+        &tenant,
+        inv_model::NewBatch {
+            product: p.id.clone(),
+            batch_code: "B-001".into(),
+            expiry_date: Utc::now() + Duration::days(120),
+            stock: 10,
+            cost: Some(dec("1500")),
+            notes: None,
+        },
+        Some(&admin),
+    )
+    .await
+    .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 5,
+            unit_price: dec("3000"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("15000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+
+    // Line records the earliest-expiry lot (first FEFO allocation).
+    assert_eq!(resp.items[0].batch.as_deref(), Some(lot_a.id.as_str()));
+
+    // product.stock decremented by total qty.
+    let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
+    assert_eq!(p2.stock, 14 - 5);
+
+    // Lot A drained, lot B took the overflow → product.stock == sum(batch.stock).
+    let a2 = inventory::get_batch(&db, &tenant, &lot_a.id).await.unwrap();
+    let b2 = inventory::get_batch(&db, &tenant, &lot_b.id).await.unwrap();
+    assert_eq!(a2.stock, 0, "earlier-expiry lot must drain first");
+    assert_eq!(b2.stock, 9, "later-expiry lot takes the overflow");
+    assert_eq!(p2.stock, a2.stock + b2.stock);
+}
+
+#[tokio::test]
+async fn pos_sale_batch_tracked_rejects_when_only_expired_lots_remain() {
+    let (db, tenant, admin) = setup().await;
+    // Batch-tracked product with stock only in an expired lot — must NOT sell.
+    let p = catalog::create_product(&db, &tenant, np("Vencido", "1000", 0))
+        .await
+        .unwrap();
+    inventory::create_batch(
+        &db,
+        &tenant,
+        inv_model::NewBatch {
+            product: p.id.clone(),
+            batch_code: "OLD".into(),
+            expiry_date: Utc::now() - Duration::days(1),
+            stock: 10,
+            cost: None,
+            notes: None,
+        },
+        Some(&admin),
+    )
+    .await
+    .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 1,
+            unit_price: dec("1000"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("1000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INSUFFICIENT_STOCK");
+
+    // Nothing changed: no order, no order_item, no stock_movement, lot untouched.
+    let orders = sales::list_orders(&db, &tenant, OrderFilters::default())
+        .await
+        .unwrap();
+    assert!(orders.is_empty(), "rejected sale must not create an order");
+}
+
+#[tokio::test]
+async fn pos_sale_non_batch_tracked_falls_back_to_product_stock() {
+    // No batches → legacy product.stock path, batch field on line is null.
+    let (db, tenant, admin) = setup().await;
+    let p = catalog::create_product(&db, &tenant, np("Sin lote", "500", 8))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 3,
+            unit_price: dec("500"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("1500")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+    assert!(resp.items[0].batch.is_none());
+    let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
+    assert_eq!(p2.stock, 5);
 }

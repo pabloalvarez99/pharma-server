@@ -1,9 +1,11 @@
 //! Sales persistence (Fase 4). Atomic POS sale, refunds, settings, idempotency.
 //!
-//! All write paths use multi-statement SurrealQL `BEGIN; …; COMMIT;` so the
-//! `order`, `order_item`, `product.stock` decrement and `stock_movement` rows
-//! cannot diverge. See [`apply_sale`] for the canonical pattern (mirrors
-//! `inventory::repo::apply_movement`).
+//! The POS sale is one multi-statement SurrealQL `BEGIN; …; COMMIT;` that
+//! creates the `order` (with a client-generated record id), its
+//! `order_item`s, the `product.stock` decrement, the `stock_movement` rows
+//! and the FEFO `product_batch.stock` decrements together — so a crash can
+//! never leave a paid order without items/stock, and `product.stock` stays
+//! equal to the sum of its batch stock. See [`apply_sale`].
 
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
@@ -11,6 +13,7 @@ use serde::Deserialize;
 use surrealdb::sql::Thing;
 
 use crate::errors::{DomainError, DomainResult};
+use crate::inventory::model::FefoAllocation;
 
 use super::model::*;
 
@@ -182,17 +185,26 @@ pub struct AppliedSale {
     pub movement_ids: Vec<String>,
 }
 
-/// Persist a POS sale in a single multi-statement SurrealQL tx.
+/// Persist a POS sale in ONE multi-statement SurrealQL transaction.
 ///
-/// Statements (in order):
-/// 1. `CREATE order SET …`
-/// 2. For each item: `CREATE order_item SET …`
-/// 3. For each item: `UPDATE product SET stock -= qty …`
-/// 4. For each item: `CREATE stock_movement SET reason='sale', ref=<order.id> …`
+/// `BEGIN;` then, in order:
+/// 1. `CREATE type::thing('order',$oid) SET status='paid' …` — the order id
+///    is generated client-side so every later statement can reference it
+///    inside the same tx (no separate auto-committed `CREATE order` that a
+///    crash could orphan).
+/// 2. per item: `CREATE order_item …` (with the primary FEFO `batch` set),
+///    `UPDATE product SET stock -= qty`, `CREATE stock_movement reason='sale'`.
+/// 3. per FEFO allocation: `UPDATE product_batch SET stock -= n`. The
+///    `product_batch.stock` `ASSERT >= 0` is the final oversell guard — a
+///    concurrent drain between planning and commit aborts the whole tx.
 ///
-/// All in one `BEGIN; …; COMMIT;` so a partial failure rolls back stock too.
-/// Callers MUST have validated tenant ownership + sufficient stock upfront
-/// (use [`load_products_for_sale`]).
+/// Then `COMMIT;`.
+///
+/// `fefo_plans[i]` aligns with `req.items[i]`: `None` = product not
+/// batch-tracked (decrement `product.stock` only, legacy behavior);
+/// `Some(plan)` = consume those lots. Callers MUST have validated tenant
+/// ownership + sufficient stock and built the plan
+/// ([`super::service::post_sale`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_sale(
     db: &Db,
@@ -201,24 +213,59 @@ pub async fn apply_sale(
     sold_by_name: Option<&str>,
     customer: Option<&Thing>,
     req: &PosSaleRequest,
+    fefo_plans: &[Option<Vec<FefoAllocation>>],
     subtotal: Decimal,
     discount: Decimal,
     total: Decimal,
 ) -> DomainResult<AppliedSale> {
-    // Two-call atomic sale: SurrealDB's `LET` slot semantics are inconsistent
-    // across versions and `SELECT VALUE id … ORDER BY created_at` is rejected
-    // by the ORDER-BY-projection gotcha. Cleaner: step 1 = CREATE order,
-    // step 2 = `BEGIN; per-item …; COMMIT;` with the order Thing bound.
-    let mut r = db
-        .query(
-            "CREATE order SET tenant=$t, status='paid', payment_method=$pm, \
-             subtotal=$sub, discount=$disc, total=$tot, \
-             cash_amount=$cash, card_amount=$card, customer=$cust, \
-             customer_name=$cname, customer_phone=$cphone, sold_by=$sb, \
-             sold_by_name=$sbname, notes=$notes, external_ref=$ext \
-             RETURN AFTER",
-        )
+    let n = req.items.len();
+    // Client-generated order id so the order CREATE lives inside the same
+    // BEGIN/COMMIT as its items/stock/movements/batches. `Thing` is
+    // `#[non_exhaustive]`, so we parse one with the public constructor.
+    let oid = uuid::Uuid::new_v4().simple().to_string();
+    let order_thing = surrealdb::sql::thing(&format!("order:{oid}"))
+        .map_err(|e| DomainError::Other(anyhow::anyhow!("order id build: {e}")))?;
+
+    let mut q = String::from(
+        "BEGIN; \
+         CREATE type::thing('order', $oid) SET tenant=$t, status='paid', \
+            payment_method=$pm, subtotal=$sub, discount=$disc, total=$tot, \
+            cash_amount=$cash, card_amount=$card, customer=$cust, \
+            customer_name=$cname, customer_phone=$cphone, sold_by=$sb, \
+            sold_by_name=$sbname, notes=$notes, external_ref=$ext \
+            RETURN AFTER; ",
+    );
+    for i in 0..n {
+        q.push_str(&format!(
+            "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
+                product_name=$pn{i}, quantity=$qty{i}, unit_price=$up{i}, \
+                subtotal=$st{i}, batch=$bt{i} RETURN AFTER; \
+             UPDATE product SET stock = stock - $qty{i} \
+                WHERE id = $p{i} AND tenant = $t; \
+             CREATE stock_movement SET tenant=$t, product=$p{i}, \
+                delta = 0 - $qty{i}, reason='sale', \
+                admin=$sb, ref=$ref RETURN AFTER; ",
+        ));
+    }
+    // FEFO batch decrements grouped at the tail so the per-item result
+    // indices above stay fixed regardless of allocation count.
+    let mut alloc_idx = 0usize;
+    for allocs in fefo_plans.iter().flatten() {
+        for _ in allocs {
+            q.push_str(&format!(
+                "UPDATE product_batch SET stock = stock - $ba{alloc_idx} \
+                 WHERE id = $bid{alloc_idx} AND tenant = $t; ",
+            ));
+            alloc_idx += 1;
+        }
+    }
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("oid", oid.clone()))
         .bind(("t", tenant.clone()))
+        .bind(("ord", order_thing.clone()))
         .bind(("pm", req.payment_method.clone()))
         .bind(("sub", dec_val(subtotal)))
         .bind(("disc", dec_val(discount)))
@@ -232,56 +279,56 @@ pub async fn apply_sale(
         .bind(("sbname", sold_by_name.map(str::to_string)))
         .bind(("notes", req.notes.clone()))
         .bind(("ext", req.external_ref.clone()))
-        .await?
-        .check()?;
-    let order_rows: Vec<OrderRow> = r.take(0)?;
-    let order_row = order_rows
-        .into_iter()
-        .next()
-        .ok_or_else(|| DomainError::Other(anyhow::anyhow!("order CREATE returned 0 rows")))?;
-    let order_thing = order_row.id.clone();
-    let order: OrderDto = order_row.into();
-
-    // Step 2: items + stock decrement + movements in one transaction.
-    let n = req.items.len();
-    let mut q = String::from("BEGIN; ");
-    for i in 0..n {
-        q.push_str(&format!(
-            "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
-                product_name=$pn{i}, quantity=$qty{i}, unit_price=$up{i}, \
-                subtotal=$st{i} RETURN AFTER; \
-             UPDATE product SET stock = stock - $qty{i} \
-                WHERE id = $p{i} AND tenant = $t; \
-             CREATE stock_movement SET tenant=$t, product=$p{i}, \
-                delta = 0 - $qty{i}, reason='sale', \
-                admin=$sb, ref=$ref RETURN AFTER; ",
-        ));
-    }
-    q.push_str("COMMIT;");
-    let mut qb = db
-        .query(q)
-        .bind(("t", tenant.clone()))
-        .bind(("ord", order_thing.clone()))
-        .bind(("sb", sold_by.cloned()))
         .bind(("ref", order_thing.to_string()));
     for (i, item) in req.items.iter().enumerate() {
         let pid = surrealdb::sql::thing(&item.product)
             .map_err(|_| DomainError::Invalid(format!("product id inválido: {}", item.product)))?;
         let line_sub = item.unit_price * Decimal::from(item.quantity);
+        // Primary batch recorded on the line = earliest-expiry lot consumed
+        // (first FEFO allocation). Multi-lot split traceability: see BACKLOG.
+        let batch_val: surrealdb::sql::Value = match fefo_plans.get(i).and_then(|p| p.as_ref()) {
+            Some(allocs) if !allocs.is_empty() => surrealdb::sql::thing(&allocs[0].batch)
+                .map_err(|_| {
+                    DomainError::Invalid(format!("batch id inválido: {}", allocs[0].batch))
+                })?
+                .into(),
+            _ => surrealdb::sql::Value::None,
+        };
         qb = qb
             .bind((format!("p{i}"), pid))
             .bind((format!("pn{i}"), item.product_name.clone()))
             .bind((format!("qty{i}"), item.quantity))
             .bind((format!("up{i}"), dec_val(item.unit_price)))
-            .bind((format!("st{i}"), dec_val(line_sub)));
+            .bind((format!("st{i}"), dec_val(line_sub)))
+            .bind((format!("bt{i}"), batch_val));
+    }
+    // Bind the tail batch-decrement params in the same order they were emitted.
+    let mut alloc_idx = 0usize;
+    for allocs in fefo_plans.iter().flatten() {
+        for a in allocs {
+            let bid = surrealdb::sql::thing(&a.batch)
+                .map_err(|_| DomainError::Invalid(format!("batch id inválido: {}", a.batch)))?;
+            qb = qb
+                .bind((format!("ba{alloc_idx}"), a.qty))
+                .bind((format!("bid{alloc_idx}"), bid));
+            alloc_idx += 1;
+        }
     }
     let mut r2 = qb.await?.check()?;
+
+    // Statement indices (BEGIN/COMMIT excluded): 0 = order CREATE;
+    // item i: order_item at 1+i*3, product UPDATE at 2+i*3, movement at 3+i*3.
+    let order_rows: Vec<OrderRow> = r2.take(0)?;
+    let order: OrderDto = order_rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| DomainError::Other(anyhow::anyhow!("order CREATE returned 0 rows")))?
+        .into();
 
     let mut items_out = Vec::with_capacity(n);
     let mut movements_out = Vec::with_capacity(n);
     for i in 0..n {
-        let base = i * 3;
-        let item_rows: Vec<OrderItemRow> = r2.take(base)?;
+        let item_rows: Vec<OrderItemRow> = r2.take(1 + i * 3)?;
         items_out.push(
             item_rows
                 .into_iter()
@@ -291,7 +338,7 @@ pub async fn apply_sale(
                 })?
                 .into(),
         );
-        let mov_rows: Vec<MovementIdRow> = r2.take(base + 2)?;
+        let mov_rows: Vec<MovementIdRow> = r2.take(3 + i * 3)?;
         movements_out.push(
             mov_rows
                 .into_iter()

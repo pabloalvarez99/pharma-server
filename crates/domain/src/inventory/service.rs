@@ -183,6 +183,27 @@ pub async fn plan_fefo(
     repo::plan_fefo(db, tenant, &pid, qty).await
 }
 
+/// FEFO plan for a POS line, distinguishing "not batch-tracked" from
+/// "tracked but unsatisfiable":
+/// * `Ok(None)`  — product has no active batches → caller decrements
+///   `product.stock` only (legacy path, unchanged behavior).
+/// * `Ok(Some(plan))` — product is batch-tracked; `plan` consumes lots
+///   earliest-expiry-first and must be applied in the sale tx.
+/// * `Err(InsufficientStock)` — tracked but available (non-expired) lots
+///   cannot satisfy `qty`; the sale must be rejected.
+pub async fn plan_fefo_optional(
+    db: &Db,
+    tenant: &Thing,
+    product_id: &str,
+    qty: i64,
+) -> DomainResult<Option<Vec<FefoAllocation>>> {
+    let pid = parse_thing(product_id)?;
+    if repo::count_active_batches(db, tenant, &pid).await? == 0 {
+        return Ok(None);
+    }
+    Ok(Some(repo::plan_fefo(db, tenant, &pid, qty).await?))
+}
+
 // --- faltas ----------------------------------------------------------------
 
 pub async fn create_falta(db: &Db, tenant: &Thing, input: NewFalta) -> DomainResult<FaltaDto> {

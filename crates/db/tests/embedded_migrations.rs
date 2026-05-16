@@ -38,7 +38,11 @@ async fn embedded_migrations_apply_then_are_idempotent() {
 
     // Second run: nothing re-applies (idempotent — safe on every startup).
     let second = db::run_embedded(&handle).await.expect("second run");
-    assert_eq!(second.len(), first.len(), "migration set changed between runs");
+    assert_eq!(
+        second.len(),
+        first.len(),
+        "migration set changed between runs"
+    );
     assert!(
         second.iter().all(|o| !o.applied),
         "re-run must skip already-applied migrations"
