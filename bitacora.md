@@ -337,3 +337,23 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Verificación**: fmt clean · clippy `-D warnings` clean (1 fix `clippy::doc_lazy_continuation` en doc comment) · `cargo test --workspace` 68 tests verde (7 nuevos sales + 61 previos).
 - **Commits branch `feature/erp-parity-sales`**: `b4b086d` scaffold+migration · `bb284a5` service+repo+tests · `fb181ae` api router · pendiente bump+merge.
 - **Pendiente**: full interactions port, prescription POS link, FEFO batch decrement, devolucion endpoints, Fase 5-full (PO+receive+WAC+AP), Fase 6 (caja+gastos+reportes), Fase 8 (cron+backup+swagger+Tauri desktop), Fase 9 (hardening+MSI vendible v1.0.0), Fase 10 (sync online opt-in), Fase 11 (agent protocol MVP).
+
+---
+
+## 2026-05-16 — Fase 11 step 1 (agent identity) + MSI downloadable verificado (v0.1.4)
+
+- **Qué**: (1) crate nuevo `agent` — foundation ecosistema federado: identidad Ed25519, DID `did:pharma:<bs58(pubkey)>`, AgentCard self-signed, Envelope firmado canonical-JSON. CLI `pharma agent {init,did,card,verify}`. (2) **MSI buildeable verificado end-to-end**: `pharma-server-0.1.4-x86_64.msi` (11.2 MB) generado con WiX v3.14 + cargo-wix 0.3.9.
+- **Por qué**: el goal exige (a) ERP descargable Windows offline+online, (b) ecosistema de agentes con dueños humanos transando. Ambos avanzados este bloque: MSI prueba el "descargable Windows" real; `agent` crate es la base criptográfica del mesh.
+- **crate `agent`** (offline-pure, sin networking):
+  - `identity.rs`: `Identity` keypair Ed25519, seed hex persistido (0600 Unix), `generate/save/load/load_or_init` idempotente, `did()`, `verify_with_did()`. 4 tests.
+  - `canonical.rs`: JSON determinista (keys ordenadas, sin whitespace) — dos nodos hashean idénticos bytes para verificar firma. 1 test.
+  - `card.rs`: `AgentCard` self-signed (did, name, kind pharmacy|supplier|distributor|lab, region, endpoint). Tamper en cualquier campo invalida sig. 3 tests.
+  - `envelope.rs`: `Envelope` (from/to/msg_id/ts/topic/body/sig) firmado sobre canonical sans sig. Detecta body tampered + `from` forjado. Topics MVP documentados (catalog.lookup, quote.request, po.create, shipment.notify, payment.confirm). 4 tests.
+- **CLI agent**: `init` (keygen idempotente, default path = sibling del data dir SurrealKv `<db dir>/agent.key`), `did`, `card --name --kind --region --endpoint`, `verify <file>` (card o envelope, exit code para scripts/CI).
+- **Bug real fixeado**: telemetry escribía a stdout → contaminaba `pharma agent card > card.json`. Nuevo `telemetry::init_cli` → logs a stderr, stdout limpio para piping. Smoke confirmó pipe limpio + tamper rejection.
+- **MSI verificación**: `cargo wix --package service --no-build --nocapture -C -ext -C WixFirewallExtension -L -ext -L WixFirewallExtension` ejecutado desde `crates/service/` (CWD relativa al include `../../installer/wix/main.wxs`). Requiere release `pharma-service.exe` pre-built (8m03s) + WiX bin en PATH (`C:/Program Files (x86)/WiX Toolset v3.14/bin`). Artefacto: `target-shared/wix/pharma-server-0.1.4-x86_64.msi`. wxs ya completo (ServiceInstall LocalSystem auto-start + ServiceControl + firewall TCP 8080 + DataDir). **Gotcha**: cargo-wix resuelve `include` relativo a CWD, NO al crate — ejecutar desde `crates/service/` o el path rompe.
+- **Decisiones nuevas (locked)**: (1) agent key default = sibling del SurrealKv data dir (backup conjunto). (2) CLI telemetry → stderr (output piping limpio, contrato para tooling). (3) Canonical JSON propio (sorted keys) en lugar de depender de serde_json map order — necesario para firma cross-nodo determinista.
+- **Verificación**: fmt clean · clippy `-D warnings` clean · `cargo test --workspace` 80 verde (12 agent + 68 previos) · MSI 11.2 MB generado OK.
+- **PRs**: #6 Sales mergeado (`b12bfa5`), #7 agent mergeado (`80de3a2`). Branch `feature/erp-parity` al día.
+- **Estado vs goal**: "descargable Windows" = **MSI v0.1.4 buildeable confirmado** (falta: firma cert Authenticode anti-SmartScreen, smoke install/uninstall en VM limpia → Fase 9). "offline" = SurrealKv embedded ya. "online + ecosistema agentes" = `agent` crate identity+envelope listo (falta: transport HTTP push/relay, topic handlers, reputación local — Fase 11 steps 2-4). "online sync ERP" = Fase 10 pendiente.
+- **Pendiente** (orden): Fase 11 step 2 transport (HTTP push endpoint `/agent/inbox` + verify middleware) + topic handler `catalog.lookup` (usa `barcode_catalog` global), step 3 reputación local (`agent_interaction`), step 4 relay opcional. Paralelo: Fase 5-full (PO+receive+WAC+AP), Fase 6 (caja+gastos+reportes), Fase 8 (cron+backup+swagger+Tauri), Fase 9 (MSI firmado + smoke VM → v1.0.0 vendible), Fase 10 (sync online opt-in → v1.1.0).
