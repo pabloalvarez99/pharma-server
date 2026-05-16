@@ -58,6 +58,60 @@ enum Cmd {
     },
     /// Print effective configuration.
     Config,
+    /// Agent ecosystem identity (Ed25519) — Fase 11 federation.
+    Agent {
+        #[command(subcommand)]
+        cmd: AgentCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// Generate (idempotent) the node keypair + print the DID.
+    Init {
+        /// Override key file path (default: <db dir>/agent.key).
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Print this node's DID.
+    Did {
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Emit a self-signed AgentCard JSON (for out-of-band discovery).
+    Card {
+        #[arg(long)]
+        name: String,
+        /// pharmacy | supplier | distributor | lab
+        #[arg(long, default_value = "pharmacy")]
+        kind: String,
+        /// ISO-3166 region hint, e.g. CL-CO.
+        #[arg(long, default_value = "")]
+        region: String,
+        /// Reachable base URL (LAN ok; empty if relay-only).
+        #[arg(long, default_value = "")]
+        endpoint: String,
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Verify an AgentCard or Envelope JSON file's signature.
+    Verify {
+        /// Path to a JSON file (card or envelope).
+        file: PathBuf,
+    },
+}
+
+/// Default agent key path: sibling of the SurrealKv data dir.
+fn agent_key_path(explicit: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    if let Some(p) = explicit {
+        return Ok(p);
+    }
+    let cfg = pharma_core::config::AppConfig::load()?;
+    let db_path = PathBuf::from(&cfg.db.path);
+    let dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    Ok(dir.join("agent.key"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,7 +131,7 @@ struct UserRow {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _ = telemetry::init("pharma-cli");
+    let _ = telemetry::init_cli("pharma-cli");
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Migrate { dir } => {
@@ -224,6 +278,69 @@ async fn main() -> anyhow::Result<()> {
             let cfg = pharma_core::config::AppConfig::load()?;
             println!("{}", serde_json::to_string_pretty(&cfg)?);
         }
+        Cmd::Agent { cmd } => match cmd {
+            AgentCmd::Init { path } => {
+                let p = agent_key_path(path)?;
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                let existed = p.exists();
+                let id = agent::Identity::load_or_init(&p)?;
+                println!("{}", id.did());
+                tracing::info!(did = %id.did(), key = %p.display(), reused = existed, "agent identity ready");
+            }
+            AgentCmd::Did { path } => {
+                let p = agent_key_path(path)?;
+                let id = agent::Identity::load(&p).with_context(|| {
+                    format!("no agent key at {} — run `pharma agent init`", p.display())
+                })?;
+                println!("{}", id.did());
+            }
+            AgentCmd::Card {
+                name,
+                kind,
+                region,
+                endpoint,
+                path,
+            } => {
+                let p = agent_key_path(path)?;
+                let id = agent::Identity::load(&p).with_context(|| {
+                    format!("no agent key at {} — run `pharma agent init`", p.display())
+                })?;
+                let kind = match kind.to_lowercase().as_str() {
+                    "pharmacy" => agent::AgentKind::Pharmacy,
+                    "supplier" => agent::AgentKind::Supplier,
+                    "distributor" => agent::AgentKind::Distributor,
+                    "lab" => agent::AgentKind::Lab,
+                    other => return Err(anyhow!("kind inválido: {other}")),
+                };
+                let card = agent::AgentCard::new(&id, name, kind, region, endpoint);
+                println!("{}", card.to_json()?);
+            }
+            AgentCmd::Verify { file } => {
+                let content = std::fs::read_to_string(&file)
+                    .with_context(|| format!("read {}", file.display()))?;
+                // Try card first, then envelope.
+                if let Ok(card) = agent::AgentCard::from_json(&content) {
+                    match card.verify() {
+                        Ok(()) => {
+                            println!("OK card  did={} name={}", card.did, card.name);
+                            return Ok(());
+                        }
+                        Err(e) => return Err(anyhow!("card signature INVALID: {e}")),
+                    }
+                }
+                let env = agent::Envelope::from_json(&content)
+                    .context("not a valid AgentCard or Envelope JSON")?;
+                match env.verify() {
+                    Ok(()) => println!(
+                        "OK envelope  from={} topic={} msg_id={}",
+                        env.from, env.topic, env.msg_id
+                    ),
+                    Err(e) => return Err(anyhow!("envelope signature INVALID: {e}")),
+                }
+            }
+        },
     }
     Ok(())
 }
