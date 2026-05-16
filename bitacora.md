@@ -276,3 +276,22 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
 - **Verificación** (CARGO_TARGET_DIR shared `pharma-server/target-shared`): `cargo fmt --all -- --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` verde (domain 13+1, api 12, auth 5, integration_db 7) · `cargo build --workspace --release` OK.
 - **Handoff integrador**: conflicto trivial esperado en `crates/api/src/v1/mod.rs` (este slice añade `pub mod purchasing;` + `.merge(purchasing::router(state))` sobre el `pub mod inventory;` de Agente A y `pub mod customers;` de Agente B). `migrations/0006_*` no colisiona (Agente A usa 0004, Agente B 0005).
 - **Pendiente**: purchase_order + purchase_order_item + receive + AP (`purchase_payment`) + OCR `scan-invoice` (501) — todos requieren inventory Fase 3 entregada antes.
+
+---
+
+## 2026-05-16 — Integración Fases 3 + 7-subset + 5-subset (epic feature/erp-parity)
+
+- **Qué**: merge A→B→C de los 3 PRs paralelos (#5 inventory, #3 customers, #4 suppliers) en branch integradora `feature/erp-parity-merge` y fast-forward a `feature/erp-parity`. Branches slice borradas tras consolidación.
+- **Por qué**: 3 agentes paralelos cerraron Fase 3 + 7-subset + 5-subset sobre el mismo base (`feature/erp-parity` post-Fase 2). Orden de merge dicta lineage limpio y minimiza conflictos: Fase 3 (Inventory) primero porque Fase 4 sales depende; B y C son independientes entre sí.
+- **Conflictos resueltos**:
+  - `crates/api/src/v1/mod.rs` (2 conflicts esperados): consolidar a 5 `pub mod` (catalog, inventory, customers, prescriptions, purchasing) + `.merge(...)` encadenados con `state.clone()`.
+  - `bitacora.md` (2 conflicts): concat de las 3 secciones agente en orden cronológico, preservando contenido íntegro.
+  - `Cargo.lock`: regen automático al `cargo build` post-merge (no conflicto real, solo CRLF stash).
+- **Versión**: workspace `0.1.2 → 0.1.3` (patch por epic, regla 11). Commit aparte `54aaafb`.
+- **Pre-commit verde** (CARGO_TARGET_DIR `pharma-server/target-shared`): `cargo fmt --all --check` clean · `cargo clippy --workspace --all-targets -- -D warnings` clean · `cargo test --workspace` verde (domain unit 3, catalog 7, inventory 10, customers 6, prescriptions 5, purchasing 6, api 12, auth 5, integration_db 7 = 61 tests) · `cargo build --workspace --release` OK (6m09s).
+- **Commits merge**: `750e2a6` Merge A · `ffc6891` Merge B · `1a55e66` Merge C · `54aaafb` bump 0.1.3.
+- **PRs**: #3 #4 #5 marcados auto-merged por GitHub al ff `feature/erp-parity`. Branches remotas + locales `feature/erp-parity-{inventory,customers,suppliers,merge}` borradas. Worktrees `ps-merge`/`ps-cust`/`ps-supp` removidos.
+- **Gotchas nuevos confirmados durales** (registrar en vault `brain/pharma-server-gotchas.md`):
+  - **datetime binding** (espejo del decimal Fase 2): `chrono::DateTime<Utc>` serializa serde como string RFC3339 → SurrealQL `datetime` schema rechaza (`FieldCheck check:"datetime"`). Fix: helpers `dt_val(dt)` = `surrealdb::sql::Datetime::from(dt).into()` y `dt_opt`. Aparece independientemente en Fase 3 (inventory: batch expiry, movement filters), Fase 7-subset (prescriptions dispensed_at, shift started_at), Fase 5-subset (price_list valid_from). Patrón obligatorio para todo bind de `datetime`.
+  - **serde-flatten + Option<Thing>**: `#[serde(flatten)]` sobre struct que contiene `Option<surrealdb::sql::Thing>` rompe deserialización (`untagged and internally tagged enums do not support enum input`). Workaround: dos queries separadas + join en código, NO flatten. Documentado en `purchasing/repo.rs::supplier_name`.
+- **Pendiente**: Fase 4 Sales/POS (usa FEFO de A + customer/loyalty de B + supplier-prices de C). Fase 5 completa (purchase_orders + receive + WAC + AP). Fase 6 Finance/Reports. Fase 8 cron+backup+swagger. Fase 9 hardening+MSI.
