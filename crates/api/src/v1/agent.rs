@@ -105,6 +105,20 @@ async fn inbox(State(state): State<AppState>, body: String) -> axum::response::R
                 return resp;
             }
         },
+        "quote.request" => match quote_request(&state, &env.body).await {
+            Ok(v) => v,
+            Err(resp) => {
+                record_interaction(&state, &env.from, &env.topic, &env.msg_id, "rejected").await;
+                return resp;
+            }
+        },
+        "po.create" => match po_create(&state, &env.from, &env.body).await {
+            Ok(v) => v,
+            Err(resp) => {
+                record_interaction(&state, &env.from, &env.topic, &env.msg_id, "rejected").await;
+                return resp;
+            }
+        },
         other => {
             record_interaction(&state, &env.from, &env.topic, &env.msg_id, "rejected").await;
             return (
@@ -118,6 +132,8 @@ async fn inbox(State(state): State<AppState>, body: String) -> axum::response::R
     let reply_topic = match env.topic.as_str() {
         "ping" => "pong",
         "catalog.lookup" => "catalog.match",
+        "quote.request" => "quote.response",
+        "po.create" => "po.ack",
         _ => "ack",
     };
     let reply = agent::Envelope::create(
@@ -195,4 +211,268 @@ async fn catalog_lookup(
         matches.push(json!({ "barcode": row.barcode, "external_id": row.external_id }));
     }
     Ok(json!({ "matches": matches }))
+}
+
+/// Resolve a tenant by slug and enforce the federation opt-in: the tenant
+/// MUST have `admin_setting` key `federation_enabled` == "true". This is the
+/// gate that keeps tenant pricing/stock private unless the operator opts in
+/// (locked decision — see docs/ecosystem-roadmap.md).
+async fn resolve_federation_tenant(
+    state: &AppState,
+    slug: &str,
+) -> Result<(std::sync::Arc<db::Db>, surrealdb::sql::Thing), axum::response::Response> {
+    let Some(db) = state.db.clone() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "db no disponible" })),
+        )
+            .into_response());
+    };
+    #[derive(serde::Deserialize)]
+    struct TRow {
+        id: surrealdb::sql::Thing,
+    }
+    let mut r = db
+        .query("SELECT id FROM tenant WHERE slug = $s LIMIT 1")
+        .bind(("s", slug.to_string()))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("lookup tenant: {e}") })),
+            )
+                .into_response()
+        })?;
+    let trow: Option<TRow> = r.take(0).unwrap_or(None);
+    let Some(trow) = trow else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("tenant '{slug}' no existe") })),
+        )
+            .into_response());
+    };
+    let tenant = trow.id;
+
+    #[derive(serde::Deserialize)]
+    struct SRow {
+        value: String,
+    }
+    let mut r2 = db
+        .query(
+            "SELECT * FROM admin_setting WHERE tenant = $t AND key = 'federation_enabled' LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("lookup setting: {e}") })),
+            )
+                .into_response()
+        })?;
+    let srow: Option<SRow> = r2.take(0).unwrap_or(None);
+    let enabled = srow.map(|s| s.value == "true").unwrap_or(false);
+    if !enabled {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": format!("tenant '{slug}' no habilitó federación (admin_setting federation_enabled)")
+            })),
+        )
+            .into_response());
+    }
+    Ok((db, tenant))
+}
+
+/// `quote.request` → `quote.response`. Body:
+/// `{ "tenant": "<slug>", "items": [ { "barcode": "..", "qty": N } ] }`.
+/// Prices/stock come from the named tenant's `product` (joined via
+/// `product_barcode`). CLP is integer pesos so `f64` is exact here.
+async fn quote_request(
+    state: &AppState,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let slug = body.get("tenant").and_then(|v| v.as_str()).unwrap_or("");
+    if slug.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body.tenant requerido" })),
+        )
+            .into_response());
+    }
+    let items = body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if items.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body.items requerido (array no vacío)" })),
+        )
+            .into_response());
+    }
+    let (db, tenant) = resolve_federation_tenant(state, slug).await?;
+
+    #[derive(serde::Deserialize)]
+    struct PRow {
+        name: String,
+        price: f64,
+        stock: i64,
+    }
+    let mut lines = Vec::new();
+    let mut total = 0_f64;
+    for it in &items {
+        let barcode = it.get("barcode").and_then(|v| v.as_str()).unwrap_or("");
+        let qty = it.get("qty").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+        if barcode.is_empty() || qty == 0 {
+            continue;
+        }
+        let mut rb = db
+            .query(
+                "SELECT VALUE product FROM product_barcode \
+                 WHERE tenant = $t AND barcode = $b LIMIT 1",
+            )
+            .bind(("t", tenant.clone()))
+            .bind(("b", barcode.to_string()))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("barcode lookup: {e}") })),
+                )
+                    .into_response()
+            })?;
+        let pids: Vec<surrealdb::sql::Thing> = rb.take(0).unwrap_or_default();
+        let pid = pids.into_iter().next();
+        let prow: Option<PRow> = match pid {
+            None => None,
+            Some(pid) => {
+                let mut r = db
+                    .query(
+                        "SELECT name, <float> price AS price, stock FROM product \
+                         WHERE id = $p AND tenant = $t AND active = true LIMIT 1",
+                    )
+                    .bind(("p", pid))
+                    .bind(("t", tenant.clone()))
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": format!("quote lookup: {e}") })),
+                        )
+                            .into_response()
+                    })?;
+                r.take(0).unwrap_or(None)
+            }
+        };
+        match prow {
+            Some(p) => {
+                let line_total = p.price * qty as f64;
+                total += line_total;
+                lines.push(json!({
+                    "barcode": barcode,
+                    "product_name": p.name,
+                    "unit_price": p.price,
+                    "qty": qty,
+                    "available": p.stock,
+                    "line_total": line_total,
+                    "in_stock": p.stock >= qty,
+                }));
+            }
+            None => lines.push(json!({
+                "barcode": barcode,
+                "qty": qty,
+                "found": false,
+            })),
+        }
+    }
+    Ok(json!({
+        "tenant": slug,
+        "currency": "CLP",
+        "lines": lines,
+        "total": total,
+    }))
+}
+
+/// `po.create` → `po.ack`. Body:
+/// `{ "tenant": "<slug>", "lines": [ { "barcode", "qty", "unit_price" } ],
+///    "buyer_note"? }`. Records an inbound `agent_order` (status=received)
+/// and returns its id. Fulfillment/settlement is a later step; this closes
+/// the offer→order handshake so two nodes can transact e2e.
+async fn po_create(
+    state: &AppState,
+    peer_did: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let slug = body.get("tenant").and_then(|v| v.as_str()).unwrap_or("");
+    if slug.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body.tenant requerido" })),
+        )
+            .into_response());
+    }
+    let lines = body
+        .get("lines")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if lines.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body.lines requerido (array no vacío)" })),
+        )
+            .into_response());
+    }
+    let (db, tenant) = resolve_federation_tenant(state, slug).await?;
+
+    let mut total = 0_f64;
+    for l in &lines {
+        let qty = l.get("qty").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+        let up = l.get("unit_price").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        total += up * qty as f64;
+    }
+    let buyer_note = body
+        .get("buyer_note")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let lines_json = serde_json::to_string(&lines).unwrap_or_else(|_| "[]".into());
+
+    #[derive(serde::Deserialize)]
+    struct ORow {
+        id: surrealdb::sql::Thing,
+    }
+    let mut r = db
+        .query(
+            "CREATE agent_order SET tenant=$t, peer_did=$p, lines_json=$l, \
+             total=$tot, status='received', buyer_note=$note RETURN AFTER",
+        )
+        .bind(("t", tenant))
+        .bind(("p", peer_did.to_string()))
+        .bind(("l", lines_json))
+        .bind(("tot", total))
+        .bind(("note", buyer_note))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("crear orden: {e}") })),
+            )
+                .into_response()
+        })?;
+    let orow: Option<ORow> = r.take(0).unwrap_or(None);
+    let order_id = orow.map(|o| o.id.to_string()).ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "orden no creada" })),
+        )
+            .into_response()
+    })?;
+    Ok(json!({
+        "order_id": order_id,
+        "status": "received",
+        "currency": "CLP",
+        "total": total,
+    }))
 }

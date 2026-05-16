@@ -157,6 +157,144 @@ async fn catalog_lookup_matches_global_barcode_catalog() {
     assert!(c.is_some(), "agent_interaction row written");
 }
 
+async fn seed_supplier_tenant(db: &db::Db, slug: &str, federation: bool) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: surrealdb::sql::Thing,
+    }
+    let mut t = db
+        .query("CREATE tenant SET name=$n, slug=$s RETURN AFTER")
+        .bind(("n", format!("Sup {slug}")))
+        .bind(("s", slug.to_string()))
+        .await
+        .unwrap();
+    let tid = t.take::<Option<Row>>(0).unwrap().unwrap().id;
+    if federation {
+        db.query("CREATE admin_setting SET tenant=$t, key='federation_enabled', value='true'")
+            .bind(("t", tid.clone()))
+            .await
+            .unwrap();
+    }
+    // Product + barcode mapping.
+    let mut p = db
+        .query(
+            "CREATE product SET tenant=$t, name='Paracetamol 500', slug='para-500', \
+             price=1490, stock=120, active=true RETURN AFTER",
+        )
+        .bind(("t", tid.clone()))
+        .await
+        .unwrap();
+    let pid = p.take::<Option<Row>>(0).unwrap().unwrap().id;
+    db.query("CREATE product_barcode SET tenant=$t, product=$p, barcode='7801234567890'")
+        .bind(("t", tid.clone()))
+        .bind(("p", pid))
+        .await
+        .unwrap();
+    tid.to_string()
+}
+
+#[tokio::test]
+async fn quote_request_returns_priced_lines_when_federation_enabled() {
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "drogueria-x", true).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "q1",
+        "quote.request",
+        serde_json::json!({
+            "tenant": "drogueria-x",
+            "items": [{ "barcode": "7801234567890", "qty": 10 }]
+        }),
+    );
+    let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let reply = agent::Envelope::from_json(&body).unwrap();
+    assert_eq!(reply.topic, "quote.response");
+    reply.verify().expect("signed");
+    let lines = reply.body["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["product_name"], "Paracetamol 500");
+    assert_eq!(lines[0]["unit_price"], 1490.0);
+    assert_eq!(lines[0]["qty"], 10);
+    assert_eq!(lines[0]["in_stock"], true);
+    assert_eq!(reply.body["total"], 14900.0);
+}
+
+#[tokio::test]
+async fn quote_request_blocked_when_federation_disabled() {
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "private-co", false).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "q2",
+        "quote.request",
+        serde_json::json!({
+            "tenant": "private-co",
+            "items": [{ "barcode": "7801234567890", "qty": 1 }]
+        }),
+    );
+    let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "opt-out tenant must reject");
+}
+
+#[tokio::test]
+async fn po_create_records_order_and_acks() {
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "drogueria-y", true).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "po1",
+        "po.create",
+        serde_json::json!({
+            "tenant": "drogueria-y",
+            "lines": [{ "barcode": "7801234567890", "qty": 24, "unit_price": 1490 }],
+            "buyer_note": "urgente fin de semana"
+        }),
+    );
+    let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let reply = agent::Envelope::from_json(&body).unwrap();
+    assert_eq!(reply.topic, "po.ack");
+    reply.verify().expect("signed");
+    assert_eq!(reply.body["status"], "received");
+    assert_eq!(reply.body["total"], 35760.0);
+    assert!(reply.body["order_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("agent_order:"));
+
+    // Order persisted, tenant-scoped, carrying buyer DID.
+    let mut r = tdb
+        .db
+        .query("SELECT peer_did, status, total FROM agent_order")
+        .await
+        .unwrap();
+    #[derive(serde::Deserialize)]
+    struct O {
+        peer_did: String,
+        status: String,
+    }
+    let rows: Vec<O> = r.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].peer_did, peer.did());
+    assert_eq!(rows[0].status, "received");
+}
+
 #[tokio::test]
 async fn unknown_topic_rejected_400() {
     let tdb = spawn_test_db().await;
