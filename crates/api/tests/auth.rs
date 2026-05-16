@@ -20,6 +20,7 @@ fn state() -> api::AppState {
         jwt: jwt_cfg(),
         db: None,
         metrics_token: None,
+        node_identity: None,
     }
 }
 

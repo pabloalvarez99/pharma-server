@@ -85,6 +85,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         jwt: jwt_cfg(),
         db: Some(db),
         metrics_token: None,
+        node_identity: None,
     }
 }
 
