@@ -95,6 +95,7 @@ mod tests {
             },
             db: None,
             metrics_token: None,
+            node_identity: None,
         }
     }
 

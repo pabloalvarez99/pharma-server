@@ -25,6 +25,9 @@ pub struct AppState {
     pub jwt: pharma_core::config::JwtConfig,
     pub db: Option<Arc<db::Db>>,
     pub metrics_token: Option<String>,
+    /// Node federation identity (Ed25519). Loaded at startup; `None` only in
+    /// unit tests that don't exercise `/agent/*`.
+    pub node_identity: Option<Arc<agent::Identity>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -53,11 +56,32 @@ pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
         tracing::warn!("metrics token not configured; /metrics will return 401");
     }
 
+    // Node federation identity: persisted alongside the SurrealKv data dir so
+    // it is backed up with tenant data. Generated once, reused thereafter.
+    let node_identity = {
+        let db_path = std::path::PathBuf::from(&cfg.db.path);
+        let dir = db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let key_path = dir.join("agent.key");
+        match agent::Identity::load_or_init(&key_path) {
+            Ok(id) => {
+                tracing::info!(did = %id.did(), key = %key_path.display(), "node identity ready");
+                Some(Arc::new(id))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "node identity init failed; /agent/* disabled");
+                None
+            }
+        }
+    };
+
     let state = AppState {
         started_at: chrono::Utc::now(),
         jwt: cfg.jwt.clone(),
         db: db_handle,
         metrics_token,
+        node_identity,
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -185,6 +209,7 @@ mod tests {
             },
             db: None,
             metrics_token: token.map(String::from),
+            node_identity: None,
         }
     }
 
