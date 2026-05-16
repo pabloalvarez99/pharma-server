@@ -3,6 +3,7 @@
 //! idempotency, settings upsert.
 
 use domain::catalog::{model::*, service as catalog};
+use domain::customers::{model::*, service as customers};
 use domain::sales::{model::*, service as sales};
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -182,6 +183,102 @@ async fn admin_setting_upsert_idempotent() {
         .await
         .unwrap();
     assert_eq!(got.unwrap().value, "5");
+}
+
+#[tokio::test]
+async fn pos_sale_awards_loyalty_when_customer_set() {
+    let (db, tenant, admin) = setup().await;
+    let p = catalog::create_product(&db, &tenant, np("Vitamina C", "2500", 20))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let c = customers::create_customer(
+        &db,
+        &tenant,
+        NewCustomer {
+            name: "Ana".into(),
+            rut: Some("12.345.678-5".into()),
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 4,
+            unit_price: dec("2500"),
+        }],
+        payment_method: "pos_debit".into(),
+        cash_amount: None,
+        card_amount: Some(dec("10000")),
+        discount: None,
+        customer: Some(c.id.clone()),
+        customer_name: Some(c.name.clone()),
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+    // total 10000 / 1000 per point default = 10 points
+    assert_eq!(resp.loyalty_points_awarded, 10);
+
+    // Customer.loyalty_points now 10
+    let c2 = customers::get_customer(&db, &tenant, &c.id).await.unwrap();
+    assert_eq!(c2.loyalty_points, 10);
+}
+
+#[tokio::test]
+async fn pos_sale_loyalty_rate_setting_overrides_default() {
+    let (db, tenant, admin) = setup().await;
+    sales::set_setting(&db, &tenant, "loyalty_points_per_clp", "500")
+        .await
+        .unwrap();
+    let p = catalog::create_product(&db, &tenant, np("Aspirina", "1500", 10))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let c = customers::create_customer(
+        &db,
+        &tenant,
+        NewCustomer {
+            name: "Bea".into(),
+            rut: None,
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 2,
+            unit_price: dec("1500"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("3000")),
+        card_amount: None,
+        discount: None,
+        customer: Some(c.id.clone()),
+        customer_name: Some(c.name.clone()),
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+    // 3000 / 500 = 6 points
+    assert_eq!(resp.loyalty_points_awarded, 6);
 }
 
 #[tokio::test]

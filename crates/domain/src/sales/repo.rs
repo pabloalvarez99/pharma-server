@@ -458,6 +458,37 @@ pub async fn lookup_idempotency(
     Ok(row.map(|r| (r.response_json, r.status_code as u16)))
 }
 
+// --- loyalty ---------------------------------------------------------------
+
+/// Atomically append a `loyalty_transaction` row + bump
+/// `customer.loyalty_points`. Caller has validated tenant ownership of
+/// `customer` and `delta > 0`.
+pub async fn award_loyalty(
+    db: &Db,
+    tenant: &Thing,
+    customer: &Thing,
+    delta: i64,
+    reason: &str,
+    order_ref: &str,
+) -> DomainResult<()> {
+    db.query(
+        "BEGIN; \
+         CREATE loyalty_transaction SET tenant=$t, customer=$c, delta=$d, \
+            reason=$r, ref=$ref; \
+         UPDATE customer SET loyalty_points = loyalty_points + $d \
+            WHERE id=$c AND tenant=$t; \
+         COMMIT;",
+    )
+    .bind(("t", tenant.clone()))
+    .bind(("c", customer.clone()))
+    .bind(("d", delta))
+    .bind(("r", reason.to_string()))
+    .bind(("ref", order_ref.to_string()))
+    .await?
+    .check()?;
+    Ok(())
+}
+
 pub async fn store_idempotency(
     db: &Db,
     tenant: &Thing,

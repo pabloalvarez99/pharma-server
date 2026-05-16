@@ -2,13 +2,20 @@
 //! POS sale atomic flow + read endpoints + settings.
 //!
 //! Out of scope this slice (deferred — tracked in roadmap):
-//! * Loyalty award (needs `customers::service::award_points` retrofit).
 //! * Prescription create from POS (needs `prescriptions::service::create_prescription` call).
 //! * FEFO batch decrement (calls `inventory::service::plan_fefo` + atomic batch update).
-//! * Interaction warnings (`super::interactions::check` returns empty for now).
+//! * Interaction warnings full ruleset port (`super::interactions::check`
+//!   currently returns empty `Vec`).
+//!
+//! Loyalty award IS active: if `customer` is set on the sale, points are
+//! awarded via `repo::award_loyalty` (atomic tx — append `loyalty_transaction`
+//! + bump `customer.loyalty_points`). Conversion rate honors
+//!   `admin_setting.loyalty_points_per_clp` if set, else
+//!   [`LOYALTY_CLP_PER_POINT_DEFAULT`].
 //!
 //! Public stable signatures so api router compiles today.
 
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use surrealdb::sql::{thing, Thing};
 
@@ -144,13 +151,24 @@ pub async fn post_sale(
     )
     .await?;
 
-    // Build response (loyalty/prescription/interactions slated for next slice)
+    // Loyalty: if customer set, award points based on total + setting.
+    let mut loyalty_awarded = 0_i64;
+    if let Some(c) = customer.as_ref() {
+        let clp_per_point = resolve_loyalty_rate(db, tenant).await?;
+        let points_dec = (total / Decimal::from(clp_per_point)).trunc();
+        let points_i = points_dec.to_i64().unwrap_or(0).max(0);
+        if points_i > 0 {
+            repo::award_loyalty(db, tenant, c, points_i, "sale", &applied.order.id).await?;
+            loyalty_awarded = points_i;
+        }
+    }
+
     let resp = PosSaleResponse {
         order: applied.order,
         items: applied.items,
         stock_movements: applied.movement_ids,
         prescriptions: Vec::new(),
-        loyalty_points_awarded: 0,
+        loyalty_points_awarded: loyalty_awarded,
         interaction_warnings: super::interactions::check(&[]),
         low_stock_alerts: Vec::new(),
     };
@@ -162,6 +180,17 @@ pub async fn post_sale(
     }
 
     Ok(resp)
+}
+
+/// Resolve loyalty conversion rate (CLP per point) — read tenant setting or
+/// fall back to [`LOYALTY_CLP_PER_POINT_DEFAULT`].
+async fn resolve_loyalty_rate(db: &Db, tenant: &Thing) -> DomainResult<i64> {
+    let s = repo::get_setting(db, tenant, "loyalty_points_per_clp").await?;
+    let rate = s
+        .and_then(|s| s.value.parse::<i64>().ok())
+        .filter(|r| *r > 0)
+        .unwrap_or(LOYALTY_CLP_PER_POINT_DEFAULT);
+    Ok(rate)
 }
 
 pub async fn list_orders(db: &Db, tenant: &Thing, f: OrderFilters) -> DomainResult<Vec<OrderDto>> {
