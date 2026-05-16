@@ -295,3 +295,26 @@ Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/p
   - **datetime binding** (espejo del decimal Fase 2): `chrono::DateTime<Utc>` serializa serde como string RFC3339 → SurrealQL `datetime` schema rechaza (`FieldCheck check:"datetime"`). Fix: helpers `dt_val(dt)` = `surrealdb::sql::Datetime::from(dt).into()` y `dt_opt`. Aparece independientemente en Fase 3 (inventory: batch expiry, movement filters), Fase 7-subset (prescriptions dispensed_at, shift started_at), Fase 5-subset (price_list valid_from). Patrón obligatorio para todo bind de `datetime`.
   - **serde-flatten + Option<Thing>**: `#[serde(flatten)]` sobre struct que contiene `Option<surrealdb::sql::Thing>` rompe deserialización (`untagged and internally tagged enums do not support enum input`). Workaround: dos queries separadas + join en código, NO flatten. Documentado en `purchasing/repo.rs::supplier_name`.
 - **Pendiente**: Fase 4 Sales/POS (usa FEFO de A + customer/loyalty de B + supplier-prices de C). Fase 5 completa (purchase_orders + receive + WAC + AP). Fase 6 Finance/Reports. Fase 8 cron+backup+swagger. Fase 9 hardening+MSI.
+
+---
+
+## 2026-05-16 — Visión extendida: ecosistema federado de agentes ERP
+
+- **Qué**: documento `docs/ecosystem-roadmap.md` formaliza ampliación visión. Pharma-server deja de ser solo ERP on-prem vendible — pasa a ser **nodo de malla federada de agentes** (farmacia, proveedor, droguería, lab) donde humanos reales transan vía protocolo común. Fases 10 (sync online opt-in) y 11 (agent protocol) añadidas al roadmap.
+- **Por qué**: usuario expresó objetivo dual: (a) ERP descargable Windows offline+online, (b) "ecosistema de agentes con dueños humanos reales comerciando". Necesario alinear desde ya — decisiones de arquitectura cambian (identidad criptográfica per-nodo, schema compartido, outbox sync) si se diseña con la mira larga, vs si se posterga y rompe compat después.
+- **Lecciones rescatadas de Tu Farmacia** (`build-and-deploy-webdev-asap/pharmacy-ecommerce/`):
+  - POS sale flow atómico (`apps/web/src/app/api/admin/pos/sale/route.ts`) → blueprint Fase 4.
+  - Cierre-dia agregaciones → blueprint Fase 6.
+  - `drug-interactions.ts` (Beers+Vademécum CL) y `controlled-substances.ts` (Decreto 404) → port literal a `domain::sales`.
+  - Loyalty (`lib/loyalty.ts`), Transbank (`lib/transbank.ts`), OCR Cloud Vision (`scan-invoice/route.ts`), cron jobs (`api/cron/*`), Electron wrapper desktop POS (`apps/desktop/main.js`) → patrones reusables.
+  - Tu Farmacia es single-tenant cloud-first; pharma-server es multi-tenant offline-first. Reglas negocio + UI reusan; stack no.
+- **Decisiones nuevas (locked-in)**:
+  - Online sync ON por defecto = **OFF**. Opt-in por tenant. Datos sensibles (PII, recetas, ventas) NUNCA salen del nodo sin opt-in explícito.
+  - Protocolo agente: Ed25519 + HTTP push + relay opcional + JSON canónico firmado. DID-style `did:pharma:<pubkey>`.
+  - Reputación local-only por nodo. Sin scoring centralizado.
+  - Desktop wrapper preferred: **Tauri** (Rust nativo, más liviano que Electron). Decisión abierta pero leaning.
+  - Catálogo global (`barcode_catalog`, `therapeutic_category_mapping`) ya existente desde Fase 2 = vocabulario producto canónico cross-nodo. Foundation correcta.
+- **Decisiones abiertas**: marketplace cross-tenant alcance (read-only fase 1 vs bidireccional fase 2), identity verifiable (SII/ISP attestation) post-Fase 11, hub federado oficial vs solo self-host.
+- **Orden propuesto**: F4 Sales→F5full→F6→F8→F9 (v1.0.0 vendible)→F10 sync (v1.1.0)→F11 agentes MVP (v1.2.0 "agent-ready").
+- **Archivos**: `docs/ecosystem-roadmap.md` (nuevo); `CLAUDE.md` (header actualizado con visión extendida).
+- **Pendiente inmediato**: arrancar Fase 4 Sales/POS (migración `0007_sales.surql`, `domain::sales` dir-module, `POST /pos/sale` atómico con FEFO+loyalty+prescription+stock_movement).

@@ -1,7 +1,9 @@
 # pharma-server — Project Context
 
 Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
-**Estado**: scaffold inicial · branch `feature/pharma-server-scaffold` · no producción todavía.
+**Estado**: v0.1.3 · branch `feature/erp-parity` · Fases 1+2+3+5sub+7sub mergeadas · pre-producción.
+
+**Visión extendida (2026-05-16)** → ver `docs/ecosystem-roadmap.md`. Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). Fases 1-9 = ERP vendible. Fase 10 = sync online opt-in. Fase 11 = agent protocol foundation.
 
 ## Producto / Visión comercial
 
