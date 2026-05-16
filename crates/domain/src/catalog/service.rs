@@ -210,30 +210,43 @@ pub async fn delete_product(db: &Db, tenant: &Thing, id: &str) -> DomainResult<(
     }
 }
 
+/// Manual adjustment from `POST /products/{id}/stock`. Fase 3 retrofit:
+/// emits a `stock_movement` (`reason = "manual_adjust"`, `admin = JWT sub`)
+/// via [`crate::inventory::service::add_movement`] in the same SurrealQL tx
+/// that updates `product.stock`. `admin` is the JWT `sub` (record id) when
+/// available; `None` is accepted for callers without a user context.
 pub async fn adjust_stock(
     db: &Db,
     tenant: &Thing,
     id: &str,
     adj: StockAdjust,
+    admin: Option<&str>,
 ) -> DomainResult<ProductDto> {
     let pid = parse_thing(id)?;
     let current = repo::get_product(db, tenant, &pid)
         .await?
         .ok_or(DomainError::NotFound)?;
-    let new_stock = match (adj.set, adj.delta) {
-        (Some(s), None) => s,
-        (None, Some(d)) => current.stock + d,
+    let delta = match (adj.set, adj.delta) {
+        (Some(s), None) => s - current.stock,
+        (None, Some(d)) => d,
         _ => {
             return Err(DomainError::Invalid(
                 "indique exactamente uno de `set` o `delta`".into(),
             ))
         }
     };
-    if new_stock < 0 {
-        return Err(DomainError::Invalid("stock resultante negativo".into()));
+    if delta == 0 {
+        return Ok(current);
     }
-    // NOTE: full audited movement (stock_movement) lands in Fase 3.
-    repo::set_stock(db, tenant, &pid, new_stock).await
+    let reason = adj
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("manual_adjust");
+    let (_movement, product) =
+        crate::inventory::service::add_movement(db, tenant, id, delta, reason, admin, None).await?;
+    Ok(product)
 }
 
 pub async fn stats(db: &Db, tenant: &Thing) -> DomainResult<ProductStats> {

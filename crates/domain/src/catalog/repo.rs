@@ -426,21 +426,9 @@ pub async fn soft_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainR
     Ok(row.is_some())
 }
 
-pub async fn set_stock(
-    db: &Db,
-    tenant: &Thing,
-    id: &Thing,
-    new_stock: i64,
-) -> DomainResult<ProductDto> {
-    let mut r = db
-        .query("UPDATE product SET stock = $s WHERE id = $id AND tenant = $t RETURN AFTER")
-        .bind(("s", new_stock))
-        .bind(("id", id.clone()))
-        .bind(("t", tenant.clone()))
-        .await?;
-    let row: Option<ProductRow> = r.take(0)?;
-    row.map(Into::into).ok_or(DomainError::NotFound)
-}
+// `set_stock` removed in Fase 3: every stock change MUST go through
+// `inventory::service::add_movement` so the audit trail and the
+// materialized counter cannot diverge.
 
 pub async fn stats(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductStats> {
     #[derive(Deserialize)]
