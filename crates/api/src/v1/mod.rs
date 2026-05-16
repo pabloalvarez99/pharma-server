@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod customers;
 pub mod inventory;
 pub mod prescriptions;
+pub mod purchasing;
 
 use axum::Router;
 
@@ -15,5 +16,6 @@ pub fn router(state: AppState) -> Router<AppState> {
     catalog::router(state.clone())
         .merge(inventory::router(state.clone()))
         .merge(customers::router(state.clone()))
-        .merge(prescriptions::router(state))
+        .merge(prescriptions::router(state.clone()))
+        .merge(purchasing::router(state))
 }
