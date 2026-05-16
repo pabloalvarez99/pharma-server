@@ -3,11 +3,17 @@ use pharma_core::config::OtlpConfig;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 pub fn init(service_name: &str) -> anyhow::Result<()> {
-    init_inner(service_name, None)
+    init_inner(service_name, None, false)
 }
 
 pub fn init_with_otlp(service_name: &str, otlp: &OtlpConfig) -> anyhow::Result<()> {
-    init_inner(service_name, Some(otlp))
+    init_inner(service_name, Some(otlp), false)
+}
+
+/// CLI variant: logs go to **stderr** so command stdout stays clean for
+/// piping (`pharma agent card > card.json`, `pharma ... | jq`).
+pub fn init_cli(service_name: &str) -> anyhow::Result<()> {
+    init_inner(service_name, None, true)
 }
 
 fn env_filter() -> EnvFilter {
@@ -15,11 +21,22 @@ fn env_filter() -> EnvFilter {
         .unwrap_or_else(|_| EnvFilter::new("info,axum=info,tower_http=info,surrealdb=warn"))
 }
 
-fn init_inner(service_name: &str, otlp: Option<&OtlpConfig>) -> anyhow::Result<()> {
+fn init_inner(
+    service_name: &str,
+    otlp: Option<&OtlpConfig>,
+    to_stderr: bool,
+) -> anyhow::Result<()> {
     let fmt_layer = fmt::layer()
         .json()
         .with_current_span(true)
-        .with_span_list(false);
+        .with_span_list(false)
+        .with_writer(move || -> Box<dyn std::io::Write> {
+            if to_stderr {
+                Box::new(std::io::stderr())
+            } else {
+                Box::new(std::io::stdout())
+            }
+        });
 
     let otlp_layer = match otlp
         .and_then(|c| c.endpoint.as_deref())

@@ -12,6 +12,7 @@ path = "src/main.rs"
 pharma-core = { path = "../core" }
 db = { path = "../db" }
 auth = { path = "../auth" }
+agent = { path = "../agent" }
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
