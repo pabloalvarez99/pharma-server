@@ -51,6 +51,7 @@ fn node_state(db: Arc<db::Db>) -> (api::AppState, String) {
         db: Some(db),
         metrics_token: None,
         node_identity: Some(Arc::new(node)),
+        data_dir: None,
     };
     (state, did)
 }

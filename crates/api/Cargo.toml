@@ -33,9 +33,15 @@ surrealdb.workspace = true
 uuid.workspace = true
 csv.workspace = true
 sha2 = "0.10"
+hex.workspace = true
+tar.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true }
 http-body-util = "0.1"
 hyper = "1"
 tempfile = "3"
+flate2.workspace = true
+tar.workspace = true
+serde_json.workspace = true

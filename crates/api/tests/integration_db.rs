@@ -86,6 +86,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         db: Some(db),
         metrics_token: None,
         node_identity: None,
+        data_dir: None,
     }
 }
 
