@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.19` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-near-expiry-report` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.19
+- **Versión**: `0.1.20` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-margins-daily` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.20
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -54,7 +54,10 @@ NO acá.
   - Caja apertura/cierre/arqueo, gastos, scheduler nocturno + retención de
     backups, backup on-demand `POST /api/v1/admin/backup`, cron auto-purga de
     `idempotency_key` (v0.1.14–0.1.18).
-  - **Reportes**: `GET /api/v1/reports/sales-daily` (rollup diario UTC) +
+  - **Reportes**: `GET /api/v1/reports/sales-daily` (rollup diario UTC),
+    `GET /api/v1/reports/margins-daily` (revenue Σ`order_item.subtotal` −
+    cost Σ`qty×product.cost_price`; `margin`, `margin_pct` 2dp,
+    `items_without_cost` honesto; refunded/cancelled excluidos) y
     `GET /api/v1/reports/near-expiry?days=N` (lotes por vencer/vencidos con
     stock, default 30d, ordenados por `expiry_date` asc, días-a-vencer
     firmado; tenant-scoped, solo `active` + `stock>0`).
@@ -87,8 +90,9 @@ NO acá.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
 9. **Fase 6** (mayormente cerrada): ~~caja~~ ✅ v0.1.14 · ~~gastos + report
-   sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19. Falta: reportes
-   avanzados restantes (márgenes/rotación/ABC) — extensiones del mismo patrón.
+   sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
+   ✅ v0.1.20. Falta: reportes avanzados restantes (rotación/ABC/top-products)
+   — extensiones del mismo patrón.
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -778,4 +782,44 @@ NO acá.
 - **Tests**: PR #27 +2 (`fulfill_persists_multi_lot_fefo_breakdown`: 5u sobre A=4 exp+30d & B=10 exp+120d → `[{A,4},{B,1}]` sum=5, lotes drenados FEFO; `fulfill_non_batch_tracked_leaves_fulfillment_batches_none`). PR #30 +1 sella el edge de semántica: `fulfill_refuses_batch_tracked_when_only_lots_are_expired` (stock=20 ≥ qty=5 pero único lote vencido → `INSUFFICIENT_STOCK`, orden queda `accepted`, stock intacto). agent_orders 10/10 → **11/11**, workspace verde, clippy `-D warnings` clean, fmt clean.
 - **Sin bump de versión** (lo manejan las sesiones paralelas; este commit queda en el pool). PR #27 + #30 mergeados a `feature/erp-parity`.
 - **Estado vs goal**: ✅ trazabilidad multi-lote completa POS + federado · ⏳ Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.20 reporte margins-daily (`GET /api/v1/reports/margins-daily`)
+
+- **Qué**: rollup diario UTC de margen bruto sobre `order`/`order_item`.
+  `revenue = Σ order_item.subtotal`; `cost = Σ quantity ×
+  product.cost_price` (solo items con costo conocido); `margin`,
+  `margin_pct` (margin/revenue×100, 2dp, 0 si revenue 0),
+  `items_without_cost` (líneas con product/cost_price ausente — honesto).
+  `refunded`/`cancelled` excluidos, tenant-scoped.
+- **Por qué**: segundo reporte avanzado del BACKLOG #9; el dueño necesita
+  ver margen real, no solo facturación (sales-daily).
+- **Patrón**: mismo módulo `expenses` (no `domain::reports`, sigue
+  scaffold). 3 queries batched (orders → items `order IN $ids` → product
+  costs `id IN $ids`) + bucket en Rust con `BTreeMap` — shape kv-surrealkv-
+  safe idéntico a `sales_daily`/`near_expiry`. Maps string-keyed
+  (`Thing::to_string()`) por gotcha clippy `mutable_key_type`.
+- **Decisiones**:
+  - `items_without_cost` explícito en vez de asumir costo 0 — el margen se
+    lee honesto cuando hay productos sin `cost_price` cargado.
+  - `order_item.product` es `option<record<product>>`; item sin product →
+    cuenta como without_cost.
+  - `margin_pct` redondeado `round_dp(2)` (94.2857 → 94.29).
+- **Tests** (`crates/domain/tests/expenses.rs` +2):
+  `margins_daily_revenue_cost_margin_and_unknown_cost` (producto cost 100 +
+  producto cost None, venta 2×1000 + 3×500 → revenue 3500, cost 200,
+  margin 3300, margin_pct 94.29, items_without_cost 1) +
+  `margins_daily_tenant_scoped_and_empty`. Workspace verde, clippy
+  `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Sin migración (solo lee `order`/`order_item`/
+  `product`).
+- **Build/MSI/Smoke**: release build (7m21s). MSI
+  `pharma-server-0.1.20-x86_64.msi` 12,193,792 bytes, sha256
+  `1307888d92ca7670fc8e0116754f1409a5765fe8e309b1d915734fb428ca8f5c`.
+  Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.19, exit 0)→
+  Running→`/`=`{"version":"0.1.20"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.20 --target feature/erp-parity`. PR
+  `feature/erp-parity-margins-daily` → `feature/erp-parity`.
 - **Pendiente**: ver `## BACKLOG` al tope.

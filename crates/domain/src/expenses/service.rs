@@ -318,3 +318,155 @@ pub async fn near_expiry(
         })
         .collect())
 }
+
+/// Daily gross-margin rollup. `revenue` = Σ `order_item.subtotal`;
+/// `cost` = Σ `quantity * product.cost_price` over items with a known cost.
+/// `refunded`/`cancelled` orders excluded. Tenant-scoped, sorted ascending
+/// by UTC date. Three batched queries (orders → items → product costs) +
+/// bucket in Rust — same kv-surrealkv-safe shape as `sales_daily`.
+pub async fn margins_daily(
+    db: &Db,
+    tenant: &Thing,
+    f: SalesReportFilters,
+) -> DomainResult<Vec<DailyMarginRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    let sql = format!(
+        "SELECT id, created_at FROM order WHERE {} ORDER BY created_at ASC",
+        conds.join(" AND ")
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct O {
+        id: Thing,
+        created_at: DateTime<Utc>,
+    }
+    let orders: Vec<O> = qb.await?.check()?.take(0)?;
+    if orders.is_empty() {
+        return Ok(Vec::new());
+    }
+    // order id (string) -> UTC date bucket.
+    use std::collections::HashMap;
+    let order_day: HashMap<String, String> = orders
+        .iter()
+        .map(|o| {
+            (
+                o.id.to_string(),
+                o.created_at.format("%Y-%m-%d").to_string(),
+            )
+        })
+        .collect();
+    let order_ids: Vec<Thing> = orders.into_iter().map(|o| o.id).collect();
+
+    #[derive(Deserialize)]
+    struct It {
+        order: Thing,
+        product: Option<Thing>,
+        quantity: i64,
+        subtotal: Decimal,
+    }
+    let items: Vec<It> = db
+        .query(
+            "SELECT order, product, quantity, subtotal FROM order_item \
+             WHERE tenant = $t AND order IN $ids",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", order_ids))
+        .await?
+        .check()?
+        .take(0)?;
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Resolve product costs in one batched query (string-keyed: `Thing`
+    // trips clippy `mutable_key_type` as a map key).
+    use std::collections::HashSet;
+    let pids: Vec<Thing> = {
+        let mut seen: HashSet<String> = HashSet::new();
+        items
+            .iter()
+            .filter_map(|i| i.product.clone())
+            .filter(|p| seen.insert(p.to_string()))
+            .collect()
+    };
+    #[derive(Deserialize)]
+    struct P {
+        id: Thing,
+        cost_price: Option<Decimal>,
+    }
+    let costs: HashMap<String, Option<Decimal>> = if pids.is_empty() {
+        HashMap::new()
+    } else {
+        let rows: Vec<P> = db
+            .query("SELECT id, cost_price FROM product WHERE tenant = $t AND id IN $ids")
+            .bind(("t", tenant.clone()))
+            .bind(("ids", pids))
+            .await?
+            .check()?
+            .take(0)?;
+        rows.into_iter()
+            .map(|p| (p.id.to_string(), p.cost_price))
+            .collect()
+    };
+
+    use std::collections::BTreeMap;
+    struct Acc {
+        revenue: Decimal,
+        cost: Decimal,
+        without_cost: i64,
+    }
+    let mut by_day: BTreeMap<String, Acc> = BTreeMap::new();
+    for it in items {
+        let Some(day) = order_day.get(&it.order.to_string()) else {
+            continue; // item of an excluded/out-of-range order
+        };
+        let e = by_day.entry(day.clone()).or_insert(Acc {
+            revenue: Decimal::ZERO,
+            cost: Decimal::ZERO,
+            without_cost: 0,
+        });
+        e.revenue += it.subtotal;
+        let unit_cost = it
+            .product
+            .as_ref()
+            .and_then(|p| costs.get(&p.to_string()).cloned().flatten());
+        match unit_cost {
+            Some(c) => e.cost += c * Decimal::from(it.quantity),
+            None => e.without_cost += 1,
+        }
+    }
+    Ok(by_day
+        .into_iter()
+        .map(|(date, a)| {
+            let margin = a.revenue - a.cost;
+            let margin_pct = if a.revenue.is_zero() {
+                Decimal::ZERO
+            } else {
+                (margin / a.revenue * Decimal::from(100)).round_dp(2)
+            };
+            DailyMarginRow {
+                date,
+                revenue: a.revenue,
+                cost: a.cost,
+                margin,
+                margin_pct,
+                items_without_cost: a.without_cost,
+            }
+        })
+        .collect())
+}

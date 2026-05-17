@@ -35,6 +35,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/expenses", get(list_expenses))
         .route("/api/v1/reports/sales-daily", get(sales_daily))
+        .route("/api/v1/reports/margins-daily", get(margins_daily))
         .route("/api/v1/reports/near-expiry", get(near_expiry));
 
     let writes = Router::new()
@@ -77,6 +78,18 @@ async fn sales_daily(
     let tenant = tenant_of(&claims)?;
     Ok(Json(
         service::sales_daily(db.as_ref(), &tenant, filters).await?,
+    ))
+}
+
+async fn margins_daily(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<SalesReportFilters>,
+) -> Result<Json<Vec<DailyMarginRow>>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    Ok(Json(
+        service::margins_daily(db.as_ref(), &tenant, filters).await?,
     ))
 }
 
