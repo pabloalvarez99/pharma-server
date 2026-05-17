@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agent"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "bs58",
  "chrono",
@@ -176,7 +176,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "agent",
  "anyhow",
@@ -187,6 +187,8 @@ dependencies = [
  "csv",
  "db",
  "domain",
+ "flate2",
+ "hex",
  "http-body-util",
  "hyper",
  "pharma-core",
@@ -194,6 +196,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "surrealdb",
+ "tar",
  "telemetry",
  "tempfile",
  "thiserror 2.0.18",
@@ -534,7 +537,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auth"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1076,7 +1079,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "agent",
  "anyhow",
@@ -1420,7 +1423,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "db"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1537,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1708,6 +1711,16 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
 
 [[package]]
 name = "find-msvc-tools"
@@ -2561,7 +2574,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jobs"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -3408,7 +3421,7 @@ dependencies = [
 
 [[package]]
 name = "pharma-core"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4716,7 +4729,7 @@ dependencies = [
 
 [[package]]
 name = "service"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "api",
@@ -5221,8 +5234,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "telemetry"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "anyhow",
  "opentelemetry",
@@ -6718,6 +6742,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
 dependencies = [
  "tap",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]
