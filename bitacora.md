@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.16` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-backup` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.16
+- **Versión**: `0.1.17` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-backup-cron` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.17
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -666,4 +666,22 @@ NO acá.
 - **Build/MSI/Smoke**: release build (7m19s). MSI `pharma-server-0.1.16-x86_64.msi` 11,984,896 bytes (mismo tamaño que 0.1.15 — solo wiring y dos deps lean), sha256 `2f372d3285c24a7af9598b685167759254e313cb93911a4b35ebcfbc316e3482`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.15, exit 0)→Running→`/`=`{"version":"0.1.16"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.16 --target feature/erp-parity`. PR `feature/erp-parity-backup` → `feature/erp-parity`. Versión 0.1.15 → 0.1.16 (bump + Cargo.lock mismo commit).
 - **Pendiente Fase 8 derivado**: cron scheduler (jobs crate ya tiene el `tokio_cron_scheduler` boilerplate) puede ahora invocar `backup_now` programáticamente para backup automático nocturno. Próximo slice.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.17: scheduler nocturno de backup (Fase 8 cron destrabada)
+
+- **Qué**: `pharma_core::config::BackupConfig { schedule, retention_days }` + `api::run` spawnea `tokio_cron_scheduler::JobScheduler` con un único async job que invoca `backup_now` + `prune_backups`. Configurable vía toml o env `PHARMA__BACKUP__SCHEDULE` / `PHARMA__BACKUP__RETENTION_DAYS`. Schedule vacío/None = scheduler deshabilitado (sin regresión para installs viejas). Release v0.1.17, smoke install limpio.
+- **Por qué**: un MSI vendible NO puede depender del operador acordándose de hacer `POST /admin/backup` cada noche. El scheduler nocturno automático + retención configurable es el feature ausente que destraba Fase 9 (v1.0.0 sellable). Backup on-demand sigue disponible — uno no sustituye al otro: on-demand es para "voy a hacer un cambio grande, quiero un check point ahora", scheduled es para "todas las noches a las 3am, sin que el operador piense".
+- **Decisión locked**: el scheduler vive **dentro del proceso `pharma-api`/`pharma-service`**, no como un crate separado o un servicio cron de Windows. Por qué: queremos zero-config para el operador — un único MSI, un único proceso, un único log. `tokio_cron_scheduler` corre sobre el runtime tokio existente. La alternativa "tarea programada de Windows" requiere docs adicionales, permisos y un binario externo — más complejidad por ningún beneficio real.
+- **Decisión locked**: `prune_backups` filtra por prefijo `pharma-backup-` y extensión `.tar.gz` — NO borra otros archivos que el operador pueda haber dejado en `<data_dir>/backups/` (snapshots manuales, exports de partner, etc.). Garbage collection conservadora. `retention_days = 0` = keep forever (default).
+- **Implementación** (`crates/api/src/lib.rs`): tras construir `state`, si `cfg.backup.schedule` no vacío, `tokio::spawn` el helper `spawn_backup_scheduler` que crea el `JobScheduler`, registra el `Job::new_async` con la expresión cron del usuario, y entra en `loop { sleep(3600s) }` para mantener vivo el scheduler. Errores se loggean pero el job sigue corriendo en próximas iteraciones (transient FS errors no matan la programación).
+- **`v1::backup_now` / `v1::prune_backups`** ahora `pub` y re-exportados al top-level del módulo `v1`, así el scheduler puede invocarlos sin pasar por el handler HTTP (sin overhead de routing/extractors).
+- **Tests** (`crates/api/src/v1/backup.rs` unit test + 2 integration existentes): `prune_backups` con un archivo viejo (10 días) y uno nuevo, retención 3 días → solo borra el viejo; retención 0 → no-op. `filetime` agregado como dev-dep para setear mtime determinístico en el test. Workspace verde.
+- **Gotcha (no en memoria — caso particular del scheduler)**: la closure async de `tokio_cron_scheduler::Job::new_async` se llama múltiples veces (una por trigger). Capturar `job_path` por move solo se permite una vez — segunda iteración → `error[E0507]: cannot move out`. Fix: capturar por `move |_, _| { let p = job_path.clone(); Box::pin(async move { ... }) }` (el body del closure clona en cada tick antes de pasar a futuros nested) y dentro del async, clonar otra vez para cada `spawn_blocking`.
+- **Compat**: aditivo. Sin migración. `BackupConfig::default()` deja todo deshabilitado, sin regresión. `default_config()` extendida para incluirlo.
+- **Build/MSI/Smoke**: release build (9m58s, mismo MSI build path). MSI `pharma-server-0.1.17-x86_64.msi` 12,144,640 bytes (+160KB vs 0.1.16 por las nuevas deps), sha256 `cd6daeac9da17e530b3c1f3b8417b37429abcac960bd0d273822db99a0dabbfc`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.16, exit 0)→Running→`/`=`{"version":"0.1.17"}`→`/health/ready` 200 `db:ok`. Scheduler no activo por default en este smoke (sin `PHARMA__BACKUP__SCHEDULE` env).
+- **Release**: `gh release create v0.1.17 --target feature/erp-parity`. PR `feature/erp-parity-backup-cron` → `feature/erp-parity`. Versión 0.1.16 → 0.1.17 (bump + Cargo.lock mismo commit).
+- **Estado vs goal**: ✅ backup on-demand (v0.1.16) + ✅ scheduler nocturno + retención automática (v0.1.17) → Fase 9 vendible v1.0.0 ahora solo necesita firma Authenticode + smoke VM limpia. Fase 8 cron destrabada (jobs crate ya tenía el boilerplate, ahora hay un caller real).
 - **Pendiente**: ver `## BACKLOG` al tope.
