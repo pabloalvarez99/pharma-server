@@ -3,6 +3,7 @@
 //! Bounded contexts. Each submodule owns its `model`, `repo`, `service`, `errors`.
 //! API crate orchestrates only; no axum types live here.
 
+pub mod agent_orders;
 pub mod catalog;
 pub mod customers;
 pub mod finance;

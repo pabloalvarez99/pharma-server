@@ -3,6 +3,7 @@
 //! claims/tenant, call `domain::*::service`, map `DomainError` → envelope.
 
 pub mod agent;
+pub mod agent_orders;
 pub mod catalog;
 pub mod customers;
 pub mod inventory;
@@ -21,5 +22,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(prescriptions::router(state.clone()))
         .merge(purchasing::router(state.clone()))
         .merge(sales::router(state.clone()))
+        .merge(agent_orders::router(state.clone()))
         .merge(agent::router(state))
 }
