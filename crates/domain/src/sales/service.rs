@@ -311,6 +311,11 @@ async fn resolve_loyalty_rate(db: &Db, tenant: &Thing) -> DomainResult<i64> {
     Ok(rate)
 }
 
+/// Cron-driven: drop `idempotency_key` rows past their TTL. Tenant-wide.
+pub async fn purge_expired_idempotency(db: &Db) -> DomainResult<u64> {
+    repo::purge_expired_idempotency(db).await
+}
+
 pub async fn list_orders(db: &Db, tenant: &Thing, f: OrderFilters) -> DomainResult<Vec<OrderDto>> {
     repo::list_orders(db, tenant, &f).await
 }

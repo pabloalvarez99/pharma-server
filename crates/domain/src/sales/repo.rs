@@ -747,6 +747,32 @@ struct IdempotencyRow {
     status_code: i64,
 }
 
+/// Delete `idempotency_key` rows whose `expires_at` has passed. Tenant-wide
+/// because the cron runs at the process level (not per-tenant). Returns the
+/// count of removed rows for logging.
+pub async fn purge_expired_idempotency(db: &Db) -> DomainResult<u64> {
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut r = db
+        .query(
+            "SELECT count() AS count FROM idempotency_key \
+             WHERE expires_at <= time::now() GROUP ALL",
+        )
+        .await?
+        .check()?;
+    let pre: Option<C> = r.take(0)?;
+    let n = pre.map(|c| c.count).unwrap_or(0).max(0) as u64;
+    if n == 0 {
+        return Ok(0);
+    }
+    db.query("DELETE idempotency_key WHERE expires_at <= time::now()")
+        .await?
+        .check()?;
+    Ok(n)
+}
+
 /// Returns cached response if `key` already resolved for `tenant` within TTL.
 pub async fn lookup_idempotency(
     db: &Db,
