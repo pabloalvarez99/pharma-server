@@ -389,6 +389,20 @@ async fn pos_sale_batch_tracked_fefo_decrements_earliest_expiry() {
     // Line records the earliest-expiry lot (first FEFO allocation).
     assert_eq!(resp.items[0].batch.as_deref(), Some(lot_a.id.as_str()));
 
+    // BACKLOG #3 — multi-lot split traceability. The full FEFO breakdown lives
+    // on `batches[]`, in consumption order, with per-allocation qty summing to
+    // the line quantity. The legacy `batch` field stays = batches[0].batch.
+    let batches = resp.items[0]
+        .batches
+        .as_ref()
+        .expect("multi-lot consumption persists batches[]");
+    assert_eq!(batches.len(), 2);
+    assert_eq!(batches[0].batch, lot_a.id);
+    assert_eq!(batches[0].qty, 4);
+    assert_eq!(batches[1].batch, lot_b.id);
+    assert_eq!(batches[1].qty, 1);
+    assert_eq!(batches.iter().map(|a| a.qty).sum::<i64>(), 5);
+
     // product.stock decremented by total qty.
     let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
     assert_eq!(p2.stock, 14 - 5);
@@ -484,6 +498,8 @@ async fn pos_sale_non_batch_tracked_falls_back_to_product_stock() {
         .await
         .unwrap();
     assert!(resp.items[0].batch.is_none());
+    // BACKLOG #3 — products without FEFO planning persist no breakdown.
+    assert!(resp.items[0].batches.is_none());
     let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
     assert_eq!(p2.stock, 5);
 }

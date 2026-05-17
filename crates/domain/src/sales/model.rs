@@ -64,7 +64,23 @@ pub struct OrderItemDto {
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub subtotal: Decimal,
+    /// Primary FEFO lot (earliest expiry consumed). Kept for backward compat;
+    /// full breakdown lives in [`Self::batches`].
     pub batch: Option<String>,
+    /// Multi-lot split (BACKLOG #3): every FEFO allocation consumed for the
+    /// line. `None` on non-batch-tracked products and on rows persisted before
+    /// migration `0013_order_item_batches`. Sum of `qty` equals `quantity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batches: Option<Vec<OrderItemBatchAllocation>>,
+}
+
+/// One FEFO allocation persisted on an [`OrderItemDto`]. The same shape is
+/// returned by `inventory::plan_fefo`, but as a DTO it carries strings (record
+/// ids) rather than `Thing`s so it can cross the API boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct OrderItemBatchAllocation {
+    pub batch: String,
+    pub qty: i64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
