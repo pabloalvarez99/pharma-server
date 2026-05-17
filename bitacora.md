@@ -540,3 +540,24 @@ NO acá.
 - **Compat**: endpoint additive, sin migración. Path federado intacto.
 - **Estado vs goal**: ✅ POS completo · ✅ descargable/offline/first-run · ✅ **lazo federado completo** (create→accept/reject→fulfill+stock, con po.status del lado comprador) · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — Fase 12 plan maestro marketplace de confianza (estrategia, no scaffolding)
+
+- **Qué**: `docs/marketplace-master-plan.md` (449 líneas, 10 secciones extendidas + Mermaid §4) — análisis fundador/VC/arquitecto de marketplace antifraude identidad verificable + reputación portable CL→LATAM. PR #11 (commit `cec33c2`) mergeado a `feature/erp-parity`. Pointer en `CLAUDE.md` L6 + sección "## 3bis. Fase 12" en `docs/ecosystem-roadmap.md` (mismo PR).
+- **Por qué**: el usuario pidió análisis ultradeep founder/VC/arquitecto de la idea marketplace. Conclusión reordena la tesis: el activo diferencial NO es "otro Yapo/Wallapop" sino el **protocolo federado firmado ya construido** (`crates/agent/{identity,envelope,card,canonical}.rs`, `crates/api/src/v1/agent.rs` con `po.create` re-cotizando precio canónico server-side L404-526, `migrations/0008_agent.surql`+`0009_agent_order.surql`, opt-in por tenant `federation_enabled`) anclado a un ERP que ya se vende single-player (MSI v0.1.x). Documento = marco estratégico acordado para cualquier trabajo futuro de marketplace/Hub.
+- **Decisiones estratégicas locked** (no son opinión de una sesión, son el frame del proyecto Fase 12):
+  1. Entrada = **B2B vertical** farmacia indep. ↔ droguería/distribuidor sobre el protocolo `agent` existente. ERP/POS MSI = anzuelo de adquisición + ancla de identidad. **NO** C2C general (inwinneable vs Facebook Marketplace).
+  2. **Densidad geográfica primero**: Coquimbo/La Serena (Tu Farmacia = nodo #1 / design partner). Expansión horizontal sólo post-PMF.
+  3. Palanca real = **verificación de transferencia** (Khipu/Fintoc open-banking confirma plata movida + titular == KYC) que mata el "comprobante falso" — la estafa #1 CL. Reputación = complemento, no núcleo.
+  4. Monetización **3 capas**: (a) ERP SaaS on-prem (cash hoy + lock-in), (b) take-rate sobre GMV inter-nodo escrowed (upside, necesita 100s de nodos — nunca el runway base), (c) identity / verified-settlement-as-a-service (moat / opcionalidad unicornio).
+  5. **NO custodiar fondos**: orquestar escrow vía partner licenciado CMF + Khipu/Fintoc; cobrar fee de orquestación. DIY custody = muerte regulatoria (Ley Fintech 21.521 / CMF / UAF).
+  6. Arquitectura = Hub centralizado online (Postgres administrado, KYC, escrow, discovery, disputa) **sobre** el protocolo federado por debajo. **NO** malla leaderless en v1. Rust para node + protocolo + núcleo del Hub (Hub importa `crates/agent` *verbatim* → cero divergencia de sig-verify); TS (Next.js/Expo) para clientes. **Sin CRDTs** (modelo tenant-owned, sin multi-writer concurrente; outbox + LWW basta — patrón Fase 10).
+  7. Riesgo existencial **#1** = el fundador construye el protocolo elegante en vez del producto aburrido (escrow + identidad verificada + reorden) que el mercado paga. Cripto = plomería, nunca un feature de cara al cliente.
+  8. Techo realista vertical-pharma = PE/lifestyle, **no unicornio**. Ruta unicornio = generalizar a riel de confianza/liquidación SMB LATAM (`did:pharma`→`did:trade`), Fase-N infra, NO marketing de v1.
+- **Scope (LOCKED, hard rule para sesiones futuras)**: estrategia/arquitectura **SOLO** — el diseño técnico del Trust Hub (registry + KYC + orquestador escrow + emisor Verifiable Credentials + scoring antifraude) es un **plan separado posterior** y **NO se inicia** hasta validar §2 con design partners reales (Coquimbo/La Serena, §6 del doc). Cero código de Hub especulativo.
+- **Discoverability**: `CLAUDE.md` L6 (pointer Fase 12 → `docs/marketplace-master-plan.md`); `docs/ecosystem-roadmap.md` §3bis (cross-ref con resumen ejecutivo); memoria `project_marketplace_master_plan` + espejo vault.
+- **Diff**: 3 docs, +473/-1. Cero código, cero deps, cero migraciones. Verificado contra evidencia citada en el doc (rutas reales de la rama).
+- **Estado vs goal**: ✅ estrategia documentada con evidencia de código real · ⏳ validación con design partners → recién ahí inicia el plan técnico del Hub/escrow.
+- **Pendiente**: ver `## BACKLOG` al tope.
