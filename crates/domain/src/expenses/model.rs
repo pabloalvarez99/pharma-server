@@ -71,3 +71,27 @@ pub struct SalesReportFilters {
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct NearExpiryFilters {
+    /// Lookahead window in days (default 30). Batches expiring on or before
+    /// `now + days` — including already-expired ones — are returned.
+    pub days: Option<i64>,
+}
+
+/// One soon-to-expire (or already-expired) product batch with on-hand stock.
+/// Sorted by `expiry_date` ascending so the most urgent lots come first.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct NearExpiryRow {
+    pub product_id: String,
+    pub product_name: String,
+    pub batch_id: String,
+    pub batch_code: String,
+    /// Expiry date (UTC).
+    pub expiry_date: DateTime<Utc>,
+    pub stock: i64,
+    /// Whole days from today (UTC) until expiry. Negative = already expired.
+    pub days_to_expiry: i64,
+    /// True when `expiry_date <= now`.
+    pub expired: bool,
+}

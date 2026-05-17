@@ -34,7 +34,8 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
 pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/expenses", get(list_expenses))
-        .route("/api/v1/reports/sales-daily", get(sales_daily));
+        .route("/api/v1/reports/sales-daily", get(sales_daily))
+        .route("/api/v1/reports/near-expiry", get(near_expiry));
 
     let writes = Router::new()
         .route("/api/v1/expenses", post(create_expense))
@@ -76,5 +77,17 @@ async fn sales_daily(
     let tenant = tenant_of(&claims)?;
     Ok(Json(
         service::sales_daily(db.as_ref(), &tenant, filters).await?,
+    ))
+}
+
+async fn near_expiry(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<NearExpiryFilters>,
+) -> Result<Json<Vec<NearExpiryRow>>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    Ok(Json(
+        service::near_expiry(db.as_ref(), &tenant, filters).await?,
     ))
 }

@@ -226,3 +226,95 @@ pub async fn sales_daily(
     }
     Ok(by_day.into_values().collect())
 }
+
+/// Batches on hand that expire on or before `now + days` (default 30),
+/// including already-expired ones (negative `days_to_expiry`). Tenant-scoped,
+/// only `active` batches with `stock > 0`. Sorted by `expiry_date` ascending
+/// — most urgent first. Product names are resolved in a second query (the
+/// codebase deliberately avoids record-link traversal in SELECT under
+/// kv-surrealkv).
+pub async fn near_expiry(
+    db: &Db,
+    tenant: &Thing,
+    f: NearExpiryFilters,
+) -> DomainResult<Vec<NearExpiryRow>> {
+    let days = f.days.unwrap_or(30).clamp(0, 3650);
+    let now = Utc::now();
+    let cutoff = now + chrono::Duration::days(days);
+
+    #[derive(Deserialize)]
+    struct B {
+        id: Thing,
+        product: Thing,
+        batch_code: String,
+        expiry_date: DateTime<Utc>,
+        stock: i64,
+    }
+    let batches: Vec<B> = db
+        .query(
+            "SELECT id, product, batch_code, expiry_date, stock \
+             FROM product_batch \
+             WHERE tenant = $t AND active = true AND stock > 0 \
+               AND expiry_date <= $c \
+             ORDER BY expiry_date ASC",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("c", surrealdb::sql::Datetime::from(cutoff)))
+        .await?
+        .check()?
+        .take(0)?;
+
+    if batches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Resolve product names in one batched query keyed by the distinct ids.
+    // `Thing` trips clippy `mutable_key_type` as a map/set key, so key the
+    // dedup + lookup by its string form instead.
+    use std::collections::{HashMap, HashSet};
+    let ids: Vec<Thing> = {
+        let mut seen: HashSet<String> = HashSet::new();
+        batches
+            .iter()
+            .filter(|b| seen.insert(b.product.to_string()))
+            .map(|b| b.product.clone())
+            .collect()
+    };
+    #[derive(Deserialize)]
+    struct P {
+        id: Thing,
+        name: String,
+    }
+    let prods: Vec<P> = db
+        .query("SELECT id, name FROM product WHERE tenant = $t AND id IN $ids")
+        .bind(("t", tenant.clone()))
+        .bind(("ids", ids))
+        .await?
+        .check()?
+        .take(0)?;
+    let names: HashMap<String, String> = prods
+        .into_iter()
+        .map(|p| (p.id.to_string(), p.name))
+        .collect();
+
+    let today = now.date_naive();
+    Ok(batches
+        .into_iter()
+        .map(|b| {
+            let days_to_expiry = (b.expiry_date.date_naive() - today).num_days();
+            NearExpiryRow {
+                product_id: b.product.to_string(),
+                product_name: names
+                    .get(&b.product.to_string())
+                    .cloned()
+                    .unwrap_or_default(),
+                batch_id: b.id.to_string(),
+                batch_code: b.batch_code,
+                expiry_date: b.expiry_date,
+                stock: b.stock,
+                days_to_expiry,
+                expired: b.expiry_date <= now,
+            }
+        })
+        .collect())
+}
