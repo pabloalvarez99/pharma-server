@@ -25,8 +25,9 @@ Esto no es opinión: es evidencia en código del propio repositorio.
 | Sobre firmado canónico | [`crates/agent/src/envelope.rs`](../crates/agent/src/envelope.rs) · [`canonical.rs`](../crates/agent/src/canonical.rs) | JSON canónico → firma Ed25519; `verify()` rechaza body manipulado y `from` falsificado. |
 | AgentCard discovery | [`crates/agent/src/card.rs`](../crates/agent/src/card.rs) | Tarjeta auto-firmada (name, kind, region, endpoint); se invalida si se altera el endpoint. |
 | Transporte nodo-a-nodo real | [`crates/api/src/v1/agent.rs`](../crates/api/src/v1/agent.rs) | `/agent/inbox`: verifica firma → addressing check → despacha `ping`/`catalog.lookup`/`quote.request`/`po.create` → responde con sobre firmado. **`po_create` re-cotiza el precio canónico server-side y NO confía en el `unit_price` del comprador** (líneas 404-526; `price_adjusted:true` si divergió). Auth = firma del sobre, **no** JWT ni tenant scope. |
-| Reputación local-only + opt-in | [`migrations/0008_agent.surql`](../migrations/0008_agent.surql) · [`0009_agent_order.surql`](../migrations/0009_agent_order.surql) | Grafo `agent_interaction` por nodo (jamás centralizado); `agent_order` inbound; gate por tenant `admin_setting.federation_enabled == "true"` antes de exponer precio/stock (`resolve_federation_tenant`, agent.rs:216-285). |
-| ERP vendible hoy | [`migrations/0001_init.surql`](../migrations/0001_init.surql) · `CLAUDE.md` | Multi-tenant estricto, SurrealKv embebido, MSI on-prem, release `v0.1.5` publicado. Valor **single-player** antes de que exista la red. |
+| Reputación local-only + opt-in | [`migrations/0008_agent.surql`](../migrations/0008_agent.surql) · [`0009_agent_order.surql`](../migrations/0009_agent_order.surql) · [`0010_agent_order_price_adjusted.surql`](../migrations/0010_agent_order_price_adjusted.surql) | Grafo `agent_interaction` por nodo (jamás centralizado); `agent_order` inbound; gate por tenant `admin_setting.federation_enabled == "true"` antes de exponer precio/stock (`resolve_federation_tenant`, agent.rs:216-285). |
+| **Lazo federado cerrado (operador humano)** | [`crates/api/src/v1/agent_orders.rs`](../crates/api/src/v1/agent_orders.rs) | Cara JWT/tenant del flujo: operador del proveedor lista órdenes inbound y accept/reject/fulfill; máquina de estados `received → accepted|rejected → fulfilled` con decremento de stock atómico; el comprador remoto se entera vía topic `po.status`. Convierte el protocolo en un *workflow* B2B completo, no solo handshake. |
+| ERP vendible hoy | [`migrations/0001_init.surql`](../migrations/0001_init.surql) · `CLAUDE.md` | Multi-tenant estricto, SurrealKv embebido, MSI on-prem, release `v0.1.10` publicado (workspace `Cargo.toml`). Valor **single-player** antes de que exista la red. |
 
 Por qué esto importa estratégicamente: los marketplaces mueren en el cold-start porque
 parten sin oferta, sin demanda y sin producto. Aquí ya existe (a) un ERP/POS on-prem
@@ -140,7 +141,7 @@ listados. Confundir ambos es el primer error fatal.
 
 - *Cold-start resuelto*: el nodo vale solo antes de la red (patrón
   single-player→multiplayer tipo Figma/Superhuman) — y el single-player **ya está
-  construido y se vende** (MSI v0.1.5).
+  construido y se vende** (MSI v0.1.10 — workspace `Cargo.toml`).
 - *CAC bajo*: es un producto vendido con soporte, no captación por ads.
 - *AOV alto y recurrente*: reposición farmacéutica es semanal/mensual, predecible.
 - *Liquidez alcanzable en una región*: una distribuidora abastece a decenas de
@@ -159,7 +160,7 @@ un feature de cara al cliente. El cliente compra "no me estafan y reordeno fáci
 
 Tres capas, ordenadas de menor a mayor defensibilidad:
 
-1. **ERP/POS SaaS on-prem (licencia + mantención).** Ya vendible (MSI v0.1.5). COGS ≈ 0
+1. **ERP/POS SaaS on-prem (licencia + mantención).** Ya vendible (MSI v0.1.10). COGS ≈ 0
    (on-prem, hardware del cliente), margen altísimo, cash-flow temprano. **Es el anzuelo
    y el lock-in.** Tier por nº de cajas/usuarios concurrentes. Esto financia el burn →
    bootstrap viable, ruta de menor dilución.
@@ -440,8 +441,10 @@ la "Fase 12". No introduce dependencias ni toca `Cargo.toml`/`migrations` reales
 - Render Markdown OK (`glow docs/marketplace-master-plan.md`); bloque Mermaid §4 válido.
 - Cada afirmación "activo ya construido" enlaza a ruta real del repo
   (`crates/agent/identity.rs|envelope.rs|card.rs|canonical.rs`,
-  `crates/api/src/v1/agent.rs`, `migrations/0008_agent.surql`, `0009_agent_order.surql`,
-  `0001_init.surql`) — verificado contra el código en esta rama.
+  `crates/api/src/v1/agent.rs`, `crates/api/src/v1/agent_orders.rs`,
+  `migrations/0008_agent.surql`, `0009_agent_order.surql`,
+  `0010_agent_order_price_adjusted.surql`, `0001_init.surql`) — verificado contra el
+  código en esta rama.
 
 **Siguiente plan (separado, post-validación de esta estrategia):** diseño técnico del
 Trust Hub (registry + KYC + orquestador escrow + emisor de Verifiable Credentials +
