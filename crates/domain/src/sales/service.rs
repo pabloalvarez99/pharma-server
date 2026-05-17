@@ -228,6 +228,109 @@ pub async fn get_order(
         .ok_or(DomainError::NotFound)
 }
 
+/// Validate + persist a refund/return atomically.
+///
+/// Rules enforced before the tx:
+/// * at least one line, every line `quantity > 0`, `unit_price >= 0`;
+/// * a line with `restock = true` MUST carry a `product` (you can't restock
+///   an unidentified item — stock movements require a product);
+/// * if `order` is set it must exist for this tenant, and per-product refunded
+///   quantity may not exceed what that order actually sold (no over-refund).
+pub async fn create_refund(
+    db: &Db,
+    tenant: &Thing,
+    processed_by: Option<&Thing>,
+    req: NewDevolucion,
+) -> DomainResult<RefundResponse> {
+    if req.items.is_empty() {
+        return Err(DomainError::Invalid("items requeridos".into()));
+    }
+    if req.motivo.trim().is_empty() {
+        return Err(DomainError::Invalid("motivo requerido".into()));
+    }
+    for it in &req.items {
+        if it.quantity <= 0 {
+            return Err(DomainError::Invalid(format!(
+                "cantidad inválida para {}: {}",
+                it.product_name, it.quantity
+            )));
+        }
+        if it.unit_price.is_sign_negative() {
+            return Err(DomainError::Invalid(format!(
+                "precio negativo para {}",
+                it.product_name
+            )));
+        }
+        if it.restock && it.product.is_none() {
+            return Err(DomainError::Invalid(format!(
+                "restock requiere product en la línea '{}'",
+                it.product_name
+            )));
+        }
+    }
+
+    let order_thing = req
+        .order
+        .as_deref()
+        .map(|s| parse_tenant_thing(s, "order"))
+        .transpose()?;
+
+    if let Some(ord) = order_thing.as_ref() {
+        let (_order, sold_items) = repo::get_order(db, tenant, ord)
+            .await?
+            .ok_or(DomainError::NotFound)?;
+        let mut sold: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for si in &sold_items {
+            if let Some(p) = &si.product {
+                *sold.entry(p.clone()).or_default() += si.quantity;
+            }
+        }
+        let mut refunding: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        for it in &req.items {
+            if let Some(p) = &it.product {
+                let acc = refunding.entry(p.clone()).or_default();
+                *acc += it.quantity;
+                let sold_qty = sold.get(p).copied().unwrap_or(0);
+                if sold_qty == 0 {
+                    return Err(DomainError::Invalid(format!(
+                        "producto {p} no estaba en la orden"
+                    )));
+                }
+                if *acc > sold_qty {
+                    return Err(DomainError::Invalid(format!(
+                        "devolución de {p} excede lo vendido ({acc} > {sold_qty})"
+                    )));
+                }
+            }
+        }
+    }
+
+    let total: Decimal = req
+        .items
+        .iter()
+        .map(|i| i.unit_price * Decimal::from(i.quantity))
+        .sum();
+
+    let applied =
+        repo::apply_refund(db, tenant, processed_by, order_thing.as_ref(), &req, total).await?;
+
+    Ok(RefundResponse {
+        devolucion: applied.devolucion,
+        items: applied.items,
+        stock_movements: applied.movement_ids,
+        order_marked_refunded: applied.order_marked_refunded,
+    })
+}
+
+pub async fn list_refunds(
+    db: &Db,
+    tenant: &Thing,
+    f: DevolucionFilters,
+) -> DomainResult<Vec<DevolucionDto>> {
+    repo::list_devoluciones(db, tenant, &f).await
+}
+
 pub async fn get_setting(
     db: &Db,
     tenant: &Thing,
