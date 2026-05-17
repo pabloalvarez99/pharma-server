@@ -5,6 +5,7 @@
 pub mod agent;
 pub mod agent_orders;
 pub mod backup;
+pub use backup::{backup_now, prune_backups};
 pub mod cash_register;
 pub mod catalog;
 pub mod customers;

@@ -43,12 +43,44 @@ fn require_admin(claims: &auth::Claims) -> Result<(), ApiError> {
 }
 
 #[derive(Serialize)]
-struct BackupReport {
-    path: String,
-    bytes: u64,
-    sha256: String,
-    started_at: chrono::DateTime<chrono::Utc>,
-    duration_ms: u128,
+pub struct BackupReport {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub duration_ms: u128,
+}
+
+/// Prune `<data_dir>/backups/pharma-backup-*.tar.gz` older than
+/// `retention_days`. `0` means keep forever.
+pub fn prune_backups(db_path: &Path, retention_days: u32) -> std::io::Result<usize> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+    let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
+    let backups_dir = data_dir.join("backups");
+    if !backups_dir.exists() {
+        return Ok(0);
+    }
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(retention_days as u64 * 86_400);
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(&backups_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("pharma-backup-") || !name.ends_with(".tar.gz") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(mtime) = meta.modified() {
+                if mtime < cutoff && std::fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
 }
 
 async fn create_backup(
@@ -64,7 +96,7 @@ async fn create_backup(
     Ok((StatusCode::CREATED, Json(report)).into_response())
 }
 
-fn backup_now(db_path: &Path) -> anyhow::Result<BackupReport> {
+pub fn backup_now(db_path: &Path) -> anyhow::Result<BackupReport> {
     let started_at = chrono::Utc::now();
     let started_inst = std::time::Instant::now();
     let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
@@ -114,4 +146,36 @@ fn sha256_of(p: &Path) -> std::io::Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_removes_only_files_older_than_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("surreal");
+        std::fs::create_dir_all(&db_path).unwrap();
+        let backups = tmp.path().join("backups");
+        std::fs::create_dir_all(&backups).unwrap();
+        // Make one old file (mtime 10 days ago) and one fresh.
+        let old_file = backups.join("pharma-backup-old.tar.gz");
+        let new_file = backups.join("pharma-backup-new.tar.gz");
+        std::fs::write(&old_file, b"old").unwrap();
+        std::fs::write(&new_file, b"new").unwrap();
+        let old_time = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 86_400);
+        filetime::set_file_mtime(&old_file, filetime::FileTime::from(old_time)).unwrap();
+
+        // Keep 3 days → old goes, new stays.
+        let removed = prune_backups(&db_path, 3).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!old_file.exists());
+        assert!(new_file.exists());
+
+        // retention_days = 0 → no-op.
+        let removed = prune_backups(&db_path, 0).unwrap();
+        assert_eq!(removed, 0);
+        assert!(new_file.exists());
+    }
 }
