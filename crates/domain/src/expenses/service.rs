@@ -1,0 +1,228 @@
+//! Expenses + simple daily sales report (revenue by UTC date).
+
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+use serde::Deserialize;
+use surrealdb::sql::{thing, Thing};
+
+use crate::errors::{DomainError, DomainResult};
+
+use super::model::*;
+
+type Db = surrealdb::Surreal<surrealdb::engine::local::Db>;
+
+fn dec_val(d: Decimal) -> surrealdb::sql::Value {
+    surrealdb::sql::Number::from(d).into()
+}
+
+const VALID_PM: &[&str] = &["cash", "bank", "card", "transfer"];
+
+#[derive(Debug, Deserialize)]
+struct Row {
+    id: Thing,
+    category: String,
+    description: String,
+    amount: Decimal,
+    payment_method: String,
+    cash_session: Option<Thing>,
+    supplier: Option<Thing>,
+    note: Option<String>,
+    created_by: Option<Thing>,
+    incurred_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<Row> for ExpenseDto {
+    fn from(r: Row) -> Self {
+        Self {
+            id: r.id.to_string(),
+            category: r.category,
+            description: r.description,
+            amount: r.amount,
+            payment_method: r.payment_method,
+            cash_session: r.cash_session.map(|t| t.to_string()),
+            supplier: r.supplier.map(|t| t.to_string()),
+            note: r.note,
+            created_by: r.created_by.map(|t| t.to_string()),
+            incurred_at: r.incurred_at,
+            created_at: r.created_at,
+        }
+    }
+}
+
+pub async fn create_expense(
+    db: &Db,
+    tenant: &Thing,
+    created_by: Option<&Thing>,
+    input: NewExpense,
+) -> DomainResult<ExpenseDto> {
+    if input.amount <= Decimal::ZERO {
+        return Err(DomainError::Invalid("amount debe ser > 0".into()));
+    }
+    if input.category.trim().is_empty() {
+        return Err(DomainError::Invalid("category requerido".into()));
+    }
+    if input.description.trim().is_empty() {
+        return Err(DomainError::Invalid("description requerido".into()));
+    }
+    if !VALID_PM.contains(&input.payment_method.as_str()) {
+        return Err(DomainError::Invalid(format!(
+            "payment_method inválido: {}",
+            input.payment_method
+        )));
+    }
+    let session_thing: surrealdb::sql::Value = match input.cash_session.as_deref() {
+        Some(s) if !s.is_empty() => {
+            let t = thing(s)
+                .map_err(|_| DomainError::Invalid(format!("cash_session id inválido: {s}")))?;
+            if t.tb != "cash_register_session" {
+                return Err(DomainError::Invalid(
+                    "cash_session no es record<cash_register_session>".into(),
+                ));
+            }
+            t.into()
+        }
+        _ => surrealdb::sql::Value::None,
+    };
+    let supplier_thing: surrealdb::sql::Value = match input.supplier.as_deref() {
+        Some(s) if !s.is_empty() => {
+            let t =
+                thing(s).map_err(|_| DomainError::Invalid(format!("supplier id inválido: {s}")))?;
+            if t.tb != "supplier" {
+                return Err(DomainError::Invalid(
+                    "supplier no es record<supplier>".into(),
+                ));
+            }
+            t.into()
+        }
+        _ => surrealdb::sql::Value::None,
+    };
+    let incurred_at: surrealdb::sql::Value = match input.incurred_at {
+        Some(dt) => surrealdb::sql::Datetime::from(dt).into(),
+        None => surrealdb::sql::Datetime::from(Utc::now()).into(),
+    };
+    let mut r = db
+        .query(
+            "CREATE expense SET tenant=$t, category=$c, description=$d, \
+             amount=$a, payment_method=$pm, cash_session=$cs, supplier=$su, \
+             note=$nt, created_by=$cb, incurred_at=$ia RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("c", input.category))
+        .bind(("d", input.description))
+        .bind(("a", dec_val(input.amount)))
+        .bind(("pm", input.payment_method))
+        .bind(("cs", session_thing))
+        .bind(("su", supplier_thing))
+        .bind(("nt", input.note))
+        .bind(("cb", created_by.cloned()))
+        .bind(("ia", incurred_at))
+        .await?
+        .check()?;
+    let row: Option<Row> = r.take(0)?;
+    row.map(Into::into)
+        .ok_or_else(|| DomainError::Other(anyhow::anyhow!("create expense returned 0")))
+}
+
+pub async fn list_expenses(
+    db: &Db,
+    tenant: &Thing,
+    f: ExpenseFilters,
+) -> DomainResult<Vec<ExpenseDto>> {
+    let mut conds = vec!["tenant = $t".to_string()];
+    if f.category.is_some() {
+        conds.push("category = $c".to_string());
+    }
+    if f.payment_method.is_some() {
+        conds.push("payment_method = $pm".to_string());
+    }
+    if f.from.is_some() {
+        conds.push("incurred_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("incurred_at <= $b".to_string());
+    }
+    let limit = f.limit.unwrap_or(100).clamp(1, 500);
+    let offset = f.offset.unwrap_or(0).max(0);
+    let sql = format!(
+        "SELECT * FROM expense WHERE {} ORDER BY incurred_at DESC LIMIT {} START {}",
+        conds.join(" AND "),
+        limit,
+        offset
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(c) = f.category {
+        qb = qb.bind(("c", c));
+    }
+    if let Some(pm) = f.payment_method {
+        qb = qb.bind(("pm", pm));
+    }
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    let rows: Vec<Row> = qb.await?.check()?.take(0)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Daily sales rollup over `order`. Tenant-scoped. `refunded`/`cancelled`
+/// excluded. Returns one row per UTC date in the range, sorted ascending.
+pub async fn sales_daily(
+    db: &Db,
+    tenant: &Thing,
+    f: SalesReportFilters,
+) -> DomainResult<Vec<DailySalesRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    // SurrealKv 2.x can't always GROUP BY a derived string column reliably
+    // for our needs (string::slice on cast datetime returned an i64 in tests).
+    // Pull the rows and bucket by UTC date in Rust — datasets are small
+    // (single-shop scale), totals fit fine in memory.
+    let sql = format!(
+        "SELECT created_at, total, cash_amount, card_amount FROM order \
+         WHERE {} ORDER BY created_at ASC",
+        conds.join(" AND ")
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct R {
+        created_at: DateTime<Utc>,
+        total: Decimal,
+        cash_amount: Option<Decimal>,
+        card_amount: Option<Decimal>,
+    }
+    let rows: Vec<R> = qb.await?.check()?.take(0)?;
+    use std::collections::BTreeMap;
+    let mut by_day: BTreeMap<String, DailySalesRow> = BTreeMap::new();
+    for r in rows {
+        let date = r.created_at.format("%Y-%m-%d").to_string();
+        let entry = by_day.entry(date.clone()).or_insert(DailySalesRow {
+            date: date.clone(),
+            orders: 0,
+            revenue: Decimal::ZERO,
+            cash: Decimal::ZERO,
+            card: Decimal::ZERO,
+        });
+        entry.orders += 1;
+        entry.revenue += r.total;
+        entry.cash += r.cash_amount.unwrap_or(Decimal::ZERO);
+        entry.card += r.card_amount.unwrap_or(Decimal::ZERO);
+    }
+    Ok(by_day.into_values().collect())
+}

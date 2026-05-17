@@ -7,6 +7,7 @@ pub mod agent_orders;
 pub mod cash_register;
 pub mod catalog;
 pub mod customers;
+pub mod expenses;
 pub mod finance;
 pub mod inventory;
 pub mod operations;
