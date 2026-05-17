@@ -17,9 +17,11 @@
 //! `DomainError` so the caller sees them (the sale already committed; a
 //! human can re-issue the receta from the order).
 //!
-//! Out of scope this slice (deferred — tracked in roadmap):
-//! * Interaction warnings full ruleset port (`super::interactions::check`
-//!   currently returns empty `Vec`).
+//! Drug-interaction warnings are wired: every cart's `product.active_ingredient`
+//! is tokenized against the full Beers + Vademécum CL ruleset
+//! (`super::interactions::check`) and the matched pairs (severity-sorted)
+//! surface in `PosSaleResponse.interaction_warnings`. Sale is never blocked —
+//! pharmacist's call.
 //!
 //! Loyalty award IS active: if `customer` is set on the sale, points are
 //! awarded via `repo::award_loyalty` (atomic tx — append `loyalty_transaction`
@@ -221,7 +223,9 @@ pub async fn post_sale(
         stock_movements: applied.movement_ids,
         prescriptions: prescription_ids,
         loyalty_points_awarded: loyalty_awarded,
-        interaction_warnings: super::interactions::check(&[]),
+        interaction_warnings: super::interactions::check(
+            &load_active_ingredients(db, tenant, &product_things).await?,
+        ),
         low_stock_alerts: Vec::new(),
     };
 
@@ -265,6 +269,37 @@ async fn detect_controlled(db: &Db, tenant: &Thing, product: Option<&str>) -> Do
         .and_then(|r| r.active_ingredient)
         .map(|ai| super::controlled::is_controlled(Some(&ai)))
         .unwrap_or(false))
+}
+
+/// Load `active_ingredient` for the cart's products (tenant-scoped). Missing
+/// rows or null fields are dropped silently — the interaction check tokenizes
+/// whatever it gets and ignores unknown drugs.
+async fn load_active_ingredients(
+    db: &Db,
+    tenant: &Thing,
+    products: &[Thing],
+) -> DomainResult<Vec<String>> {
+    if products.is_empty() {
+        return Ok(Vec::new());
+    }
+    #[derive(serde::Deserialize)]
+    struct R {
+        active_ingredient: Option<String>,
+    }
+    let rows: Vec<R> = db
+        .query(
+            "SELECT active_ingredient FROM product \
+             WHERE tenant = $t AND id IN $ids",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", products.to_vec()))
+        .await?
+        .check()?
+        .take(0)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.active_ingredient)
+        .collect())
 }
 
 async fn resolve_loyalty_rate(db: &Db, tenant: &Thing) -> DomainResult<i64> {
