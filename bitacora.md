@@ -67,11 +67,11 @@ NO acá.
    install/uninstall en VM Windows limpia (sin firma → SmartScreen warning).
 2. **~~Order fulfillment/settlement agente~~** ✅: `po.status` (comprador
    consulta), operador accept/reject/fulfill (`/api/v1/agent-orders/{id}/...`)
-   con stock decrement atómico + audit trail. Pendiente menor: multi-lot/FEFO
-   split en path federado (sales ya lo tiene).
+   con stock decrement atómico + audit trail. ✅ multi-lot/FEFO split en
+   path federado (migr 0014, PR #27 + #30) — ver log 2026-05-17.
 3. **~~Multi-lot split traceability~~** ✅ (sales path): migración 0013 +
-   `order_item.batches_json` + `OrderItemDto.batches`. Pendiente: replicar en
-   `agent_fulfill` (path federado) — ver BACKLOG #2.
+   `order_item.batches_json` + `OrderItemDto.batches`. ✅ replicado en
+   `agent_fulfill` (path federado, migr 0014, PR #27 + #30).
 4. **~~Drug-interactions ruleset port~~** ✅ (Beers + Vademécum CL, 31 reglas).
 5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
    `controlled` autodetectado vía `product.active_ingredient`.
@@ -714,4 +714,19 @@ NO acá.
 - **Compat**: aditivo. Sin migración. `BackupConfig` sin cambios. Instalaciones viejas sin `PHARMA__BACKUP__SCHEDULE` ahora obtienen el purge automático sin reconfigurar.
 - **Build/MSI/Smoke**: release build (7m05s). MSI `pharma-server-0.1.18-x86_64.msi` 12,165,120 bytes (+20KB), sha256 `1da935e93b8fed7b289fed117b3174482d9057ce01b291740c953ed11280760d`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.17, exit 0)→Running→`/`=`{"version":"0.1.18"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.18 --target feature/erp-parity`. PR `feature/erp-parity-cron-idempotency` → `feature/erp-parity`.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — Multi-lot FEFO split en `agent_fulfill` (cierra BACKLOG #2 remainder)
+
+- **Qué/por qué**: PR #27 (`97d77ee`) replica en el path federado (`agent_fulfill`) la trazabilidad multi-lote que el path sales tiene desde Fase 4 (#24). Cierra el "Pendiente menor" de BACKLOG #2 (y el "Pendiente: replicar en agent_fulfill" de BACKLOG #3): hasta ahora `fulfill` decrementaba sólo `product.stock` sin breakdown por lote, así que un peer comprador no sabía de qué lotes salió su pedido — gap de trazabilidad en el lazo federado.
+- **Migración** `0014_agent_order_fulfillment_batches.surql`: aditiva, `agent_order.fulfillment_batches_json: option<string>` (filas previas quedan NULL, sin backfill).
+- **Modelo**: `AgentOrderDto.fulfillment_batches: Option<Vec<AgentOrderFulfillmentLine{product, allocations:[{batch,qty}]}>>`. Parseado on-read silently-None si ausente/malformado (filas viejas + productos non-batch-tracked nunca lo escriben).
+- **Impl** `fulfill()`: por cada línea catalogada arma plan FEFO vía `inventory::service::plan_fefo_optional`, agrega `UPDATE product_batch SET stock = stock - $baN` al `BEGIN/COMMIT` existente (mismo layout atómico que `sales::repo::apply_sale`), persiste el breakdown junto a `status='fulfilled'`. Non-batch-tracked → path legacy `product.stock`-only, sin breakdown, sin cambio de comportamiento.
+- **Patrón**: JSON-string mirror de `order_item.batches_json` (#24) + `agent_order.lines_json` — evita el trap SurrealQL de binding arrays-of-objects.
+- **Cambio de semántica (honesto)**: para productos batch-tracked, `plan_fefo_optional` devuelve `InsufficientStock` si los lotes activos no-vencidos no cubren `qty` AUNQUE `product.stock >= qty`. Es más correcto (no se despacha stock vencido/sin lote válido en el path federado) pero ES cambio de comportamiento vs el path pre-0014. Documentado en doc-comment + comentario inline de `fulfill()`.
+- **Tests**: PR #27 +2 (`fulfill_persists_multi_lot_fefo_breakdown`: 5u sobre A=4 exp+30d & B=10 exp+120d → `[{A,4},{B,1}]` sum=5, lotes drenados FEFO; `fulfill_non_batch_tracked_leaves_fulfillment_batches_none`). PR #30 +1 sella el edge de semántica: `fulfill_refuses_batch_tracked_when_only_lots_are_expired` (stock=20 ≥ qty=5 pero único lote vencido → `INSUFFICIENT_STOCK`, orden queda `accepted`, stock intacto). agent_orders 10/10 → **11/11**, workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Sin bump de versión** (lo manejan las sesiones paralelas; este commit queda en el pool). PR #27 + #30 mergeados a `feature/erp-parity`.
+- **Estado vs goal**: ✅ trazabilidad multi-lote completa POS + federado · ⏳ Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
