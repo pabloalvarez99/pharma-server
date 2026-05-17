@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.18` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-cron-idempotency` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.18
+- **Versión**: `0.1.19` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-near-expiry-report` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.19
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -51,11 +51,19 @@ NO acá.
     reglas, 12 grupos): cada venta tokeniza `product.active_ingredient` de
     cada item y devuelve `interaction_warnings` ordenados por severidad. No
     bloquea la venta (caveat clínico).
+  - Caja apertura/cierre/arqueo, gastos, scheduler nocturno + retención de
+    backups, backup on-demand `POST /api/v1/admin/backup`, cron auto-purga de
+    `idempotency_key` (v0.1.14–0.1.18).
+  - **Reportes**: `GET /api/v1/reports/sales-daily` (rollup diario UTC) +
+    `GET /api/v1/reports/near-expiry?days=N` (lotes por vencer/vencidos con
+    stock, default 30d, ordenados por `expiry_date` asc, días-a-vencer
+    firmado; tenant-scoped, solo `active` + `stock>0`).
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
 - **Tests**: workspace verde (`cargo test --workspace`), incluye 14 `sales`
-  (devoluciones) + 11 `agent_inbox` (`po.status`) + 8 `agent_orders` (3 nuevos
-  de `fulfill`).
+  (devoluciones) + 11 `agent_inbox` (`po.status`) + 8 `agent_orders` +
+  `expenses` (sales-daily + near-expiry: ventana/orden/expirados/exclusiones/
+  tenant-scoped).
 
 ---
 
@@ -79,8 +87,8 @@ NO acá.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
 9. **Fase 6** (mayormente cerrada): ~~caja~~ ✅ v0.1.14 · ~~gastos + report
-   sales-daily~~ ✅ v0.1.15. Falta: reportes avanzados (márgenes/rotación/ABC/
-   vencimientos) — extensiones sobre el mismo patrón.
+   sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19. Falta: reportes
+   avanzados restantes (márgenes/rotación/ABC) — extensiones del mismo patrón.
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -714,4 +722,45 @@ NO acá.
 - **Compat**: aditivo. Sin migración. `BackupConfig` sin cambios. Instalaciones viejas sin `PHARMA__BACKUP__SCHEDULE` ahora obtienen el purge automático sin reconfigurar.
 - **Build/MSI/Smoke**: release build (7m05s). MSI `pharma-server-0.1.18-x86_64.msi` 12,165,120 bytes (+20KB), sha256 `1da935e93b8fed7b289fed117b3174482d9057ce01b291740c953ed11280760d`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.17, exit 0)→Running→`/`=`{"version":"0.1.18"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.18 --target feature/erp-parity`. PR `feature/erp-parity-cron-idempotency` → `feature/erp-parity`.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+## 2026-05-17 — v0.1.19 reporte near-expiry (`GET /api/v1/reports/near-expiry`)
+
+- **Qué**: endpoint read `GET /api/v1/reports/near-expiry?days=N` — vista por
+  lote de stock por vencer o ya vencido. Default 30 días; incluye lotes
+  vencidos (`days_to_expiry` negativo). Tenant-scoped, solo `product_batch`
+  `active=true` con `stock>0`, ordenado `expiry_date` ASC (más urgente
+  primero). `NearExpiryRow{product_id,product_name,batch_id,batch_code,
+  expiry_date,stock,days_to_expiry,expired}`.
+- **Por qué**: stock por vencer en una farmacia es plata que se pierde;
+  primer reporte avanzado del BACKLOG #9, máximo leverage operativo.
+- **Patrón**: reusa el módulo `expenses` probado (sales-daily v0.1.15) —
+  no se creó módulo nuevo (`domain::reports` sigue siendo scaffold). Service
+  `expenses::service::near_expiry` + model `NearExpiryRow/Filters` + route en
+  `api::v1::expenses` + tests kv-mem en `tests/expenses.rs`.
+- **Decisiones**:
+  - Granularidad por-lote (no agrupado por producto): la farmacia retira
+    lotes físicos específicos del estante; más accionable.
+  - Nombres de producto resueltos en una 2da query batched (`id IN $ids`),
+    no traversal de record-link en SELECT (gotcha kv-surrealkv ya documentado).
+  - `cutoff = now + days`; `expiry_date <= cutoff` captura vencidos también.
+  - `days_to_expiry = (expiry.date_naive() - today).num_days()` (firmado).
+- **Gotcha nuevo confirmado**: clippy `mutable_key_type` con `-D warnings`
+  rechaza `Thing` como key de `HashMap`/`HashSet` (contiene `AtomicU8` →
+  interior mutability). Fix: keyear por `Thing::to_string()` (String). Dedup
+  de ids con `HashSet<String>`, lookup de nombres con `HashMap<String,String>`.
+- **Tests** (`crates/domain/tests/expenses.rs` +2): `near_expiry_window_sort
+  _expired_and_exclusions` (6 lotes SOON/EDGE/FAR/EXPIRED/INACTIVE/ZERO →
+  default 30d devuelve EXPIRED→SOON→EDGE en orden; days=365 suma FAR; days=0
+  solo EXPIRED; valida expired flag + days_to_expiry signo + exclusión
+  inactive/zero-stock) + `near_expiry_tenant_scoped`. Workspace verde, clippy
+  `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Sin migración (solo lee `product_batch`/`product`).
+- **Build/MSI/Smoke**: release build OK. MSI
+  `pharma-server-0.1.19-x86_64.msi` 12,177,408 bytes, sha256
+  `a00a40c66da826adffa256fc8458f958a0800cb3ba1a48d998a9d709309c7166`. Smoke
+  real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.18, exit 0)→Running→
+  `/`=`{"version":"0.1.19"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.19 --target feature/erp-parity`. PR
+  `feature/erp-parity-near-expiry-report` → `feature/erp-parity`.
 - **Pendiente**: ver `## BACKLOG` al tope.
