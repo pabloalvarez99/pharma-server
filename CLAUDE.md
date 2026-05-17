@@ -3,7 +3,7 @@
 Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
 **Estado**: v0.1.5 · branch `feature/erp-parity` · Fases 1+2+3+4+5sub+7sub + **Fase 11 completa steps 1-4** (agent identity + transport + trading quote/po) mergeadas · **MSI descargable publicado**: GitHub release `v0.1.5` (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.5, 11.38 MB) · ecosistema agentes COMERCIA end-to-end (catalog.lookup→quote.request→po.create, firmado, opt-in por tenant) · pre-producción (sin firma cert).
 
-**Visión extendida (2026-05-16)** → ver `docs/ecosystem-roadmap.md`. Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). Fases 1-9 = ERP vendible. Fase 10 = sync online opt-in. Fase 11 = agent protocol foundation.
+**Visión extendida (2026-05-16)** → ver `docs/ecosystem-roadmap.md`. Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). Fases 1-9 = ERP vendible. Fase 10 = sync online opt-in. Fase 11 = agent protocol foundation. **Fase 12 = capa de confianza/marketplace** (estrategia fundador/VC, modelo de negocio, Trust Hub) → ver `docs/marketplace-master-plan.md`.
 
 ## Producto / Visión comercial
 
