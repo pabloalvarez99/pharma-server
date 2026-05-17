@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.13` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-interactions-check` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.13
+- **Versión**: `0.1.14` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-cash-register` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.14
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -77,8 +77,8 @@ NO acá.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
-9. **Fase 6**: caja (apertura/cierre/arqueo) + gastos + reportes
-   (ventas/márgenes/rotación/ABC/vencimientos).
+9. **Fase 6** (parcial): ~~caja (apertura/cierre/arqueo)~~ ✅ v0.1.14.
+   Pendiente: gastos + reportes (ventas/márgenes/rotación/ABC/vencimientos).
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -609,4 +609,27 @@ NO acá.
 - **Compat**: aditivo. Sin migración. Cero impacto en `post_sale`, sales tests 16/16 verde.
 - **Build/MSI/Smoke**: release build (7m10s). MSI `pharma-server-0.1.13-x86_64.msi` 11,821,056 bytes, sha256 `3643539a4d291eaf5881b5de0c103a1ac3da93bae808f56e76eaa5e4e106cbf3`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.12)→Running→`/`=`{"version":"0.1.13"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.13 --target feature/erp-parity`. PR `feature/erp-parity-interactions-check` → `feature/erp-parity`. Versión 0.1.12 → 0.1.13 (bump + Cargo.lock mismo commit).
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.14: caja (apertura/cierre/arqueo + movimientos) — Fase 6 parcial
+
+- **Qué**: cash register completo. Nueva migración `0011`, crate `domain::cash_register`, API `/api/v1/cash-sessions[...]`. Release v0.1.14, smoke install limpio.
+- **Por qué**: una farmacia real abre y cierra caja todos los días — sin esto no hay control de diferencias, no hay arqueo, no se puede reconciliar Z (cierre) con efectivo físico. Cierra el componente "caja" del ítem Fase 6 del BACKLOG (gastos + reportes quedan pendientes).
+- **Migración 0011**: `cash_register_session` (status `open|closed`, `opening_cash` decimal, `closing_cash_counted/_expected`, `discrepancia`, `opened_at`/`closed_at`) + `cash_movement` (`tipo ingreso|retiro`, `amount > 0`, `reason`, `admin`, FK `session`). Índices `(tenant,opened_at)`, `(tenant,status,opened_at)`, `(tenant,user,status)`. Additive — migración append-only.
+- **`domain::cash_register::service`**: invariantes principales:
+  1. **Una caja abierta por (tenant, user)** — segundo open = `CONFLICT` (chequeo `SELECT count() GROUP ALL` antes de CREATE).
+  2. Cualquier `add_movement` exige `session.status='open'` — si está cerrada, `CONFLICT`.
+  3. `close_session` desde `closed` = `CONFLICT` (no idempotente — re-cerrar una caja resuelta es error operativo).
+  4. `tipo` válido `ingreso|retiro`, `amount > 0`, `reason` no vacío — todo `INVALID_INPUT` ante violación.
+  5. Tenant isolation: get/list/decide filtran por `tenant=$t`; otra organización no ve caja de la primera.
+- **Math del arqueo** (`compute_summary`): expected = `opening_cash + cash_sales + Σ ingreso − Σ retiro`. `cash_sales` = `math::sum(order.cash_amount) WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] AND status NOT IN ['refunded','cancelled'] AND created_at BETWEEN opened_at..close_time`. Sin denormalizar el link sale→session: el rango temporal hace el join. `discrepancia = counted - expected` (negativo = falta, positivo = sobra).
+- **`arqueo` live**: misma fórmula que `close` pero sin freezear — el operador app pinta el expected en vivo mientras la caja sigue abierta (`closing_cash_expected` surface en el DTO, `counted/discrepancia` siguen `None`).
+- **API**: roles `admin/owner/cashier` para writes; reads bearer. Endpoints: `POST /cash-sessions` (open), `GET /cash-sessions[?status&user]`, `GET /{id}`, `GET /{id}/arqueo` (live), `GET /{id}/movements`, `POST /{id}/movements`, `POST /{id}/close`.
+- **Tests** (6 kv-mem): open+2 ventas pos_cash+ingreso 2000+retiro 500 → expected 14500, counted 14450 → discrepancia -50 (short, registrada sin error); segundo open mismo user = CONFLICT; movimiento en caja cerrada = CONFLICT; close-already-closed = CONFLICT; tipo "fuga" o amount=0 → INVALID_INPUT; cross-tenant get → NOT_FOUND. **Gotcha confirmado**: `rust_decimal::Decimal::is_sign_positive()` retorna `true` para `ZERO` — para validar "estrictamente positivo" usar `value <= Decimal::ZERO`, no `!is_sign_positive()`. Costó un test rojo al primer run.
+- **Compat**: aditivo. Sin tocar `order` schema ni POS. Migración 0011 embebida (`include_dir!`) → first-run de upgrade aplica sola en el smoke real (verificado: `/health/ready` db:ok tras `msiexec /i` sobre instalación 0.1.13).
+- **Build/MSI/Smoke**: release build (7m19s). MSI `pharma-server-0.1.14-x86_64.msi` 11,943,936 bytes (~120 KB más que 0.1.13 por el binario más grande), sha256 `6f75d3cfe87b6bb2e09c9d3c6a960219b9a7ce99755244ab9bddb204107c7fc5`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.13, exit 0)→Running→`/`=`{"version":"0.1.14"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.14 --target feature/erp-parity`. PR `feature/erp-parity-cash-register` → `feature/erp-parity`. Versión 0.1.13 → 0.1.14 (bump + Cargo.lock mismo commit).
+- **Estado vs goal**: ✅ POS completo · ✅ devoluciones · ✅ receta · ✅ alertas interacciones (commit + live) · ✅ caja apertura/cierre/arqueo · ✅ lazo federado completo · ⏳ Fase 6 restante (gastos + reportes) · ⏳ Fase 9 firma MSI · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
