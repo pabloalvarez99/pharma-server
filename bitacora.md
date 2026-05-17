@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.12` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-interactions` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.12
+- **Versión**: `0.1.13` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-interactions-check` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.13
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -596,4 +596,17 @@ NO acá.
 - **Build/MSI/Smoke**: release build (7m16s). MSI `pharma-server-0.1.12-x86_64.msi` 11,808,768 bytes, sha256 `a94c0b8882c26ce1cc81a0e9fb7c81e43ac271c38ca0663e5e7bd3425deac9cf`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.11)→Running→`/`=`{"version":"0.1.12"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.12 --target feature/erp-parity`. PR `feature/erp-parity-interactions` → `feature/erp-parity`. Versión 0.1.11 → 0.1.12 (bump + Cargo.lock mismo commit).
 - **Estado vs goal**: ✅ POS completo (venta + devolución + receta + alertas de interacción) · ✅ descargable/offline/first-run · ✅ lazo federado completo · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.13: `POST /api/v1/interactions/check` — preview live de interacciones
+
+- **Qué**: endpoint pre-check para que el POS muestre warnings de interacción **antes** de commitear la venta (badge live mientras el cajero arma el carrito). v0.1.12 dejó las alertas activas pero solo on commit — demasiado tarde para UX. Body `{products:[product:xxx], extra_ingredients:[free-text]}` → mismo `interaction_warnings` que `post_sale` devolvería.
+- **Por qué**: warnings clínicos solo en `PosSaleResponse` exigen ejecutar la venta para ver la alerta. El flujo real del cajero: agrega un ítem → quiere ver si interactúa con lo ya en el carrito. Sin pre-check, la única forma sería commitear y devolver, que es contra el invariante de stock.
+- **Wiring** (`crates/api/src/v1/sales.rs`): `route_layer(reads)` (bearer, NO write-roles — pre-check es read-only). Tenant-scoped: product ids de otros tenants se filtran silenciosamente. `extra_ingredients` permite al POS pre-cargar líneas todavía no linked a un `product` (ej: ítems custom del cajero).
+- **Refactor mínimo**: `domain::sales::service::load_active_ingredients` pasa de `async fn` privada a `pub` para reuso del api crate. Cero cambio en behaviour.
+- **Compat**: aditivo. Sin migración. Cero impacto en `post_sale`, sales tests 16/16 verde.
+- **Build/MSI/Smoke**: release build (7m10s). MSI `pharma-server-0.1.13-x86_64.msi` 11,821,056 bytes, sha256 `3643539a4d291eaf5881b5de0c103a1ac3da93bae808f56e76eaa5e4e106cbf3`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.12)→Running→`/`=`{"version":"0.1.13"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.13 --target feature/erp-parity`. PR `feature/erp-parity-interactions-check` → `feature/erp-parity`. Versión 0.1.12 → 0.1.13 (bump + Cargo.lock mismo commit).
 - **Pendiente**: ver `## BACKLOG` al tope.
