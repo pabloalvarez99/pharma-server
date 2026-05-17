@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.17` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-backup-cron` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.17
+- **Versión**: `0.1.18` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-cron-idempotency` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.18
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -698,4 +698,20 @@ NO acá.
 - **Build/MSI/Smoke**: release build (9m58s, mismo MSI build path). MSI `pharma-server-0.1.17-x86_64.msi` 12,144,640 bytes (+160KB vs 0.1.16 por las nuevas deps), sha256 `cd6daeac9da17e530b3c1f3b8417b37429abcac960bd0d273822db99a0dabbfc`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.16, exit 0)→Running→`/`=`{"version":"0.1.17"}`→`/health/ready` 200 `db:ok`. Scheduler no activo por default en este smoke (sin `PHARMA__BACKUP__SCHEDULE` env).
 - **Release**: `gh release create v0.1.17 --target feature/erp-parity`. PR `feature/erp-parity-backup-cron` → `feature/erp-parity`. Versión 0.1.16 → 0.1.17 (bump + Cargo.lock mismo commit).
 - **Estado vs goal**: ✅ backup on-demand (v0.1.16) + ✅ scheduler nocturno + retención automática (v0.1.17) → Fase 9 vendible v1.0.0 ahora solo necesita firma Authenticode + smoke VM limpia. Fase 8 cron destrabada (jobs crate ya tenía el boilerplate, ahora hay un caller real).
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.18: scheduler hub + cron `idempotency_key` TTL purge
+
+- **Qué**: el comentario en `migrations/0007_sales.surql` (líneas 10-11, 101) decía hace meses "TTL purge handled by Fase 8 cron" pero el cron no existía. Ahora destrabado: scheduler hub registra el job de backup nocturno (de v0.1.17) Y un job horario que dropea `idempotency_key` con `expires_at <= time::now()`. Release v0.1.18, smoke install limpio.
+- **Por qué**: sin la purga, la tabla crece monotónicamente — cada `POST /pos/sale` con `Idempotency-Key` agrega una row, y nunca se borran. En una farmacia activa son miles de rows/día acumuladas sin uso (la dedup ya solo aplica los primeros 24h). Riesgo: degradación lenta del data dir + tamaño del backup creciendo sin parar. Ahora el dueño tiene una farmacia que se auto-cuida.
+- **`domain::sales::service::purge_expired_idempotency(db) -> u64`**: `SELECT count() AS count FROM idempotency_key WHERE expires_at <= time::now() GROUP ALL` para el pre-count (loggear), luego `DELETE` con la misma WHERE. Tenant-wide: el cron corre a nivel proceso, no per-tenant; multi-tenant queda correctamente cubierto en una sola pasada.
+- **`spawn_scheduler_hub`** (refactor `spawn_backup_scheduler` → hub): un único `JobScheduler` registra ambos jobs (backup opcional + idempotency hourly siempre on cuando hay db). Se spawnea SIEMPRE — antes era `if let Some(schedule)` que dejaba sin scheduler hub si no había backup configurado, lo que dejaba el purge igualmente sin correr. Ahora: si hay db pero no schedule de backup → solo se registra el purge. Si hay ambos → ambos. Si no hay db (kv-mem tests) → ninguno; el hub vive pero sin jobs.
+- **`idempotency_purge_job`**: `Job::new_async("0 0 * * * *", ...)` — cada hora segundo 0. Cadencia suficiente dado el TTL de 24h. Sin log noise cuando `removed == 0` (común). Captura `Arc<db::Db>` por move + clone interno en cada tick para evitar el mismo gotcha de la closure async.
+- **Gotcha confirmado por compilador**: `Job::new_async(schedule.as_str(), ...)` con `schedule: &str` falla con `error[E0658]: use of unstable library feature str_as_str` (Rust 1.85 MSRV). `.as_str()` sobre `&str` es nightly. Fix: pasar `schedule: &str` directamente (sin `.as_str()`). El bug solo aparece cuando refactorizás un `String.as_str()` → `&str.as_str()` (duplicación inocente).
+- **Tests** (`crates/domain/tests/sales.rs` +1, sales 17/17): seed 2 rows — una con `expires_at = now-1h`, otra `now+1h`. `purge_expired_idempotency` → 1 row borrada; remaining row tiene `key='stays'`. Segundo run → 0 (no-op). Workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Sin migración. `BackupConfig` sin cambios. Instalaciones viejas sin `PHARMA__BACKUP__SCHEDULE` ahora obtienen el purge automático sin reconfigurar.
+- **Build/MSI/Smoke**: release build (7m05s). MSI `pharma-server-0.1.18-x86_64.msi` 12,165,120 bytes (+20KB), sha256 `1da935e93b8fed7b289fed117b3174482d9057ce01b291740c953ed11280760d`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.17, exit 0)→Running→`/`=`{"version":"0.1.18"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.18 --target feature/erp-parity`. PR `feature/erp-parity-cron-idempotency` → `feature/erp-parity`.
 - **Pendiente**: ver `## BACKLOG` al tope.
