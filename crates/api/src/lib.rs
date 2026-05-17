@@ -28,6 +28,9 @@ pub struct AppState {
     /// Node federation identity (Ed25519). Loaded at startup; `None` only in
     /// unit tests that don't exercise `/agent/*`.
     pub node_identity: Option<Arc<agent::Identity>>,
+    /// SurrealKv data directory on disk. Used by the backup endpoint to know
+    /// what to tar. `None` in unit tests with kv-mem.
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -140,6 +143,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         db: db_handle,
         metrics_token,
         node_identity,
+        data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -268,6 +272,7 @@ mod tests {
             db: None,
             metrics_token: token.map(String::from),
             node_identity: None,
+            data_dir: None,
         }
     }
 
