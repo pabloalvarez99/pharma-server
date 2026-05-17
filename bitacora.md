@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.9` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-agent-orders-admin` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.9
+- **Versión**: `0.1.10` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-po-fulfill` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.10
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -36,13 +36,18 @@ NO acá.
     `unit_price` del comprador; `price_adjusted` persistido en `agent_order`).
   - **`po.status`**: el comprador consulta el estado/decisión de su orden
     (`{status,total,currency,price_adjusted}`), scoped a su propio DID.
-  - **Operador acepta/rechaza órdenes entrantes**: `GET /api/v1/agent-orders`,
-    `POST /api/v1/agent-orders/{id}/accept|reject` (JWT, role admin/owner,
-    tenant-scoped). Transición solo `received → accepted|rejected`.
+  - **Operador acepta/rechaza/despacha órdenes entrantes**:
+    `GET /api/v1/agent-orders`, `POST /{id}/accept|reject|fulfill` (JWT,
+    role admin/owner, tenant-scoped). **`fulfill` decrementa stock real**
+    (`product.stock -= qty` + `stock_movement(reason='agent_fulfill')` por
+    línea + `agent_order.status='fulfilled'`, todo en un BEGIN/COMMIT;
+    invariante `stock = SUM(stock_movement.delta)` se mantiene). Transiciones:
+    `received → accepted|rejected`, `accepted → fulfilled`. Cualquier otra = CONFLICT.
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
 - **Tests**: workspace verde (`cargo test --workspace`), incluye 14 `sales`
-  (devoluciones) + 11 `agent_inbox` (`po.status`) + 5 `agent_orders`.
+  (devoluciones) + 11 `agent_inbox` (`po.status`) + 8 `agent_orders` (3 nuevos
+  de `fulfill`).
 
 ---
 
@@ -52,10 +57,10 @@ NO acá.
 
 1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke
    install/uninstall en VM Windows limpia (sin firma → SmartScreen warning).
-2. **Order fulfillment/settlement agente**: `po.status` ✅ (comprador consulta
-   decisión) · operador accept/reject ✅ (`/api/v1/agent-orders/{id}/...`).
-   Falta: **`po.fulfill`** — descuento real de stock vía sales/inventory al
-   aceptar+despachar (cierre del handshake comprador↔proveedor).
+2. **~~Order fulfillment/settlement agente~~** ✅: `po.status` (comprador
+   consulta), operador accept/reject/fulfill (`/api/v1/agent-orders/{id}/...`)
+   con stock decrement atómico + audit trail. Pendiente menor: multi-lot/FEFO
+   split en path federado (sales ya lo tiene).
 3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
    lote primario; falta desglose por lote cuando una línea consume varios lotes.
 4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
@@ -518,4 +523,20 @@ NO acá.
 - **Build/MSI/Smoke**: release build. MSI `pharma-server-0.1.9-x86_64.msi` 11,763,712 bytes, sha256 `8a507d6a3a3bafbb405451542b7b2ff9e954c758c89102a2a52626f51e9ea992`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.8, exit 0)→Running→`/`=`{"version":"0.1.9"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.9 --target feature/erp-parity`. PR `feature/erp-parity-agent-orders-admin` → `feature/erp-parity`. Versión 0.1.8 → 0.1.9 (bump + Cargo.lock mismo commit).
 - **Compat**: endpoints nuevos additive, sin migración (reusa `agent_order` + campos existentes). No toca path federado.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.10: `fulfill` cierra el lazo comprador↔proveedor con stock real
+
+- **Qué**: `POST /api/v1/agent-orders/{id}/fulfill` despacha la orden aceptada — decrementa `product.stock` real y deja audit trail. Es el paso que faltaba del ítem #2 del BACKLOG (fulfillment/settlement). Release v0.1.10, smoke limpio.
+- **Por qué**: aceptar una orden y no descontar stock dejaba la decisión sin efecto físico. Ahora el lazo comercial inter-nodo es completo y consistente con el invariante de inventario: el comprador puede polear `po.status=fulfilled`, y el proveedor tiene la trazabilidad del stock que salió por cada orden federada.
+- **`service::fulfill`** (`crates/domain/src/agent_orders/service.rs`): solo legal desde `accepted` (received/rejected/fulfilled → `CONFLICT`). Pre-resuelve cada línea catalogada vía `product_barcode` (tenant-scoped, `active=true`); si alguna falta producto o tiene stock insuficiente rechaza la orden ENTERA antes de cualquier escritura — no hay fulfillment parcial. Un único `BEGIN/COMMIT`: `UPDATE product SET stock = stock - $q` + `CREATE stock_movement(reason='agent_fulfill', ref=order_id)` por línea + `UPDATE agent_order SET status='fulfilled'`. Mantiene el invariante `product.stock = SUM(stock_movement.delta)` y la regla "stock NUNCA fuera del audit trail" (igual que `apply_sale` y `apply_refund`). Líneas con `found:false` del re-quote de `po.create` se saltan (no son catálogo del proveedor).
+- **Decisión**: agent_fulfill NO usa FEFO/batch split todavía. El path sales sí (Fase 4), pero acá la complejidad cosmética de mostrar lotes a un peer federado no justifica bloquear el cierre del lazo — queda en BACKLOG como mejora.
+- **API** (`crates/api/src/v1/agent_orders.rs`): `POST /api/v1/agent-orders/{id}/fulfill` (role admin/owner). Transiciones legales: `received → accepted|rejected`, `accepted → fulfilled`.
+- **Tests** (`crates/domain/tests/agent_orders.rs` +3, total 8): happy path (stock 50→43, movement -7 con `reason=agent_fulfill` + `ref` correcto, status=fulfilled); fulfill desde received → `CONFLICT`; fulfill con stock insuficiente (stock=3, qty=10) → `INSUFFICIENT_STOCK`, orden queda `accepted` y stock intacto. agent_orders 8/8, workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Build/MSI/Smoke**: release build (7m). MSI `pharma-server-0.1.10-x86_64.msi` 11,780,096 bytes, sha256 `79410ce2393767a954f076c4b52d426a62581b4690d968e946fcf861760339eb`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.9)→Running→`/`=`{"version":"0.1.10"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.10 --target feature/erp-parity`. PR `feature/erp-parity-po-fulfill` → `feature/erp-parity`. Versión 0.1.9 → 0.1.10 (bump + Cargo.lock mismo commit).
+- **Compat**: endpoint additive, sin migración. Path federado intacto.
+- **Estado vs goal**: ✅ POS completo · ✅ descargable/offline/first-run · ✅ **lazo federado completo** (create→accept/reject→fulfill+stock, con po.status del lado comprador) · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
