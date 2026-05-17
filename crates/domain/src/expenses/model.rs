@@ -72,6 +72,31 @@ pub struct SalesReportFilters {
     pub to: Option<DateTime<Utc>>,
 }
 
+/// Gross-margin rollup for one UTC date. `revenue` = sum of
+/// `order_item.subtotal`; `cost` = sum of `quantity * product.cost_price`
+/// over the items whose product cost is known. `items_without_cost` counts
+/// line items excluded from `cost` (product unset or `cost_price` null) so
+/// the margin can be read honestly.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DailyMarginRow {
+    /// Date in YYYY-MM-DD (UTC).
+    pub date: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub revenue: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub cost: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub margin: Decimal,
+    /// `margin / revenue * 100`, rounded to 2 decimals. Zero when revenue is 0.
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub margin_pct: Decimal,
+    pub items_without_cost: i64,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct NearExpiryFilters {
     /// Lookahead window in days (default 30). Batches expiring on or before

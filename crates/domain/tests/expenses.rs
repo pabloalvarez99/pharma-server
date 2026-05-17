@@ -350,3 +350,97 @@ async fn near_expiry_tenant_scoped() {
         .unwrap();
     assert!(seen.is_empty(), "other tenant sees no batches");
 }
+
+#[tokio::test]
+async fn margins_daily_revenue_cost_margin_and_unknown_cost() {
+    let (db, tenant, user) = setup().await;
+    // Known-cost product: price 1000, cost 100.
+    let priced = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
+        .await
+        .unwrap();
+    // No-cost product (cost_price None).
+    let nocost = catalog::create_product(
+        &db,
+        &tenant,
+        NewProduct {
+            name: "NC".into(),
+            slug: None,
+            description: None,
+            price: dec("500"),
+            cost_price: None,
+            stock: 100,
+            category: None,
+            image_url: None,
+            external_id: None,
+            laboratory: None,
+            therapeutic_action: None,
+            active_ingredient: None,
+            prescription_type: None,
+            presentation: None,
+            discount_percent: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let req = smodel::PosSaleRequest {
+        items: vec![
+            smodel::PosSaleItem {
+                product: priced.id.clone(),
+                product_name: priced.name.clone(),
+                quantity: 2,
+                unit_price: dec("1000"),
+            },
+            smodel::PosSaleItem {
+                product: nocost.id.clone(),
+                product_name: nocost.name.clone(),
+                quantity: 3,
+                unit_price: dec("500"),
+            },
+        ],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("3500")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
+        .await
+        .unwrap();
+
+    let rows = service::margins_daily(&db, &tenant, SalesReportFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "single UTC day");
+    let r = &rows[0];
+    // revenue = 2*1000 + 3*500 = 3500
+    assert_eq!(r.revenue, dec("3500"));
+    // cost = 2 * 100 (only the priced product has cost) = 200
+    assert_eq!(r.cost, dec("200"));
+    assert_eq!(r.margin, dec("3300"));
+    // 3300 / 3500 * 100 = 94.2857… -> 94.29
+    assert_eq!(r.margin_pct, dec("94.29"));
+    assert_eq!(r.items_without_cost, 1, "the no-cost line");
+}
+
+#[tokio::test]
+async fn margins_daily_tenant_scoped_and_empty() {
+    let (db, tenant, _user) = setup().await;
+    let other: Thing = db
+        .query("CREATE tenant SET name='O', slug='o' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let rows = service::margins_daily(&db, &other, SalesReportFilters::default())
+        .await
+        .unwrap();
+    assert!(rows.is_empty());
+    let _ = tenant;
+}
