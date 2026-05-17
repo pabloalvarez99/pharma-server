@@ -4,6 +4,62 @@ Registro cronológico de decisiones técnicas, cambios significativos e incident
 Formato: `## YYYY-MM-DD — título corto` + bullets `qué / por qué / archivos / commit`.
 Espejada en vault: `C:/Users/Administrator/Documents/obsidian-mind/work/active/pharma-server/bitacora.md`.
 
+Estructura: **ESTADO ACTUAL** (top, se sobrescribe cada sesión — single source of
+truth) → **BACKLOG** (lista priorizada única) → **log append-only** (histórico,
+NO se edita). Gotchas viven en memoria + vault `brain/pharma-server-gotchas.md`,
+NO acá.
+
+---
+
+## ESTADO ACTUAL
+
+> Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
+
+- **Versión**: `0.1.6` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-v016` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.6
+- **Funciona end-to-end**:
+  - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
+    decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
+  - Multi-tenant por JWT claim `tenant_id`; auth JWT HS256 + argon2id.
+  - SurrealDB embedded `kv-surrealkv`, migraciones append-only con tracking.
+  - **Service corre migraciones al arrancar** desde schema embebido (fix
+    first-run: instalación limpia ya queda healthy sin tocar la CLI).
+  - MSI instalable: ServiceInstall + ServiceControl + firewall TCP 8080.
+  - Ecosistema agentes federado: identidad Ed25519 / DID, Envelope firmado
+    canonical-JSON, `POST /agent/inbox` (ping, catalog.lookup, quote.request,
+    po.create) — opt-in por tenant (`admin_setting federation_enabled`).
+  - **`po.create` re-cotiza contra catálogo del proveedor** (no confía en
+    `unit_price` del comprador; `price_adjusted` en el ack).
+- **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
+  smoke install/uninstall en VM limpia (Fase 9).
+- **Tests**: workspace verde (`cargo test --workspace`), incluye 9 tests
+  `agent_inbox` (2 nuevos de seguridad po.create).
+
+---
+
+## BACKLOG
+
+> Lista priorizada única. Consolidé acá todos los "Pendiente" dispersos del log.
+
+1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke
+   install/uninstall en VM Windows limpia (sin firma → SmartScreen warning).
+2. **Order fulfillment/settlement agente**: `po.accept`/`po.fulfill` +
+   descuento real de stock vía sales/inventory; cierre del handshake comprador↔proveedor.
+3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
+   lote primario; falta desglose por lote cuando una línea consume varios lotes.
+4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
+5. **Prescription desde POS**: crear receta retenida/cheque/controlados ligada
+   a la venta (modelo parcial; falta link POS).
+6. **Devolución endpoints**: modelo + migración listos; falta service + API.
+7. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
+8. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
+9. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
+10. **Fase 6**: caja (apertura/cierre/arqueo) + gastos + reportes
+    (ventas/márgenes/rotación/ABC/vencimientos).
+11. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
+    Swagger UI + desktop Tauri.
+
 ---
 
 ## 2026-05-07 — scaffold inicial + sistema de memoria/contexto

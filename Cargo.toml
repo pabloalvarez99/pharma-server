@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 rust-version = "1.85"
 license = "Proprietary"
@@ -41,6 +41,7 @@ anyhow = "1"
 
 # db
 surrealdb = { version = "2.1", features = ["kv-surrealkv"] }
+include_dir = "0.7"
 
 # auth
 jsonwebtoken = "9"

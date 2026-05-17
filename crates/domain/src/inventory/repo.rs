@@ -444,6 +444,23 @@ pub async fn soft_delete_batch(db: &Db, tenant: &Thing, id: &Thing) -> DomainRes
 
 // --- FEFO ------------------------------------------------------------------
 
+/// Count of `active` batches for a product (any stock/expiry). `0` means the
+/// product is not batch-tracked, so sales fall back to the plain
+/// `product.stock` path; `> 0` means FEFO consumption is mandatory (a
+/// batch-tracked product with only expired/empty lots must NOT sell).
+pub async fn count_active_batches(db: &Db, tenant: &Thing, product: &Thing) -> DomainResult<i64> {
+    let mut r = db
+        .query(
+            "SELECT count() AS n FROM product_batch \
+             WHERE tenant = $t AND product = $p AND active = true GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .await?;
+    let n: Option<i64> = r.take((0, "n"))?;
+    Ok(n.unwrap_or(0))
+}
+
 /// Read-only FEFO plan: order eligible batches by `expiry_date ASC,
 /// created_at ASC` and allocate `qty`. Returns `Err(InsufficientStock)` if
 /// total available < qty. Caller (sales Fase 4) is responsible for writing

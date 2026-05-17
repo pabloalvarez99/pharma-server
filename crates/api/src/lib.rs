@@ -42,9 +42,67 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+/// Stable per-machine data root. The Windows service runs as LocalSystem with
+/// CWD = `C:\Windows\System32`, and the MSI ships no `config/`, so a relative
+/// `db.path` would otherwise land under System32. Anchor it to the same
+/// `%ProgramData%\PharmaServer` dir the installer (`main.wxs` DATAFOLDER)
+/// creates, so data is backed up and removed together. Dev (non-Windows, or an
+/// absolute path) keeps its existing behavior.
+#[cfg(windows)]
+fn install_data_base() -> std::path::PathBuf {
+    std::env::var_os("ProgramData")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\ProgramData"))
+        .join("PharmaServer")
+}
+
+#[cfg(not(windows))]
+fn install_data_base() -> std::path::PathBuf {
+    std::path::PathBuf::from(".")
+}
+
+fn resolve_data_path(p: &str) -> String {
+    let path = std::path::Path::new(p);
+    if path.is_absolute() {
+        return p.to_string();
+    }
+    let rel = path.strip_prefix(".").unwrap_or(path);
+    install_data_base().join(rel).to_string_lossy().into_owned()
+}
+
+pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    let resolved = resolve_data_path(&cfg.db.path);
+    if resolved != cfg.db.path {
+        tracing::info!(from = %cfg.db.path, to = %resolved, "db path anchored to install data dir");
+        cfg.db.path = resolved;
+    }
+    if let Some(parent) = std::path::Path::new(&cfg.db.path).parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(error = %e, dir = %parent.display(), "could not create data dir");
+        }
+    }
+
     let db_handle = match db::connect(&cfg.db).await {
-        Ok(h) => Some(Arc::new(h)),
+        Ok(h) => match db::run_embedded(&h).await {
+            Ok(outcomes) => {
+                let applied: Vec<&str> = outcomes
+                    .iter()
+                    .filter(|o| o.applied)
+                    .map(|o| o.id.as_str())
+                    .collect();
+                tracing::info!(
+                    total = outcomes.len(),
+                    applied = ?applied,
+                    skipped = outcomes.len() - applied.len(),
+                    "startup migrations complete"
+                );
+                Some(Arc::new(h))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "startup migrations FAILED; serving degraded (no schema) — /health/ready will report unavailable");
+                None
+            }
+        },
         Err(e) => {
             tracing::warn!(error = %e, "db connect failed, /health/ready will report degraded");
             None

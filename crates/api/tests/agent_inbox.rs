@@ -273,6 +273,13 @@ async fn po_create_records_order_and_acks() {
     reply.verify().expect("signed");
     assert_eq!(reply.body["status"], "received");
     assert_eq!(reply.body["total"], 35760.0);
+    assert_eq!(
+        reply.body["price_adjusted"], false,
+        "buyer sent canonical price → no adjustment"
+    );
+    let l0 = &reply.body["lines"][0];
+    assert_eq!(l0["unit_price_canonical"], 1490.0);
+    assert_eq!(l0["unit_price_sent"], 1490.0);
     assert!(reply.body["order_id"]
         .as_str()
         .unwrap()
@@ -293,6 +300,88 @@ async fn po_create_records_order_and_acks() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].peer_did, peer.did());
     assert_eq!(rows[0].status, "received");
+}
+
+#[tokio::test]
+async fn po_create_rejects_buyer_supplied_price_and_uses_canonical() {
+    // SECURITY: a malicious peer sends unit_price=1 for a product the supplier
+    // catalogs at 1490. The supplier MUST re-quote against its own catalog;
+    // the persisted total + ack must reflect 1490, and price_adjusted=true.
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "drogueria-z", true).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "po-evil",
+        "po.create",
+        serde_json::json!({
+            "tenant": "drogueria-z",
+            "lines": [{ "barcode": "7801234567890", "qty": 10, "unit_price": 1 }]
+        }),
+    );
+    let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let reply = agent::Envelope::from_json(&body).unwrap();
+    assert_eq!(reply.topic, "po.ack");
+    reply.verify().expect("signed");
+    assert_eq!(
+        reply.body["total"], 14900.0,
+        "supplier must price with canonical 1490, not buyer-supplied 1"
+    );
+    assert_eq!(
+        reply.body["price_adjusted"], true,
+        "buyer price diverged from canonical → flag must be set"
+    );
+    let l0 = &reply.body["lines"][0];
+    assert_eq!(l0["unit_price_canonical"], 1490.0);
+    assert_eq!(l0["unit_price_sent"], 1.0);
+
+    // Persisted agent_order total = canonical, not buyer-supplied.
+    #[derive(serde::Deserialize)]
+    struct O {
+        total: f64,
+    }
+    let mut r = tdb
+        .db
+        .query("SELECT <float> total AS total FROM agent_order")
+        .await
+        .unwrap();
+    let rows: Vec<O> = r.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!((rows[0].total - 14900.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn po_create_marks_adjusted_when_product_unknown() {
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "drogueria-w", true).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "po-unknown",
+        "po.create",
+        serde_json::json!({
+            "tenant": "drogueria-w",
+            "lines": [{ "barcode": "0000000000000", "qty": 5, "unit_price": 100 }]
+        }),
+    );
+    let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let reply = agent::Envelope::from_json(&body).unwrap();
+    assert_eq!(reply.body["price_adjusted"], true);
+    assert_eq!(
+        reply.body["total"], 0.0,
+        "unknown product contributes 0 to total"
+    );
+    assert_eq!(reply.body["lines"][0]["found"], false);
 }
 
 #[tokio::test]

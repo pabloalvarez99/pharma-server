@@ -1,9 +1,15 @@
 //! Sales service (Fase 4). Composes inventory/customer primitives into the
 //! POS sale atomic flow + read endpoints + settings.
 //!
+//! FEFO batch consumption IS active for batch-tracked products: each line
+//! is planned via [`crate::inventory::service::plan_fefo_optional`] and the
+//! resulting `product_batch.stock` decrements run inside the same sale
+//! BEGIN/COMMIT as the order/order_item/product.stock/stock_movement writes
+//! ([`super::repo::apply_sale`]). Products with no active batches keep the
+//! legacy `product.stock`-only path so adoption is opt-in per SKU.
+//!
 //! Out of scope this slice (deferred — tracked in roadmap):
 //! * Prescription create from POS (needs `prescriptions::service::create_prescription` call).
-//! * FEFO batch decrement (calls `inventory::service::plan_fefo` + atomic batch update).
 //! * Interaction warnings full ruleset port (`super::interactions::check`
 //!   currently returns empty `Vec`).
 //!
@@ -138,6 +144,19 @@ pub async fn post_sale(
         .map(|s| parse_tenant_thing(s, "customer"))
         .transpose()?;
 
+    // FEFO plan per line. `None` = product not batch-tracked (legacy
+    // product.stock-only path); `Some(plan)` = batch-tracked, lots consumed
+    // earliest-expiry-first inside the sale tx; `Err(InsufficientStock)` =
+    // tracked but non-expired lots can't cover the line.
+    let mut fefo_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
+        Vec::with_capacity(req.items.len());
+    for it in &req.items {
+        fefo_plans.push(
+            crate::inventory::service::plan_fefo_optional(db, tenant, &it.product, it.quantity)
+                .await?,
+        );
+    }
+
     let applied = repo::apply_sale(
         db,
         tenant,
@@ -145,6 +164,7 @@ pub async fn post_sale(
         sold_by_name,
         customer.as_ref(),
         &req,
+        &fefo_plans,
         subtotal,
         discount,
         total,
