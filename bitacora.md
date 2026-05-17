@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.11` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-prescription-pos` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.11
+- **Versión**: `0.1.12` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-interactions` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.12
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -47,6 +47,10 @@ NO acá.
     rows ligadas al cliente; `controlled` se autodetecta vía
     `product.active_ingredient` si el POS no lo manda. IDs vuelven en
     `PosSaleResponse.prescriptions`.
+  - **Alertas de interacciones medicamentosas** (Beers + Vademécum CL, 31
+    reglas, 12 grupos): cada venta tokeniza `product.active_ingredient` de
+    cada item y devuelve `interaction_warnings` ordenados por severidad. No
+    bloquea la venta (caveat clínico).
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
 - **Tests**: workspace verde (`cargo test --workspace`), incluye 14 `sales`
@@ -67,7 +71,7 @@ NO acá.
    split en path federado (sales ya lo tiene).
 3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
    lote primario; falta desglose por lote cuando una línea consume varios lotes.
-4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
+4. **~~Drug-interactions ruleset port~~** ✅ (Beers + Vademécum CL, 31 reglas).
 5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
    `controlled` autodetectado vía `product.active_ingredient`.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
@@ -576,4 +580,20 @@ NO acá.
 - **Tests** (`crates/domain/tests/sales.rs` +2, total 16): venta con prescription persiste `prescription:xxx` linked; controlled=true sin doctor → INVALID_INPUT. Workspace verde, clippy `-D warnings` clean, fmt clean.
 - **Build/MSI/Smoke**: release build (7m). MSI `pharma-server-0.1.11-x86_64.msi` 11,780,096 bytes (idéntico tamaño a 0.1.10 — solo wiring), sha256 `63556fdc4fd760f258e3549648cb4ef4fdd753783282594d58bc516af276cda3`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.10)→Running→`/`=`{"version":"0.1.11"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.11 --target feature/erp-parity`. PR `feature/erp-parity-prescription-pos` → `feature/erp-parity`. Versión 0.1.10 → 0.1.11 (bump + Cargo.lock mismo commit).
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.12: drug-interactions ruleset port (Beers + Vademécum CL) — cierra BACKLOG #4
+
+- **Qué**: `sales::interactions::check` ya no devuelve `Vec::new()` — port completo del ruleset clínico desde Tu Farmacia (`apps/web/src/lib/drug-interactions.ts`, ~370 LoC). `post_sale` ahora carga `active_ingredient` de cada producto del carrito (tenant-scoped) y devuelve `interaction_warnings` ordenados por severidad en la respuesta. La venta NUNCA se bloquea — caveat clínico mirrored: las reglas son referenciales, no sustituyen criterio farmacéutico.
+- **Por qué**: el goal "ERP profesional para farmacias" incluye seguridad del paciente. Una venta de WARFARINA + IBUPROFENO o SILDENAFIL + NITRATO sin warning visible es un riesgo evitable. El ruleset upstream ya está validado clínicamente (Beers Criteria 2023, Vademécum Chileno, FNM ISP) y portarlo cierra el último ítem clínico-funcional pendiente del POS.
+- **Ruleset** (`crates/domain/src/sales/interactions.rs`, 565 LoC): 12 grupos (AINE, ANTICOAGULANTE, IBP, BENZODIAZEPINA, IECA, ARA2, ISRS, NITRATO, ESTATINA_3A4, MACROLIDO_3A4, PDE5, HIPOGLICEMIANTE), 31 reglas (grupo|fármaco × grupo|fármaco con severidad Crítica|Mayor|Moderada). PAIR_MAP build-once con `OnceLock` — reglas específicas de mayor severidad ganan sobre reglas de grupo (ej: SIMVASTATINA+CLARITROMICINA = Crítica overridea ESTATINA_3A4×MACROLIDO_3A4 = Mayor). Una exclusión explícita: CLOPIDOGREL+PANTOPRAZOL (otros IBPs sí disparan; PANTOPRAZOL es el alternativa segura clínica).
+- **Tokenizador**: uppercase + strip acentos castellanos (Á/É/Í/Ó/Ú/Ñ) + match **greedy longest-first** contra el set conocido de nombres de fármacos. Importante: "Mononitrato de isosorbida" contiene literal "ISOSORBIDA" Y "MONONITRATO DE ISOSORBIDA"; el matcher consume el más largo y rellena con espacios el span para evitar doble-match (ambos están en el grupo NITRATO y dispararían dos warnings idénticos contra PDE5). Caso real cubierto por test `pde5_plus_nitrato_is_critica`.
+- **Wiring en `post_sale`**: nueva helper `load_active_ingredients` (single SELECT IN $ids, tenant-scoped). El resultado se pasa a `check()` y se serializa en `PosSaleResponse.interaction_warnings` (vacío serializa skip vía `serde(skip_serializing_if)`).
+- **Compat**: aditivo. Sin migración. Productos sin `active_ingredient` simplemente no aportan tokens al check. Sales 16/16 y resto del workspace sin cambios.
+- **Tests** (6 unit + workspace verde): pde5+nitrato Crítica con un solo hit (no doble-match); anticoagulante+aine Crítica; clopidogrel+pantoprazol excluido pero otros IBPs disparan Mayor; simvastatina+claritromicina override a Crítica; sort por severidad descendente; vacío/desconocido devuelve vacío. clippy `-D warnings` clean (1 fix `clippy::unnecessary_sort_by` → `sort_by_key(Reverse(...))`), fmt clean.
+- **Build/MSI/Smoke**: release build (7m16s). MSI `pharma-server-0.1.12-x86_64.msi` 11,808,768 bytes, sha256 `a94c0b8882c26ce1cc81a0e9fb7c81e43ac271c38ca0663e5e7bd3425deac9cf`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.11)→Running→`/`=`{"version":"0.1.12"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.12 --target feature/erp-parity`. PR `feature/erp-parity-interactions` → `feature/erp-parity`. Versión 0.1.11 → 0.1.12 (bump + Cargo.lock mismo commit).
+- **Estado vs goal**: ✅ POS completo (venta + devolución + receta + alertas de interacción) · ✅ descargable/offline/first-run · ✅ lazo federado completo · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
