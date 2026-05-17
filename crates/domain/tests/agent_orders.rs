@@ -237,6 +237,118 @@ async fn fulfill_refuses_when_stock_insufficient_and_leaves_state() {
     assert_eq!(product_stock(&db, &pid).await, 3);
 }
 
+/// BACKLOG #2 remainder — agent fulfillment of a batch-tracked product
+/// persists the per-line FEFO breakdown to `agent_order.fulfillment_batches_json`
+/// (migration `0014`) and decrements every consumed lot, not just `product.stock`.
+#[tokio::test]
+async fn fulfill_persists_multi_lot_fefo_breakdown() {
+    let (db, tenant) = setup().await;
+
+    // Catalogued product with two lots: A expires sooner (4 units), B later (10).
+    // Order asks for 5 → FEFO must drain A (4) then dip into B (1).
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: Thing,
+    }
+    let mut p = db
+        .query(
+            "CREATE product SET tenant=$t, name='X', slug='x', price=1000, \
+             stock=14, active=true RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let pid = p.take::<Option<Row>>(0).unwrap().unwrap().id;
+    db.query("CREATE product_barcode SET tenant=$t, product=$p, barcode='BC-MULTI'")
+        .bind(("t", tenant.clone()))
+        .bind(("p", pid.clone()))
+        .await
+        .unwrap();
+    // Lot A (earlier expiry).
+    let mut a = db
+        .query(
+            "CREATE product_batch SET tenant=$t, product=$p, batch_code='A', \
+             expiry_date=time::now() + 30d, stock=4, active=true RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", pid.clone()))
+        .await
+        .unwrap();
+    let lot_a = a.take::<Option<Row>>(0).unwrap().unwrap().id;
+    // Lot B (later expiry).
+    let mut b = db
+        .query(
+            "CREATE product_batch SET tenant=$t, product=$p, batch_code='B', \
+             expiry_date=time::now() + 120d, stock=10, active=true RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", pid.clone()))
+        .await
+        .unwrap();
+    let lot_b = b.take::<Option<Row>>(0).unwrap().unwrap().id;
+
+    let lines_json = r#"[{"barcode":"BC-MULTI","qty":5,"unit_price_canonical":1000}]"#.to_string();
+    let mut o = db
+        .query(
+            "CREATE agent_order SET tenant=$t, peer_did='did:pharma:b', \
+             lines_json=$l, total=5000, status='accepted', price_adjusted=false \
+             RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("l", lines_json))
+        .await
+        .unwrap();
+    let oid = o.take::<Option<Row>>(0).unwrap().unwrap().id.to_string();
+
+    let r = service::fulfill(&db, &tenant, &oid).await.unwrap();
+    assert_eq!(r.status, "fulfilled");
+    assert_eq!(product_stock(&db, &pid).await, 14 - 5);
+
+    // Per-line breakdown persisted in FEFO order, sum = line qty, legacy
+    // `product.stock` decrement still happened (asserted above).
+    let breakdown = r
+        .fulfillment_batches
+        .expect("batch-tracked fulfillment persists breakdown");
+    assert_eq!(breakdown.len(), 1);
+    let line = &breakdown[0];
+    assert_eq!(line.product, pid.to_string());
+    assert_eq!(line.allocations.len(), 2);
+    assert_eq!(line.allocations[0].batch, lot_a.to_string());
+    assert_eq!(line.allocations[0].qty, 4);
+    assert_eq!(line.allocations[1].batch, lot_b.to_string());
+    assert_eq!(line.allocations[1].qty, 1);
+    assert_eq!(line.allocations.iter().map(|a| a.qty).sum::<i64>(), 5);
+
+    // Lots drained per FEFO; product.stock invariant holds.
+    #[derive(serde::Deserialize)]
+    struct S {
+        stock: i64,
+    }
+    let mut q = db
+        .query("SELECT stock FROM product_batch WHERE id = $b LIMIT 1")
+        .bind(("b", lot_a.clone()))
+        .await
+        .unwrap();
+    assert_eq!(q.take::<Option<S>>(0).unwrap().unwrap().stock, 0);
+    let mut q = db
+        .query("SELECT stock FROM product_batch WHERE id = $b LIMIT 1")
+        .bind(("b", lot_b.clone()))
+        .await
+        .unwrap();
+    assert_eq!(q.take::<Option<S>>(0).unwrap().unwrap().stock, 9);
+}
+
+/// Non-batch-tracked products keep the legacy `product.stock`-only path —
+/// `fulfillment_batches` stays `None`, no migration backfill needed.
+#[tokio::test]
+async fn fulfill_non_batch_tracked_leaves_fulfillment_batches_none() {
+    let (db, tenant) = setup().await;
+    let (id, _pid) = seed_catalogued_order(&db, &tenant, "7800000000099", 50, 3).await;
+    let r = service::fulfill(&db, &tenant, &id).await.unwrap();
+    assert_eq!(r.status, "fulfilled");
+    assert!(r.fulfillment_batches.is_none());
+}
+
 #[tokio::test]
 async fn cross_tenant_get_is_not_found() {
     let (db, tenant) = setup().await;
