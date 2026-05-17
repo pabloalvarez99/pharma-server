@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.10` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-po-fulfill` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.10
+- **Versión**: `0.1.11` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-prescription-pos` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.11
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -43,6 +43,10 @@ NO acá.
     línea + `agent_order.status='fulfilled'`, todo en un BEGIN/COMMIT;
     invariante `stock = SUM(stock_movement.delta)` se mantiene). Transiciones:
     `received → accepted|rejected`, `accepted → fulfilled`. Cualquier otra = CONFLICT.
+  - **Receta desde POS**: `PosSaleRequest.prescriptions` persiste `prescription`
+    rows ligadas al cliente; `controlled` se autodetecta vía
+    `product.active_ingredient` si el POS no lo manda. IDs vuelven en
+    `PosSaleResponse.prescriptions`.
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
 - **Tests**: workspace verde (`cargo test --workspace`), incluye 14 `sales`
@@ -64,8 +68,8 @@ NO acá.
 3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
    lote primario; falta desglose por lote cuando una línea consume varios lotes.
 4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
-5. **Prescription desde POS**: crear receta retenida/cheque/controlados ligada
-   a la venta (modelo parcial; falta link POS).
+5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
+   `controlled` autodetectado vía `product.active_ingredient`.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
@@ -540,7 +544,6 @@ NO acá.
 - **Compat**: endpoint additive, sin migración. Path federado intacto.
 - **Estado vs goal**: ✅ POS completo · ✅ descargable/offline/first-run · ✅ **lazo federado completo** (create→accept/reject→fulfill+stock, con po.status del lado comprador) · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
-
 ---
 
 ## 2026-05-16 — Fase 12 plan maestro marketplace de confianza (estrategia, no scaffolding)
@@ -560,4 +563,17 @@ NO acá.
 - **Discoverability**: `CLAUDE.md` L6 (pointer Fase 12 → `docs/marketplace-master-plan.md`); `docs/ecosystem-roadmap.md` §3bis (cross-ref con resumen ejecutivo); memoria `project_marketplace_master_plan` + espejo vault.
 - **Diff**: 3 docs, +473/-1. Cero código, cero deps, cero migraciones. Verificado contra evidencia citada en el doc (rutas reales de la rama).
 - **Estado vs goal**: ✅ estrategia documentada con evidencia de código real · ⏳ validación con design partners → recién ahí inicia el plan técnico del Hub/escrow.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.11: receta(s) desde POS (cierra BACKLOG #5)
+
+- **Qué**: `PosSaleRequest.prescriptions` ya no se descarta — cada entry persiste una `prescription` row después del commit de la venta y los IDs vuelven en `PosSaleResponse.prescriptions`. Cierra el ítem #5 del BACKLOG. Release v0.1.11.
+- **Por qué**: el modelo `PosPrescriptionInput`, la tabla `prescription`, y `prescriptions::service::create_prescription` ya existían pero `post_sale` los ignoraba (`prescriptions: Vec::new()`). Una farmacia real necesita la receta ligada a la venta para Ley 20.000 (controlados) y para recetas retenidas/cheque.
+- **`detect_controlled`** (helper en `sales/service.rs`): si el POS deja `controlled = None`, consulta `product.active_ingredient` y delega a `sales::controlled::is_controlled` (Decreto 404 CL). Si el POS manda `Some(true)` explícito y faltan datos del médico, el repo de prescriptions ya rechaza con `INVALID_INPUT` (guard existente).
+- **Compat**: aditivo. Llamadas viejas con `prescriptions: vec![]` siguen igual. No migración.
+- **Tests** (`crates/domain/tests/sales.rs` +2, total 16): venta con prescription persiste `prescription:xxx` linked; controlled=true sin doctor → INVALID_INPUT. Workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Build/MSI/Smoke**: release build (7m). MSI `pharma-server-0.1.11-x86_64.msi` 11,780,096 bytes (idéntico tamaño a 0.1.10 — solo wiring), sha256 `63556fdc4fd760f258e3549648cb4ef4fdd753783282594d58bc516af276cda3`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.10)→Running→`/`=`{"version":"0.1.11"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.11 --target feature/erp-parity`. PR `feature/erp-parity-prescription-pos` → `feature/erp-parity`. Versión 0.1.10 → 0.1.11 (bump + Cargo.lock mismo commit).
 - **Pendiente**: ver `## BACKLOG` al tope.

@@ -523,6 +523,99 @@ async fn sell_one(
 }
 
 #[tokio::test]
+async fn pos_sale_with_prescription_persists_receta_linked_to_customer() {
+    let (db, tenant, admin) = setup().await;
+    let p = catalog::create_product(&db, &tenant, np("Amoxi 500", "1200", 20))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let c = customers::create_customer(
+        &db,
+        &tenant,
+        NewCustomer {
+            name: "Juan".into(),
+            rut: Some("11.111.111-1".into()),
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 1,
+            unit_price: dec("1200"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("2000")),
+        card_amount: None,
+        discount: None,
+        customer: Some(c.id.clone()),
+        customer_name: Some(c.name.clone()),
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![PosPrescriptionInput {
+            product: Some(p.id.clone()),
+            patient_name: "Juan".into(),
+            patient_rut: "11.111.111-1".into(),
+            doctor_name: Some("Dra. Pérez".into()),
+            doctor_rut: Some("9.876.543-2".into()),
+            folio: Some("FOL-001".into()),
+            controlled: Some(false),
+        }],
+    };
+    let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+    assert_eq!(resp.prescriptions.len(), 1);
+    assert!(resp.prescriptions[0].starts_with("prescription:"));
+}
+
+#[tokio::test]
+async fn pos_sale_controlled_prescription_requires_doctor_data() {
+    // controlled=Some(true) sin doctor → INVALID_INPUT del repo de receta.
+    let (db, tenant, admin) = setup().await;
+    let p = catalog::create_product(&db, &tenant, np("Clonazepam 2mg", "500", 5))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 1,
+            unit_price: dec("500"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("1000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![PosPrescriptionInput {
+            product: Some(p.id.clone()),
+            patient_name: "Ana".into(),
+            patient_rut: "22.222.222-2".into(),
+            doctor_name: None,
+            doctor_rut: None,
+            folio: None,
+            controlled: Some(true),
+        }],
+    };
+    let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
 async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movement() {
     let (db, tenant, admin) = setup().await;
     let admin_t = surrealdb::sql::thing(&admin).unwrap();
