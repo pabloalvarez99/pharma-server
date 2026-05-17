@@ -4,6 +4,7 @@
 //! API crate orchestrates only; no axum types live here.
 
 pub mod agent_orders;
+pub mod cash_register;
 pub mod catalog;
 pub mod customers;
 pub mod finance;
