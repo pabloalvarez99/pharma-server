@@ -69,8 +69,9 @@ NO acá.
    consulta), operador accept/reject/fulfill (`/api/v1/agent-orders/{id}/...`)
    con stock decrement atómico + audit trail. Pendiente menor: multi-lot/FEFO
    split en path federado (sales ya lo tiene).
-3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
-   lote primario; falta desglose por lote cuando una línea consume varios lotes.
+3. **~~Multi-lot split traceability~~** ✅ (sales path): migración 0013 +
+   `order_item.batches_json` + `OrderItemDto.batches`. Pendiente: replicar en
+   `agent_fulfill` (path federado) — ver BACKLOG #2.
 4. **~~Drug-interactions ruleset port~~** ✅ (Beers + Vademécum CL, 31 reglas).
 5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
    `controlled` autodetectado vía `product.active_ingredient`.
@@ -666,6 +667,19 @@ NO acá.
 - **Build/MSI/Smoke**: release build (7m19s). MSI `pharma-server-0.1.16-x86_64.msi` 11,984,896 bytes (mismo tamaño que 0.1.15 — solo wiring y dos deps lean), sha256 `2f372d3285c24a7af9598b685167759254e313cb93911a4b35ebcfbc316e3482`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.15, exit 0)→Running→`/`=`{"version":"0.1.16"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.16 --target feature/erp-parity`. PR `feature/erp-parity-backup` → `feature/erp-parity`. Versión 0.1.15 → 0.1.16 (bump + Cargo.lock mismo commit).
 - **Pendiente Fase 8 derivado**: cron scheduler (jobs crate ya tiene el `tokio_cron_scheduler` boilerplate) puede ahora invocar `backup_now` programáticamente para backup automático nocturno. Próximo slice.
+- **Pendiente**: ver `## BACKLOG` al tope.
+---
+
+## 2026-05-17 — Multi-lot split traceability sales (cierra BACKLOG #3)
+
+- **Qué**: `POST /pos/sale` persiste el desglose COMPLETO de lotes FEFO consumidos por línea, no sólo el lote primario. PR #24 mergeado a `feature/erp-parity` (commit `fb68af6`).
+- **Por qué**: el propio código en `crates/domain/src/sales/repo.rs:287-289` apuntaba a BACKLOG #3 ("Multi-lot split traceability: see BACKLOG"). Sin esto, refunds/auditoría/recalls solo conocen el lote head; si una venta consume A=4 + B=1, B queda fuera del trail. Ítem aún sin tomar mientras otras sesiones cerraban v0.1.11→v0.1.16 → pick de menor colisión + alta utilidad.
+- **Diseño**: campo `order_item.batches_json: option<string>` (migración `0013_order_item_batches.surql`, additive). Mismo patrón JSON-string ya probado en `agent_order.lines_json` — sidestepea el trap SurrealQL de bindear arrays-of-objects. Legacy `batch` (lote head) intacto → backward compat total. Rows viejas + líneas sin FEFO quedan NULL.
+- **Implementación**: `OrderItemDto.batches: Option<Vec<OrderItemBatchAllocation{batch,qty}>>` parseado on-read (silently None en payload inválido — fallback al `batch` primario). `apply_sale` escribe en orden FEFO de consumo, sum(qty)=quantity. Nuevo struct `OrderItemBatchAllocation` en `sales::model` con Serialize+Deserialize+ToSchema.
+- **Tests**: test FEFO existente (`pos_sale_batch_tracked_fefo_decrements_earliest_expiry`) extendido — 5 unidades sobre lotes A=4(exp+30d) + B=10(exp+120d) → `batches=[{A,4},{B,1}]`, sum=5, `batch=A` (legacy compat). Test fallback (`pos_sale_non_batch_tracked_falls_back_to_product_stock`) asserta `batches.is_none()`. sales 16/16, workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Pendiente menor** (anota BACKLOG #2): el mismo split debe escribirse en `agent_fulfill` (path federado) — hoy decrementa stock con FEFO pero `agent_order.lines_json` no lleva el breakdown por allocation. Próximo slice.
+- **Sin bump versión** (otras sesiones bumpearon 0.1.15→0.1.16 en paralelo sin esperar este commit; queda en pool 0.1.16+).
+- **Estado vs goal**: ✅ trazabilidad multi-lote completa en POS · ⏳ replicar en path federado · ⏳ Fase 9 firma, Fase 10 sync, Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
 
 ---

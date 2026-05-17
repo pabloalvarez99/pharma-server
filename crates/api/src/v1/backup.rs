@@ -133,6 +133,21 @@ pub fn backup_now(db_path: &Path) -> anyhow::Result<BackupReport> {
     })
 }
 
+fn sha256_of(p: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(p)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,19 +178,4 @@ mod tests {
         assert_eq!(removed, 0);
         assert!(new_file.exists());
     }
-}
-
-fn sha256_of(p: &Path) -> std::io::Result<String> {
-    use std::io::Read;
-    let mut f = std::fs::File::open(p)?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()))
 }
