@@ -93,10 +93,19 @@ struct OrderItemRow {
     unit_price: Decimal,
     subtotal: Decimal,
     batch: Option<Thing>,
+    #[serde(default)]
+    batches_json: Option<String>,
 }
 
 impl From<OrderItemRow> for OrderItemDto {
     fn from(r: OrderItemRow) -> Self {
+        // Multi-lot breakdown (BACKLOG #3): parse the JSON-string column written
+        // by `apply_sale`. Silently None on legacy rows or malformed payloads —
+        // the primary `batch` field is the legacy fallback for those.
+        let batches = r
+            .batches_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<OrderItemBatchAllocation>>(s).ok());
         Self {
             id: r.id.to_string(),
             order: r.order.to_string(),
@@ -106,6 +115,7 @@ impl From<OrderItemRow> for OrderItemDto {
             unit_price: r.unit_price,
             subtotal: r.subtotal,
             batch: r.batch.map(|t| t.to_string()),
+            batches,
         }
     }
 }
@@ -239,7 +249,8 @@ pub async fn apply_sale(
         q.push_str(&format!(
             "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
                 product_name=$pn{i}, quantity=$qty{i}, unit_price=$up{i}, \
-                subtotal=$st{i}, batch=$bt{i} RETURN AFTER; \
+                subtotal=$st{i}, batch=$bt{i}, batches_json=$bts{i} \
+                RETURN AFTER; \
              UPDATE product SET stock = stock - $qty{i} \
                 WHERE id = $p{i} AND tenant = $t; \
              CREATE stock_movement SET tenant=$t, product=$p{i}, \
@@ -284,14 +295,32 @@ pub async fn apply_sale(
         let pid = surrealdb::sql::thing(&item.product)
             .map_err(|_| DomainError::Invalid(format!("product id inválido: {}", item.product)))?;
         let line_sub = item.unit_price * Decimal::from(item.quantity);
-        // Primary batch recorded on the line = earliest-expiry lot consumed
-        // (first FEFO allocation). Multi-lot split traceability: see BACKLOG.
-        let batch_val: surrealdb::sql::Value = match fefo_plans.get(i).and_then(|p| p.as_ref()) {
+        // Primary batch = earliest-expiry lot consumed (first FEFO allocation),
+        // kept for backward compat. Full breakdown goes to `batches_json`
+        // (BACKLOG #3, migration 0013) so refund/audit flows can attribute
+        // every consumed lot, not just the head.
+        let plan = fefo_plans.get(i).and_then(|p| p.as_ref());
+        let batch_val: surrealdb::sql::Value = match plan {
             Some(allocs) if !allocs.is_empty() => surrealdb::sql::thing(&allocs[0].batch)
                 .map_err(|_| {
                     DomainError::Invalid(format!("batch id inválido: {}", allocs[0].batch))
                 })?
                 .into(),
+            _ => surrealdb::sql::Value::None,
+        };
+        let batches_json: surrealdb::sql::Value = match plan {
+            Some(allocs) if !allocs.is_empty() => {
+                let payload: Vec<crate::sales::model::OrderItemBatchAllocation> = allocs
+                    .iter()
+                    .map(|a| crate::sales::model::OrderItemBatchAllocation {
+                        batch: a.batch.clone(),
+                        qty: a.qty,
+                    })
+                    .collect();
+                serde_json::to_string(&payload)
+                    .map_err(|e| DomainError::Other(anyhow::anyhow!("batches_json: {e}")))?
+                    .into()
+            }
             _ => surrealdb::sql::Value::None,
         };
         qb = qb
@@ -300,7 +329,8 @@ pub async fn apply_sale(
             .bind((format!("qty{i}"), item.quantity))
             .bind((format!("up{i}"), dec_val(item.unit_price)))
             .bind((format!("st{i}"), dec_val(line_sub)))
-            .bind((format!("bt{i}"), batch_val));
+            .bind((format!("bt{i}"), batch_val))
+            .bind((format!("bts{i}"), batches_json));
     }
     // Bind the tail batch-decrement params in the same order they were emitted.
     let mut alloc_idx = 0usize;
