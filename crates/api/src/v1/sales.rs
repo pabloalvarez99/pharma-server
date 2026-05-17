@@ -48,10 +48,12 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/orders", get(list_orders))
         .route("/api/v1/orders/{id}", get(get_order))
+        .route("/api/v1/returns", get(list_refunds))
         .route("/api/v1/settings/{key}", get(get_setting));
 
     let pos = Router::new()
         .route("/api/v1/pos/sale", post(post_sale))
+        .route("/api/v1/pos/returns", post(create_refund))
         .route_layer(crate::role::layer(state.clone(), POS_ROLES));
 
     let writes = Router::new()
@@ -125,6 +127,31 @@ async fn get_order(
     let tenant = tenant_of(&claims)?;
     let (order, items) = service::get_order(db.as_ref(), &tenant, &id).await?;
     Ok(Json(OrderDetail { order, items }))
+}
+
+// --- returns / devoluciones ------------------------------------------------
+
+async fn create_refund(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<NewDevolucion>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let user = user_of(&claims).ok();
+    let resp = service::create_refund(db.as_ref(), &tenant, user.as_ref(), body).await?;
+    Ok((StatusCode::CREATED, Json(resp)).into_response())
+}
+
+async fn list_refunds(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<DevolucionFilters>,
+) -> Result<Json<Vec<DevolucionDto>>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let rows = service::list_refunds(db.as_ref(), &tenant, filters).await?;
+    Ok(Json(rows))
 }
 
 // --- admin_setting CRUD ---------------------------------------------------

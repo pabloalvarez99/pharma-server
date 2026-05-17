@@ -358,6 +358,236 @@ pub async fn apply_sale(
     })
 }
 
+// --- devolucion (refund) atomic tx -----------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct DevolucionRow {
+    id: Thing,
+    order: Option<Thing>,
+    tipo: String,
+    motivo: String,
+    notas: Option<String>,
+    total_devuelto: Decimal,
+    metodo_reembolso: Option<String>,
+    procesado_por: Option<Thing>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<DevolucionRow> for DevolucionDto {
+    fn from(r: DevolucionRow) -> Self {
+        Self {
+            id: r.id.to_string(),
+            order: r.order.map(|t| t.to_string()),
+            tipo: r.tipo,
+            motivo: r.motivo,
+            notas: r.notas,
+            total_devuelto: r.total_devuelto,
+            metodo_reembolso: r.metodo_reembolso,
+            procesado_por: r.procesado_por.map(|t| t.to_string()),
+            created_at: r.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DevolucionItemRow {
+    id: Thing,
+    devolucion: Thing,
+    product: Option<Thing>,
+    product_name: String,
+    quantity: i64,
+    unit_price: Decimal,
+    restock: bool,
+}
+
+impl From<DevolucionItemRow> for DevolucionItemDto {
+    fn from(r: DevolucionItemRow) -> Self {
+        Self {
+            id: r.id.to_string(),
+            devolucion: r.devolucion.to_string(),
+            product: r.product.map(|t| t.to_string()),
+            product_name: r.product_name,
+            quantity: r.quantity,
+            unit_price: r.unit_price,
+            restock: r.restock,
+        }
+    }
+}
+
+pub struct AppliedRefund {
+    pub devolucion: DevolucionDto,
+    pub items: Vec<DevolucionItemDto>,
+    pub movement_ids: Vec<String>,
+    pub order_marked_refunded: bool,
+}
+
+/// Persist a `devolucion` + its `devolucion_item`s atomically. Lines flagged
+/// `restock=true` add their quantity back to `product.stock` and append a
+/// `stock_movement(reason='return')` inside the same BEGIN/COMMIT (stock is
+/// never written outside the audit trail — same invariant as the sale path).
+/// When `order` is set, the order is moved to `status='refunded'` in the same
+/// tx so a crash can't leave a refunded order still marked paid.
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_refund(
+    db: &Db,
+    tenant: &Thing,
+    processed_by: Option<&Thing>,
+    order: Option<&Thing>,
+    req: &NewDevolucion,
+    total: Decimal,
+) -> DomainResult<AppliedRefund> {
+    let did = uuid::Uuid::new_v4().simple().to_string();
+    let dev_thing = surrealdb::sql::thing(&format!("devolucion:{did}"))
+        .map_err(|e| DomainError::Other(anyhow::anyhow!("devolucion id build: {e}")))?;
+
+    let mut q = String::from(
+        "BEGIN; \
+         CREATE type::thing('devolucion', $did) SET tenant=$t, order=$ord, \
+            tipo=$tipo, motivo=$mot, notas=$notas, total_devuelto=$tot, \
+            metodo_reembolso=$mr, procesado_por=$by RETURN AFTER; ",
+    );
+    // Statement layout (BEGIN/COMMIT excluded). idx 0 = devolucion CREATE.
+    // For item i: devolucion_item CREATE at `item_idx[i]`; if it restocks, a
+    // product UPDATE follows then a stock_movement CREATE at `mov_idx[i]`.
+    let mut stmt = 1usize;
+    let mut item_idx = Vec::with_capacity(req.items.len());
+    let mut mov_idx = Vec::with_capacity(req.items.len());
+    for (i, it) in req.items.iter().enumerate() {
+        q.push_str(&format!(
+            "CREATE devolucion_item SET tenant=$t, devolucion=$dev, \
+                product=$p{i}, product_name=$pn{i}, quantity=$qty{i}, \
+                unit_price=$up{i}, restock=$rs{i} RETURN AFTER; ",
+        ));
+        item_idx.push(stmt);
+        stmt += 1;
+        if it.restock && it.product.is_some() {
+            q.push_str(&format!(
+                "UPDATE product SET stock = stock + $qty{i} \
+                 WHERE id = $p{i} AND tenant = $t; ",
+            ));
+            stmt += 1;
+            q.push_str(&format!(
+                "CREATE stock_movement SET tenant=$t, product=$p{i}, \
+                    delta=$qty{i}, reason='return', admin=$by, ref=$devref \
+                    RETURN AFTER; ",
+            ));
+            mov_idx.push(Some(stmt));
+            stmt += 1;
+        } else {
+            mov_idx.push(None);
+        }
+    }
+    let order_marked = order.is_some();
+    if order_marked {
+        q.push_str("UPDATE order SET status='refunded' WHERE id=$ord AND tenant=$t; ");
+    }
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("did", did.clone()))
+        .bind(("t", tenant.clone()))
+        .bind(("ord", order.cloned()))
+        .bind(("tipo", req.tipo.clone()))
+        .bind(("mot", req.motivo.clone()))
+        .bind(("notas", req.notas.clone()))
+        .bind(("tot", dec_val(total)))
+        .bind(("mr", req.metodo_reembolso.clone()))
+        .bind(("by", processed_by.cloned()))
+        .bind(("dev", dev_thing.clone()))
+        .bind(("devref", dev_thing.to_string()));
+    for (i, it) in req.items.iter().enumerate() {
+        let pid: surrealdb::sql::Value = match it.product.as_deref() {
+            Some(s) => surrealdb::sql::thing(s)
+                .map_err(|_| DomainError::Invalid(format!("product id inválido: {s}")))?
+                .into(),
+            None => surrealdb::sql::Value::None,
+        };
+        qb = qb
+            .bind((format!("p{i}"), pid))
+            .bind((format!("pn{i}"), it.product_name.clone()))
+            .bind((format!("qty{i}"), it.quantity))
+            .bind((format!("up{i}"), dec_val(it.unit_price)))
+            .bind((format!("rs{i}"), it.restock));
+    }
+    let mut r = qb.await?.check()?;
+
+    let dev_rows: Vec<DevolucionRow> = r.take(0)?;
+    let devolucion: DevolucionDto = dev_rows
+        .into_iter()
+        .next()
+        .ok_or_else(|| DomainError::Other(anyhow::anyhow!("devolucion CREATE returned 0 rows")))?
+        .into();
+
+    let mut items_out = Vec::with_capacity(req.items.len());
+    let mut movements_out = Vec::new();
+    for i in 0..req.items.len() {
+        let irows: Vec<DevolucionItemRow> = r.take(item_idx[i])?;
+        items_out.push(
+            irows
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    DomainError::Other(anyhow::anyhow!("devolucion_item insert returned 0 rows"))
+                })?
+                .into(),
+        );
+        if let Some(mi) = mov_idx[i] {
+            let mrows: Vec<MovementIdRow> = r.take(mi)?;
+            movements_out.push(
+                mrows
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        DomainError::Other(anyhow::anyhow!("stock_movement insert returned 0 rows"))
+                    })?
+                    .id
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok(AppliedRefund {
+        devolucion,
+        items: items_out,
+        movement_ids: movements_out,
+        order_marked_refunded: order_marked,
+    })
+}
+
+pub async fn list_devoluciones(
+    db: &Db,
+    tenant: &Thing,
+    f: &DevolucionFilters,
+) -> DomainResult<Vec<DevolucionDto>> {
+    let mut conds = vec!["tenant = $t".to_string()];
+    if f.order.is_some() {
+        conds.push("order = $o".to_string());
+    }
+    if f.tipo.is_some() {
+        conds.push("tipo = $tp".to_string());
+    }
+    let limit = f.limit.unwrap_or(100).clamp(1, 500);
+    let offset = f.offset.unwrap_or(0).max(0);
+    let sql = format!(
+        "SELECT * FROM devolucion WHERE {} ORDER BY created_at DESC LIMIT {} START {}",
+        conds.join(" AND "),
+        limit,
+        offset
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(o) = &f.order {
+        let ot = surrealdb::sql::thing(o)
+            .map_err(|_| DomainError::Invalid(format!("order id inválido: {o}")))?;
+        qb = qb.bind(("o", ot));
+    }
+    if let Some(tp) = &f.tipo {
+        qb = qb.bind(("tp", tp.clone()));
+    }
+    let rows: Vec<DevolucionRow> = qb.await?.check()?.take(0)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 // --- orders read -----------------------------------------------------------
 
 pub async fn list_orders(db: &Db, tenant: &Thing, f: &OrderFilters) -> DomainResult<Vec<OrderDto>> {

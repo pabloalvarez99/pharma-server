@@ -487,3 +487,213 @@ async fn pos_sale_non_batch_tracked_falls_back_to_product_stock() {
     let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
     assert_eq!(p2.stock, 5);
 }
+
+// --- returns / devoluciones ------------------------------------------------
+
+async fn sell_one(
+    db: &Db,
+    tenant: &Thing,
+    admin_t: &Thing,
+    product_id: &str,
+    product_name: &str,
+    qty: i64,
+    unit_price: &str,
+) -> PosSaleResponse {
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: product_id.to_string(),
+            product_name: product_name.to_string(),
+            quantity: qty,
+            unit_price: dec(unit_price),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("999999")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(db, tenant, Some(admin_t), Some("admin"), None, req)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movement() {
+    let (db, tenant, admin) = setup().await;
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let p = catalog::create_product(&db, &tenant, np("Amoxicilina 500", "3000", 30))
+        .await
+        .unwrap();
+    let sale = sell_one(&db, &tenant, &admin_t, &p.id, &p.name, 5, "3000").await;
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        25
+    );
+
+    let req = NewDevolucion {
+        order: Some(sale.order.id.clone()),
+        tipo: "venta".into(),
+        motivo: "cliente devolvió producto sellado".into(),
+        notas: None,
+        metodo_reembolso: Some("efectivo".into()),
+        items: vec![NewDevolucionItem {
+            product: Some(p.id.clone()),
+            product_name: p.name.clone(),
+            quantity: 2,
+            unit_price: dec("3000"),
+            restock: true,
+        }],
+    };
+    let resp = sales::create_refund(&db, &tenant, Some(&admin_t), req)
+        .await
+        .unwrap();
+
+    assert_eq!(resp.devolucion.total_devuelto, dec("6000"));
+    assert_eq!(resp.items.len(), 1);
+    assert_eq!(resp.stock_movements.len(), 1);
+    assert!(resp.order_marked_refunded);
+    // Restocked: 25 + 2 = 27
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        27
+    );
+    // Order flipped to refunded.
+    let (order, _items) = sales::get_order(&db, &tenant, &sale.order.id)
+        .await
+        .unwrap();
+    assert_eq!(order.status, "refunded");
+    // Listed under returns.
+    let list = sales::list_refunds(&db, &tenant, DevolucionFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(list.len(), 1);
+}
+
+#[tokio::test]
+async fn refund_without_restock_does_not_touch_stock_or_movements() {
+    let (db, tenant, admin) = setup().await;
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let p = catalog::create_product(&db, &tenant, np("Jarabe vencido", "2000", 10))
+        .await
+        .unwrap();
+    let sale = sell_one(&db, &tenant, &admin_t, &p.id, &p.name, 4, "2000").await;
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        6
+    );
+
+    let req = NewDevolucion {
+        order: Some(sale.order.id.clone()),
+        tipo: "garantia".into(),
+        motivo: "producto vencido, no revender".into(),
+        notas: Some("descartar".into()),
+        metodo_reembolso: Some("efectivo".into()),
+        items: vec![NewDevolucionItem {
+            product: Some(p.id.clone()),
+            product_name: p.name.clone(),
+            quantity: 4,
+            unit_price: dec("2000"),
+            restock: false,
+        }],
+    };
+    let resp = sales::create_refund(&db, &tenant, Some(&admin_t), req)
+        .await
+        .unwrap();
+    assert!(resp.stock_movements.is_empty());
+    assert_eq!(resp.devolucion.total_devuelto, dec("8000"));
+    // Stock unchanged (not resellable).
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        6
+    );
+}
+
+#[tokio::test]
+async fn refund_rejected_when_quantity_exceeds_sold() {
+    let (db, tenant, admin) = setup().await;
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let p = catalog::create_product(&db, &tenant, np("Ibuprofeno 600", "1800", 20))
+        .await
+        .unwrap();
+    let sale = sell_one(&db, &tenant, &admin_t, &p.id, &p.name, 3, "1800").await;
+
+    let req = NewDevolucion {
+        order: Some(sale.order.id.clone()),
+        tipo: "venta".into(),
+        motivo: "intento de sobre-devolución".into(),
+        notas: None,
+        metodo_reembolso: None,
+        items: vec![NewDevolucionItem {
+            product: Some(p.id.clone()),
+            product_name: p.name.clone(),
+            quantity: 5,
+            unit_price: dec("1800"),
+            restock: true,
+        }],
+    };
+    let err = sales::create_refund(&db, &tenant, Some(&admin_t), req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+    // Stock untouched by the rejected refund.
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        17
+    );
+}
+
+#[tokio::test]
+async fn refund_restock_without_product_is_rejected() {
+    let (db, tenant, _admin) = setup().await;
+    let admin_t = surrealdb::sql::thing(
+        &db.query(
+            "CREATE user SET tenant=$t, email='b@t.l', password='x', roles=['admin'] RETURN id",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap()
+        .to_string(),
+    )
+    .unwrap();
+    let req = NewDevolucion {
+        order: None,
+        tipo: "error".into(),
+        motivo: "ajuste sin orden".into(),
+        notas: None,
+        metodo_reembolso: None,
+        items: vec![NewDevolucionItem {
+            product: None,
+            product_name: "Genérico".into(),
+            quantity: 1,
+            unit_price: dec("1000"),
+            restock: true,
+        }],
+    };
+    let err = sales::create_refund(&db, &tenant, Some(&admin_t), req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}

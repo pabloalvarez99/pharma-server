@@ -205,6 +205,22 @@ pub struct DevolucionItemDto {
     pub restock: bool,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RefundResponse {
+    pub devolucion: DevolucionDto,
+    pub items: Vec<DevolucionItemDto>,
+    pub stock_movements: Vec<String>,
+    pub order_marked_refunded: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct DevolucionFilters {
+    pub order: Option<String>,
+    pub tipo: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 // --- admin_setting ---------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
