@@ -349,6 +349,69 @@ async fn fulfill_non_batch_tracked_leaves_fulfillment_batches_none() {
     assert!(r.fulfillment_batches.is_none());
 }
 
+/// BACKLOG #2 remainder — semantics seal. A batch-tracked product whose
+/// `product.stock` would cover the line but whose only lot is **expired**
+/// must refuse fulfillment (FEFO planner returns `InsufficientStock`),
+/// leaving the order `accepted` and stock untouched. Before migration `0014`
+/// `fulfill` only checked `product.stock >= qty` and would have shipped
+/// expired stock with no valid lot — this test pins the corrected behavior
+/// so a regression to the legacy path is caught.
+#[tokio::test]
+async fn fulfill_refuses_batch_tracked_when_only_lots_are_expired() {
+    let (db, tenant) = setup().await;
+
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: Thing,
+    }
+    // product.stock = 20 (>= qty 5) but the single active lot is expired.
+    let mut p = db
+        .query(
+            "CREATE product SET tenant=$t, name='X', slug='x', price=1000, \
+             stock=20, active=true RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let pid = p.take::<Option<Row>>(0).unwrap().unwrap().id;
+    db.query("CREATE product_barcode SET tenant=$t, product=$p, barcode='BC-EXPIRED'")
+        .bind(("t", tenant.clone()))
+        .bind(("p", pid.clone()))
+        .await
+        .unwrap();
+    db.query(
+        "CREATE product_batch SET tenant=$t, product=$p, batch_code='OLD', \
+         expiry_date=time::now() - 10d, stock=20, active=true",
+    )
+    .bind(("t", tenant.clone()))
+    .bind(("p", pid.clone()))
+    .await
+    .unwrap();
+
+    let lines_json =
+        r#"[{"barcode":"BC-EXPIRED","qty":5,"unit_price_canonical":1000}]"#.to_string();
+    let mut o = db
+        .query(
+            "CREATE agent_order SET tenant=$t, peer_did='did:pharma:b', \
+             lines_json=$l, total=5000, status='accepted', price_adjusted=false \
+             RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("l", lines_json))
+        .await
+        .unwrap();
+    let oid = o.take::<Option<Row>>(0).unwrap().unwrap().id.to_string();
+
+    let err = service::fulfill(&db, &tenant, &oid).await.unwrap_err();
+    assert_eq!(err.code(), "INSUFFICIENT_STOCK");
+    // Order untouched: still accepted, product.stock intact, no breakdown.
+    assert_eq!(
+        service::get(&db, &tenant, &oid).await.unwrap().status,
+        "accepted"
+    );
+    assert_eq!(product_stock(&db, &pid).await, 20);
+}
+
 #[tokio::test]
 async fn cross_tenant_get_is_not_found() {
     let (db, tenant) = setup().await;
