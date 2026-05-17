@@ -8,8 +8,16 @@
 //! ([`super::repo::apply_sale`]). Products with no active batches keep the
 //! legacy `product.stock`-only path so adoption is opt-in per SKU.
 //!
+//! Prescription create from POS IS wired: each entry in
+//! `PosSaleRequest.prescriptions` is persisted via
+//! `prescriptions::service::create_prescription` after the sale tx commits.
+//! `controlled` defaults to autodetection from `product.active_ingredient`
+//! via [`super::controlled::is_controlled`] when the POS does not send the
+//! flag explicitly. Failures of individual prescription creates surface as
+//! `DomainError` so the caller sees them (the sale already committed; a
+//! human can re-issue the receta from the order).
+//!
 //! Out of scope this slice (deferred — tracked in roadmap):
-//! * Prescription create from POS (needs `prescriptions::service::create_prescription` call).
 //! * Interaction warnings full ruleset port (`super::interactions::check`
 //!   currently returns empty `Vec`).
 //!
@@ -183,11 +191,35 @@ pub async fn post_sale(
         }
     }
 
+    // Prescriptions (Fase 4+: link receta a la venta). One row per input.
+    // Controlled flag autodetected from product.active_ingredient when the
+    // POS leaves it unset.
+    let mut prescription_ids = Vec::with_capacity(req.prescriptions.len());
+    for p in &req.prescriptions {
+        let controlled = match p.controlled {
+            Some(c) => c,
+            None => detect_controlled(db, tenant, p.product.as_deref()).await?,
+        };
+        let new = crate::prescriptions::model::NewPrescription {
+            product: p.product.clone(),
+            customer: req.customer.clone(),
+            patient_name: p.patient_name.clone(),
+            patient_rut: p.patient_rut.clone(),
+            doctor_name: p.doctor_name.clone(),
+            doctor_rut: p.doctor_rut.clone(),
+            controlled,
+            folio: p.folio.clone(),
+            dispensed_at: None,
+        };
+        let dto = crate::prescriptions::service::create_prescription(db, tenant, new).await?;
+        prescription_ids.push(dto.id);
+    }
+
     let resp = PosSaleResponse {
         order: applied.order,
         items: applied.items,
         stock_movements: applied.movement_ids,
-        prescriptions: Vec::new(),
+        prescriptions: prescription_ids,
         loyalty_points_awarded: loyalty_awarded,
         interaction_warnings: super::interactions::check(&[]),
         low_stock_alerts: Vec::new(),
@@ -204,6 +236,37 @@ pub async fn post_sale(
 
 /// Resolve loyalty conversion rate (CLP per point) — read tenant setting or
 /// fall back to [`LOYALTY_CLP_PER_POINT_DEFAULT`].
+/// Look up `product.active_ingredient` and check against the Decreto 404 set
+/// (`super::controlled::is_controlled`). Returns `false` when no product id
+/// was provided or the product row carries no active ingredient.
+async fn detect_controlled(db: &Db, tenant: &Thing, product: Option<&str>) -> DomainResult<bool> {
+    let Some(pid_s) = product else {
+        return Ok(false);
+    };
+    if pid_s.is_empty() {
+        return Ok(false);
+    }
+    let pid = parse_tenant_thing(pid_s, "product")?;
+    #[derive(serde::Deserialize)]
+    struct R {
+        active_ingredient: Option<String>,
+    }
+    let mut r = db
+        .query(
+            "SELECT active_ingredient FROM product \
+             WHERE id = $p AND tenant = $t LIMIT 1",
+        )
+        .bind(("p", pid))
+        .bind(("t", tenant.clone()))
+        .await?
+        .check()?;
+    let row: Option<R> = r.take(0)?;
+    Ok(row
+        .and_then(|r| r.active_ingredient)
+        .map(|ai| super::controlled::is_controlled(Some(&ai)))
+        .unwrap_or(false))
+}
+
 async fn resolve_loyalty_rate(db: &Db, tenant: &Thing) -> DomainResult<i64> {
     let s = repo::get_setting(db, tenant, "loyalty_points_per_clp").await?;
     let rate = s
