@@ -69,8 +69,9 @@ NO acá.
    consulta), operador accept/reject/fulfill (`/api/v1/agent-orders/{id}/...`)
    con stock decrement atómico + audit trail. Pendiente menor: multi-lot/FEFO
    split en path federado (sales ya lo tiene).
-3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
-   lote primario; falta desglose por lote cuando una línea consume varios lotes.
+3. **~~Multi-lot split traceability~~** ✅ (sales path): migración 0013 +
+   `order_item.batches_json` + `OrderItemDto.batches`. Pendiente: replicar en
+   `agent_fulfill` (path federado) — ver BACKLOG #2.
 4. **~~Drug-interactions ruleset port~~** ✅ (Beers + Vademécum CL, 31 reglas).
 5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
    `controlled` autodetectado vía `product.active_ingredient`.
