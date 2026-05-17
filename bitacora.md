@@ -15,12 +15,15 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.6` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-v016` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.6
+- **Versión**: `0.1.7` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-returns` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.7
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
+  - **Devoluciones/refunds**: `POST /api/v1/pos/returns` atómico (devolucion +
+    devolucion_item + restock opcional vía stock_movement; marca order
+    `refunded`; rechaza sobre-devolución). `GET /api/v1/returns` filtrable.
   - Multi-tenant por JWT claim `tenant_id`; auth JWT HS256 + argon2id.
   - SurrealDB embedded `kv-surrealkv`, migraciones append-only con tracking.
   - **Service corre migraciones al arrancar** desde schema embebido (fix
@@ -33,8 +36,8 @@ NO acá.
     `unit_price` del comprador; `price_adjusted` en el ack).
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
-- **Tests**: workspace verde (`cargo test --workspace`), incluye 9 tests
-  `agent_inbox` (2 nuevos de seguridad po.create).
+- **Tests**: workspace verde (`cargo test --workspace`), incluye 14 tests
+  `sales` (4 nuevos de devoluciones) + 9 `agent_inbox`.
 
 ---
 
@@ -51,14 +54,16 @@ NO acá.
 4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
 5. **Prescription desde POS**: crear receta retenida/cheque/controlados ligada
    a la venta (modelo parcial; falta link POS).
-6. **Devolución endpoints**: modelo + migración listos; falta service + API.
-7. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
-8. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
-9. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
-10. **Fase 6**: caja (apertura/cierre/arqueo) + gastos + reportes
-    (ventas/márgenes/rotación/ABC/vencimientos).
-11. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
+6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
+7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
+8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
+9. **Fase 6**: caja (apertura/cierre/arqueo) + gastos + reportes
+   (ventas/márgenes/rotación/ABC/vencimientos).
+10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
+11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
+    branch `feature/marketplace-master-plan`): capa B2B sobre el protocolo
+    federado firmado. Estrategia/locked decisions, sin scaffold aún.
 
 ---
 
@@ -463,3 +468,18 @@ NO acá.
 - **PRs**: #10 mergeado (merge commit `2eed7d5`). Versión 0.1.5 → 0.1.6.
 - **Estado vs goal**: ✅ descargable Windows (release v0.1.6, smoke limpio) · ✅ offline (SurrealKv) · ✅ instala healthy sin CLI (first-run) · ✅ ecosistema agentes comerciando **con integridad de precio** (el proveedor no puede ser estafado vía `unit_price`) · ⏳ fulfillment/settlement + relay offline = siguiente · ⏳ MSI firmado cert + smoke VM limpia = Fase 9 (v1.0.0 vendible) · ⏳ Fase 10 sync online.
 - **Pendiente**: ver `## BACKLOG` al tope (lista priorizada única).
+
+---
+
+## 2026-05-16 — v0.1.7: devoluciones/refunds (cierra ítem BACKLOG, Fase 4 completa POS↔return)
+
+- **Qué**: feature devoluciones end-to-end. `POST /api/v1/pos/returns` + `GET /api/v1/returns`. Modelo + migración `0007` (`devolucion`/`devolucion_item`) ya existían desde Fase 4; faltaban repo+service+API+tests. Release v0.1.7, smoke install limpio.
+- **Por qué**: el ítem "Devolución endpoints" estaba en BACKLOG con modelo/migración listos pero sin lógica. Una farmacia real necesita devoluciones (producto vencido, error de venta, garantía) — sin esto el POS está incompleto. Usuario pidió seguir trabajando autónomamente sobre BACKLOG; este era el ítem de menor riesgo y mayor cierre (no estaba en la exclusión de la sesión v0.1.6).
+- **`repo::apply_refund`** (`crates/domain/src/sales/repo.rs`): un solo `BEGIN; … COMMIT;` — CREATE `devolucion` (id client-gen para vivir dentro de la tx) + N `devolucion_item`; por línea con `restock=true` además `UPDATE product SET stock += qty` + `CREATE stock_movement(reason='return')`; si hay `order` referenciada → `UPDATE order SET status='refunded'` en la misma tx. Índices de statement calculados dinámicamente (restock = +2 statements) para `take(idx)` correcto. **Invariante mantenido**: stock nunca se escribe fuera del audit trail (mismo principio que `apply_sale`).
+- **`service::create_refund`**: valida items no vacío, `qty>0`, `unit_price>=0`, `restock` exige `product` (no se puede reponer un ítem sin SKU — `stock_movement.product` es obligatorio), y si hay `order` rechaza **sobre-devolución** (qty devuelta por producto ≤ qty vendida en esa orden; producto debe pertenecer a la orden). `list_refunds` filtrable por order/tipo, paginado.
+- **API** (`crates/api/src/v1/sales.rs`): `POST /api/v1/pos/returns` roles `admin/owner/cashier` (mostrador procesa devoluciones), `GET /api/v1/returns` bearer. Mismo patrón tenant-scoped que el resto de sales.
+- **Tests** (`crates/domain/tests/sales.rs` +4, total 14): restock devuelve stock + marca order `refunded` + registra movement; no-restock no toca stock ni movements; sobre-devolución (qty>vendido) → `INVALID_INPUT` con stock intacto; restock sin product → `INVALID_INPUT`. Workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Build/MSI/Smoke**: release build (CARGO_TARGET_DIR absoluto). MSI `pharma-server-0.1.7-x86_64.msi` 11,743,232 bytes, sha256 `6ad21a16b248802d4337f2f2938c0175ac6ba371d85fcc5d7e45ac2997536455`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.6, exit 0)→Running→`/`=`{"version":"0.1.7"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.7 --target feature/erp-parity`. PR `feature/erp-parity-returns` → `feature/erp-parity`. Versión 0.1.6 → 0.1.7. Cargo.lock sincronizado en el mismo commit del bump (lección de v0.1.6: no dejar drift toml/lock).
+- **Estado vs goal**: ✅ POS completo (venta + devolución atómicas) · ✅ descargable/offline/first-run/agentes (sin cambios) · ⏳ fulfillment/settlement + relay = siguiente · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace (plan en branch separada).
+- **Pendiente**: ver `## BACKLOG` al tope.
