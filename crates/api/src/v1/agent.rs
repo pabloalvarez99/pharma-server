@@ -119,6 +119,13 @@ async fn inbox(State(state): State<AppState>, body: String) -> axum::response::R
                 return resp;
             }
         },
+        "po.status" => match po_status(&state, &env.from, &env.body).await {
+            Ok(v) => v,
+            Err(resp) => {
+                record_interaction(&state, &env.from, &env.topic, &env.msg_id, "rejected").await;
+                return resp;
+            }
+        },
         other => {
             record_interaction(&state, &env.from, &env.topic, &env.msg_id, "rejected").await;
             return (
@@ -134,6 +141,7 @@ async fn inbox(State(state): State<AppState>, body: String) -> axum::response::R
         "catalog.lookup" => "catalog.match",
         "quote.request" => "quote.response",
         "po.create" => "po.ack",
+        "po.status" => "po.status.result",
         _ => "ack",
     };
     let reply = agent::Envelope::create(
@@ -537,13 +545,15 @@ async fn po_create(
     let mut r = db
         .query(
             "CREATE agent_order SET tenant=$t, peer_did=$p, lines_json=$l, \
-             total=$tot, status='received', buyer_note=$note RETURN AFTER",
+             total=$tot, status='received', buyer_note=$note, \
+             price_adjusted=$pa RETURN AFTER",
         )
         .bind(("t", tenant))
         .bind(("p", peer_did.to_string()))
         .bind(("l", lines_json))
         .bind(("tot", total))
         .bind(("note", buyer_note))
+        .bind(("pa", price_adjusted))
         .await
         .map_err(|e| {
             (
@@ -567,5 +577,88 @@ async fn po_create(
         "total": total,
         "price_adjusted": price_adjusted,
         "lines": canonical_lines,
+    }))
+}
+
+/// `po.status` → `po.status.result`. Body: `{ "order_id": "agent_order:.." }`.
+/// Lets the buyer learn the supplier's decision on an order it placed. The
+/// query is scoped to the caller's own DID (`agent_order.peer_did` == the
+/// signed envelope's `from`) so a peer can never read another buyer's orders —
+/// authenticity is the Ed25519 signature, authorization is DID ownership.
+async fn po_status(
+    state: &AppState,
+    peer_did: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let order_id = body
+        .get("order_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if order_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "body.order_id requerido" })),
+        )
+            .into_response());
+    }
+    let oid = surrealdb::sql::thing(order_id).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("order_id inválido: {order_id}") })),
+        )
+            .into_response()
+    })?;
+    if oid.tb != "agent_order" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "order_id no es un agent_order" })),
+        )
+            .into_response());
+    }
+    let Some(db) = state.db.clone() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "db no disponible" })),
+        )
+            .into_response());
+    };
+
+    #[derive(serde::Deserialize)]
+    struct SRow {
+        status: String,
+        total: f64,
+        currency: String,
+        price_adjusted: bool,
+    }
+    let mut r = db
+        .query(
+            "SELECT status, <float> total AS total, currency, price_adjusted \
+             FROM agent_order WHERE id = $id AND peer_did = $p LIMIT 1",
+        )
+        .bind(("id", oid))
+        .bind(("p", peer_did.to_string()))
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("consulta orden: {e}") })),
+            )
+                .into_response()
+        })?;
+    let srow: Option<SRow> = r.take(0).unwrap_or(None);
+    let Some(s) = srow else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "orden no encontrada para este peer" })),
+        )
+            .into_response());
+    };
+    Ok(json!({
+        "order_id": order_id,
+        "status": s.status,
+        "total": s.total,
+        "currency": s.currency,
+        "price_adjusted": s.price_adjusted,
     }))
 }

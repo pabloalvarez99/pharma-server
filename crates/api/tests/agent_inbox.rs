@@ -385,6 +385,84 @@ async fn po_create_marks_adjusted_when_product_unknown() {
 }
 
 #[tokio::test]
+async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
+    let tdb = spawn_test_db().await;
+    seed_supplier_tenant(&tdb.db, "drogueria-s", true).await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    // Buyer places an order with a bad price → supplier reprices.
+    let buyer = agent::Identity::generate();
+    let create = agent::Envelope::create(
+        &buyer,
+        node_did.clone(),
+        "po-s1",
+        "po.create",
+        serde_json::json!({
+            "tenant": "drogueria-s",
+            "lines": [{ "barcode": "7801234567890", "qty": 3, "unit_price": 1 }]
+        }),
+    );
+    let (status, body) = post_inbox(&app, create.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let ack = agent::Envelope::from_json(&body).unwrap();
+    let order_id = ack.body["order_id"].as_str().unwrap().to_string();
+    assert_eq!(ack.body["price_adjusted"], true);
+
+    // Same buyer polls status: durable price_adjusted + canonical total.
+    let q = agent::Envelope::create(
+        &buyer,
+        node_did.clone(),
+        "po-s2",
+        "po.status",
+        serde_json::json!({ "order_id": order_id }),
+    );
+    let (status, body) = post_inbox(&app, q.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "body={body}");
+    let reply = agent::Envelope::from_json(&body).unwrap();
+    assert_eq!(reply.topic, "po.status.result");
+    reply.verify().expect("signed");
+    assert_eq!(reply.body["status"], "received");
+    assert_eq!(reply.body["price_adjusted"], true);
+    assert_eq!(reply.body["total"], 4470.0); // 3 × canonical 1490
+    assert_eq!(reply.body["currency"], "CLP");
+
+    // A different peer cannot read this order (DID-scoped).
+    let intruder = agent::Identity::generate();
+    let evil = agent::Envelope::create(
+        &intruder,
+        node_did,
+        "po-s3",
+        "po.status",
+        serde_json::json!({ "order_id": order_id }),
+    );
+    let (status, _) = post_inbox(&app, evil.to_json().unwrap()).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "another buyer's DID must not resolve the order"
+    );
+}
+
+#[tokio::test]
+async fn po_status_unknown_order_is_not_found() {
+    let tdb = spawn_test_db().await;
+    let (state, node_did) = node_state(tdb.db.clone());
+    let app = api::build_router(state);
+
+    let peer = agent::Identity::generate();
+    let env = agent::Envelope::create(
+        &peer,
+        node_did,
+        "po-s4",
+        "po.status",
+        serde_json::json!({ "order_id": "agent_order:doesnotexist" }),
+    );
+    let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn unknown_topic_rejected_400() {
     let tdb = spawn_test_db().await;
     let (state, node_did) = node_state(tdb.db.clone());
