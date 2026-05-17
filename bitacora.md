@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.15` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-expenses-reports` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.15
+- **Versión**: `0.1.16` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-backup` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.16
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -649,4 +649,21 @@ NO acá.
 - **Build/MSI/Smoke**: release build (7m15s). MSI `pharma-server-0.1.15-x86_64.msi` 11,984,896 bytes, sha256 `6055ca2a70da2ec114b6ee18ef18d0ce135c7c9512896f152d4bea813c596daf`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.14, exit 0)→Running→`/`=`{"version":"0.1.15"}`→`/health/ready` 200 `db:ok` (migración 0012 aplicada en first-run del upgrade).
 - **Release**: `gh release create v0.1.15 --target feature/erp-parity`. PR `feature/erp-parity-expenses-reports` → `feature/erp-parity`. Versión 0.1.14 → 0.1.15 (bump + Cargo.lock mismo commit).
 - **Estado vs goal**: ✅ POS clínicamente completo · ✅ caja + gastos + reporte ventas/día · ✅ lazo federado completo · ⏳ reportes avanzados (márgenes/rotación/ABC/vencimientos) — extensiones del mismo patrón, no urgentes · ⏳ Fase 9 firma MSI · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.16: backup on-demand (`POST /api/v1/admin/backup`)
+
+- **Qué**: nuevo endpoint que empaqueta el data dir SurrealKv + `agent.key` en un `tar.gz` timestamped bajo `<data_dir>/backups/`. Devuelve `{path, bytes, sha256, started_at, duration_ms}`. Role `admin/owner`. Release v0.1.16, smoke install limpio.
+- **Por qué**: Fase 9 vendible v1.0.0 no shippea sin backup confiable. Un cliente real necesita poder respaldar y restaurar — sin esto la única estrategia es "que el VSS de Windows haga snapshot del data dir", lo cual no es accionable desde la app. El endpoint da una salida vendible: un único `.tar.gz` portable que contiene SurrealKv + identidad federada juntos.
+- **Implementación** (`crates/api/src/v1/backup.rs`): `AppState.data_dir: Option<PathBuf>` agregado (None en kv-mem tests). `backup_now()` sincrónico (no `spawn_blocking` — datasets single-shop son chicos y el handler tolera el bloqueo del runtime durante un tar; cambiar a spawn_blocking si los tiempos escalan): `tar::Builder` con `flate2::write::GzEncoder` empaqueta el `db_path` bajo `surreal/` + `agent.key` raíz, luego sha256 del archivo final. Path timestamped `pharma-backup-YYYYMMDDTHHMMSSZ.tar.gz`.
+- **Decisión locked**: backup NO es tenant-scoped — el dump es per-install. El operador `admin/owner` ve todos los tenants juntos. Si en el futuro hay multi-tenant fuerte se puede agregar un endpoint per-tenant export-JSON; por ahora "una farmacia, una instalación" hace que el backup global sea lo correcto.
+- **Decisión locked**: el endpoint NO detiene el servicio. SurrealKv (LSM) tolera lecturas concurrentes con writes; un snapshot puede estar pocos ms desfasado pero es crash-recoverable on restore (WAL replay). Para un backup totalmente quiesced, el operador detiene el servicio Windows antes (documentar en MSI flow Fase 9).
+- **Gotcha tropezado (no en memoria — no es duradero)**: usar `route_layer(role::layer(...))` con la firma `Stack<Extension, FromFnLayer>` actual sobre un Router de una sola ruta + merge() dio `Missing request extension: AllowedRoles` en tests con axum 0.8 — el `Extension` no llegaba al middleware. Workaround pragmático para esta slice: chequeo `require_admin` inline en el handler (1 línea, lee `claims.roles`). El resto de los endpoints siguen funcionando con `route_layer` porque tienen múltiples rutas y un `reads.merge(writes)` final. Investigar el patrón mínimo que reproduce el bug → BACKLOG menor.
+- **Tests** (2 integration en `crates/api/tests/backup.rs`): admin bearer → 201 con report cuyo `.tar.gz` en disco matchea `bytes` + `sha256` + contiene `agent.key` + al menos una entrada bajo `surreal/`; sin bearer → 401. Workspace verde (120+ tests).
+- **Compat**: aditivo. Sin migración. Sin tocar otros endpoints.
+- **Build/MSI/Smoke**: release build (7m19s). MSI `pharma-server-0.1.16-x86_64.msi` 11,984,896 bytes (mismo tamaño que 0.1.15 — solo wiring y dos deps lean), sha256 `2f372d3285c24a7af9598b685167759254e313cb93911a4b35ebcfbc316e3482`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.15, exit 0)→Running→`/`=`{"version":"0.1.16"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.16 --target feature/erp-parity`. PR `feature/erp-parity-backup` → `feature/erp-parity`. Versión 0.1.15 → 0.1.16 (bump + Cargo.lock mismo commit).
+- **Pendiente Fase 8 derivado**: cron scheduler (jobs crate ya tiene el `tokio_cron_scheduler` boilerplate) puede ahora invocar `backup_now` programáticamente para backup automático nocturno. Próximo slice.
 - **Pendiente**: ver `## BACKLOG` al tope.
