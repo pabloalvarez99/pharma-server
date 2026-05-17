@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.14` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-cash-register` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.14
+- **Versión**: `0.1.15` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-expenses-reports` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.15
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -77,8 +77,9 @@ NO acá.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
-9. **Fase 6** (parcial): ~~caja (apertura/cierre/arqueo)~~ ✅ v0.1.14.
-   Pendiente: gastos + reportes (ventas/márgenes/rotación/ABC/vencimientos).
+9. **Fase 6** (mayormente cerrada): ~~caja~~ ✅ v0.1.14 · ~~gastos + report
+   sales-daily~~ ✅ v0.1.15. Falta: reportes avanzados (márgenes/rotación/ABC/
+   vencimientos) — extensiones sobre el mismo patrón.
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -632,4 +633,20 @@ NO acá.
 - **Build/MSI/Smoke**: release build (7m19s). MSI `pharma-server-0.1.14-x86_64.msi` 11,943,936 bytes (~120 KB más que 0.1.13 por el binario más grande), sha256 `6f75d3cfe87b6bb2e09c9d3c6a960219b9a7ce99755244ab9bddb204107c7fc5`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.13, exit 0)→Running→`/`=`{"version":"0.1.14"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.14 --target feature/erp-parity`. PR `feature/erp-parity-cash-register` → `feature/erp-parity`. Versión 0.1.13 → 0.1.14 (bump + Cargo.lock mismo commit).
 - **Estado vs goal**: ✅ POS completo · ✅ devoluciones · ✅ receta · ✅ alertas interacciones (commit + live) · ✅ caja apertura/cierre/arqueo · ✅ lazo federado completo · ⏳ Fase 6 restante (gastos + reportes) · ⏳ Fase 9 firma MSI · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.15: gastos + reporte sales-daily (Fase 6 mayormente cerrada)
+
+- **Qué**: dos slices para cerrar Fase 6 contable básica. Migración `0012` agrega `expense`. Nuevo `domain::expenses` (model+service) y API `/api/v1/expenses` + `/api/v1/reports/sales-daily`. Release v0.1.15, smoke install limpio.
+- **Por qué**: caja sola no cierra el ciclo financiero del día — el operador necesita registrar gastos (arriendo, luz, sueldos, facturas) y ver ingresos por día para evaluar rentabilidad. Sin esto la app pinta solo el efectivo del cajón, no el negocio.
+- **`expense`** (`migrations/0012_expenses_and_reports.surql`): `category`, `description`, `amount > 0`, `payment_method ∈ {cash, bank, card, transfer}`, opcional `cash_session` (FK a `cash_register_session` — un gasto en efectivo durante un turno cierra naturalmente contra el arqueo), opcional `supplier` (FK), `note`, `created_by`, `incurred_at`, `created_at`. Tres índices: `(tenant, incurred_at)`, `(tenant, cash_session)`, `(tenant, category, incurred_at)`.
+- **`sales_daily`**: rollup `revenue/cash/card/orders` por fecha UTC sobre `order`. Inicialmente intenté `GROUP BY string::slice(<string> created_at, 0, 10)` directo en SurrealQL — falló con `Serialization("expected a string, found 0i64")`. **Gotcha**: en SurrealKv 2.1, el cast `<string> created_at` dentro de un `string::slice` no devuelve un string utilizable como group key — el slice termina re-serializado como int. **Fix**: pull rows + bucket en Rust con `chrono::format("%Y-%m-%d")` + `BTreeMap`. Para datasets single-shop esto es trivial (<10K orders/día); cuando el volumen lo justifique, usar `time::format` directamente.
+- **API**: writes role `admin/owner`, reads bearer. `POST /api/v1/expenses`, `GET /api/v1/expenses[?category&payment_method&from&to&limit&offset]`, `GET /api/v1/reports/sales-daily[?from&to]` (tenant-scoped; `refunded/cancelled` excluidos del reporte).
+- **Tests** (4 kv-mem): create+list filtrable por category (rent) y payment_method (cash); INVALID_INPUT para `amount=0` y `payment_method='bitcoin'`; sales_daily con 3 ventas pos_cash en la misma fecha UTC agrega `orders=3, revenue=3000, cash=3000`, `date` formato `YYYY-MM-DD`; tenant isolation (otro tenant ve lista vacía y reporte vacío). Workspace verde (118 tests totales), clippy `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Migración 0012 embebida (`include_dir!`) → first-run de upgrade aplica sola. Cero cambio al schema de `order`.
+- **Build/MSI/Smoke**: release build (7m15s). MSI `pharma-server-0.1.15-x86_64.msi` 11,984,896 bytes, sha256 `6055ca2a70da2ec114b6ee18ef18d0ce135c7c9512896f152d4bea813c596daf`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.14, exit 0)→Running→`/`=`{"version":"0.1.15"}`→`/health/ready` 200 `db:ok` (migración 0012 aplicada en first-run del upgrade).
+- **Release**: `gh release create v0.1.15 --target feature/erp-parity`. PR `feature/erp-parity-expenses-reports` → `feature/erp-parity`. Versión 0.1.14 → 0.1.15 (bump + Cargo.lock mismo commit).
+- **Estado vs goal**: ✅ POS clínicamente completo · ✅ caja + gastos + reporte ventas/día · ✅ lazo federado completo · ⏳ reportes avanzados (márgenes/rotación/ABC/vencimientos) — extensiones del mismo patrón, no urgentes · ⏳ Fase 9 firma MSI · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
