@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.7` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-returns` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.7
+- **Versión**: `0.1.8` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-po-status` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.8
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -33,11 +33,13 @@ NO acá.
     canonical-JSON, `POST /agent/inbox` (ping, catalog.lookup, quote.request,
     po.create) — opt-in por tenant (`admin_setting federation_enabled`).
   - **`po.create` re-cotiza contra catálogo del proveedor** (no confía en
-    `unit_price` del comprador; `price_adjusted` en el ack).
+    `unit_price` del comprador; `price_adjusted` persistido en `agent_order`).
+  - **`po.status`**: el comprador consulta el estado/decisión de su orden
+    (`{status,total,currency,price_adjusted}`), scoped a su propio DID.
 - **Falta para v1.0.0 vendible**: firma cert Authenticode (anti-SmartScreen) +
   smoke install/uninstall en VM limpia (Fase 9).
 - **Tests**: workspace verde (`cargo test --workspace`), incluye 14 tests
-  `sales` (4 nuevos de devoluciones) + 9 `agent_inbox`.
+  `sales` (devoluciones) + 11 `agent_inbox` (2 nuevos de `po.status`).
 
 ---
 
@@ -47,8 +49,10 @@ NO acá.
 
 1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke
    install/uninstall en VM Windows limpia (sin firma → SmartScreen warning).
-2. **Order fulfillment/settlement agente**: `po.accept`/`po.fulfill` +
-   descuento real de stock vía sales/inventory; cierre del handshake comprador↔proveedor.
+2. **Order fulfillment/settlement agente**: `po.status` ✅ (comprador consulta
+   decisión). Falta: `po.accept`/`po.reject` (acción local del operador
+   proveedor sobre `agent_order`) + `po.fulfill` (descuento real de stock vía
+   sales/inventory) — cierre del handshake comprador↔proveedor.
 3. **Multi-lot split traceability**: hoy `order_item.batch` persiste solo el
    lote primario; falta desglose por lote cuando una línea consume varios lotes.
 4. **Drug-interactions ruleset port** (~370 LoC Beers + Vademécum CL).
@@ -482,4 +486,18 @@ NO acá.
 - **Build/MSI/Smoke**: release build (CARGO_TARGET_DIR absoluto). MSI `pharma-server-0.1.7-x86_64.msi` 11,743,232 bytes, sha256 `6ad21a16b248802d4337f2f2938c0175ac6ba371d85fcc5d7e45ac2997536455`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.6, exit 0)→Running→`/`=`{"version":"0.1.7"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.7 --target feature/erp-parity`. PR `feature/erp-parity-returns` → `feature/erp-parity`. Versión 0.1.6 → 0.1.7. Cargo.lock sincronizado en el mismo commit del bump (lección de v0.1.6: no dejar drift toml/lock).
 - **Estado vs goal**: ✅ POS completo (venta + devolución atómicas) · ✅ descargable/offline/first-run/agentes (sin cambios) · ⏳ fulfillment/settlement + relay = siguiente · ⏳ Fase 9 MSI firmado · ⏳ Fase 10 sync · ⏳ Fase 12 marketplace (plan en branch separada).
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-16 — v0.1.8: `po.status` (comprador consulta decisión) + price_adjusted durable
+
+- **Qué**: topic federado nuevo `po.status` → `po.status.result`. Migración `0010` persiste `price_adjusted` en `agent_order`. Release v0.1.8, smoke install limpio.
+- **Por qué**: tras `po.create` el comprador no tenía forma protocolar de saber la decisión del proveedor ni si su orden fue re-cotizada. Sin esto el "comercio" inter-nodo es ciego del lado comprador. Es el primer paso (de menor riesgo, additive) del ítem #2 del BACKLOG (fulfillment/settlement) — los siguientes (`po.accept`/`po.reject`/`po.fulfill`) implican acción local del operador + descuento real de stock y se dejan para después.
+- **`po.status`** (`crates/api/src/v1/agent.rs`): body `{order_id}` → `{order_id,status,total,currency,price_adjusted}`. **Autorización = propiedad del DID**: la query filtra `agent_order WHERE id=$id AND peer_did=$from` (el `from` del Envelope firmado). Un peer no puede leer órdenes de otro comprador aunque conozca el id. Autenticidad = firma Ed25519; autorización = DID ownership. Decimal→f64 con cast `<float> total` (gotcha conocido). order_id inválido→400, no-agent_order→400, no encontrado/otro DID→404.
+- **Migración 0010**: `DEFINE FIELD price_adjusted ON agent_order TYPE bool DEFAULT false`. `po.create` ahora bindea `price_adjusted=$pa` en el CREATE (antes solo se devolvía en el ack y se perdía). Append-only; embebida vía `include_dir!` (compile-time) → el service la aplica en first-run sin tocar CLI (verificado en smoke: upgrade 0.1.7→0.1.8 aplicó 0010, `/health/ready` db:ok).
+- **Tests** (`crates/api/tests/agent_inbox.rs` +2, total 11): po.create con precio malo → po.status del mismo comprador devuelve `status=received`, `total` canónico (3×1490=4470), `price_adjusted=true`; otro DID → 404; id inexistente → 404. Workspace verde, clippy `-D warnings` clean, fmt clean.
+- **Build/MSI/Smoke**: release build (CARGO_TARGET_DIR absoluto). MSI `pharma-server-0.1.8-x86_64.msi` 11,747,328 bytes, sha256 `8e172b3454fb68ba9961050d5f32af61fce1fb573b17228eba146a36b4d6b2f2`. Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.7, exit 0)→Running→`/`=`{"version":"0.1.8"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.8 --target feature/erp-parity`. PR `feature/erp-parity-po-status` → `feature/erp-parity`. Versión 0.1.7 → 0.1.8 (bump + Cargo.lock mismo commit).
+- **Compat federada**: topic nuevo additive — no cambia `po.create`/`quote.request`/peers ya releasados. Migración additive con DEFAULT (órdenes viejas → `price_adjusted=false`).
 - **Pendiente**: ver `## BACKLOG` al tope.
