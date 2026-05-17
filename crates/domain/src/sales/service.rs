@@ -274,7 +274,7 @@ async fn detect_controlled(db: &Db, tenant: &Thing, product: Option<&str>) -> Do
 /// Load `active_ingredient` for the cart's products (tenant-scoped). Missing
 /// rows or null fields are dropped silently — the interaction check tokenizes
 /// whatever it gets and ignores unknown drugs.
-async fn load_active_ingredients(
+pub async fn load_active_ingredients(
     db: &Db,
     tenant: &Thing,
     products: &[Thing],

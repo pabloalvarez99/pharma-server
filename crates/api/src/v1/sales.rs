@@ -49,6 +49,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/orders", get(list_orders))
         .route("/api/v1/orders/{id}", get(get_order))
         .route("/api/v1/returns", get(list_refunds))
+        .route("/api/v1/interactions/check", post(check_interactions))
         .route("/api/v1/settings/{key}", get(get_setting));
 
     let pos = Router::new()
@@ -152,6 +153,51 @@ async fn list_refunds(
     let tenant = tenant_of(&claims)?;
     let rows = service::list_refunds(db.as_ref(), &tenant, filters).await?;
     Ok(Json(rows))
+}
+
+// --- interactions pre-check ------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct CheckRequest {
+    /// Product record ids (`product:xxx`). Tenant-scoped lookup; missing
+    /// or other-tenant ids are silently dropped.
+    #[serde(default)]
+    products: Vec<String>,
+    /// Free-text ingredients (e.g. from a draft cart line) — useful when
+    /// the POS holds items not yet linked to a product row.
+    #[serde(default)]
+    extra_ingredients: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct CheckResponse {
+    interaction_warnings: Vec<domain::sales::interactions::InteractionDetail>,
+}
+
+/// Preview interactions without committing a sale. The POS calls this when
+/// the cart changes to surface warnings live (badge in UI, etc.).
+async fn check_interactions(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<CheckRequest>,
+) -> Result<Json<CheckResponse>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let mut things: Vec<Thing> = Vec::new();
+    for s in &body.products {
+        if let Ok(t) = surrealdb::sql::thing(s) {
+            if t.tb == "product" {
+                things.push(t);
+            }
+        }
+    }
+    let mut ingredients = service::load_active_ingredients(db.as_ref(), &tenant, &things)
+        .await
+        .unwrap_or_default();
+    ingredients.extend(body.extra_ingredients);
+    Ok(Json(CheckResponse {
+        interaction_warnings: domain::sales::interactions::check(&ingredients),
+    }))
 }
 
 // --- admin_setting CRUD ---------------------------------------------------
