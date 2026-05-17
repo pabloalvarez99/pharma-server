@@ -539,6 +539,52 @@ async fn sell_one(
 }
 
 #[tokio::test]
+async fn purge_expired_idempotency_drops_only_expired_rows() {
+    let (db, tenant, _admin) = setup().await;
+    db.query(
+        "CREATE idempotency_key SET tenant=$t, key='gone', response_json='{}', \
+         status_code=200, expires_at=$e",
+    )
+    .bind(("t", tenant.clone()))
+    .bind((
+        "e",
+        surrealdb::sql::Datetime::from(Utc::now() - Duration::hours(1)),
+    ))
+    .await
+    .unwrap();
+    db.query(
+        "CREATE idempotency_key SET tenant=$t, key='stays', response_json='{}', \
+         status_code=200, expires_at=$e",
+    )
+    .bind(("t", tenant.clone()))
+    .bind((
+        "e",
+        surrealdb::sql::Datetime::from(Utc::now() + Duration::hours(1)),
+    ))
+    .await
+    .unwrap();
+
+    let removed = sales::purge_expired_idempotency(&db).await.unwrap();
+    assert_eq!(removed, 1);
+
+    #[derive(serde::Deserialize)]
+    struct R {
+        key: String,
+    }
+    let mut q = db
+        .query("SELECT key FROM idempotency_key WHERE tenant=$t")
+        .bind(("t", tenant))
+        .await
+        .unwrap();
+    let rows: Vec<R> = q.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "stays");
+
+    let removed = sales::purge_expired_idempotency(&db).await.unwrap();
+    assert_eq!(removed, 0);
+}
+
+#[tokio::test]
 async fn pos_sale_with_prescription_persists_receta_linked_to_customer() {
     let (db, tenant, admin) = setup().await;
     let p = catalog::create_product(&db, &tenant, np("Amoxi 500", "1200", 20))
