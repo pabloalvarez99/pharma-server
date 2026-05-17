@@ -157,6 +157,29 @@ Tabla nueva `agent_interaction` (peer_did, kind, outcome, ts, optional_rating). 
 
 ---
 
+## 3bis. Fase 12 — capa de confianza / marketplace (estrategia)
+
+Las Fases 1-11 entregan ERP vendible + protocolo agente. La **Fase 12** sube un nivel:
+convertir el protocolo firmado existente (`crates/agent/*`, `/agent/inbox`,
+`agent_interaction`, `agent_order`) en un **marketplace B2B de confianza con identidad
+verificable, escrow y reputación portable** — y, a largo plazo, en un riel de
+identidad/liquidación reusable para SMB LATAM.
+
+El análisis fundador/VC/arquitecto completo (validación de mercado, modelo de negocio,
+arquitectura del Trust Hub, identidad/antifraude, GTM Coquimbo/La Serena, roadmap 24
+meses, financiero, riesgos existenciales, visión unicornio) vive en
+**[`docs/marketplace-master-plan.md`](./marketplace-master-plan.md)**.
+
+Resumen ejecutivo: el activo diferencial no es el marketplace sino el protocolo
+federado firmado anclado a un nodo ERP que ya se vende solo; estrategia elegida = B2B
+vertical (farmacia indep. ↔ distribuidor) con ERP como anzuelo; monetización en 3
+capas (ERP SaaS + take rate escrowed + identity-as-a-service); Hub centralizado online
+sobre protocolo federado por debajo (no malla leaderless en v1); **no custodiar
+fondos** (orquestar vía PSP licenciado + Khipu/Fintoc). Documento estratégico, no
+scaffolding — la implementación del Hub es un plan separado posterior.
+
+---
+
 ## 4. Decisiones de arquitectura clave (locked-in vs abierto)
 
 | Tema | Decisión | Estado |
