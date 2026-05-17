@@ -7,6 +7,7 @@ pub mod agent_orders;
 pub mod cash_register;
 pub mod catalog;
 pub mod customers;
+pub mod expenses;
 pub mod inventory;
 pub mod prescriptions;
 pub mod purchasing;
@@ -25,5 +26,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(sales::router(state.clone()))
         .merge(agent_orders::router(state.clone()))
         .merge(cash_register::router(state.clone()))
+        .merge(expenses::router(state.clone()))
         .merge(agent::router(state))
 }
