@@ -400,6 +400,13 @@ async fn quote_request(
 ///    "buyer_note"? }`. Records an inbound `agent_order` (status=received)
 /// and returns its id. Fulfillment/settlement is a later step; this closes
 /// the offer→order handshake so two nodes can transact e2e.
+///
+/// SECURITY: the supplier node MUST NOT trust the buyer-supplied `unit_price`.
+/// Every line is re-quoted against the supplier tenant's catalog (same path as
+/// `quote.request`); the canonical price wins, and the persisted line carries
+/// `unit_price_canonical`. If any line was rewritten (price differed, product
+/// not found, or product inactive), the ack carries `price_adjusted: true` so
+/// the buyer can re-confirm before fulfillment.
 async fn po_create(
     state: &AppState,
     peer_did: &str,
@@ -427,17 +434,101 @@ async fn po_create(
     }
     let (db, tenant) = resolve_federation_tenant(state, slug).await?;
 
+    #[derive(serde::Deserialize)]
+    struct PRow {
+        name: String,
+        price: f64,
+    }
+    let mut canonical_lines: Vec<serde_json::Value> = Vec::with_capacity(lines.len());
     let mut total = 0_f64;
+    let mut price_adjusted = false;
     for l in &lines {
+        let barcode = l.get("barcode").and_then(|v| v.as_str()).unwrap_or("");
         let qty = l.get("qty").and_then(|v| v.as_i64()).unwrap_or(0).max(0);
-        let up = l.get("unit_price").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        total += up * qty as f64;
+        let sent_price = l.get("unit_price").and_then(|v| v.as_f64());
+        if barcode.is_empty() || qty == 0 {
+            price_adjusted = true;
+            canonical_lines.push(json!({
+                "barcode": barcode,
+                "qty": qty,
+                "found": false,
+                "unit_price_sent": sent_price,
+            }));
+            continue;
+        }
+        let mut rb = db
+            .query(
+                "SELECT VALUE product FROM product_barcode \
+                 WHERE tenant = $t AND barcode = $b LIMIT 1",
+            )
+            .bind(("t", tenant.clone()))
+            .bind(("b", barcode.to_string()))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("barcode lookup: {e}") })),
+                )
+                    .into_response()
+            })?;
+        let pids: Vec<surrealdb::sql::Thing> = rb.take(0).unwrap_or_default();
+        let prow: Option<PRow> = match pids.into_iter().next() {
+            None => None,
+            Some(pid) => {
+                let mut r = db
+                    .query(
+                        "SELECT name, <float> price AS price FROM product \
+                         WHERE id = $p AND tenant = $t AND active = true LIMIT 1",
+                    )
+                    .bind(("p", pid))
+                    .bind(("t", tenant.clone()))
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": format!("price lookup: {e}") })),
+                        )
+                            .into_response()
+                    })?;
+                r.take(0).unwrap_or(None)
+            }
+        };
+        match prow {
+            Some(p) => {
+                let canonical_price = p.price;
+                let line_total = canonical_price * qty as f64;
+                total += line_total;
+                let diverged = sent_price
+                    .map(|sp| (sp - canonical_price).abs() > f64::EPSILON)
+                    .unwrap_or(true);
+                if diverged {
+                    price_adjusted = true;
+                }
+                canonical_lines.push(json!({
+                    "barcode": barcode,
+                    "product_name": p.name,
+                    "qty": qty,
+                    "unit_price_sent": sent_price,
+                    "unit_price_canonical": canonical_price,
+                    "line_total": line_total,
+                }));
+            }
+            None => {
+                price_adjusted = true;
+                canonical_lines.push(json!({
+                    "barcode": barcode,
+                    "qty": qty,
+                    "unit_price_sent": sent_price,
+                    "found": false,
+                }));
+            }
+        }
     }
     let buyer_note = body
         .get("buyer_note")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let lines_json = serde_json::to_string(&lines).unwrap_or_else(|_| "[]".into());
+    let lines_json = serde_json::to_string(&canonical_lines).unwrap_or_else(|_| "[]".into());
 
     #[derive(serde::Deserialize)]
     struct ORow {
@@ -474,5 +565,7 @@ async fn po_create(
         "status": "received",
         "currency": "CLP",
         "total": total,
+        "price_adjusted": price_adjusted,
+        "lines": canonical_lines,
     }))
 }
