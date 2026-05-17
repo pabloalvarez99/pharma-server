@@ -8,6 +8,20 @@ pub struct AppConfig {
     pub otlp: OtlpConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub backup: BackupConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BackupConfig {
+    /// Cron expression (`sec min hour day month weekday`, UTC). Empty/None
+    /// disables the scheduler. Recommended: `"0 0 3 * * *"` (every day 03:00).
+    #[serde(default)]
+    pub schedule: Option<String>,
+    /// Retention in days. Backups older than this are pruned after each run.
+    /// `0` = keep forever.
+    #[serde(default)]
+    pub retention_days: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

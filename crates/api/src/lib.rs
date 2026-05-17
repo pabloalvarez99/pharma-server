@@ -171,6 +171,23 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         )
         .with_state(state.clone());
 
+    // Nightly backup scheduler (Fase 8). Spawned only if cfg.backup.schedule
+    // is set; tokio_cron_scheduler runs on its own task and won't block the
+    // axum serve loop.
+    if let Some(schedule) = cfg.backup.schedule.as_ref().filter(|s| !s.is_empty()) {
+        if let Some(db_path) = state.data_dir.clone() {
+            let retention = cfg.backup.retention_days;
+            let sched = schedule.clone();
+            tokio::spawn(async move {
+                if let Err(e) = spawn_backup_scheduler(sched, db_path, retention).await {
+                    tracing::error!(error = %e, "backup scheduler failed to start");
+                }
+            });
+        } else {
+            tracing::warn!("backup schedule configured but data_dir missing; scheduler skipped");
+        }
+    }
+
     let app = build_router(state).merge(metrics_router).layer(prom_layer);
 
     let addr: SocketAddr = cfg.bind.parse()?;
@@ -178,6 +195,58 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// Background backup scheduler. Runs `backup_now` on the given cron
+/// expression (`tokio_cron_scheduler` syntax: `sec min hour day month
+/// weekday`, UTC). After each successful run, prunes backups older than
+/// `retention_days` (0 = keep forever). Errors are logged; the loop keeps
+/// running so transient FS issues don't kill the schedule.
+async fn spawn_backup_scheduler(
+    schedule: String,
+    db_path: std::path::PathBuf,
+    retention_days: u32,
+) -> anyhow::Result<()> {
+    let sched = tokio_cron_scheduler::JobScheduler::new().await?;
+    let job_path = db_path.clone();
+    let job = tokio_cron_scheduler::Job::new_async(schedule.as_str(), move |_uuid, _l| {
+        let p = job_path.clone();
+        Box::pin(async move {
+            let p_run = p.clone();
+            let result = tokio::task::spawn_blocking(move || v1::backup_now(&p_run)).await;
+            match result {
+                Ok(Ok(rep)) => {
+                    tracing::info!(
+                        path = %rep.path, bytes = rep.bytes, sha256 = %rep.sha256,
+                        duration_ms = rep.duration_ms,
+                        "scheduled backup completed"
+                    );
+                }
+                Ok(Err(e)) => tracing::error!(error = %e, "scheduled backup failed"),
+                Err(e) => tracing::error!(error = %e, "scheduled backup task panicked"),
+            }
+            if retention_days > 0 {
+                let p_prune = p.clone();
+                if let Ok(Ok(removed)) = tokio::task::spawn_blocking(move || {
+                    v1::prune_backups(&p_prune, retention_days)
+                })
+                .await
+                {
+                    if removed > 0 {
+                        tracing::info!(removed, "pruned old backups");
+                    }
+                }
+            }
+        })
+    })?;
+    sched.add(job).await?;
+    sched.start().await?;
+    tracing::info!(%schedule, retention_days, "backup scheduler started");
+    // Keep the scheduler alive for the lifetime of the process by holding it
+    // here on a long-lived task that never returns.
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
 }
 
 pub fn default_config() -> pharma_core::config::AppConfig {
@@ -198,6 +267,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
             service_name: "pharma-api".into(),
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
+        backup: pharma_core::config::BackupConfig::default(),
     }
 }
 
