@@ -250,3 +250,103 @@ async fn tenant_isolation_for_expenses_and_reports() {
         .unwrap();
     assert!(other_rep.is_empty());
 }
+
+async fn seed_batch(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    code: &str,
+    expiry_expr: &str,
+    stock: i64,
+    active: bool,
+) {
+    db.query(format!(
+        "CREATE product_batch SET tenant=$t, product=$p, batch_code=$c, \
+         expiry_date={expiry_expr}, stock=$s, active=$a"
+    ))
+    .bind(("t", tenant.clone()))
+    .bind(("p", product.clone()))
+    .bind(("c", code.to_string()))
+    .bind(("s", stock))
+    .bind(("a", active))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+}
+
+#[tokio::test]
+async fn near_expiry_window_sort_expired_and_exclusions() {
+    let (db, tenant, _user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
+        .await
+        .unwrap();
+    let pid = Thing::from_str(&p.id).unwrap();
+
+    seed_batch(&db, &tenant, &pid, "SOON", "time::now() + 10d", 5, true).await;
+    seed_batch(&db, &tenant, &pid, "EDGE", "time::now() + 25d", 3, true).await;
+    seed_batch(&db, &tenant, &pid, "FAR", "time::now() + 200d", 9, true).await;
+    seed_batch(&db, &tenant, &pid, "EXPIRED", "time::now() - 5d", 2, true).await;
+    seed_batch(&db, &tenant, &pid, "INACTIVE", "time::now() + 1d", 7, false).await;
+    seed_batch(&db, &tenant, &pid, "ZERO", "time::now() + 1d", 0, true).await;
+
+    // Default 30d window: EXPIRED + SOON + EDGE; FAR/INACTIVE/ZERO excluded.
+    let rows = service::near_expiry(&db, &tenant, NearExpiryFilters::default())
+        .await
+        .unwrap();
+    let codes: Vec<&str> = rows.iter().map(|r| r.batch_code.as_str()).collect();
+    assert_eq!(
+        codes,
+        vec!["EXPIRED", "SOON", "EDGE"],
+        "sorted by expiry asc"
+    );
+
+    assert!(rows[0].expired);
+    assert!(rows[0].days_to_expiry < 0, "EXPIRED has negative days");
+    assert_eq!(rows[0].stock, 2);
+    assert_eq!(rows[0].product_name, "P");
+    assert_eq!(rows[0].product_id, p.id);
+
+    assert!(!rows[1].expired);
+    assert!(
+        (9..=10).contains(&rows[1].days_to_expiry),
+        "SOON ~10 days, got {}",
+        rows[1].days_to_expiry
+    );
+
+    // Wide window pulls FAR in too.
+    let wide = service::near_expiry(&db, &tenant, NearExpiryFilters { days: Some(365) })
+        .await
+        .unwrap();
+    assert_eq!(wide.len(), 4);
+    assert_eq!(wide.last().unwrap().batch_code, "FAR");
+
+    // days=0 → only batches expiring at/before now.
+    let none_future = service::near_expiry(&db, &tenant, NearExpiryFilters { days: Some(0) })
+        .await
+        .unwrap();
+    assert_eq!(none_future.len(), 1);
+    assert_eq!(none_future[0].batch_code, "EXPIRED");
+}
+
+#[tokio::test]
+async fn near_expiry_tenant_scoped() {
+    let (db, tenant, _user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
+        .await
+        .unwrap();
+    let pid = Thing::from_str(&p.id).unwrap();
+    seed_batch(&db, &tenant, &pid, "SOON", "time::now() + 5d", 5, true).await;
+
+    let other: Thing = db
+        .query("CREATE tenant SET name='O', slug='o' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let seen = service::near_expiry(&db, &other, NearExpiryFilters::default())
+        .await
+        .unwrap();
+    assert!(seen.is_empty(), "other tenant sees no batches");
+}
