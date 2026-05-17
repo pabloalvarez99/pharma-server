@@ -37,6 +37,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/agent-orders/{id}", get(get_one))
         .route("/api/v1/agent-orders/{id}/accept", post(accept))
         .route("/api/v1/agent-orders/{id}/reject", post(reject))
+        .route("/api/v1/agent-orders/{id}/fulfill", post(fulfill))
         .route_layer(crate::role::layer(state, OP_ROLES))
 }
 
@@ -82,4 +83,14 @@ async fn reject(
     Ok(Json(
         service::decide(db.as_ref(), &tenant, &id, "rejected").await?,
     ))
+}
+
+async fn fulfill(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<AgentOrderDto>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    Ok(Json(service::fulfill(db.as_ref(), &tenant, &id).await?))
 }

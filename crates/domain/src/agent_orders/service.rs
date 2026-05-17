@@ -117,3 +117,103 @@ pub async fn decide(
         .check()?;
     get(db, tenant, id).await
 }
+
+/// Fulfill an `accepted` order: decrement the supplier tenant's stock for
+/// every catalogued line and append an audit `stock_movement(reason=
+/// 'agent_fulfill')`, then flip the order to `fulfilled` — all in one
+/// `BEGIN/COMMIT` so a crash can't ship stock without recording it (the
+/// `product.stock = SUM(stock_movement.delta)` invariant holds).
+///
+/// Only legal from `accepted` (a rejected/received/fulfilled order cannot be
+/// shipped). Stock is validated up-front: if any line lacks a catalogued
+/// product or has insufficient stock the whole fulfillment is refused and the
+/// order stays `accepted`. Batch/FEFO split is out of scope here (see BACKLOG
+/// multi-lot) — agent fulfillment decrements `product.stock` only.
+pub async fn fulfill(db: &Db, tenant: &Thing, id: &str) -> DomainResult<AgentOrderDto> {
+    let current = get(db, tenant, id).await?;
+    if current.status != "accepted" {
+        return Err(DomainError::Conflict(format!(
+            "orden en estado '{}' no puede pasar a 'fulfilled' (solo desde 'accepted')",
+            current.status
+        )));
+    }
+
+    let lines = current
+        .lines
+        .as_array()
+        .cloned()
+        .ok_or_else(|| DomainError::Invalid("lines_json no es un array".into()))?;
+
+    #[derive(Deserialize)]
+    struct Prod {
+        id: Thing,
+        stock: i64,
+    }
+    // Resolve + stock-check every catalogued line before any write.
+    let mut plan: Vec<(Thing, i64)> = Vec::new();
+    for l in &lines {
+        if l.get("found").and_then(|v| v.as_bool()) == Some(false) {
+            continue;
+        }
+        let barcode = l.get("barcode").and_then(|v| v.as_str()).unwrap_or("");
+        let qty = l.get("qty").and_then(|v| v.as_i64()).unwrap_or(0);
+        if barcode.is_empty() || qty <= 0 {
+            continue;
+        }
+        let mut rb = db
+            .query(
+                "SELECT VALUE product FROM product_barcode \
+                 WHERE tenant = $t AND barcode = $b LIMIT 1",
+            )
+            .bind(("t", tenant.clone()))
+            .bind(("b", barcode.to_string()))
+            .await?
+            .check()?;
+        let pids: Vec<Thing> = rb.take(0)?;
+        let pid = pids.into_iter().next().ok_or_else(|| {
+            DomainError::Invalid(format!("producto no catalogado para barcode {barcode}"))
+        })?;
+        let mut rp = db
+            .query(
+                "SELECT id, stock FROM product \
+                 WHERE id = $p AND tenant = $t AND active = true LIMIT 1",
+            )
+            .bind(("p", pid))
+            .bind(("t", tenant.clone()))
+            .await?
+            .check()?;
+        let prod: Option<Prod> = rp.take(0)?;
+        let prod =
+            prod.ok_or_else(|| DomainError::Invalid(format!("producto inactivo: {barcode}")))?;
+        if prod.stock < qty {
+            return Err(DomainError::InsufficientStock);
+        }
+        plan.push((prod.id, qty));
+    }
+
+    let oid =
+        thing(id).map_err(|_| DomainError::Invalid(format!("agent_order id inválido: {id}")))?;
+    let mut q = String::from("BEGIN; ");
+    for i in 0..plan.len() {
+        q.push_str(&format!(
+            "UPDATE product SET stock = stock - $q{i} WHERE id = $p{i} AND tenant = $t; \
+             CREATE stock_movement SET tenant=$t, product=$p{i}, delta = 0 - $q{i}, \
+                reason='agent_fulfill', ref=$ref; ",
+        ));
+    }
+    q.push_str("UPDATE agent_order SET status='fulfilled' WHERE id=$o AND tenant=$t; COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("o", oid))
+        .bind(("ref", id.to_string()));
+    for (i, (pid, qty)) in plan.iter().enumerate() {
+        qb = qb
+            .bind((format!("p{i}"), pid.clone()))
+            .bind((format!("q{i}"), *qty));
+    }
+    qb.await?.check()?;
+
+    get(db, tenant, id).await
+}
