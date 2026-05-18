@@ -273,3 +273,184 @@ async fn tenant_isolation() {
         .unwrap();
     assert!(seen.is_empty(), "tenant 2 must not see tenant 1 suppliers");
 }
+
+// --- purchase orders (Fase 5-full, BACKLOG #8 slice 1) ---------------------
+
+fn po_item(product: Option<&str>, name: &str, qty: i64, cost: &str) -> NewPurchaseOrderItem {
+    NewPurchaseOrderItem {
+        product: product.map(str::to_string),
+        product_name: name.into(),
+        quantity: qty,
+        unit_cost: dec(cost),
+    }
+}
+
+#[tokio::test]
+async fn po_create_persists_header_lines_and_total_then_get_roundtrips() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("Paracetamol", "1990", Some("900")))
+        .await
+        .unwrap();
+
+    let input = NewPurchaseOrder {
+        supplier: s.id.clone(),
+        currency: None,
+        notes: Some("reposición mensual".into()),
+        external_ref: Some("OC-001".into()),
+        items: vec![
+            po_item(Some(&prod.id), "Paracetamol", 10, "900"),
+            po_item(None, "Bolsas despacho", 200, "5"),
+        ],
+    };
+    let po = service::create_purchase_order(&db, &t, input)
+        .await
+        .unwrap();
+
+    assert_eq!(po.status, "draft");
+    assert_eq!(po.currency, "CLP");
+    assert_eq!(po.supplier, s.id);
+    assert_eq!(po.items.len(), 2);
+    // total = 10*900 + 200*5 = 9000 + 1000 = 10000.
+    assert_eq!(po.total, dec("10000"));
+    let line0 = po.items.iter().find(|i| i.product.is_some()).unwrap();
+    assert_eq!(line0.product.as_deref(), Some(prod.id.as_str()));
+    assert_eq!(line0.subtotal, dec("9000"));
+    let line1 = po.items.iter().find(|i| i.product.is_none()).unwrap();
+    assert_eq!(line1.product_name, "Bolsas despacho");
+    assert_eq!(line1.subtotal, dec("1000"));
+
+    // get returns the same document with its lines.
+    let got = service::get_purchase_order(&db, &t, &po.id).await.unwrap();
+    assert_eq!(got.id, po.id);
+    assert_eq!(got.total, dec("10000"));
+    assert_eq!(got.items.len(), 2);
+    assert_eq!(got.notes.as_deref(), Some("reposición mensual"));
+}
+
+#[tokio::test]
+async fn po_create_rejects_empty_items_bad_qty_and_negative_cost() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("S"))
+        .await
+        .unwrap();
+
+    let empty = NewPurchaseOrder {
+        supplier: s.id.clone(),
+        currency: None,
+        notes: None,
+        external_ref: None,
+        items: vec![],
+    };
+    assert_eq!(
+        service::create_purchase_order(&db, &t, empty)
+            .await
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+
+    let bad_qty = NewPurchaseOrder {
+        supplier: s.id.clone(),
+        currency: None,
+        notes: None,
+        external_ref: None,
+        items: vec![po_item(None, "X", 0, "100")],
+    };
+    assert_eq!(
+        service::create_purchase_order(&db, &t, bad_qty)
+            .await
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+
+    let neg_cost = NewPurchaseOrder {
+        supplier: s.id,
+        currency: None,
+        notes: None,
+        external_ref: None,
+        items: vec![po_item(None, "X", 1, "-5")],
+    };
+    assert_eq!(
+        service::create_purchase_order(&db, &t, neg_cost)
+            .await
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+}
+
+#[tokio::test]
+async fn po_create_rejects_supplier_from_other_tenant() {
+    let (db, t1) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let t2: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+    let foreign = service::create_supplier(&db, &t2, new_supplier("Foreign"))
+        .await
+        .unwrap();
+
+    let input = NewPurchaseOrder {
+        supplier: foreign.id,
+        currency: None,
+        notes: None,
+        external_ref: None,
+        items: vec![po_item(None, "X", 1, "100")],
+    };
+    // Cross-tenant supplier must not be resolvable from t1.
+    assert_eq!(
+        service::create_purchase_order(&db, &t1, input)
+            .await
+            .unwrap_err()
+            .code(),
+        "INVALID_INPUT"
+    );
+}
+
+#[tokio::test]
+async fn po_list_filters_by_status_and_is_tenant_scoped() {
+    let (db, t1) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let t2: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+
+    let s = service::create_supplier(&db, &t1, new_supplier("S"))
+        .await
+        .unwrap();
+    service::create_purchase_order(
+        &db,
+        &t1,
+        NewPurchaseOrder {
+            supplier: s.id.clone(),
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(None, "X", 1, "100")],
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut f = PurchaseOrderFilters::default();
+    let all = service::list_purchase_orders(&db, &t1, f.clone())
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 1);
+    assert!(all[0].items.is_empty(), "list is header-only");
+
+    f.status = Some("received".into());
+    let none = service::list_purchase_orders(&db, &t1, f).await.unwrap();
+    assert!(none.is_empty(), "no draft matches status=received");
+
+    let other = service::list_purchase_orders(&db, &t2, PurchaseOrderFilters::default())
+        .await
+        .unwrap();
+    assert!(other.is_empty(), "tenant 2 must not see tenant 1 POs");
+}
