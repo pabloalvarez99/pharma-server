@@ -39,6 +39,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/suppliers", post(create_supplier))
         .route("/api/v1/purchase-orders", post(create_purchase_order))
         .route(
+            "/api/v1/purchase-orders/{id}/receive",
+            post(receive_purchase_order),
+        )
+        .route(
             "/api/v1/suppliers/{id}",
             axum::routing::patch(update_supplier).delete(delete_supplier),
         )
@@ -180,6 +184,18 @@ async fn create_purchase_order(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::create_purchase_order(&db, &t, input).await?))
+}
+
+async fn receive_purchase_order(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<PurchaseOrderDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(
+        service::receive_purchase_order(&db, &t, &id, Some(&claims.sub)).await?,
+    ))
 }
 
 // --- CSV import ------------------------------------------------------------

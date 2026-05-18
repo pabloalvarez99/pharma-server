@@ -454,3 +454,199 @@ async fn po_list_filters_by_status_and_is_tenant_scoped() {
         .unwrap();
     assert!(other.is_empty(), "tenant 2 must not see tenant 1 POs");
 }
+
+// --- purchase order receipt (Fase 5-full, BACKLOG #8 slice 2) --------------
+
+async fn product_stock_cost(db: &Db, pid: &str) -> (i64, Option<Decimal>) {
+    #[derive(serde::Deserialize)]
+    struct R {
+        stock: i64,
+        cost_price: Option<Decimal>,
+    }
+    let t = surrealdb::sql::thing(pid).unwrap();
+    let mut r = db
+        .query("SELECT stock, cost_price FROM product WHERE id = $id LIMIT 1")
+        .bind(("id", t))
+        .await
+        .unwrap();
+    let row: Option<R> = r.take(0).unwrap();
+    let row = row.unwrap();
+    (row.stock, row.cost_price)
+}
+
+#[tokio::test]
+async fn po_receive_bumps_stock_recomputes_wac_logs_movement_and_marks_received() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    // Seed: 10 units at cost 100 (old WAC). Receipt: 30 units at cost 200.
+    // New WAC = (10*100 + 30*200) / 40 = 7000 / 40 = 175.
+    let prod = catalog::create_product(&db, &t, new_product("Paracetamol", "1990", Some("100")))
+        .await
+        .unwrap();
+    let pid_thing = surrealdb::sql::thing(&prod.id).unwrap();
+    // Seed stock=10 directly (Fase 3 inventory not in scope here).
+    db.query("UPDATE product SET stock = 10 WHERE id = $p")
+        .bind(("p", pid_thing.clone()))
+        .await
+        .unwrap();
+
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id.clone(),
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "Paracetamol", 30, "200")],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(po.status, "draft");
+
+    let recv = service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+    assert_eq!(recv.status, "received");
+    let (stock, cost) = product_stock_cost(&db, &prod.id).await;
+    assert_eq!(stock, 40);
+    assert_eq!(cost, Some(dec("175")));
+
+    // Audit: one movement with reason=purchase_receipt, delta=+30, ref=po_id.
+    #[derive(serde::Deserialize)]
+    struct Mov {
+        delta: i64,
+        reason: String,
+        #[serde(rename = "ref")]
+        reff: Option<String>,
+    }
+    let mut q = db
+        .query("SELECT delta, reason, ref FROM stock_movement WHERE tenant = $t")
+        .bind(("t", t.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Mov> = q.take(0).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].delta, 30);
+    assert_eq!(rows[0].reason, "purchase_receipt");
+    assert_eq!(rows[0].reff.as_deref(), Some(po.id.as_str()));
+}
+
+#[tokio::test]
+async fn po_receive_first_receipt_seeds_cost_price_without_diluting_to_zero() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("S"))
+        .await
+        .unwrap();
+    // Product with NO cost_price. First receipt must seed cost to line avg
+    // (not (0*0 + 10*500)/10 which is 500 by accident — but break if we
+    // multiplied by old_cost=None=0 and then divided by total). Here:
+    // 5 units at 300 + 5 units at 700 = Σcost 5000, qty 10, avg 500.
+    let prod = catalog::create_product(&db, &t, new_product("X", "1000", None))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![
+                po_item(Some(&prod.id), "X", 5, "300"),
+                po_item(Some(&prod.id), "X", 5, "700"),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+
+    // Aggregated into ONE movement per product, not two.
+    #[derive(serde::Deserialize)]
+    struct Mov {
+        delta: i64,
+    }
+    let mut q = db
+        .query("SELECT delta FROM stock_movement WHERE tenant = $t")
+        .bind(("t", t.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Mov> = q.take(0).unwrap();
+    assert_eq!(rows.len(), 1, "two lines on same product → one movement");
+    assert_eq!(rows[0].delta, 10);
+
+    let (stock, cost) = product_stock_cost(&db, &prod.id).await;
+    assert_eq!(stock, 10);
+    assert_eq!(cost, Some(dec("500")));
+}
+
+#[tokio::test]
+async fn po_receive_skips_free_text_lines() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("S"))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(None, "Bolsas despacho", 100, "5")],
+        },
+    )
+    .await
+    .unwrap();
+    let recv = service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+    assert_eq!(recv.status, "received");
+    // No catalogued line → no stock_movement.
+    let mut q = db
+        .query("SELECT count() AS n FROM stock_movement WHERE tenant = $t GROUP ALL")
+        .bind(("t", t.clone()))
+        .await
+        .unwrap();
+    let n: Option<i64> = q.take((0, "n")).unwrap();
+    assert_eq!(n.unwrap_or(0), 0);
+}
+
+#[tokio::test]
+async fn po_receive_refuses_when_not_draft() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("S"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("X", "100", Some("50")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "X", 1, "50")],
+        },
+    )
+    .await
+    .unwrap();
+    service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+    let err = service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}

@@ -292,6 +292,92 @@ pub async fn get_purchase_order(
         .ok_or(DomainError::NotFound)
 }
 
+/// Receive a `draft` purchase order (BACKLOG #8 slice 2): for each catalogued
+/// line bump `product.stock` by the line `quantity`, recompute
+/// `product.cost_price` as the weighted average cost
+/// `(old_stock·old_cost + Σqty·unit_cost) / (old_stock + Σqty)`, append an
+/// audit `stock_movement(reason='purchase_receipt', ref=po_id)`, and flip
+/// the PO to `received` — all in one `BEGIN/COMMIT` so a crash can't bump
+/// stock without the movement (mirrors `sales::repo::apply_sale`; preserves
+/// the `product.stock = SUM(stock_movement.delta)` invariant).
+///
+/// Free-text lines (no `product`) are accounting-only — they don't move
+/// stock. Multiple lines on the same product are aggregated before the WAC
+/// computation. WAC base: if `old_cost is None`, treat it as the line
+/// `unit_cost` so a first receipt seeds `cost_price` without diluting it
+/// with a phantom zero.
+///
+/// Receipt is one-shot per PO (status must be `draft`). Partial receipt and
+/// receipt of an inactive product are out of scope for this slice;
+/// accounts-payable (`purchase_payment`) stays deferred to slice 3.
+pub async fn receive_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+    admin: Option<&str>,
+) -> DomainResult<PurchaseOrderDto> {
+    let po = parse_typed(id, "purchase_order")?;
+    let current = repo::get_purchase_order(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if current.status != "draft" {
+        return Err(DomainError::Conflict(format!(
+            "orden en estado '{}' no puede pasar a 'received' (solo desde 'draft')",
+            current.status
+        )));
+    }
+
+    // Aggregate catalogued lines per product so a PO with two lines on the
+    // same product still produces one WAC recompute + one stock_movement.
+    use std::collections::BTreeMap;
+    let mut buckets: BTreeMap<String, (Thing, i64, Decimal)> = BTreeMap::new();
+    for line in &current.items {
+        let Some(pid_str) = line.product.as_deref() else {
+            continue;
+        };
+        let pid = parse_typed(pid_str, "product")?;
+        let entry = buckets
+            .entry(pid_str.to_string())
+            .or_insert_with(|| (pid, 0i64, Decimal::ZERO));
+        entry.1 += line.quantity;
+        // Σ(qty · unit_cost), accumulated for the weighted average.
+        entry.2 += line.unit_cost * Decimal::from(line.quantity);
+    }
+
+    let mut effects = Vec::with_capacity(buckets.len());
+    for (_pid_str, (pid, add_qty, cost_sum)) in buckets {
+        let (old_stock, old_cost_opt) = repo::product_stock_cost(db, tenant, &pid)
+            .await?
+            .ok_or_else(|| {
+                DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
+            })?;
+        let line_avg_cost = cost_sum / Decimal::from(add_qty);
+        let new_cost = match old_cost_opt {
+            // No prior cost → first receipt seeds the cost with the line
+            // average; otherwise old_cost weight would dilute to zero.
+            None => line_avg_cost,
+            Some(_) if old_stock <= 0 => line_avg_cost,
+            Some(old_cost) => {
+                let total_qty = Decimal::from(old_stock + add_qty);
+                (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
+            }
+        };
+        effects.push(repo::ReceiveEffect {
+            product: pid,
+            add_qty,
+            new_cost,
+        });
+    }
+
+    let admin_thing = match admin {
+        Some(a) if !a.is_empty() => Some(parse_thing(a)?),
+        _ => None,
+    };
+    repo::receive_purchase_order(db, tenant, &po, admin_thing, &effects)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

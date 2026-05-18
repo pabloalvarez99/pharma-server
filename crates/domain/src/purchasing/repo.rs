@@ -644,3 +644,75 @@ pub async fn get_purchase_order(
     let items: Vec<PurchaseOrderItemRow> = ri.take(0)?;
     Ok(Some(po_dto(header, items)))
 }
+
+/// Current `(stock, cost_price)` for a tenant-scoped product, or `None` if it
+/// doesn't belong to the tenant. Used by receipt to compute weighted average
+/// cost before the atomic stock bump.
+pub async fn product_stock_cost(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+) -> DomainResult<Option<(i64, Option<Decimal>)>> {
+    #[derive(Deserialize)]
+    struct Row {
+        stock: i64,
+        cost_price: Option<Decimal>,
+    }
+    let mut r = db
+        .query("SELECT stock, cost_price FROM product WHERE id = $id AND tenant = $t LIMIT 1")
+        .bind(("id", product.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let row: Option<Row> = r.take(0)?;
+    Ok(row.map(|r| (r.stock, r.cost_price)))
+}
+
+/// One per-product receipt effect: aggregate `add_qty` to receive and the
+/// recomputed weighted average `new_cost` (already computed by the service).
+pub struct ReceiveEffect {
+    pub product: Thing,
+    pub add_qty: i64,
+    pub new_cost: Decimal,
+}
+
+/// Atomically post a purchase-order receipt: for every catalogued product
+/// bump `product.stock`, set the new WAC `cost_price`, and append an audit
+/// `stock_movement(reason='purchase_receipt')`; then flip the PO to
+/// `received`. One `BEGIN/COMMIT` so a crash can't bump stock without the
+/// movement or leave the PO half-received (mirrors `sales::repo::apply_sale`
+/// / `agent_orders` fulfill — keeps `product.stock = SUM(stock_movement.delta)`).
+pub async fn receive_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+    admin: Option<Thing>,
+    effects: &[ReceiveEffect],
+) -> DomainResult<Option<PurchaseOrderDto>> {
+    let mut q = String::from("BEGIN; ");
+    for i in 0..effects.len() {
+        q.push_str(&format!(
+            "UPDATE product SET stock = stock + $q{i}, cost_price = $c{i} \
+                WHERE id = $p{i} AND tenant = $t; \
+             CREATE stock_movement SET tenant=$t, product=$p{i}, delta=$q{i}, \
+                reason='purchase_receipt', admin=$adm, ref=$ref; ",
+        ));
+    }
+    q.push_str("UPDATE purchase_order SET status='received' WHERE id=$po AND tenant=$t; ");
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("po", po.clone()))
+        .bind(("adm", admin))
+        .bind(("ref", po.to_string()));
+    for (i, e) in effects.iter().enumerate() {
+        qb = qb
+            .bind((format!("p{i}"), e.product.clone()))
+            .bind((format!("q{i}"), e.add_qty))
+            .bind((format!("c{i}"), dec_val(e.new_cost)));
+    }
+    qb.await?.check()?;
+
+    get_purchase_order(db, tenant, po).await
+}
