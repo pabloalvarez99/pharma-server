@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.20` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-margins-daily` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.20
+- **Versión**: `0.1.21` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-top-products` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.21
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -57,7 +57,10 @@ NO acá.
   - **Reportes**: `GET /api/v1/reports/sales-daily` (rollup diario UTC),
     `GET /api/v1/reports/margins-daily` (revenue Σ`order_item.subtotal` −
     cost Σ`qty×product.cost_price`; `margin`, `margin_pct` 2dp,
-    `items_without_cost` honesto; refunded/cancelled excluidos) y
+    `items_without_cost` honesto; refunded/cancelled excluidos),
+    `GET /api/v1/reports/top-products?limit=N` (ranking qty+revenue +
+    clasificación ABC Pareto A≤80%/B≤95%/C sobre revenue acumulado del
+    ranking completo, `limit` trunca después) y
     `GET /api/v1/reports/near-expiry?days=N` (lotes por vencer/vencidos con
     stock, default 30d, ordenados por `expiry_date` asc, días-a-vencer
     firmado; tenant-scoped, solo `active` + `stock>0`).
@@ -91,8 +94,8 @@ NO acá.
 8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
 9. **Fase 6** (mayormente cerrada): ~~caja~~ ✅ v0.1.14 · ~~gastos + report
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
-   ✅ v0.1.20. Falta: reportes avanzados restantes (rotación/ABC/top-products)
-   — extensiones del mismo patrón.
+   ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21. Falta: `stock-rotation`
+   (turnover = qty_sold / avg_stock) — última extensión del mismo patrón.
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -822,4 +825,43 @@ NO acá.
   Running→`/`=`{"version":"0.1.20"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.20 --target feature/erp-parity`. PR
   `feature/erp-parity-margins-daily` → `feature/erp-parity`.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.21 reporte top-products + ABC (`GET /api/v1/reports/top-products`)
+
+- **Qué**: ranking de productos por ventas en la ventana + clasificación
+  ABC (Pareto). `qty_sold = Σ order_item.quantity`,
+  `revenue = Σ order_item.subtotal`, `revenue_pct` (share del total, 2dp),
+  `abc_class` sobre revenue ACUMULADO del ranking completo (A ≤80%,
+  B ≤95%, C resto). `rank` 1-based. `limit` (default 50, 1..=500) trunca
+  el output DESPUÉS de calcular ABC sobre el ranking completo.
+  `refunded`/`cancelled` excluidos, tenant-scoped.
+- **Por qué**: tercer reporte avanzado del BACKLOG #9; ABC = qué SKUs
+  mueven la caja, base para decisiones de surtido/compra.
+- **Patrón**: mismo módulo `expenses` (`domain::reports` sigue scaffold).
+  2 queries (orders ids → items `order IN $ids`) + agregación/sort en Rust
+  — shape kv-surrealkv-safe idéntico a `margins_daily`.
+- **Decisiones**:
+  - Group key = product id si presente, si no `name:<product_name>` →
+    líneas catalogadas y free-text nunca colisionan; `product_id` queda
+    `Option<String>`.
+  - Sort determinista: revenue desc → qty desc → name asc.
+  - ABC sobre ranking completo ANTES del `limit` (un top-10 sigue
+    reportando la clase ABC real del producto en el universo completo).
+- **Tests** (`crates/domain/tests/expenses.rs` +2):
+  `top_products_ranking_abc_and_limit` (3 productos A=8000/80% B=1500/15%
+  C=500/5% → ranks 1/2/3, abc A/B/C, revenue_pct 80.00/15.00/5.00;
+  limit=2 trunca a 2 pero B sigue clase B) +
+  `top_products_tenant_scoped_empty`. Workspace verde, clippy
+  `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Sin migración (lee `order`/`order_item`).
+- **Build/MSI/Smoke**: release build OK. MSI
+  `pharma-server-0.1.21-x86_64.msi` 12,214,272 bytes, sha256
+  `d1a6f86734f4b15053e55f578c6ae453c84039241e09ab5c12b9625e12e2ba5d`.
+  Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.20, exit 0)→
+  Running→`/`=`{"version":"0.1.21"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.21 --target <merge-commit>`. PR
+  `feature/erp-parity-top-products` → `feature/erp-parity`.
 - **Pendiente**: ver `## BACKLOG` al tope.

@@ -72,6 +72,33 @@ pub struct SalesReportFilters {
     pub to: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct TopProductsFilters {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    /// Cap on returned rows (1..=500, default 50). The ABC class is always
+    /// computed over the *full* ranking before the cap is applied.
+    pub limit: Option<i64>,
+}
+
+/// One product's sales ranking over the window. `revenue_pct` is the share
+/// of total revenue (2dp). `abc_class` is the Pareto bucket computed on the
+/// cumulative revenue of the full ranking: `A` ≤80%, `B` ≤95%, `C` rest.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TopProductRow {
+    pub rank: i64,
+    pub product_id: Option<String>,
+    pub product_name: String,
+    pub qty_sold: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub revenue: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub revenue_pct: Decimal,
+    pub abc_class: String,
+}
+
 /// Gross-margin rollup for one UTC date. `revenue` = sum of
 /// `order_item.subtotal`; `cost` = sum of `quantity * product.cost_price`
 /// over the items whose product cost is known. `items_without_cost` counts
