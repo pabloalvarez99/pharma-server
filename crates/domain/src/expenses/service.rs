@@ -603,3 +603,144 @@ pub async fn top_products(
     rows.truncate(limit);
     Ok(rows)
 }
+
+/// Inventory turnover over the window. `qty_sold` = Σ `order_item.quantity`
+/// for catalogued products on non-`refunded`/`cancelled` orders;
+/// `turnover` = `qty_sold / product.stock` (current stock as proxy — no
+/// historical snapshots kept, documented on [`StockRotationRow`]).
+/// `turnover`/`days_of_inventory` are `None` when current stock ≤ 0.
+/// `days_of_inventory` = `window_days / turnover`, only when both `from`
+/// and `to` are supplied. Tenant-scoped, sorted by turnover desc (fastest
+/// movers first; `None` turnover sorted last). Same kv-surrealkv-safe
+/// shape as `top_products`.
+pub async fn stock_rotation(
+    db: &Db,
+    tenant: &Thing,
+    f: SalesReportFilters,
+) -> DomainResult<Vec<StockRotationRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    let sql = format!("SELECT id FROM order WHERE {}", conds.join(" AND "));
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct O {
+        id: Thing,
+    }
+    let orders: Vec<O> = qb.await?.check()?.take(0)?;
+    if orders.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order_ids: Vec<Thing> = orders.into_iter().map(|o| o.id).collect();
+
+    #[derive(Deserialize)]
+    struct It {
+        product: Option<Thing>,
+        quantity: i64,
+    }
+    let items: Vec<It> = db
+        .query(
+            "SELECT product, quantity FROM order_item \
+             WHERE tenant = $t AND order IN $ids",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", order_ids))
+        .await?
+        .check()?
+        .take(0)?;
+
+    use std::collections::HashMap;
+    // Sum sold qty per catalogued product (string-keyed: `Thing` trips
+    // clippy `mutable_key_type` as a map key). Free-text lines (no product)
+    // have no stock to rotate — skipped.
+    let mut sold: HashMap<String, i64> = HashMap::new();
+    for it in items {
+        if let Some(p) = it.product {
+            *sold.entry(p.to_string()).or_insert(0) += it.quantity;
+        }
+    }
+    if sold.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pids: Vec<Thing> = {
+        let mut out = Vec::with_capacity(sold.len());
+        for k in sold.keys() {
+            if let Ok(t) = surrealdb::sql::thing(k) {
+                out.push(t);
+            }
+        }
+        out
+    };
+    #[derive(Deserialize)]
+    struct P {
+        id: Thing,
+        name: String,
+        stock: i64,
+    }
+    let prods: Vec<P> = db
+        .query("SELECT id, name, stock FROM product WHERE tenant = $t AND id IN $ids")
+        .bind(("t", tenant.clone()))
+        .bind(("ids", pids))
+        .await?
+        .check()?
+        .take(0)?;
+
+    // Window length in days, only when both bounds are known.
+    let window_days: Option<Decimal> = match (f.from, f.to) {
+        (Some(a), Some(b)) => {
+            let d = (b - a).num_days().max(1);
+            Some(Decimal::from(d))
+        }
+        _ => None,
+    };
+
+    let mut rows: Vec<StockRotationRow> = prods
+        .into_iter()
+        .filter_map(|p| {
+            let qty = *sold.get(&p.id.to_string())?;
+            let (turnover, days_of_inventory) = if p.stock > 0 {
+                let to = Decimal::from(qty) / Decimal::from(p.stock);
+                let doi = window_days.and_then(|w| {
+                    if to.is_zero() {
+                        None
+                    } else {
+                        Some((w / to).round_dp(2))
+                    }
+                });
+                (Some(to.round_dp(4)), doi)
+            } else {
+                (None, None)
+            };
+            Some(StockRotationRow {
+                product_id: p.id.to_string(),
+                product_name: p.name,
+                qty_sold: qty,
+                current_stock: p.stock,
+                turnover,
+                days_of_inventory,
+            })
+        })
+        .collect();
+    // Turnover desc; None (stock ≤ 0) sorted last, then by name for stability.
+    rows.sort_by(|x, y| match (x.turnover, y.turnover) {
+        (Some(xt), Some(yt)) => yt.cmp(&xt).then(x.product_name.cmp(&y.product_name)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => x.product_name.cmp(&y.product_name),
+    });
+    Ok(rows)
+}

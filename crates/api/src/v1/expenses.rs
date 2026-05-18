@@ -37,6 +37,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/reports/sales-daily", get(sales_daily))
         .route("/api/v1/reports/margins-daily", get(margins_daily))
         .route("/api/v1/reports/top-products", get(top_products))
+        .route("/api/v1/reports/stock-rotation", get(stock_rotation))
         .route("/api/v1/reports/near-expiry", get(near_expiry));
 
     let writes = Router::new()
@@ -103,6 +104,18 @@ async fn top_products(
     let tenant = tenant_of(&claims)?;
     Ok(Json(
         service::top_products(db.as_ref(), &tenant, filters).await?,
+    ))
+}
+
+async fn stock_rotation(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<SalesReportFilters>,
+) -> Result<Json<Vec<StockRotationRow>>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    Ok(Json(
+        service::stock_rotation(db.as_ref(), &tenant, filters).await?,
     ))
 }
 

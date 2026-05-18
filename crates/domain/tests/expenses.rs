@@ -547,3 +547,118 @@ async fn top_products_tenant_scoped_empty() {
         .unwrap();
     assert!(rows.is_empty());
 }
+
+#[tokio::test]
+async fn stock_rotation_turnover_days_and_oos() {
+    let (db, tenant, user) = setup().await;
+    // Post-sale current stock is the denominator. Start high enough that
+    // after the sale the remaining stock is the intended value:
+    //   Fast: start 25, sell 20 -> stock 5,   turnover 20/5   = 4
+    //   Slow: start 110, sell 10 -> stock 100, turnover 10/100 = 0.1
+    //   Oos:  start 10, sell 3  -> stock 7, then forced to 0
+    //         (a real later stockout) -> turnover None
+    let fast = catalog::create_product(&db, &tenant, new_product("Fast", "100", 25))
+        .await
+        .unwrap();
+    let slow = catalog::create_product(&db, &tenant, new_product("Slow", "100", 110))
+        .await
+        .unwrap();
+    let oos = catalog::create_product(&db, &tenant, new_product("Oos", "100", 10))
+        .await
+        .unwrap();
+    let req = smodel::PosSaleRequest {
+        items: vec![
+            smodel::PosSaleItem {
+                product: fast.id.clone(),
+                product_name: fast.name.clone(),
+                quantity: 20,
+                unit_price: dec("100"),
+            },
+            smodel::PosSaleItem {
+                product: slow.id.clone(),
+                product_name: slow.name.clone(),
+                quantity: 10,
+                unit_price: dec("100"),
+            },
+            smodel::PosSaleItem {
+                product: oos.id.clone(),
+                product_name: oos.name.clone(),
+                quantity: 3,
+                unit_price: dec("100"),
+            },
+        ],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("3300")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
+        .await
+        .unwrap();
+
+    // Oos sold over the window but is now out of stock (later stockout).
+    db.query("UPDATE product SET stock = 0 WHERE id = $p AND tenant = $t")
+        .bind(("p", Thing::from_str(&oos.id).unwrap()))
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // 10-day window so days_of_inventory is computed.
+    let now = chrono::Utc::now();
+    let f = SalesReportFilters {
+        from: Some(now - chrono::Duration::days(5)),
+        to: Some(now + chrono::Duration::days(5)),
+    };
+    let rows = service::stock_rotation(&db, &tenant, f).await.unwrap();
+    assert_eq!(rows.len(), 3);
+
+    // Fast first (turnover 4), then Slow (0.1), Oos last (None).
+    assert_eq!(rows[0].product_name, "Fast");
+    assert_eq!(rows[0].qty_sold, 20);
+    assert_eq!(rows[0].current_stock, 5);
+    assert_eq!(rows[0].turnover, Some(dec("4")));
+    assert_eq!(rows[0].days_of_inventory, Some(dec("2.5")));
+
+    assert_eq!(rows[1].product_name, "Slow");
+    assert_eq!(rows[1].current_stock, 100);
+    assert_eq!(rows[1].turnover, Some(dec("0.1")));
+    assert_eq!(rows[1].days_of_inventory, Some(dec("100")));
+
+    assert_eq!(rows[2].product_name, "Oos");
+    assert_eq!(rows[2].qty_sold, 3);
+    assert_eq!(rows[2].current_stock, 0);
+    assert_eq!(rows[2].turnover, None);
+    assert_eq!(rows[2].days_of_inventory, None);
+
+    // No window -> days_of_inventory is None even for divisible turnover.
+    let nowin = service::stock_rotation(&db, &tenant, SalesReportFilters::default())
+        .await
+        .unwrap();
+    let fast_row = nowin.iter().find(|r| r.product_name == "Fast").unwrap();
+    assert_eq!(fast_row.turnover, Some(dec("4")));
+    assert_eq!(fast_row.days_of_inventory, None);
+}
+
+#[tokio::test]
+async fn stock_rotation_tenant_scoped_empty() {
+    let (db, _tenant, _user) = setup().await;
+    let other: Thing = db
+        .query("CREATE tenant SET name='O', slug='o' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let rows = service::stock_rotation(&db, &other, SalesReportFilters::default())
+        .await
+        .unwrap();
+    assert!(rows.is_empty());
+}

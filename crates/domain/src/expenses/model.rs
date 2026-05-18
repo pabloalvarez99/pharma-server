@@ -72,6 +72,28 @@ pub struct SalesReportFilters {
     pub to: Option<DateTime<Utc>>,
 }
 
+/// Inventory-turnover row over the window. `turnover` = `qty_sold /
+/// current_stock`. The server keeps no historical stock snapshots, so
+/// *current* `product.stock` is used as the denominator proxy (documented
+/// approximation, same honesty stance as `items_without_cost`). `turnover`
+/// and `days_of_inventory` are `null` when current stock is ≤ 0 (can't
+/// divide) — those products still surface with `qty_sold` so stockouts of
+/// fast movers stay visible. `days_of_inventory` (= `window_days /
+/// turnover`) is only computed when both `from` and `to` are given.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct StockRotationRow {
+    pub product_id: String,
+    pub product_name: String,
+    pub qty_sold: i64,
+    pub current_stock: i64,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = Option<String>)]
+    pub turnover: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = Option<String>)]
+    pub days_of_inventory: Option<Decimal>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct TopProductsFilters {
     pub from: Option<DateTime<Utc>>,
