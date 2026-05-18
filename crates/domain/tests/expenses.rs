@@ -444,3 +444,106 @@ async fn margins_daily_tenant_scoped_and_empty() {
     assert!(rows.is_empty());
     let _ = tenant;
 }
+
+#[tokio::test]
+async fn top_products_ranking_abc_and_limit() {
+    let (db, tenant, user) = setup().await;
+    let a = catalog::create_product(&db, &tenant, new_product("A", "1000", 100))
+        .await
+        .unwrap();
+    let b = catalog::create_product(&db, &tenant, new_product("B", "500", 100))
+        .await
+        .unwrap();
+    let c = catalog::create_product(&db, &tenant, new_product("C", "100", 100))
+        .await
+        .unwrap();
+    // Revenue: A 8*1000=8000 (80%), B 3*500=1500 (15%), C 5*100=500 (5%).
+    let req = smodel::PosSaleRequest {
+        items: vec![
+            smodel::PosSaleItem {
+                product: a.id.clone(),
+                product_name: a.name.clone(),
+                quantity: 8,
+                unit_price: dec("1000"),
+            },
+            smodel::PosSaleItem {
+                product: b.id.clone(),
+                product_name: b.name.clone(),
+                quantity: 3,
+                unit_price: dec("500"),
+            },
+            smodel::PosSaleItem {
+                product: c.id.clone(),
+                product_name: c.name.clone(),
+                quantity: 5,
+                unit_price: dec("100"),
+            },
+        ],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("10000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
+        .await
+        .unwrap();
+
+    let rows = service::top_products(&db, &tenant, TopProductsFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+
+    assert_eq!(rows[0].rank, 1);
+    assert_eq!(rows[0].product_name, "A");
+    assert_eq!(rows[0].qty_sold, 8);
+    assert_eq!(rows[0].revenue, dec("8000"));
+    assert_eq!(rows[0].revenue_pct, dec("80.00"));
+    assert_eq!(rows[0].abc_class, "A");
+    assert_eq!(rows[0].product_id.as_deref(), Some(a.id.as_str()));
+
+    assert_eq!(rows[1].product_name, "B");
+    assert_eq!(rows[1].revenue_pct, dec("15.00"));
+    assert_eq!(rows[1].abc_class, "B");
+
+    assert_eq!(rows[2].product_name, "C");
+    assert_eq!(rows[2].revenue_pct, dec("5.00"));
+    assert_eq!(rows[2].abc_class, "C");
+
+    // Limit truncates output but ABC was computed over the full ranking.
+    let capped = service::top_products(
+        &db,
+        &tenant,
+        TopProductsFilters {
+            from: None,
+            to: None,
+            limit: Some(2),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(capped.len(), 2);
+    assert_eq!(capped[1].product_name, "B");
+    assert_eq!(capped[1].abc_class, "B");
+}
+
+#[tokio::test]
+async fn top_products_tenant_scoped_empty() {
+    let (db, _tenant, _user) = setup().await;
+    let other: Thing = db
+        .query("CREATE tenant SET name='O', slug='o' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let rows = service::top_products(&db, &other, TopProductsFilters::default())
+        .await
+        .unwrap();
+    assert!(rows.is_empty());
+}

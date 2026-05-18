@@ -470,3 +470,136 @@ pub async fn margins_daily(
         })
         .collect())
 }
+
+/// Product sales ranking over the window with ABC (Pareto) classification.
+/// `qty_sold` = Σ `order_item.quantity`; `revenue` = Σ `order_item.subtotal`.
+/// `refunded`/`cancelled` excluded, tenant-scoped. Items are grouped by
+/// product record; line items without a product fall back to grouping by
+/// `product_name`. ABC is computed on cumulative revenue of the *full*
+/// ranking (A ≤80%, B ≤95%, C rest) before `limit` truncates the result.
+/// Same kv-surrealkv-safe shape as `margins_daily` (orders → items, bucket
+/// in Rust).
+pub async fn top_products(
+    db: &Db,
+    tenant: &Thing,
+    f: TopProductsFilters,
+) -> DomainResult<Vec<TopProductRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    let sql = format!("SELECT id FROM order WHERE {}", conds.join(" AND "));
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct O {
+        id: Thing,
+    }
+    let orders: Vec<O> = qb.await?.check()?.take(0)?;
+    if orders.is_empty() {
+        return Ok(Vec::new());
+    }
+    let order_ids: Vec<Thing> = orders.into_iter().map(|o| o.id).collect();
+
+    #[derive(Deserialize)]
+    struct It {
+        product: Option<Thing>,
+        product_name: String,
+        quantity: i64,
+        subtotal: Decimal,
+    }
+    let items: Vec<It> = db
+        .query(
+            "SELECT product, product_name, quantity, subtotal FROM order_item \
+             WHERE tenant = $t AND order IN $ids",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", order_ids))
+        .await?
+        .check()?
+        .take(0)?;
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    use std::collections::HashMap;
+    struct Agg {
+        product_id: Option<String>,
+        product_name: String,
+        qty: i64,
+        revenue: Decimal,
+    }
+    // Group key: product id when present, else `name:<product_name>` so
+    // catalogued and free-text lines never collide.
+    let mut by_key: HashMap<String, Agg> = HashMap::new();
+    for it in items {
+        let pid = it.product.as_ref().map(|p| p.to_string());
+        let key = pid
+            .clone()
+            .unwrap_or_else(|| format!("name:{}", it.product_name));
+        let e = by_key.entry(key).or_insert(Agg {
+            product_id: pid,
+            product_name: it.product_name,
+            qty: 0,
+            revenue: Decimal::ZERO,
+        });
+        e.qty += it.quantity;
+        e.revenue += it.subtotal;
+    }
+
+    let mut aggs: Vec<Agg> = by_key.into_values().collect();
+    // Revenue desc, then qty desc, then name asc — stable, deterministic.
+    aggs.sort_by(|x, y| {
+        y.revenue
+            .cmp(&x.revenue)
+            .then(y.qty.cmp(&x.qty))
+            .then(x.product_name.cmp(&y.product_name))
+    });
+
+    let total: Decimal = aggs.iter().map(|a| a.revenue).sum();
+    let mut cumulative = Decimal::ZERO;
+    let mut rows: Vec<TopProductRow> = Vec::with_capacity(aggs.len());
+    for (i, a) in aggs.into_iter().enumerate() {
+        let revenue_pct = if total.is_zero() {
+            Decimal::ZERO
+        } else {
+            (a.revenue / total * Decimal::from(100)).round_dp(2)
+        };
+        cumulative += a.revenue;
+        let cum_pct = if total.is_zero() {
+            Decimal::ZERO
+        } else {
+            cumulative / total * Decimal::from(100)
+        };
+        let abc_class = if cum_pct <= Decimal::from(80) {
+            "A"
+        } else if cum_pct <= Decimal::from(95) {
+            "B"
+        } else {
+            "C"
+        };
+        rows.push(TopProductRow {
+            rank: (i as i64) + 1,
+            product_id: a.product_id,
+            product_name: a.product_name,
+            qty_sold: a.qty,
+            revenue: a.revenue,
+            revenue_pct,
+            abc_class: abc_class.to_string(),
+        });
+    }
+    let limit = f.limit.unwrap_or(50).clamp(1, 500) as usize;
+    rows.truncate(limit);
+    Ok(rows)
+}
