@@ -209,6 +209,89 @@ pub async fn compare(
     Ok(CompareResponse { items: out })
 }
 
+// --- purchase orders (Fase 5-full, BACKLOG #8 slice 1) ---------------------
+
+/// Create a `draft` purchase order. Validates the supplier is in this tenant,
+/// every line (qty > 0, unit_cost ≥ 0, product_name present, product — if
+/// given — is in this tenant), computes per-line `subtotal` and the header
+/// `total`, and persists header + lines atomically.
+///
+/// Receipt (stock + weighted average cost recompute) and accounts-payable
+/// stay deferred to later BACKLOG #8 slices — this only creates the document.
+pub async fn create_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    input: NewPurchaseOrder,
+) -> DomainResult<PurchaseOrderDto> {
+    if input.items.is_empty() {
+        return Err(DomainError::Invalid(
+            "la orden de compra requiere al menos un ítem".into(),
+        ));
+    }
+    let supplier = resolve_supplier(db, tenant, &input.supplier).await?;
+    let currency = input.currency.as_deref().unwrap_or(CURRENCY_CLP);
+
+    let mut lines = Vec::with_capacity(input.items.len());
+    let mut total = Decimal::ZERO;
+    for it in input.items {
+        if it.product_name.trim().is_empty() {
+            return Err(DomainError::Invalid("product_name requerido".into()));
+        }
+        if it.quantity <= 0 {
+            return Err(DomainError::Invalid("quantity debe ser mayor a 0".into()));
+        }
+        if it.unit_cost < Decimal::ZERO {
+            return Err(DomainError::Invalid(
+                "unit_cost no puede ser negativo".into(),
+            ));
+        }
+        let product = match it.product.as_deref() {
+            Some(s) if !s.is_empty() => Some(resolve_product(db, tenant, s).await?),
+            _ => None,
+        };
+        let subtotal = it.unit_cost * Decimal::from(it.quantity);
+        total += subtotal;
+        lines.push(repo::PoLine {
+            product,
+            product_name: it.product_name.trim().to_string(),
+            quantity: it.quantity,
+            unit_cost: it.unit_cost,
+            subtotal,
+        });
+    }
+
+    repo::create_purchase_order(
+        db,
+        tenant,
+        &supplier,
+        currency,
+        input.notes.as_deref(),
+        input.external_ref.as_deref(),
+        total,
+        &lines,
+    )
+    .await
+}
+
+pub async fn list_purchase_orders(
+    db: &Db,
+    tenant: &Thing,
+    filters: PurchaseOrderFilters,
+) -> DomainResult<Vec<PurchaseOrderDto>> {
+    repo::list_purchase_orders(db, tenant, &filters).await
+}
+
+pub async fn get_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+) -> DomainResult<PurchaseOrderDto> {
+    let id = parse_typed(id, "purchase_order")?;
+    repo::get_purchase_order(db, tenant, &id)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

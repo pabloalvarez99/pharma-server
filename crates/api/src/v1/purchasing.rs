@@ -31,10 +31,13 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/suppliers", get(list_suppliers))
         .route("/api/v1/suppliers/{id}", get(get_supplier))
-        .route("/api/v1/supplier-prices", get(list_prices));
+        .route("/api/v1/supplier-prices", get(list_prices))
+        .route("/api/v1/purchase-orders", get(list_purchase_orders))
+        .route("/api/v1/purchase-orders/{id}", get(get_purchase_order));
 
     let writes = Router::new()
         .route("/api/v1/suppliers", post(create_supplier))
+        .route("/api/v1/purchase-orders", post(create_purchase_order))
         .route(
             "/api/v1/suppliers/{id}",
             axum::routing::patch(update_supplier).delete(delete_supplier),
@@ -145,6 +148,38 @@ async fn compare_prices(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::compare(&db, &t, req).await?))
+}
+
+// --- purchase orders -------------------------------------------------------
+
+async fn list_purchase_orders(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<PurchaseOrderFilters>,
+) -> Result<Json<Vec<PurchaseOrderDto>>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::list_purchase_orders(&db, &t, filters).await?))
+}
+
+async fn get_purchase_order(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<PurchaseOrderDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::get_purchase_order(&db, &t, &id).await?))
+}
+
+async fn create_purchase_order(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(input): Json<NewPurchaseOrder>,
+) -> Result<Json<PurchaseOrderDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::create_purchase_order(&db, &t, input).await?))
 }
 
 // --- CSV import ------------------------------------------------------------

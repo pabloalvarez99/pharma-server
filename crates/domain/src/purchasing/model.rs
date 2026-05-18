@@ -153,3 +153,67 @@ pub struct CompareResult {
 pub struct CompareResponse {
     pub items: Vec<CompareResult>,
 }
+
+// --- purchase orders (Fase 5-full, BACKLOG #8 slice 1) ---------------------
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PurchaseOrderItemDto {
+    pub id: String,
+    /// Internal product record id (`product:xxx`) if catalogued, else `None`.
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub unit_cost: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub subtotal: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PurchaseOrderDto {
+    pub id: String,
+    pub supplier: String,
+    pub status: String,
+    pub currency: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub total: Decimal,
+    pub notes: Option<String>,
+    pub external_ref: Option<String>,
+    /// Lines. Populated by `get`; `list` returns an empty vec (header only).
+    pub items: Vec<PurchaseOrderItemDto>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewPurchaseOrderItem {
+    /// Optional internal product record id (`product:xxx`). When absent the
+    /// line is free-text (`product_name` only) — supports off-catalog buys.
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub unit_cost: Decimal,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewPurchaseOrder {
+    /// Supplier record id (`supplier:xxx`).
+    pub supplier: String,
+    pub currency: Option<String>,
+    pub notes: Option<String>,
+    pub external_ref: Option<String>,
+    pub items: Vec<NewPurchaseOrderItem>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct PurchaseOrderFilters {
+    pub supplier: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
