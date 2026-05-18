@@ -716,3 +716,139 @@ pub async fn receive_purchase_order(
 
     get_purchase_order(db, tenant, po).await
 }
+
+// --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
+
+#[derive(Debug, Deserialize)]
+struct PurchasePaymentRow {
+    id: Thing,
+    purchase_order: Thing,
+    amount: Decimal,
+    currency: String,
+    payment_method: String,
+    cash_session: Option<Thing>,
+    reference: Option<String>,
+    note: Option<String>,
+    paid_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
+}
+
+impl From<PurchasePaymentRow> for PurchasePaymentDto {
+    fn from(r: PurchasePaymentRow) -> Self {
+        Self {
+            id: r.id.to_string(),
+            purchase_order: r.purchase_order.to_string(),
+            amount: r.amount,
+            currency: r.currency,
+            payment_method: r.payment_method,
+            cash_session: r.cash_session.map(|t| t.to_string()),
+            reference: r.reference,
+            note: r.note,
+            paid_at: r.paid_at,
+            created_at: r.created_at,
+        }
+    }
+}
+
+pub async fn purchase_order_belongs(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+) -> DomainResult<Option<(String, Decimal, String)>> {
+    #[derive(Deserialize)]
+    struct Row {
+        status: String,
+        total: Decimal,
+        currency: String,
+    }
+    let mut r = db
+        .query("SELECT status, total, currency FROM purchase_order WHERE id = $id AND tenant = $t LIMIT 1")
+        .bind(("id", po.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let row: Option<Row> = r.take(0)?;
+    Ok(row.map(|r| (r.status, r.total, r.currency)))
+}
+
+pub async fn cash_session_belongs(db: &Db, tenant: &Thing, session: &Thing) -> DomainResult<bool> {
+    let mut r = db
+        .query(
+            "SELECT id FROM cash_register_session \
+             WHERE id = $id AND tenant = $t LIMIT 1",
+        )
+        .bind(("id", session.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let row: Option<Thing> = r.take((0, "id"))?;
+    Ok(row.is_some())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_purchase_payment(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+    amount: Decimal,
+    currency: &str,
+    payment_method: &str,
+    cash_session: Option<Thing>,
+    reference: Option<&str>,
+    note: Option<&str>,
+    paid_at: Option<DateTime<Utc>>,
+    created_by: Option<Thing>,
+) -> DomainResult<PurchasePaymentDto> {
+    let mut r = db
+        .query(
+            "CREATE purchase_payment SET tenant=$t, purchase_order=$po, \
+             amount=$amount, currency=$cur, payment_method=$pm, \
+             cash_session=$cs, reference=$ref, note=$note, \
+             paid_at=$paid_at, created_by=$by RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("po", po.clone()))
+        .bind(("amount", dec_val(amount)))
+        .bind(("cur", currency.to_string()))
+        .bind(("pm", payment_method.to_string()))
+        .bind(("cs", cash_session))
+        .bind(("ref", reference.map(str::to_string)))
+        .bind(("note", note.map(str::to_string)))
+        .bind((
+            "paid_at",
+            surrealdb::sql::Datetime::from(paid_at.unwrap_or_else(Utc::now)),
+        ))
+        .bind(("by", created_by))
+        .await?;
+    let row: Option<PurchasePaymentRow> = r.take(0)?;
+    row.map(Into::into).ok_or(DomainError::NotFound)
+}
+
+pub async fn list_payments_for(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+) -> DomainResult<Vec<PurchasePaymentDto>> {
+    let mut r = db
+        .query(
+            "SELECT * FROM purchase_payment \
+             WHERE tenant = $t AND purchase_order = $po \
+             ORDER BY paid_at ASC, created_at ASC",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("po", po.clone()))
+        .await?;
+    let rows: Vec<PurchasePaymentRow> = r.take(0)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+pub async fn sum_payments(db: &Db, tenant: &Thing, po: &Thing) -> DomainResult<Decimal> {
+    let mut r = db
+        .query(
+            "SELECT math::sum(amount) AS s FROM purchase_payment \
+             WHERE tenant = $t AND purchase_order = $po GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("po", po.clone()))
+        .await?;
+    let s: Option<Decimal> = r.take((0, "s"))?;
+    Ok(s.unwrap_or(Decimal::ZERO))
+}
