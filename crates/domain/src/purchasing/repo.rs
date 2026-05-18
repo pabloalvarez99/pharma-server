@@ -451,3 +451,196 @@ pub async fn product_cost_price(
     let row: Option<Option<Decimal>> = r.take((0, "cost_price"))?;
     Ok(row.flatten())
 }
+
+// --- purchase orders (Fase 5-full, BACKLOG #8 slice 1) ---------------------
+
+#[derive(Debug, Deserialize)]
+struct PurchaseOrderRow {
+    id: Thing,
+    supplier: Thing,
+    status: String,
+    currency: String,
+    total: Decimal,
+    notes: Option<String>,
+    external_ref: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PurchaseOrderItemRow {
+    id: Thing,
+    product: Option<Thing>,
+    product_name: String,
+    quantity: i64,
+    unit_cost: Decimal,
+    subtotal: Decimal,
+}
+
+impl From<PurchaseOrderItemRow> for PurchaseOrderItemDto {
+    fn from(r: PurchaseOrderItemRow) -> Self {
+        Self {
+            id: r.id.to_string(),
+            product: r.product.map(|p| p.to_string()),
+            product_name: r.product_name,
+            quantity: r.quantity,
+            unit_cost: r.unit_cost,
+            subtotal: r.subtotal,
+        }
+    }
+}
+
+fn po_dto(h: PurchaseOrderRow, items: Vec<PurchaseOrderItemRow>) -> PurchaseOrderDto {
+    PurchaseOrderDto {
+        id: h.id.to_string(),
+        supplier: h.supplier.to_string(),
+        status: h.status,
+        currency: h.currency,
+        total: h.total,
+        notes: h.notes,
+        external_ref: h.external_ref,
+        items: items.into_iter().map(Into::into).collect(),
+        created_at: h.created_at,
+        updated_at: h.updated_at,
+    }
+}
+
+/// One resolved purchase-order line: product already validated tenant-scoped
+/// by the service (or `None` for a free-text line), `subtotal` precomputed.
+pub struct PoLine {
+    pub product: Option<Thing>,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_cost: Decimal,
+    pub subtotal: Decimal,
+}
+
+/// Atomic create: header + every line in one `BEGIN/COMMIT` so a crash can't
+/// leave a PO with partial lines (mirrors `sales::repo::apply_sale`). The id
+/// is client-generated so the header `CREATE` lives in the same tx as its
+/// items.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    supplier: &Thing,
+    currency: &str,
+    notes: Option<&str>,
+    external_ref: Option<&str>,
+    total: Decimal,
+    lines: &[PoLine],
+) -> DomainResult<PurchaseOrderDto> {
+    let poid = uuid::Uuid::new_v4().simple().to_string();
+    let po_thing = surrealdb::sql::thing(&format!("purchase_order:{poid}"))
+        .map_err(|e| DomainError::Other(anyhow::anyhow!("purchase_order id build: {e}")))?;
+
+    let mut q = String::from(
+        "BEGIN; \
+         CREATE type::thing('purchase_order', $poid) SET tenant=$t, \
+            supplier=$sup, status='draft', currency=$cur, total=$tot, \
+            notes=$notes, external_ref=$ext RETURN AFTER; ",
+    );
+    for i in 0..lines.len() {
+        q.push_str(&format!(
+            "CREATE purchase_order_item SET tenant=$t, purchase_order=$po, \
+                product=$p{i}, product_name=$pn{i}, quantity=$qty{i}, \
+                unit_cost=$uc{i}, subtotal=$st{i} RETURN AFTER; ",
+        ));
+    }
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("poid", poid))
+        .bind(("t", tenant.clone()))
+        .bind(("po", po_thing))
+        .bind(("sup", supplier.clone()))
+        .bind(("cur", currency.to_string()))
+        .bind(("tot", dec_val(total)))
+        .bind(("notes", notes.map(str::to_string)))
+        .bind(("ext", external_ref.map(str::to_string)));
+    for (i, l) in lines.iter().enumerate() {
+        qb = qb
+            .bind((format!("p{i}"), l.product.clone()))
+            .bind((format!("pn{i}"), l.product_name.clone()))
+            .bind((format!("qty{i}"), l.quantity))
+            .bind((format!("uc{i}"), dec_val(l.unit_cost)))
+            .bind((format!("st{i}"), dec_val(l.subtotal)));
+    }
+    let mut r = qb.await?.check()?;
+
+    // Statement indices (BEGIN/COMMIT excluded): 0 = header CREATE,
+    // 1..=n = line CREATEs in input order.
+    let header: Option<PurchaseOrderRow> = r.take(0)?;
+    let header =
+        header.ok_or_else(|| DomainError::Other(anyhow::anyhow!("PO CREATE returned 0 rows")))?;
+    let mut items = Vec::with_capacity(lines.len());
+    for i in 0..lines.len() {
+        let row: Option<PurchaseOrderItemRow> = r.take(i + 1)?;
+        if let Some(row) = row {
+            items.push(row);
+        }
+    }
+    Ok(po_dto(header, items))
+}
+
+pub async fn list_purchase_orders(
+    db: &Db,
+    tenant: &Thing,
+    f: &PurchaseOrderFilters,
+) -> DomainResult<Vec<PurchaseOrderDto>> {
+    let mut conds = vec!["tenant = $t".to_string()];
+    if f.supplier.is_some() {
+        conds.push("supplier = $sup".to_string());
+    }
+    if f.status.is_some() {
+        conds.push("status = $status".to_string());
+    }
+    let limit = f.limit.unwrap_or(100).min(500);
+    let offset = f.offset.unwrap_or(0);
+    let q = format!(
+        "SELECT * FROM purchase_order WHERE {} ORDER BY created_at DESC LIMIT {} START {}",
+        conds.join(" AND "),
+        limit,
+        offset
+    );
+    let supplier = f
+        .supplier
+        .as_deref()
+        .and_then(|s| surrealdb::sql::thing(s).ok());
+    let mut r = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("sup", supplier))
+        .bind(("status", f.status.clone().unwrap_or_default()))
+        .await?;
+    let rows: Vec<PurchaseOrderRow> = r.take(0)?;
+    // List is header-only; callers use `get` for the lines.
+    Ok(rows.into_iter().map(|h| po_dto(h, Vec::new())).collect())
+}
+
+pub async fn get_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &Thing,
+) -> DomainResult<Option<PurchaseOrderDto>> {
+    let mut r = db
+        .query("SELECT * FROM purchase_order WHERE id = $id AND tenant = $t LIMIT 1")
+        .bind(("id", id.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let header: Option<PurchaseOrderRow> = r.take(0)?;
+    let Some(header) = header else {
+        return Ok(None);
+    };
+    let mut ri = db
+        .query(
+            "SELECT * FROM purchase_order_item \
+             WHERE purchase_order = $id AND tenant = $t ORDER BY created_at ASC",
+        )
+        .bind(("id", id.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let items: Vec<PurchaseOrderItemRow> = ri.take(0)?;
+    Ok(Some(po_dto(header, items)))
+}

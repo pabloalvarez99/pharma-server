@@ -94,7 +94,8 @@ NO acá.
    `controlled` autodetectado vía `product.active_ingredient`.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
-8. **Fase 5-full**: PO local + recepción + costo promedio ponderado (WAC) + AP.
+8. **Fase 5-full**: ✅ PO local create/list/get (migr 0015, PR #35) ·
+   pendiente: recepción + costo promedio ponderado (WAC) + AP.
 9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
    ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
@@ -917,4 +918,18 @@ NO acá.
 - **Release**: `gh release create v0.1.22 --target <merge-commit>`. PR
   `feature/erp-parity-stock-rotation` → `feature/erp-parity`.
 - **Hito**: BACKLOG #9 (Fase 6 reportes) CERRADO. 7 reportes vivos.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — Órdenes de compra locales create/list/get (BACKLOG #8 Fase 5-full slice 1)
+
+- **Qué/por qué**: PR #35 (`13775ec`). Primer incremento de Fase 5-full: `purchase_order` tenant-scoped contra `supplier`, con `purchase_order_item` relacional. Elección de diseño: tabla hija relacional (espejo `order`/`order_item`, migr 0007) en vez de JSON-string — una OC es un documento header + líneas que el operador edita y audita por línea; mejor trazabilidad que un array-de-objetos embebido. Hasta ahora `purchasing` solo tenía supplier/mapping/price-list (Fase 5-subset); la OC local era el gran pendiente de BACKLOG #8.
+- **Migración** `0015_purchase_order.surql` (aditiva): `purchase_order` (`status` DEFAULT 'draft' ASSERT IN ['draft','received','cancelled'], `currency` DEFAULT 'CLP', `total` decimal computado, `notes`/`external_ref` opcionales, `created_at`/`updated_at`) + `purchase_order_item` (`product option<record<product>>` para compras fuera de catálogo, `quantity` int ASSERT >0, `unit_cost`/`subtotal` decimal). Multi-tenant: ambas tablas `tenant: record<tenant>` + índices compuestos que incluyen tenant (`*_tenant_created/status/supplier`, `*_tenant_po/product`). El enum reserva `received`/`cancelled` para que los slices siguientes no necesiten migración de enum.
+- **Domain** (`crates/domain/src/purchasing`): `NewPurchaseOrder`/`NewPurchaseOrderItem`/`PurchaseOrderDto`/`PurchaseOrderItemDto`/`PurchaseOrderFilters` (money decimal-string `rust_decimal::serde::str`, `#[schema(value_type=String)]`). `service::create_purchase_order` valida items no-vacíos, supplier ∈ tenant (`resolve_supplier`), y por-línea: product_name presente, quantity>0, unit_cost≥0, product ∈ tenant si se da (`resolve_product`); calcula `subtotal = unit_cost × quantity` y `total = Σ subtotal`. `repo::create_purchase_order`: id cliente-generado (`uuid::Uuid::new_v4`) → `BEGIN; CREATE type::thing('purchase_order',$poid) …; CREATE purchase_order_item … (×n); COMMIT;` (mismo patrón atómico que `sales::repo::apply_sale`) → un crash no deja una OC con líneas parciales. `list` devuelve header-only (lines vacío), `get` incluye líneas (2da query ordenada `created_at ASC`).
+- **API** (`crates/api/src/v1/purchasing.rs`): `GET /api/v1/purchase-orders` (list, filtros supplier/status), `GET /api/v1/purchase-orders/{id}` (con líneas), `POST /api/v1/purchase-orders` (create). Reads = bearer; writes = `admin`/`owner` vía el `route_layer(crate::role::layer(...))` ya existente — solo se añadieron rutas al `purchasing::router`, sin tocar el wiring de `v1/mod.rs`.
+- **Tests** (`crates/domain/tests/purchasing.rs` 6 → **10/10**, +4): `po_create_persists_header_lines_and_total_then_get_roundtrips` (total=10*900+200*5=10000, línea catalogada + free-text, get round-trip), `po_create_rejects_empty_items_bad_qty_and_negative_cost` (3× INVALID_INPUT), `po_create_rejects_supplier_from_other_tenant` (cross-tenant supplier no resoluble), `po_list_filters_by_status_and_is_tenant_scoped` (list header-only, filtro status, aislamiento tenant). Workspace verde, clippy `-D warnings` clean (gotcha: `create_purchase_order` 8 args → `#[allow(clippy::too_many_arguments)]`, mismo precedente que `create_price`), fmt clean.
+- **Diferido (BACKLOG #8 slices siguientes)**: recepción (decremento/alta de stock + `product_batch` + recálculo costo promedio ponderado WAC + `stock_movement`) y cuentas por pagar (`purchase_payment`). Documentado en `purchasing/mod.rs`, el header de la migración y el commit.
+- **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #35 mergeado a `feature/erp-parity`.
+- **Estado vs goal**: ✅ OC local creable/consultable (Fase 5 compras destrabada parcialmente) · ⏳ recepción+WAC+AP (resto BACKLOG #8), Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
