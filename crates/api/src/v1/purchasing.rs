@@ -33,7 +33,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/suppliers/{id}", get(get_supplier))
         .route("/api/v1/supplier-prices", get(list_prices))
         .route("/api/v1/purchase-orders", get(list_purchase_orders))
-        .route("/api/v1/purchase-orders/{id}", get(get_purchase_order));
+        .route("/api/v1/purchase-orders/{id}", get(get_purchase_order))
+        .route(
+            "/api/v1/purchase-orders/{id}/payments",
+            get(get_po_payments),
+        );
 
     let writes = Router::new()
         .route("/api/v1/suppliers", post(create_supplier))
@@ -41,6 +45,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/api/v1/purchase-orders/{id}/receive",
             post(receive_purchase_order),
+        )
+        .route(
+            "/api/v1/purchase-orders/{id}/payments",
+            post(create_po_payment),
         )
         .route(
             "/api/v1/suppliers/{id}",
@@ -195,6 +203,31 @@ async fn receive_purchase_order(
     let t = tenant_of(&claims)?;
     Ok(Json(
         service::receive_purchase_order(&db, &t, &id, Some(&claims.sub)).await?,
+    ))
+}
+
+async fn get_po_payments(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<PurchasePaymentSummary>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(
+        service::get_purchase_payment_summary(&db, &t, &id).await?,
+    ))
+}
+
+async fn create_po_payment(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    Json(input): Json<NewPurchasePayment>,
+) -> Result<Json<PurchasePaymentDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(
+        service::create_purchase_payment(&db, &t, &id, input, Some(&claims.sub)).await?,
     ))
 }
 

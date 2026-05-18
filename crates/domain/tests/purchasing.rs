@@ -650,3 +650,255 @@ async fn po_receive_refuses_when_not_draft() {
         .unwrap_err();
     assert_eq!(err.code(), "CONFLICT");
 }
+
+// --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
+
+async fn seed_po_with_total(db: &Db, t: &Thing, total: &str) -> String {
+    let s = service::create_supplier(db, t, new_supplier("S"))
+        .await
+        .unwrap();
+    service::create_purchase_order(
+        db,
+        t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![NewPurchaseOrderItem {
+                product: None,
+                product_name: "X".into(),
+                quantity: 1,
+                unit_cost: dec(total),
+            }],
+        },
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+#[tokio::test]
+async fn po_payment_records_and_summary_tracks_balance_until_fully_paid() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "10000").await;
+
+    // Initial summary: nothing paid, full balance.
+    let s0 = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s0.total, dec("10000"));
+    assert_eq!(s0.paid, dec("0"));
+    assert_eq!(s0.balance, dec("10000"));
+    assert!(!s0.fully_paid);
+    assert!(s0.payments.is_empty());
+
+    let p1 = service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("4000"),
+            currency: None,
+            payment_method: Some("transfer".into()),
+            cash_session: None,
+            reference: Some("TR-1".into()),
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(p1.amount, dec("4000"));
+    assert_eq!(p1.payment_method, "transfer");
+    // PO currency defaults to CLP (slice 1) → payment inherits unless overridden.
+    assert_eq!(p1.currency, "CLP");
+
+    let s1 = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s1.paid, dec("4000"));
+    assert_eq!(s1.balance, dec("6000"));
+    assert!(!s1.fully_paid);
+
+    // Second payment closes the balance exactly.
+    service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("6000"),
+            currency: None,
+            payment_method: Some("bank".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let s2 = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s2.paid, dec("10000"));
+    assert_eq!(s2.balance, dec("0"));
+    assert!(s2.fully_paid);
+    assert_eq!(s2.payments.len(), 2);
+    // List is chronological by paid_at ASC.
+    assert_eq!(s2.payments[0].amount, dec("4000"));
+    assert_eq!(s2.payments[1].amount, dec("6000"));
+}
+
+#[tokio::test]
+async fn po_payment_refuses_amount_exceeding_balance() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "1000").await;
+
+    service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("700"),
+            currency: None,
+            payment_method: Some("cash".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Remaining 300, intentar 500 → CONFLICT y nada se persiste.
+    let err = service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("500"),
+            currency: None,
+            payment_method: Some("cash".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+
+    let s = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s.paid, dec("700"));
+    assert_eq!(s.payments.len(), 1);
+}
+
+#[tokio::test]
+async fn po_payment_rejects_invalid_inputs_and_cross_tenant_po() {
+    let (db, t1) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let t2: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+    let po_id = seed_po_with_total(&db, &t1, "1000").await;
+
+    // amount <= 0.
+    let err = service::create_purchase_payment(
+        &db,
+        &t1,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("0"),
+            currency: None,
+            payment_method: None,
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    // payment_method desconocido.
+    let err = service::create_purchase_payment(
+        &db,
+        &t1,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("10"),
+            currency: None,
+            payment_method: Some("bitcoin".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    // PO de t1, intentado pagar desde t2 → NotFound (no leak cross-tenant).
+    let err = service::create_purchase_payment(
+        &db,
+        &t2,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("10"),
+            currency: None,
+            payment_method: Some("cash".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+}
+
+#[tokio::test]
+async fn po_payment_refuses_payment_to_cancelled_order() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "1000").await;
+    let po_thing = surrealdb::sql::thing(&po_id).unwrap();
+    db.query("UPDATE purchase_order SET status = 'cancelled' WHERE id = $id")
+        .bind(("id", po_thing))
+        .await
+        .unwrap();
+
+    let err = service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("10"),
+            currency: None,
+            payment_method: Some("cash".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}

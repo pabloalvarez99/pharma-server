@@ -378,6 +378,122 @@ pub async fn receive_purchase_order(
         .ok_or(DomainError::NotFound)
 }
 
+// --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
+
+const ALLOWED_PAYMENT_METHODS: &[&str] = &["cash", "bank", "card", "transfer"];
+
+fn validate_payment_method(method: &str) -> DomainResult<&'static str> {
+    ALLOWED_PAYMENT_METHODS
+        .iter()
+        .find(|m| **m == method)
+        .copied()
+        .ok_or_else(|| {
+            DomainError::Invalid(format!(
+                "payment_method inválido: {method} (use cash|bank|card|transfer)"
+            ))
+        })
+}
+
+/// Record a payment against a purchase order. Validates the PO is in this
+/// tenant (any status except `cancelled` — payments to a cancelled PO are
+/// rejected so the AP ledger doesn't accept money against a void document),
+/// amount > 0, payment_method ∈ {cash,bank,card,transfer}, and that the
+/// running `paid + amount ≤ total` so accidental overpayment is caught up-
+/// front (operator can split a payment but not double-pay). Cash payments
+/// optionally bind a `cash_register_session` (validated tenant-scoped) so
+/// arqueo can include them later.
+pub async fn create_purchase_payment(
+    db: &Db,
+    tenant: &Thing,
+    po_id: &str,
+    input: NewPurchasePayment,
+    created_by: Option<&str>,
+) -> DomainResult<PurchasePaymentDto> {
+    let po = parse_typed(po_id, "purchase_order")?;
+    let (status, total, po_currency) = repo::purchase_order_belongs(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if status == "cancelled" {
+        return Err(DomainError::Conflict(
+            "no se puede pagar una orden de compra cancelada".into(),
+        ));
+    }
+    if input.amount <= Decimal::ZERO {
+        return Err(DomainError::Invalid("amount debe ser mayor a 0".into()));
+    }
+    let method = validate_payment_method(input.payment_method.as_deref().unwrap_or("cash"))?;
+    let currency = input
+        .currency
+        .as_deref()
+        .unwrap_or(&po_currency)
+        .to_string();
+
+    let cash_session = match input.cash_session.as_deref() {
+        Some(s) if !s.is_empty() => {
+            let t = parse_typed(s, "cash_register_session")?;
+            if !repo::cash_session_belongs(db, tenant, &t).await? {
+                return Err(DomainError::Invalid(
+                    "la sesión de caja no existe en este tenant".into(),
+                ));
+            }
+            Some(t)
+        }
+        _ => None,
+    };
+
+    let already_paid = repo::sum_payments(db, tenant, &po).await?;
+    if already_paid + input.amount > total {
+        return Err(DomainError::Conflict(format!(
+            "el pago excede el saldo: total={total}, pagado={already_paid}, intento={}",
+            input.amount
+        )));
+    }
+
+    let created_by_thing = match created_by {
+        Some(s) if !s.is_empty() => Some(parse_thing(s)?),
+        _ => None,
+    };
+    repo::create_purchase_payment(
+        db,
+        tenant,
+        &po,
+        input.amount,
+        &currency,
+        method,
+        cash_session,
+        input.reference.as_deref(),
+        input.note.as_deref(),
+        input.paid_at,
+        created_by_thing,
+    )
+    .await
+}
+
+/// Read the AP state of a PO: header `total` + sum of payments + remaining
+/// `balance` + `fully_paid` flag + the full payment ledger (chronological).
+pub async fn get_purchase_payment_summary(
+    db: &Db,
+    tenant: &Thing,
+    po_id: &str,
+) -> DomainResult<PurchasePaymentSummary> {
+    let po = parse_typed(po_id, "purchase_order")?;
+    let (status, total, _currency) = repo::purchase_order_belongs(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let payments = repo::list_payments_for(db, tenant, &po).await?;
+    let paid: Decimal = payments.iter().map(|p| p.amount).sum();
+    let balance = total - paid;
+    Ok(PurchasePaymentSummary {
+        purchase_order: po.to_string(),
+        status,
+        total,
+        paid,
+        balance,
+        fully_paid: balance <= Decimal::ZERO,
+        payments,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

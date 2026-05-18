@@ -217,3 +217,55 @@ pub struct PurchaseOrderFilters {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
+
+// --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PurchasePaymentDto {
+    pub id: String,
+    pub purchase_order: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub amount: Decimal,
+    pub currency: String,
+    pub payment_method: String,
+    pub cash_session: Option<String>,
+    pub reference: Option<String>,
+    pub note: Option<String>,
+    pub paid_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewPurchasePayment {
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub amount: Decimal,
+    pub currency: Option<String>,
+    pub payment_method: Option<String>,
+    /// `cash_register_session:xxx` — required when `payment_method='cash'`
+    /// and a session is open; surfaces the payment in the drawer arqueo.
+    pub cash_session: Option<String>,
+    pub reference: Option<String>,
+    pub note: Option<String>,
+    pub paid_at: Option<DateTime<Utc>>,
+}
+
+/// Snapshot of a PO's accounts-payable state: header `total` + sum of
+/// payments + remaining `balance` + `fully_paid` flag (balance ≤ 0).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PurchasePaymentSummary {
+    pub purchase_order: String,
+    pub status: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub total: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub paid: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub balance: Decimal,
+    pub fully_paid: bool,
+    pub payments: Vec<PurchasePaymentDto>,
+}
