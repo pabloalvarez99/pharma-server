@@ -95,7 +95,9 @@ NO acá.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: ✅ PO local create/list/get (migr 0015, PR #35) ·
-   pendiente: recepción + costo promedio ponderado (WAC) + AP.
+   ✅ recepción + costo promedio ponderado (WAC) + audit movement
+   (PR #38, sin migración — enum 'received' ya en 0015) · pendiente:
+   cuentas por pagar (`purchase_payment`).
 9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
    ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
@@ -932,4 +934,26 @@ NO acá.
 - **Diferido (BACKLOG #8 slices siguientes)**: recepción (decremento/alta de stock + `product_batch` + recálculo costo promedio ponderado WAC + `stock_movement`) y cuentas por pagar (`purchase_payment`). Documentado en `purchasing/mod.rs`, el header de la migración y el commit.
 - **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #35 mergeado a `feature/erp-parity`.
 - **Estado vs goal**: ✅ OC local creable/consultable (Fase 5 compras destrabada parcialmente) · ⏳ recepción+WAC+AP (resto BACKLOG #8), Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — Recepción de OC: stock + WAC + audit movement (BACKLOG #8 Fase 5-full slice 2)
+
+- **Qué/por qué**: PR #38. Segundo slice de Fase 5-full — cierra el lazo de la OC local: `draft → received` mueve stock real al inventario, recalcula costo promedio ponderado (WAC), audita en `stock_movement`. Sin esto la OC era papel: la farmacia no podía cargar la mercadería recibida sin tocar manualmente el catálogo. Cuentas por pagar (`purchase_payment`) sigue diferido a slice 3.
+- **Sin migración**: el ASSERT enum `'draft','received','cancelled'` ya estaba definido en migr 0015 (slice 1 reservó el estado, slice 2 lo activa).
+- **Domain** (`crates/domain/src/purchasing/service.rs`): `receive_purchase_order(db, tenant, id, admin)`:
+  - Guard `current.status == 'draft'` → `DomainError::Conflict` si no. One-shot; partial receipt no entra en este slice.
+  - Agrega líneas catalogadas por `product` vía `BTreeMap<String,(Thing,i64,Decimal)>` — dos líneas sobre el mismo producto producen UN solo `stock_movement` + UNA sola recompute de WAC. Líneas free-text (`product = None`) son contables-only, se saltan; una OC compuesta solo de free-text marca `received` sin generar movimientos.
+  - WAC: `new_cost = (old_stock · old_cost + Σ(qty · unit_cost)) / (old_stock + Σqty)`. Base seeding honesta: si `cost_price is None` O `old_stock ≤ 0`, `new_cost = Σ(qty · unit_cost) / Σqty` (line average), NO se promedia con un fantasma cero — primer receipt sin costo previo debe sembrar `cost_price` con el costo real de las líneas.
+- **Repo** (`crates/domain/src/purchasing/repo.rs`): `product_stock_cost` lee `(stock, cost_price)` tenant-scoped antes del cálculo. `receive_purchase_order` atómico: un `BEGIN; … UPDATE product SET stock=stock+$qN, cost_price=$cN WHERE id=$pN AND tenant=$t; CREATE stock_movement SET tenant=$t, product=$pN, delta=$qN, reason='purchase_receipt', admin=$adm, ref=$ref; … UPDATE purchase_order SET status='received' WHERE id=$po AND tenant=$t; COMMIT;`. Mismo patrón que `sales::repo::apply_sale` y `agent_orders::service::fulfill`: si crashea, no queda stock movido sin movimiento ni PO half-received. Invariante `product.stock = SUM(stock_movement.delta)` se mantiene.
+- **API** (`crates/api/src/v1/purchasing.rs`): `POST /api/v1/purchase-orders/{id}/receive` (ruta en el bloque `writes` con `route_layer(role::layer(state, WRITE_ROLES))`, admin/owner). `claims.sub` se pasa como `admin` opcional al movimiento (igual que `inventory::adjust`).
+- **Tests** (`crates/domain/tests/purchasing.rs` 10 → **14/14**, +4):
+  - `po_receive_bumps_stock_recomputes_wac_logs_movement_and_marks_received`: producto con stock=10/cost=100; OC 30 unidades @ 200 → stock=40, cost_price=175, UN stock_movement `delta=+30 reason='purchase_receipt' ref=po_id`, status='received'.
+  - `po_receive_first_receipt_seeds_cost_price_without_diluting_to_zero`: producto sin `cost_price`; dos líneas mismo producto (5@300 + 5@700) → UN movement `delta=+10`, nuevo `cost_price=500` (line average, no dilution).
+  - `po_receive_skips_free_text_lines`: OC solo con free-text (`product=None`) → `status='received'`, cero `stock_movement` rows.
+  - `po_receive_refuses_when_not_draft`: doble receive → segundo `CONFLICT`, estado/`stock_movement` no se duplican.
+- **Gate**: workspace verde, clippy `-D warnings` clean, fmt clean, release build verde.
+- **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #38 mergeado a `feature/erp-parity`.
+- **Estado vs goal**: ✅ ciclo compra local destrabado (crear + recibir → stock + WAC + audit) · ⏳ Slice 3 cuentas por pagar (`purchase_payment`), Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
 - **Pendiente**: ver `## BACKLOG` al tope.
