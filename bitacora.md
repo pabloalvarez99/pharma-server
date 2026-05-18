@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.22` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-stock-rotation` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.22
+- **Versión**: `0.1.23` (workspace `Cargo.toml`).
+- **Branch**: `chore/bump-0.1.23` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -989,4 +989,49 @@ NO acá.
 - **Gate**: `cargo test --workspace --tests --lib` verde, `cargo test -p api --doc` solo verde. Race conocida en doctest con `CARGO_TARGET_DIR` compartido cuando otra sesión paralela compila simultáneamente — solo affecta `cargo test --workspace` (que invoca rustdoc del lib mientras otra sesión sobre-escribe rlibs); gate igual verde validando por componentes (tests + doctest solo). Clippy `-D warnings` clean, fmt clean, release build verde (exit 0).
 - **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #40 mergeado a `feature/erp-parity`.
 - **Estado vs goal**: ✅ **BACKLOG #8 Fase 5-full CIERRA** — ciclo PO local completo (crear + recibir + WAC + audit + AP). ⏳ Fase 9 firma cert Authenticode + smoke VM (v1.0.0 vendible), Fase 10 sync ERP online opt-in (v1.1.0), Fase 12 marketplace (locked estrategia-only).
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-18 — v0.1.23 release (PO receipt + WAC + AP + post_sale zip fix) — Fase 5-full CIERRA
+
+- **Qué**: release MSI 0.1.23 que empaqueta todo el work pooled de
+  Fase 5-full BACKLOG #8 cerrado por sesiones paralelas + fix latente
+  en `sales::post_sale`. Commits en feature/erp-parity:
+  - PR #38 — PO receipt + stock + WAC + audit movement (slice 2).
+  - PR #40 — accounts payable (`purchase_payment`) ledger (slice 3 → CIERRA #8).
+  - PR #43 — fix `post_sale` stock pre-check by id (no zip posicional).
+- **Bug latente (PR #43)**: `sales::service::post_sale` zipeaba
+  `req.items` contra `load_products_for_sale` que usa `id IN $ids`.
+  SurrealKv no preserva orden de request en `IN`. Con stocks distintos
+  por línea, la pre-check comparaba qty contra el stock del producto
+  equivocado → `InsufficientStock` espurio bajo carga. Cazado por el
+  test `stock_rotation_turnover_days_and_oos` de v0.1.22 corriendo
+  serializado (3× pass/fail/pass). Fix: `HashMap<String,i64>` keyed por
+  `Thing::to_string()` (gotcla clippy `mutable_key_type`) + lookup por
+  id. No hubo corrupción de datos en prod: el ASSERT `>=0` sobre
+  `product_batch.stock` en la tx atómica habría abortado cualquier
+  oversell que se colara — el síntoma visible era falso-negativo
+  (ventas legítimas rechazadas), no oversell real. Validado 3× full-binary
+  post-fix → 0 flakes.
+- **Sesión paralela vs esta sesión** — esta sesión preparó su propio
+  branch `feature/erp-parity-po-receive` con la misma feature (PO receipt
+  + WAC + migr 0016 con `received_at`/`received_by` opcionales). Al
+  intentar push descubrimos que origin ya tenía la misma branch con un
+  commit equivalente de otra sesión (`503e54d`, terminó como PR #38, sin
+  migración audit). Decisión: **cerrar PR #42 como duplicado de #38** y
+  conservar solo el fix de `post_sale` como PR #43 standalone. Migración
+  `0016_purchase_payment.surql` ya estaba en origin (la otra sesión la
+  usó para AP). La feature audit `received_at`/`received_by` queda como
+  enhancement opcional futuro si se requiere.
+- **Build/MSI/Smoke**: release build OK. MSI
+  `pharma-server-0.1.23-x86_64.msi` 12,304,384 bytes, sha256
+  `4a2c61c395d8f848bf3d5e6bda8f12cf2ea0f59f47c9bdf06233c567cc4d4a24`.
+  Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.22, exit 0)→
+  Running→`/`=`{"version":"0.1.23"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.23 --target <merge-commit>`. PR
+  `chore/bump-0.1.23` → `feature/erp-parity`.
+- **BACKLOG #8 ESTADO**: ✅ PO local create/list/get (PR #35) · ✅
+  recepción + WAC (PR #38) · ✅ accounts payable (PR #40) → Fase 5-full
+  CIERRA COMPLETA.
 - **Pendiente**: ver `## BACKLOG` al tope.
