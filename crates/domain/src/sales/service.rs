@@ -115,8 +115,20 @@ pub async fn post_sale(
     if loaded.len() != req.items.len() {
         return Err(DomainError::NotFound);
     }
-    for (req_item, prod) in req.items.iter().zip(loaded.iter()) {
-        if prod.stock < req_item.quantity {
+    // `id IN $ids` doesn't preserve request order in SurrealKv — a naive
+    // zip would compare a line's qty against the wrong product's stock when
+    // stocks differ across the cart (latent: surfaced under load by the
+    // v0.1.22 stock_rotation test on serialized runs). Index by id and
+    // look each line up. String keys (clippy `mutable_key_type` rejects
+    // `Thing` as a HashMap key — `AtomicU8` interior mutability).
+    let by_id: std::collections::HashMap<String, i64> =
+        loaded.iter().map(|p| (p.id.to_string(), p.stock)).collect();
+    for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
+        let stock = by_id
+            .get(&pthing.to_string())
+            .copied()
+            .ok_or(DomainError::NotFound)?;
+        if stock < req_item.quantity {
             return Err(DomainError::InsufficientStock);
         }
     }
