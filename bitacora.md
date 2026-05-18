@@ -15,9 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.21` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity-top-products` (PR → `feature/erp-parity`).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.21
+- **Versión**: `0.1.22` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity-stock-rotation` (PR → `feature/erp-parity`).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.22
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -60,7 +60,10 @@ NO acá.
     `items_without_cost` honesto; refunded/cancelled excluidos),
     `GET /api/v1/reports/top-products?limit=N` (ranking qty+revenue +
     clasificación ABC Pareto A≤80%/B≤95%/C sobre revenue acumulado del
-    ranking completo, `limit` trunca después) y
+    ranking completo, `limit` trunca después),
+    `GET /api/v1/reports/stock-rotation?from&to` (turnover =
+    qty_sold/current_stock; `days_of_inventory` = window/turnover si hay
+    rango; `null` si stock≤0; sorted turnover desc) y
     `GET /api/v1/reports/near-expiry?days=N` (lotes por vencer/vencidos con
     stock, default 30d, ordenados por `expiry_date` asc, días-a-vencer
     firmado; tenant-scoped, solo `active` + `stock>0`).
@@ -93,10 +96,11 @@ NO acá.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
 8. **Fase 5-full**: ✅ PO local create/list/get (migr 0015, PR #35) ·
    pendiente: recepción + costo promedio ponderado (WAC) + AP.
-9. **Fase 6** (mayormente cerrada): ~~caja~~ ✅ v0.1.14 · ~~gastos + report
+9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
-   ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21. Falta: `stock-rotation`
-   (turnover = qty_sold / avg_stock) — última extensión del mismo patrón.
+   ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
+   v0.1.22. Set de reportes Fase 6 cerrado (sales/margins/top/ABC/near-
+   expiry/rotation). Reportes futuros = extensiones del mismo patrón.
 10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
     Swagger UI + desktop Tauri.
 11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
@@ -865,6 +869,55 @@ NO acá.
   Running→`/`=`{"version":"0.1.21"}`→`/health/ready` 200 `db:ok`.
 - **Release**: `gh release create v0.1.21 --target <merge-commit>`. PR
   `feature/erp-parity-top-products` → `feature/erp-parity`.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — v0.1.22 reporte stock-rotation (`GET /api/v1/reports/stock-rotation`) — cierra Fase 6 reportes
+
+- **Qué**: rotación de inventario. `qty_sold = Σ order_item.quantity`
+  (productos catalogados, orders no refunded/cancelled);
+  `turnover = qty_sold / product.stock`. `days_of_inventory =
+  window_days / turnover` (solo si vienen `from` Y `to`). `turnover` y
+  `days_of_inventory` = `null` si stock actual ≤ 0 (no se puede dividir;
+  el producto igual aparece con `qty_sold` → stockouts de fast movers
+  visibles). Sorted turnover desc, `null` al final. Tenant-scoped.
+- **Por qué**: último reporte del BACKLOG #9 — cierra el set Fase 6.
+  Rotación = qué SKUs mueven inventario, base de decisiones de compra.
+- **Limitación honesta (documentada)**: el server NO guarda snapshots
+  históricos de stock → se usa `product.stock` ACTUAL como proxy del
+  denominador. Mismo principio que `items_without_cost` (no inventar
+  precisión que no hay; documentado en doc-comment de `StockRotationRow`).
+- **Patrón**: mismo módulo `expenses` (`domain::reports` sigue scaffold).
+  3 queries (orders ids → items `order IN $ids` → products `id IN $ids`)
+  + agregación/sort Rust — shape kv-surrealkv-safe idéntico a
+  `top_products`/`margins_daily`. Maps string-keyed (gotcha clippy
+  `mutable_key_type`).
+- **Bug atrapado por test**: comparador `sort_by` invertido — destructuré
+  `(y.turnover, x.turnover)` y comparé `xt.cmp(&yt)` → orden ascendente
+  (Slow 0.1 antes que Fast 4). Fix: `(x.turnover, y.turnover)` +
+  `yt.cmp(&xt)` para desc, arms None ajustados (Some<None ⇒ Less).
+  El test de orden lo cazó antes del release.
+- **Gotcha test**: `post_sale` sobre producto non-batch-tracked rechaza
+  `qty == stock` (no solo `qty > stock`) con `InsufficientStock`. Para
+  el caso "out of stock" del test: vender parcial y luego
+  `UPDATE product SET stock=0` (modela un stockout posterior real) en vez
+  de vender exactamente todo el stock.
+- **Tests** (`crates/domain/tests/expenses.rs` +2):
+  `stock_rotation_turnover_days_and_oos` (Fast 25→5 sell20 turnover 4
+  doi 2.5; Slow 110→100 sell10 turnover 0.1 doi 100; Oos sell3 luego
+  stock=0 → turnover/doi None, ordenado último; sin ventana → doi None) +
+  `stock_rotation_tenant_scoped_empty`. Workspace verde, clippy
+  `-D warnings` clean, fmt clean.
+- **Compat**: aditivo. Sin migración (lee `order`/`order_item`/`product`).
+- **Build/MSI/Smoke**: release build OK. MSI
+  `pharma-server-0.1.22-x86_64.msi` 12,234,752 bytes, sha256
+  `36e3b6b00f6fc7a048ea90c93245d8984221bae0e176f5bee6015d2b948bfd4c`.
+  Smoke real: stop→`msiexec /i` (MajorUpgrade quitó 0.1.21, exit 0)→
+  Running→`/`=`{"version":"0.1.22"}`→`/health/ready` 200 `db:ok`.
+- **Release**: `gh release create v0.1.22 --target <merge-commit>`. PR
+  `feature/erp-parity-stock-rotation` → `feature/erp-parity`.
+- **Hito**: BACKLOG #9 (Fase 6 reportes) CERRADO. 7 reportes vivos.
 - **Pendiente**: ver `## BACKLOG` al tope.
 
 ---
