@@ -94,10 +94,10 @@ NO acá.
    `controlled` autodetectado vía `product.active_ingredient`.
 6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
 7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
-8. **Fase 5-full**: ✅ PO local create/list/get (migr 0015, PR #35) ·
-   ✅ recepción + costo promedio ponderado (WAC) + audit movement
-   (PR #38, sin migración — enum 'received' ya en 0015) · pendiente:
-   cuentas por pagar (`purchase_payment`).
+8. **~~Fase 5-full~~ ✅ COMPLETA**: ✅ PO local create/list/get
+   (migr 0015, PR #35) · ✅ recepción + costo promedio ponderado (WAC) +
+   audit movement (PR #38) · ✅ cuentas por pagar `purchase_payment`
+   (migr 0016, PR #40). Ciclo completo: crear → recibir → pagar.
 9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
    ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
@@ -956,4 +956,37 @@ NO acá.
 - **Gate**: workspace verde, clippy `-D warnings` clean, fmt clean, release build verde.
 - **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #38 mergeado a `feature/erp-parity`.
 - **Estado vs goal**: ✅ ciclo compra local destrabado (crear + recibir → stock + WAC + audit) · ⏳ Slice 3 cuentas por pagar (`purchase_payment`), Fase 9 firma cert + smoke VM, Fase 10 sync online, Fase 12 marketplace.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — Cuentas por pagar `purchase_payment` (BACKLOG #8 Fase 5-full slice 3 — CIERRA Fase 5-full)
+
+- **Qué/por qué**: PR #40. Tercer slice de Fase 5-full — cierra el ciclo PO local. Vida útil ahora completa: crear (slice 1, #35) → recibir con stock + WAC + audit (slice 2, #38) → pagar (slice 3, este). Sin AP, la OC quedaba completa físicamente pero sin trazabilidad financiera. **`paid` y `balance` se derivan del ledger `purchase_payment`, NO de un flip de status** — un pago equivocado se reversa sin reescribir historia.
+- **Migración** `0016_purchase_payment.surql` (aditiva): tenant-scoped, `amount: decimal ASSERT $value > 0`, `payment_method: string ASSERT IN ['cash','bank','card','transfer']`, `cash_session: option<record<cash_register_session>>` (mirror migr 0012 expense — cash con sesión abierta → arqueo lo levanta como retiro implícito), `currency`/`reference`/`note`/`created_by`/`paid_at`/`created_at`. Índices compuestos `purchase_payment_tenant_po`, `purchase_payment_tenant_paid_at`, `purchase_payment_tenant_session` — todos incluyen `tenant`.
+- **Repo**:
+  - `purchase_order_belongs(po) -> Option<(status, total, currency)>`: valida tenant + lee total en una sola query (evita double-fetch).
+  - `cash_session_belongs(session) -> bool`: tenant-scoped existence.
+  - `sum_payments(po) -> Decimal`: `SELECT math::sum(amount) AS s FROM purchase_payment WHERE tenant=$t AND purchase_order=$po GROUP ALL` (`None → 0`).
+  - `create_purchase_payment(...)` y `list_payments_for(po)` (ORDER BY paid_at ASC, created_at ASC).
+- **Service** `create_purchase_payment`:
+  - PO ∈ tenant (cross-tenant → `DomainError::NotFound`, no leak).
+  - Rechaza pago a PO `cancelled` → `Conflict`.
+  - `amount > 0` (`Invalid`), `payment_method` ∈ enum (`Invalid` con lista permitida en el mensaje), `cash_session ∈ tenant` si se da.
+  - Precondición `already_paid + amount ≤ total` → si excede, `Conflict` con detalle `total=X paid=Y intento=Z`. Operador puede dividir un pago en N partes pero no double-pay.
+  - `currency` hereda de la PO si no se override (default CLP en slice 1).
+  - `claims.sub` → `created_by` opcional.
+- **Service** `get_purchase_payment_summary`: `{purchase_order, status, total, paid = Σ payments.amount, balance = total - paid, fully_paid = balance ≤ 0, payments[chronological by paid_at ASC]}`.
+- **API**:
+  - `POST /api/v1/purchase-orders/{id}/payments` (`writes`, admin/owner).
+  - `GET /api/v1/purchase-orders/{id}/payments` (`reads`, bearer) → summary completo.
+- **Decisión clave**: `purchase_payment` rechaza pago a `cancelled` PO pero ACEPTA pagos a `draft` y `received`. Slice 2 maneja el estado de stock (`status`) por separado del estado de cuenta (derivado del ledger). Una farmacia puede prepagar antes de recibir (`draft` + pagos) o pagar después de recibir (`received` + pagos), y `fully_paid` es ortogonal al `status` — no hay un cuarto estado `paid` porque eso obligaría a una transición.
+- **Tests** (`crates/domain/tests/purchasing.rs` 14 → **18/18**, +4):
+  - `po_payment_records_and_summary_tracks_balance_until_fully_paid`: total=10000, pago 4000 (transfer, currency inherita CLP), summary `paid=4000 balance=6000 fully_paid=false`; segundo pago 6000 (bank) → `paid=10000 balance=0 fully_paid=true`, `payments[].len=2` orden cronológico (paid_at ASC).
+  - `po_payment_refuses_amount_exceeding_balance`: total=1000, pago 700 OK; intento 500 (saldo 300) → `CONFLICT`, summary intacto `paid=700 payments.len=1`.
+  - `po_payment_rejects_invalid_inputs_and_cross_tenant_po`: `amount=0` → `INVALID_INPUT`; `payment_method='bitcoin'` → `INVALID_INPUT`; pago a PO de t1 desde t2 → `NOT_FOUND` (no leak — mapeo `Option<...> → NotFound` mantiene la regla de no informar existencia de recursos cross-tenant).
+  - `po_payment_refuses_payment_to_cancelled_order`: PO marcada cancelled → `CONFLICT`.
+- **Gate**: `cargo test --workspace --tests --lib` verde, `cargo test -p api --doc` solo verde. Race conocida en doctest con `CARGO_TARGET_DIR` compartido cuando otra sesión paralela compila simultáneamente — solo affecta `cargo test --workspace` (que invoca rustdoc del lib mientras otra sesión sobre-escribe rlibs); gate igual verde validando por componentes (tests + doctest solo). Clippy `-D warnings` clean, fmt clean, release build verde (exit 0).
+- **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #40 mergeado a `feature/erp-parity`.
+- **Estado vs goal**: ✅ **BACKLOG #8 Fase 5-full CIERRA** — ciclo PO local completo (crear + recibir + WAC + audit + AP). ⏳ Fase 9 firma cert Authenticode + smoke VM (v1.0.0 vendible), Fase 10 sync ERP online opt-in (v1.1.0), Fase 12 marketplace (locked estrategia-only).
 - **Pendiente**: ver `## BACKLOG` al tope.
