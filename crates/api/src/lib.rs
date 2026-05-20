@@ -31,6 +31,12 @@ pub struct AppState {
     /// SurrealKv data directory on disk. Used by the backup endpoint to know
     /// what to tar. `None` in unit tests with kv-mem.
     pub data_dir: Option<std::path::PathBuf>,
+    /// Node license — controls feature entitlement. Falls back to
+    /// [`license::License::free_default`] when `data/license.json` is missing
+    /// or invalid (invariant: core gratis always works — ADR-0005).
+    /// Stored behind `Arc` for cheap clones; mutation requires service restart
+    /// today, hot-reload deferred to Fase 10c CLI work.
+    pub license: Arc<license::License>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -137,6 +143,38 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         }
     };
 
+    // License: load from `<data_dir>/license.json` if present and valid;
+    // otherwise fall back to Free-tier default. Errors are logged but never
+    // block startup — core ERP must always run (ADR-0005).
+    let license = {
+        let db_path = std::path::PathBuf::from(&cfg.db.path);
+        let dir = db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let path = license::default_license_path(dir);
+        if path.exists() {
+            match license::load_from_disk(&path) {
+                Ok(lic) => {
+                    tracing::info!(
+                        tier = lic.tier.as_str(),
+                        license_id = %lic.license_id,
+                        features = lic.features.len(),
+                        "license loaded"
+                    );
+                    Arc::new(lic)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, path = %path.display(),
+                        "license file present but invalid; falling back to Free");
+                    Arc::new(license::License::free_default(uuid::Uuid::nil()))
+                }
+            }
+        } else {
+            tracing::info!("no license file; running Free tier");
+            Arc::new(license::License::free_default(uuid::Uuid::nil()))
+        }
+    };
+
     let state = AppState {
         started_at: chrono::Utc::now(),
         jwt: cfg.jwt.clone(),
@@ -144,6 +182,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         metrics_token,
         node_identity,
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
+        license,
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -378,6 +417,7 @@ mod tests {
             metrics_token: token.map(String::from),
             node_identity: None,
             data_dir: None,
+            license: Arc::new(license::License::free_default(uuid::Uuid::nil())),
         }
     }
 

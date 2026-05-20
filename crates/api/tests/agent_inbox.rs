@@ -52,6 +52,7 @@ fn node_state(db: Arc<db::Db>) -> (api::AppState, String) {
         metrics_token: None,
         node_identity: Some(Arc::new(node)),
         data_dir: None,
+        license: Arc::new(license::License::free_default(uuid::Uuid::nil())),
     };
     (state, did)
 }

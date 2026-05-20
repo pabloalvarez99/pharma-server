@@ -122,6 +122,32 @@ NO acá.
 
 ---
 
+## 2026-05-20 — Fase 10b/c/d: AppState + 402 + gated endpoint + CLI
+
+- **Qué**:
+  - **10b — `ApiError::payment_required(feature, tier_required)`** en `crates/api/src/error.rs`. Devuelve 402 con código `FEATURE_REQUIRES_UPGRADE` y `details = {feature, tier_required}`. `impl From<license::GateError> for ApiError` permite usar `?` directo en handlers. AppState extendido con `pub license: Arc<license::License>` cargado al boot desde `<data_dir>/license.json`; si falta o es inválido cae a `License::free_default(Uuid::nil())` (invariante ADR-0005: core gratis nunca bloqueado).
+  - **10d — gated endpoint POC**: `GET /api/v1/reports/margins-daily` ahora llama `license::require(&state.license, "reports.margins_daily")?` antes del DB lookup. Free tier → 402; Pro+ con la feature → pasa al handler.
+  - **10c — CLI `pharma license`**: subcomandos `import <FILE>`, `status`, `features [--json]`, `verify <FILE>`, `export`, `clear --force`. Persistencia en `<data_dir>/license.json` (junto al SurrealKv dir + `agent.key`, queda incluido en backups). `status` muestra tier/status (active|grace|expired)/license_id/expires/seats/features/issuer DID/key_id.
+- **Tests nuevos (14 + roll-up)**:
+  - `crates/api/src/error.rs`: `payment_required_envelope` (status 402, code, details), `gate_error_converts_to_payment_required` (Into<ApiError>).
+  - `crates/api/tests/license_gate.rs`: `free_tier_blocks_margins_daily_with_402` (Free → 402 con details `feature=reports.margins_daily, tier_required=pro` ANTES de mirar DB), `pro_tier_passes_gate_then_hits_db_unavailable` (Pro con feature → gate pasa → 503 service_unavailable porque no hay DB; prueba que el gate no bloquea).
+  - Constructores AppState en tests existentes (backup, integration_db, auth, agent_inbox, middleware/role) actualizados al nuevo field.
+- **Workspace test count**: license 10 + api error 4 (2 nuevos) + api license_gate 2 (nuevos) + resto sin cambio.
+- **Por qué**:
+  - Fase 10b/d entrega el primer gate funcional end-to-end ⇒ valida que el design de `crates/license` (10a) integra limpio con axum/AppState sin caer en cycles de deps.
+  - Fase 10c entrega la UX que necesita el operador para activar/diagnosticar licenses sin tocar archivos a mano.
+  - License loading offline-first: ausencia o invalidez nunca bloquea startup ⇒ cumple ADR-0005 + §11 "failure modes" del license-architecture.
+- **Archivos**:
+  - `crates/api/Cargo.toml` (+ `license = { path }`), `crates/api/src/error.rs`, `crates/api/src/lib.rs`, `crates/api/src/v1/expenses.rs`, `crates/api/src/middleware/role.rs`, `crates/api/tests/{auth,backup,integration_db,agent_inbox,license_gate}.rs`.
+  - `crates/cli/Cargo.toml` (+ `license`, `chrono`, `uuid`), `crates/cli/src/main.rs` (~+150 LOC subcomandos).
+- **No-en-esta-sesión**:
+  - Auto-refresh/CRL (Fase 11+).
+  - Hot reload tras `pharma license import` (hoy requiere restart del service; documentado en doccomment de `AppState.license`).
+  - Más endpoints gated (sólo POC sobre `reports.margins_daily`; el resto del catálogo §9 espera owner-decision sobre cuáles cobran realmente).
+  - Integración con license real (key embebida sigue placeholder hasta Fase 11a).
+
+---
+
 ## 2026-05-20 — Fase 10a `crates/license` skeleton (Ed25519 offline-first)
 
 - **Qué**: nuevo crate `crates/license` que implementa verificación offline de licenses

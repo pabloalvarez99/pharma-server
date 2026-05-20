@@ -115,6 +115,25 @@ impl ApiError {
         )
     }
 
+    /// 402 — feature requires a paid tier. Body code: `FEATURE_REQUIRES_UPGRADE`.
+    /// Caller passes the feature key (e.g. `reports.margins_daily`) and the
+    /// minimum tier (`pro` | `business` | `enterprise`). Spec:
+    /// `docs/strategy/license-architecture.md` §7.2.
+    pub fn payment_required(feature: &str, tier_required: &str) -> Self {
+        Self::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "FEATURE_REQUIRES_UPGRADE",
+            format!(
+                "Esta funcionalidad requiere el plan '{tier_required}'. \
+                 Active en https://pharma-server.cl/upgrade (feature: {feature})."
+            ),
+        )
+        .with_details(serde_json::json!({
+            "feature": feature,
+            "tier_required": tier_required,
+        }))
+    }
+
     pub fn not_implemented() -> Self {
         Self::new(
             StatusCode::NOT_IMPLEMENTED,
@@ -125,6 +144,12 @@ impl ApiError {
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg)
+    }
+}
+
+impl From<license::GateError> for ApiError {
+    fn from(e: license::GateError) -> Self {
+        Self::payment_required(&e.feature, e.tier_required)
     }
 }
 
@@ -182,6 +207,32 @@ mod tests {
         assert_eq!(v["error"]["code"], "INVALID_INPUT");
         assert_eq!(v["error"]["message"], "RUT inválido");
         assert_eq!(v["error"]["details"]["field"], "rut");
+    }
+
+    #[tokio::test]
+    async fn payment_required_envelope() {
+        let resp = ApiError::payment_required("reports.margins_daily", "pro").into_response();
+        assert_eq!(resp.status(), StatusCode::PAYMENT_REQUIRED);
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"]["code"], "FEATURE_REQUIRES_UPGRADE");
+        assert!(v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("plan 'pro'"));
+        assert_eq!(v["error"]["details"]["feature"], "reports.margins_daily");
+        assert_eq!(v["error"]["details"]["tier_required"], "pro");
+    }
+
+    #[tokio::test]
+    async fn gate_error_converts_to_payment_required() {
+        let gate_err = license::GateError {
+            feature: "branding.white_label".to_string(),
+            tier_required: "enterprise",
+        };
+        let api_err: ApiError = gate_err.into();
+        assert_eq!(api_err.status, StatusCode::PAYMENT_REQUIRED);
+        assert_eq!(api_err.code, "FEATURE_REQUIRES_UPGRADE");
     }
 
     #[tokio::test]

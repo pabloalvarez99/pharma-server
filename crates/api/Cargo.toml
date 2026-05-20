@@ -14,6 +14,7 @@ db = { path = "../db" }
 auth = { path = "../auth" }
 domain = { path = "../domain" }
 agent = { path = "../agent" }
+license = { path = "../license" }
 telemetry = { path = "../telemetry" }
 tokio.workspace = true
 axum.workspace = true

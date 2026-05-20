@@ -68,6 +68,7 @@ async fn spawn() -> (axum::Router, String, TempDir, std::path::PathBuf) {
         metrics_token: None,
         node_identity: None,
         data_dir: Some(db_path.clone()),
+        license: Arc::new(license::License::free_default(uuid::Uuid::nil())),
     };
     (api::build_router(state), token, tmp, db_path)
 }
