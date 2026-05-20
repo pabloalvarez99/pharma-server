@@ -88,6 +88,9 @@ async fn margins_daily(
     AuthUser(claims): AuthUser,
     Query(filters): Query<SalesReportFilters>,
 ) -> Result<Json<Vec<DailyMarginRow>>, ApiError> {
+    // License gate (Fase 10d POC): requires Pro+ or microtx that grants
+    // `reports.margins_daily`. Free tier → 402 FEATURE_REQUIRES_UPGRADE.
+    license::require(&state.license, "reports.margins_daily")?;
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
     Ok(Json(

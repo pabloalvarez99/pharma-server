@@ -15,8 +15,8 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.23` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado).
+- **Versión**: `0.1.24` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/). Pre-código de licencia/pago.
 - **Funciona end-to-end**:
@@ -119,6 +119,74 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — Fase 10b/c/d: AppState + 402 + gated endpoint + CLI
+
+- **Qué**:
+  - **10b — `ApiError::payment_required(feature, tier_required)`** en `crates/api/src/error.rs`. Devuelve 402 con código `FEATURE_REQUIRES_UPGRADE` y `details = {feature, tier_required}`. `impl From<license::GateError> for ApiError` permite usar `?` directo en handlers. AppState extendido con `pub license: Arc<license::License>` cargado al boot desde `<data_dir>/license.json`; si falta o es inválido cae a `License::free_default(Uuid::nil())` (invariante ADR-0005: core gratis nunca bloqueado).
+  - **10d — gated endpoint POC**: `GET /api/v1/reports/margins-daily` ahora llama `license::require(&state.license, "reports.margins_daily")?` antes del DB lookup. Free tier → 402; Pro+ con la feature → pasa al handler.
+  - **10c — CLI `pharma license`**: subcomandos `import <FILE>`, `status`, `features [--json]`, `verify <FILE>`, `export`, `clear --force`. Persistencia en `<data_dir>/license.json` (junto al SurrealKv dir + `agent.key`, queda incluido en backups). `status` muestra tier/status (active|grace|expired)/license_id/expires/seats/features/issuer DID/key_id.
+- **Tests nuevos (14 + roll-up)**:
+  - `crates/api/src/error.rs`: `payment_required_envelope` (status 402, code, details), `gate_error_converts_to_payment_required` (Into<ApiError>).
+  - `crates/api/tests/license_gate.rs`: `free_tier_blocks_margins_daily_with_402` (Free → 402 con details `feature=reports.margins_daily, tier_required=pro` ANTES de mirar DB), `pro_tier_passes_gate_then_hits_db_unavailable` (Pro con feature → gate pasa → 503 service_unavailable porque no hay DB; prueba que el gate no bloquea).
+  - Constructores AppState en tests existentes (backup, integration_db, auth, agent_inbox, middleware/role) actualizados al nuevo field.
+- **Workspace test count**: license 10 + api error 4 (2 nuevos) + api license_gate 2 (nuevos) + resto sin cambio.
+- **Por qué**:
+  - Fase 10b/d entrega el primer gate funcional end-to-end ⇒ valida que el design de `crates/license` (10a) integra limpio con axum/AppState sin caer en cycles de deps.
+  - Fase 10c entrega la UX que necesita el operador para activar/diagnosticar licenses sin tocar archivos a mano.
+  - License loading offline-first: ausencia o invalidez nunca bloquea startup ⇒ cumple ADR-0005 + §11 "failure modes" del license-architecture.
+- **Archivos**:
+  - `crates/api/Cargo.toml` (+ `license = { path }`), `crates/api/src/error.rs`, `crates/api/src/lib.rs`, `crates/api/src/v1/expenses.rs`, `crates/api/src/middleware/role.rs`, `crates/api/tests/{auth,backup,integration_db,agent_inbox,license_gate}.rs`.
+  - `crates/cli/Cargo.toml` (+ `license`, `chrono`, `uuid`), `crates/cli/src/main.rs` (~+150 LOC subcomandos).
+- **No-en-esta-sesión**:
+  - Auto-refresh/CRL (Fase 11+).
+  - Hot reload tras `pharma license import` (hoy requiere restart del service; documentado en doccomment de `AppState.license`).
+  - Más endpoints gated (sólo POC sobre `reports.margins_daily`; el resto del catálogo §9 espera owner-decision sobre cuáles cobran realmente).
+  - Integración con license real (key embebida sigue placeholder hasta Fase 11a).
+
+---
+
+## 2026-05-20 — Fase 10a `crates/license` skeleton (Ed25519 offline-first)
+
+- **Qué**: nuevo crate `crates/license` que implementa verificación offline de licenses
+  JSON firmadas Ed25519. Reusa `agent::canonical` (hecho público en este commit) +
+  `agent::identity::verify_with_did`. Cero red, cero clock externo.
+- **Módulos**:
+  - `schema` — `License { schema_version, license_id, tenant_id, tier, features,
+    bought_addons, seat_count, issued_at, expires_at?, issuer_did, key_id, signature,
+    metadata? }`. `Tier { Free | Pro | Business | Enterprise }`. `SCHEMA_VERSION = 1`.
+    `License::free_default(tenant)` para fallback (Free + `reports.sales_daily` +
+    `federation.receive_cards`).
+  - `keys` — `LICENSER_KEYS: &[(&str, &str)]` placeholder + `lookup_did`. Real pubkey
+    inyectada en Fase 11a cuando `pharma-license-server` cree keypair KMS.
+  - `verify` — `parse_and_verify(json)` y `parse_and_verify_with_keys(json, keys)`
+    (la última para tests). Valida `schema_version <= SCHEMA_VERSION` (forward-compat
+    error claro), regla `expires_at=null ⇒ tier=free`, `key_id` lookup, `issuer_did`
+    matchea key, base64(sig) 64-byte, Ed25519 verify sobre canonical-JSON sin campo
+    `signature`. No valida expiry (responsabilidad del caller).
+  - `gate` — `entitled(license, feature) -> bool` y `require -> Result<(), GateError>`
+    con `tier_required` (catálogo §9 de `license-architecture.md`). Helpers
+    `is_expired(now, grace)` y `is_in_grace(now, grace)`. Free perpetuo nunca expira.
+  - `store` — `load_from_disk` (verify ⇒ License) y `save_to_disk` (pretty JSON).
+- **Tests (10/10 verde)**: roundtrip firma+verify; tampering detectado; key_id desconocido;
+  schema_version=999 rechazado; gate entitled+require; expiry inside/outside grace; store
+  save→read→verify; free_default shape.
+- **Por qué**:
+  - Implementa Fase 10a del [`roadmap`](./CLAUDE.md) post-pivote.
+  - Cumple [ADR-0002](./docs/adr/0002-license-ed25519-offline.md) (offline-first Ed25519)
+    + [ADR-0007](./docs/adr/0007-key-rotation-licenser.md) (multi-key con `key_id`).
+  - Sienta base para Fase 10b (`ApiError::payment_required`), 10c (CLI `pharma license`),
+    10d (gated endpoint POC).
+- **Archivos**: `crates/license/Cargo.toml`, `crates/license/src/{lib,schema,keys,verify,gate,store}.rs`,
+  `crates/license/tests/{common/mod.rs, verify_roundtrip, verify_tamper, verify_unknown_key,
+  verify_schema_forward_compat, gate_entitled, gate_pro, gate_expiry, store_roundtrip,
+  free_default}.rs`. Workspace: bump `0.1.23 → 0.1.24`, add member, add `base64 = "0.22"`.
+  `crates/agent/src/lib.rs` cambia `mod canonical` → `pub mod canonical`.
+- **No-en-esta-sesión**: integración con `crates/api` AppState (Fase 10b/d), CLI `pharma
+  license import|status|features` (Fase 10c), endpoint gated POC (Fase 10d), CRL refresh
+  (Fase 11+).
 
 ---
 

@@ -63,6 +63,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentCmd,
     },
+    /// License management — import, status, features (Fase 10c).
+    License {
+        #[command(subcommand)]
+        cmd: LicenseCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -99,6 +104,46 @@ enum AgentCmd {
         /// Path to a JSON file (card or envelope).
         file: PathBuf,
     },
+}
+
+#[derive(Subcommand)]
+enum LicenseCmd {
+    /// Import a .lic file. Verifies the Ed25519 signature offline and
+    /// persists to <data dir>/license.json. Exits non-zero if invalid.
+    Import {
+        /// Path to the .lic / .json license file.
+        file: PathBuf,
+    },
+    /// Print active license summary: tier, expiry, features, key.
+    Status,
+    /// List entitled feature keys.
+    Features {
+        /// Output as JSON array instead of one-per-line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a license file's signature without importing.
+    Verify {
+        /// Path to a .lic / .json license file.
+        file: PathBuf,
+    },
+    /// Print the active license JSON to stdout (useful for bug reports).
+    Export,
+    /// Remove the active license. Reverts to Free tier. Requires --force.
+    Clear {
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+/// Default license path: sibling of the SurrealKv data dir.
+fn license_path() -> anyhow::Result<PathBuf> {
+    let cfg = pharma_core::config::AppConfig::load()?;
+    let db_path = PathBuf::from(&cfg.db.path);
+    let dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    Ok(license::default_license_path(dir))
 }
 
 /// Default agent key path: sibling of the SurrealKv data dir.
@@ -338,6 +383,122 @@ async fn main() -> anyhow::Result<()> {
                         env.from, env.topic, env.msg_id
                     ),
                     Err(e) => return Err(anyhow!("envelope signature INVALID: {e}")),
+                }
+            }
+        },
+        Cmd::License { cmd } => match cmd {
+            LicenseCmd::Import { file } => {
+                let bytes =
+                    std::fs::read(&file).with_context(|| format!("read {}", file.display()))?;
+                let lic = license::parse_and_verify(&bytes)
+                    .with_context(|| format!("verify {}", file.display()))?;
+                let dest = license_path()?;
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                license::save_to_disk(&lic, &dest)?;
+                println!(
+                    "license imported: tier={} id={} features={} → {}",
+                    lic.tier.as_str(),
+                    lic.license_id,
+                    lic.features.len(),
+                    dest.display()
+                );
+            }
+            LicenseCmd::Status => {
+                let path = license_path()?;
+                if !path.exists() {
+                    println!("No license file at {}.", path.display());
+                    println!("Tier: free (default).");
+                    return Ok(());
+                }
+                match license::load_from_disk(&path) {
+                    Ok(lic) => {
+                        let now = chrono::Utc::now();
+                        let grace = chrono::Duration::days(30);
+                        let status = if license::is_expired(&lic, now, grace) {
+                            "expired"
+                        } else if license::is_in_grace(&lic, now, grace) {
+                            "grace"
+                        } else {
+                            "active"
+                        };
+                        println!("Tier:        {}", lic.tier.as_str());
+                        println!("Status:      {status}");
+                        println!("License ID:  {}", lic.license_id);
+                        println!("Tenant:      {}", lic.tenant_id);
+                        match lic.expires_at {
+                            Some(e) => println!("Expires:     {e}"),
+                            None => println!("Expires:     never (perpetual Free)"),
+                        }
+                        println!("Seats:       {}", lic.seat_count);
+                        println!("Features ({}):", lic.features.len());
+                        for f in &lic.features {
+                            println!("  - {f}");
+                        }
+                        println!("Issuer DID:  {}", lic.issuer_did);
+                        println!("Key ID:      {}", lic.key_id);
+                    }
+                    Err(e) => {
+                        eprintln!("License file invalid: {e}");
+                        eprintln!("Running Free tier as fallback.");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            LicenseCmd::Features { json } => {
+                let path = license_path()?;
+                let lic = if path.exists() {
+                    license::load_from_disk(&path)?
+                } else {
+                    license::License::free_default(uuid::Uuid::nil())
+                };
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&lic.features)?);
+                } else {
+                    for f in &lic.features {
+                        println!("{f}");
+                    }
+                }
+            }
+            LicenseCmd::Verify { file } => {
+                let bytes =
+                    std::fs::read(&file).with_context(|| format!("read {}", file.display()))?;
+                match license::parse_and_verify(&bytes) {
+                    Ok(lic) => {
+                        println!(
+                            "OK  tier={} id={} key_id={} expires={:?}",
+                            lic.tier.as_str(),
+                            lic.license_id,
+                            lic.key_id,
+                            lic.expires_at
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("INVALID: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            LicenseCmd::Export => {
+                let path = license_path()?;
+                if !path.exists() {
+                    return Err(anyhow!("no license at {}", path.display()));
+                }
+                let bytes = std::fs::read(&path)?;
+                println!("{}", String::from_utf8_lossy(&bytes));
+            }
+            LicenseCmd::Clear { force } => {
+                if !force {
+                    return Err(anyhow!("requiere --force para borrar la license activa"));
+                }
+                let path = license_path()?;
+                if path.exists() {
+                    std::fs::remove_file(&path)
+                        .with_context(|| format!("remove {}", path.display()))?;
+                    println!("license removed: {} (tier free vigente)", path.display());
+                } else {
+                    println!("no license to remove at {}", path.display());
                 }
             }
         },

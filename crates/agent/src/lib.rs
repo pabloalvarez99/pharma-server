@@ -17,11 +17,10 @@
 //! No networking here — transport (HTTP push / optional relay / NATS) lives in
 //! a future `sync`/transport crate. This crate is offline-pure and unit-tested.
 
+pub mod canonical;
 pub mod card;
 pub mod envelope;
 pub mod identity;
-
-mod canonical;
 
 pub use card::{AgentCard, AgentKind};
 pub use envelope::Envelope;

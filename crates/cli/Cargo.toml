@@ -13,6 +13,9 @@ pharma-core = { path = "../core" }
 db = { path = "../db" }
 auth = { path = "../auth" }
 agent = { path = "../agent" }
+license = { path = "../license" }
+chrono.workspace = true
+uuid.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

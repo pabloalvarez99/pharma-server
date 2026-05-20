@@ -97,6 +97,7 @@ mod tests {
             metrics_token: None,
             node_identity: None,
             data_dir: None,
+            license: std::sync::Arc::new(license::License::free_default(uuid::Uuid::nil())),
         }
     }
 
