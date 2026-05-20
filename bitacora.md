@@ -19,7 +19,7 @@ NO acá.
 - **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
-- **Fase 10 MVP local CIERRA** (2026-05-20, PR #47): `crates/license` (Ed25519 offline) + `AppState.license: Arc<License>` (cargado al boot, missing/invalid → `free_default`) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force`. Falta: hot-reload tras import (hoy restart), CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
+- **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -91,7 +91,8 @@ NO acá.
    - ~~10c~~ ✅ CLI `pharma license import|status|features|verify|export|clear --force`.
    - ~~10d~~ ✅ POC `GET /api/v1/reports/margins-daily` gated.
    - **10e pendiente**: tests E2E con license real firmada (requiere Fase 11a license-server o un dev-tool para mintear); hoy cubierto por unit/integration tests con keypair determinista.
-   - **Pendiente cola**: hot-reload sin restart del service (POST `/api/v1/admin/license/reload`), CRL refresh, key real producción.
+   - ~~Hot-reload sin restart~~ ✅ — `POST /api/v1/admin/license/reload` + `GET /api/v1/admin/license/status` admin-only, ArcSwap atómico.
+   - **Pendiente cola**: CRL refresh, key real producción.
 3. **Fase 11 — Payment rails + license-server** (REPO SEPARADO `pharma-license-server`):
    - **11a** Skeleton Next.js + Postgres (Vercel). Endpoints `issue`, `revoke`, webhooks. Sin rails aún.
    - **11b** Webpay (Oneclick) integration — Pro/Business sub mensual + microtx CL.
@@ -121,6 +122,25 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — License hot-reload sin restart (Fase 10 cola)
+
+- **Qué**: `AppState.license` ahora es `Arc<arc_swap::ArcSwap<License>>` (lock-free swap, lectura zero-cost en hot path). Nuevo endpoint admin:
+  - `POST /api/v1/admin/license/reload` (admin/owner) — re-lee `<data_dir>/license.json`, verifica offline, swap atómico. Fallback a `free_default` si missing/invalid (ADR-0005). Devuelve `LicenseSummary { tier, status, license_id, features, expires_at, key_id, seat_count }`.
+  - `GET /api/v1/admin/license/status` — mismo summary sin tocar disco.
+- **Loader extraído**: `api::load_license_from(path)` centraliza la policy "load+verify, fallback a Free en cualquier error". Lo usa tanto el startup como el endpoint reload.
+- **AppState extendido**: `license_path: Option<PathBuf>` para que el endpoint sepa qué releer (None en tests con kv-mem).
+- **Tests nuevos (6/6 verde)** en `crates/api/tests/license_admin.rs`: status devuelve summary (tier=pro, seats=5, features, status=active), status 403 sin admin role, reload 403 sin admin role, reload 503 sin path configurado, reload con file inexistente → 200 + fallback Free, reload con JSON inválido → 200 + fallback Free.
+- **Por qué**:
+  - CLI `pharma license import` ahora puede ser seguido por un call HTTP al endpoint y el cambio surte efecto sin restart del service (DevOps no-op cuando se compran microtx o se renueva sub).
+  - ArcSwap es lock-free en el hot path (Read-Copy-Update). El gate de `margins_daily` ahora hace `state.license.load()` que devuelve un Guard barato.
+  - Loader unificado evita drift entre startup y reload.
+- **Archivos**: `Cargo.toml` (+ `arc-swap = "1"`), `crates/api/Cargo.toml` (+`arc-swap`), `crates/api/src/lib.rs` (AppState struct + load_license_from helper + startup wiring + test stub), `crates/api/src/v1/{mod,license,expenses}.rs` (mod entry, nuevo módulo, gate usa `.load()`), `crates/api/src/middleware/role.rs`, `crates/api/tests/{auth,backup,integration_db,agent_inbox,license_gate,license_admin}.rs`.
+- **No-en-este-PR**:
+  - CLI auto-call al reload endpoint tras `import` (necesitaría HTTP client + JWT minting en CLI; documentar como flujo manual `curl -X POST -H "Authorization: Bearer <token>" /api/v1/admin/license/reload` por ahora).
+  - CRL refresh, key real producción (Fase 11+).
 
 ---
 

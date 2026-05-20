@@ -34,9 +34,12 @@ pub struct AppState {
     /// Node license — controls feature entitlement. Falls back to
     /// [`license::License::free_default`] when `data/license.json` is missing
     /// or invalid (invariant: core gratis always works — ADR-0005).
-    /// Stored behind `Arc` for cheap clones; mutation requires service restart
-    /// today, hot-reload deferred to Fase 10c CLI work.
-    pub license: Arc<license::License>,
+    /// `ArcSwap` allows lock-free hot-reload from
+    /// `POST /api/v1/admin/license/reload` without restarting the service.
+    pub license: Arc<arc_swap::ArcSwap<license::License>>,
+    /// On-disk path that `POST /api/v1/admin/license/reload` re-reads. `None`
+    /// only in unit tests with kv-mem.
+    pub license_path: Option<std::path::PathBuf>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -146,33 +149,14 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     // License: load from `<data_dir>/license.json` if present and valid;
     // otherwise fall back to Free-tier default. Errors are logged but never
     // block startup — core ERP must always run (ADR-0005).
-    let license = {
+    let (license, license_path) = {
         let db_path = std::path::PathBuf::from(&cfg.db.path);
         let dir = db_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."));
         let path = license::default_license_path(dir);
-        if path.exists() {
-            match license::load_from_disk(&path) {
-                Ok(lic) => {
-                    tracing::info!(
-                        tier = lic.tier.as_str(),
-                        license_id = %lic.license_id,
-                        features = lic.features.len(),
-                        "license loaded"
-                    );
-                    Arc::new(lic)
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, path = %path.display(),
-                        "license file present but invalid; falling back to Free");
-                    Arc::new(license::License::free_default(uuid::Uuid::nil()))
-                }
-            }
-        } else {
-            tracing::info!("no license file; running Free tier");
-            Arc::new(license::License::free_default(uuid::Uuid::nil()))
-        }
+        let lic = load_license_from(&path);
+        (Arc::new(arc_swap::ArcSwap::from_pointee(lic)), Some(path))
     };
 
     let state = AppState {
@@ -183,6 +167,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         node_identity,
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
         license,
+        license_path,
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -323,6 +308,34 @@ fn idempotency_purge_job(db: Arc<db::Db>) -> anyhow::Result<tokio_cron_scheduler
     Ok(job)
 }
 
+/// Read + verify a license from disk, falling back to `License::free_default`
+/// on any error. Logs both paths. Returned by both startup and the
+/// `admin/license/reload` handler, so the policy stays in one place.
+pub fn load_license_from(path: &std::path::Path) -> license::License {
+    if path.exists() {
+        match license::load_from_disk(path) {
+            Ok(lic) => {
+                tracing::info!(
+                    tier = lic.tier.as_str(),
+                    license_id = %lic.license_id,
+                    features = lic.features.len(),
+                    path = %path.display(),
+                    "license loaded"
+                );
+                lic
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(),
+                    "license file present but invalid; falling back to Free");
+                license::License::free_default(uuid::Uuid::nil())
+            }
+        }
+    } else {
+        tracing::info!(path = %path.display(), "no license file; running Free tier");
+        license::License::free_default(uuid::Uuid::nil())
+    }
+}
+
 pub fn default_config() -> pharma_core::config::AppConfig {
     pharma_core::config::AppConfig {
         bind: "0.0.0.0:8080".into(),
@@ -417,7 +430,10 @@ mod tests {
             metrics_token: token.map(String::from),
             node_identity: None,
             data_dir: None,
-            license: Arc::new(license::License::free_default(uuid::Uuid::nil())),
+            license: Arc::new(arc_swap::ArcSwap::from_pointee(
+                license::License::free_default(uuid::Uuid::nil()),
+            )),
+            license_path: None,
         }
     }
 

@@ -11,6 +11,7 @@ pub mod catalog;
 pub mod customers;
 pub mod expenses;
 pub mod inventory;
+pub mod license;
 pub mod prescriptions;
 pub mod purchasing;
 pub mod sales;
@@ -30,5 +31,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(cash_register::router(state.clone()))
         .merge(expenses::router(state.clone()))
         .merge(backup::router(state.clone()))
+        .merge(license::router(state.clone()))
         .merge(agent::router(state))
 }

@@ -87,7 +87,10 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         metrics_token: None,
         node_identity: None,
         data_dir: None,
-        license: Arc::new(license::License::free_default(uuid::Uuid::nil())),
+        license: Arc::new(arc_swap::ArcSwap::from_pointee(
+            license::License::free_default(uuid::Uuid::nil()),
+        )),
+        license_path: None,
     }
 }
 

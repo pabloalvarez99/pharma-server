@@ -22,7 +22,10 @@ fn state() -> api::AppState {
         metrics_token: None,
         node_identity: None,
         data_dir: None,
-        license: std::sync::Arc::new(license::License::free_default(uuid::Uuid::nil())),
+        license: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+            license::License::free_default(uuid::Uuid::nil()),
+        )),
+        license_path: None,
     }
 }
 

@@ -15,6 +15,7 @@ auth = { path = "../auth" }
 domain = { path = "../domain" }
 agent = { path = "../agent" }
 license = { path = "../license" }
+arc-swap.workspace = true
 telemetry = { path = "../telemetry" }
 tokio.workspace = true
 axum.workspace = true
