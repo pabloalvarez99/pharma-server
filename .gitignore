@@ -16,3 +16,6 @@ installer/wix/*.msi
 *.swp
 .DS_Store
 .claude/scheduled_tasks.lock
+
+# Custom cargo target dir used across sessions (CARGO_TARGET_DIR=target-shared)
+target-shared/
