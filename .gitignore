@@ -19,3 +19,8 @@ installer/wix/*.msi
 
 # Custom cargo target dir used across sessions (CARGO_TARGET_DIR=target-shared)
 target-shared/
+
+# Notas locales del fundador (historial de prompts/sesiones), nunca commitear
+a*_historial_*.md
+a_historial_*.md
+claudeapp.md

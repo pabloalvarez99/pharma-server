@@ -1,9 +1,9 @@
 # pharma-server — Project Context
 
 Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
-**Estado**: v0.1.5 · branch `feature/erp-parity` · Fases 1+2+3+4+5sub+7sub + **Fase 11 completa steps 1-4** (agent identity + transport + trading quote/po) mergeadas · **MSI descargable publicado**: GitHub release `v0.1.5` (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.5, 11.38 MB) · ecosistema agentes COMERCIA end-to-end (catalog.lookup→quote.request→po.create, firmado, opt-in por tenant) · pre-producción (sin firma cert).
+**Estado**: v0.1.23 · branch `feature/erp-parity` · Fases 1-7 + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · pre-producción (sin firma cert).
 
-**Visión extendida (2026-05-16)** → ver `docs/ecosystem-roadmap.md`. Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). Fases 1-9 = ERP vendible. Fase 10 = sync online opt-in. Fase 11 = agent protocol foundation. **Fase 12 = capa de confianza/marketplace** (estrategia fundador/VC, modelo de negocio, Trust Hub) → ver `docs/marketplace-master-plan.md`.
+**Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md).
 
 ## Producto / Visión comercial
 
@@ -29,10 +29,7 @@ Módulos objetivo (roadmap producto, no scaffold):
 8. **Backup**: snapshot SurrealKv programado + restore guiado.
 9. **Usuarios/roles**: cajero, químico, admin, dueño. Permisos por módulo.
 
-Modelo de negocio (referencia, no decidido):
-- Licencia por instalación + mantención anual (incluye updates + soporte).
-- Tier por nº de cajas/usuarios concurrentes.
-- Soporte premium (SLA) como add-on.
+Modelo de negocio: ver § "Modelo de negocio (freemium, lockeado)" abajo.
 
 Reglas de diseño derivadas:
 - **No agregar dependencia cloud** sin opción de operar offline.
@@ -40,6 +37,59 @@ Reglas de diseño derivadas:
 - **UI desacoplada**: el server expone API HTTP/JSON estable y versionada (`/api/v1/...`). Frontend (POS, admin) es cliente separado.
 - **Errores en español** en respuestas user-facing (códigos en inglés OK para devs).
 - **Performance budget**: endpoints POS <50ms p99 en hardware mínimo (i3 + SSD + 8GB).
+
+## Modelo de negocio (freemium, lockeado)
+
+Decidido 2026-05-20. **Pivote** de licencia única → **MSI Windows freemium estilo LoL**: core gratis + tiers pagos + microtransacciones one-time. Detalle completo en [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md). Decisión raíz: [ADR-0001](./docs/adr/0001-freemium-pivot.md).
+
+**Tiers** (resumen — ver master plan §3 para matrix completa):
+- **Free** — POS + inventario + caja + gastos + recetas + backup local + sales-daily + 1 caja + 1 sucursal.
+- **Pro** — 3 cajas, reportes margins/top-products, integraciones via microtx.
+- **Business** — 10 cajas, 5 sucursales, sync online, SII/ISP auto, federación quote+PO.
+- **Enterprise** — ilimitado, white-label, multi-cluster, SLA 4h.
+
+**Microtx one-time** (catálogo cerrado v1): Branding pack, SII unlock, Telegram bot, Premium reports pack, Extra cashier seat, Premium support credits.
+
+**Invariantes NO negociables** (codificados en [ADR-0005](./docs/adr/0005-core-gratis-no-locked-in.md)):
+1. Core ERP siempre gratis offline. Capacidades sólo se *agregan* al Free, nunca se quitan.
+2. License OFFLINE-FIRST — server NO requiere internet para operar features ya activadas.
+3. Telemetría OPT-IN siempre, default OFF, sin PII (Ley 19.628).
+4. Sin lock-in de datos — Free incluye export CSV/JSON completo de todo.
+5. Sin dark patterns — máx 1 upgrade prompt/sesión, cero en POS hot path.
+6. Sin kill-switch remoto — core gratis sigue operativo aunque license expire/revoque.
+7. Compromiso de continuidad — si la empresa cierra, last release queda funcional indefinida.
+
+**Arquitectura técnica del licenciamiento** ([`docs/strategy/license-architecture.md`](./docs/strategy/license-architecture.md), [ADR-0002](./docs/adr/0002-license-ed25519-offline.md)):
+- License = JSON Ed25519-firmado (reusa `crates/agent/identity.rs` + `envelope.rs`).
+- Pubkey del licenser embebida en binario. Validación 100% local.
+- Feature gate API: `entitled(feature) -> bool` + `require(feature) -> Result` (retorna 402 `FEATURE_REQUIRES_UPGRADE`).
+- CRL firmado distribuido por CDN ([ADR-0006](./docs/adr/0006-revocation-strategy-signed-crl.md)). Refresh opcional.
+- Key rotation multi-key con `key_id` ([ADR-0007](./docs/adr/0007-key-rotation-licenser.md)).
+- License-server vive en **repo separado** `pharma-license-server` ([ADR-0004](./docs/adr/0004-license-server-separado.md)).
+
+**Pagos** ([`docs/strategy/payments-cl.md`](./docs/strategy/payments-cl.md), [ADR-0003](./docs/adr/0003-payments-webpay-first.md)):
+- Webpay primario (Pro/Business sub + microtx CL).
+- Stripe secundario (microtx con tarjeta internacional, Fase 11.1).
+- Khipu para Enterprise (Fase 11.2).
+- Mercado Pago para LATAM multi-país (Fase 11.3+).
+
+## Roadmap (fases)
+
+Renumerado 2026-05-20 post-pivote. Estado en `bitacora.md` ## BACKLOG.
+
+- **Fase 9** — MSI vendible v1.0.0 (firma Authenticode + smoke VM Windows limpia). **BLOQUEADO por cert**.
+- **Fase 10** — License/entitlement layer:
+  - 10a `crates/license` crate nuevo (Ed25519 verify + parser, reusa `crates/agent`).
+  - 10b Feature gate API (`entitled`/`require`) + `ApiError::payment_required` 402.
+  - 10c CLI `pharma license import|status|features`.
+  - 10d 1 feature gated POC (sugerencia: `reports.margins_daily`).
+- **Fase 11** — Payment rails + license-server integration (repo separado, online activation):
+  - 11a `pharma-license-server` skeleton (Next.js + Postgres).
+  - 11b Webpay integration (Pro/Business sub).
+  - 11c Stripe Checkout (microtx).
+- **Fase 12** — Sync online opt-in entre nodos (paid tier).
+- **Fase 13** — Marketplace federado B2B ([`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md)). Capa de confianza/reputación.
+- **Fase 14** — Cloud companion (web admin + mobile dashboard, opt-in).
 
 ## Scope de este repo (IMPORTANTE)
 
@@ -126,7 +176,8 @@ Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
 | Antes de debug Windows-specific | `brain/pharma-server-gotchas.md` |
 | Visión producto / por qué existe | `brain/pharma-server-north-star.md` |
 | Arquitectura general (crates, flujo, multi-tenant) | `reference/pharma-server-architecture.md` |
-| Decisiones técnicas (por qué X) | `brain/pharma-server-decisions.md` |
+| Decisiones técnicas (por qué X) | `brain/pharma-server-decisions.md` + repo `docs/adr/` |
+| **Modelo de negocio / freemium / licencia / pagos** | repo `docs/strategy/` + `docs/adr/` |
 
 SessionStart hook (`.claude/hooks/vault-hint.sh`) sugiere refs según archivos cambiados — leer hints, NO duplicar lectura.
 

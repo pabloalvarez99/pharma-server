@@ -3,8 +3,10 @@
 > **Documento estratégico, no scaffolding.** Entrega análisis fundador/VC/arquitecto-jefe
 > y arquitectura objetivo. La implementación técnica del Hub/escrow es un plan separado
 > posterior, una vez validada la estrategia aquí. Consistente con
-> [`docs/ecosystem-roadmap.md`](./ecosystem-roadmap.md) (esto es la **Fase 12** de ese
-> roadmap). Última edición: 2026-05-16.
+> [`ecosystem-roadmap.md`](./ecosystem-roadmap.md) (esto es la **Fase 13** del roadmap
+> post-pivote freemium 2026-05-20). Movido desde `docs/marketplace-master-plan.md`
+> + renombrado a `b2b-marketplace.md` el 2026-05-20. Última edición de contenido:
+> 2026-05-16.
 
 ---
 
@@ -248,7 +250,7 @@ forma garantizada de no conseguir nunca liquidez.
   SurrealDB como primario del Hub a escala (herramienta equivocada para ese trabajo).
 - **Sin CRDTs.** El modelo es tenant-owned source-of-truth, sin multi-writer
   concurrente por registro. El diseño outbox + LWW ya descrito en
-  `docs/ecosystem-roadmap.md` §2 (Fase 10) basta y es mucho más simple. CRDT =
+  [`ecosystem-roadmap.md`](./ecosystem-roadmap.md) §2 (Fase 10) basta y es mucho más simple. CRDT =
   complejidad innecesaria → se corta explícitamente. Cortar complejidad es una
   decisión, no una omisión.
 - **Monolito modular, no microservicios.** El nodo ya es monolito modular de crates; el
@@ -302,7 +304,7 @@ forma garantizada de no conseguir nunca liquidez.
 - **Privacidad/datos:** nueva Ley de Protección de Datos CL (régimen tipo GDPR +
   Agencia). Minimización: nunca PII cruda al público; RUT hasheado; datos sensibles del
   ERP (PII paciente, recetas, ventas) **nunca** salen del nodo sin opt-in explícito por
-  tenant — decisión ya *locked* en `docs/ecosystem-roadmap.md` §4 y enforced en código
+  tenant — decisión ya *locked* en [`ecosystem-roadmap.md`](./ecosystem-roadmap.md) §4 y enforced en código
   (`resolve_federation_tenant`, agent.rs:216-285, gate `federation_enabled`).
 
 ---
@@ -438,7 +440,7 @@ la "Fase 12". No introduce dependencias ni toca `Cargo.toml`/`migrations` reales
 **Verificación:**
 
 - `git diff` muestra solo `docs/*.md` + `CLAUDE.md` (cero cambios de código).
-- Render Markdown OK (`glow docs/marketplace-master-plan.md`); bloque Mermaid §4 válido.
+- Render Markdown OK (`glow docs/strategy/b2b-marketplace.md`); bloque Mermaid §4 válido.
 - Cada afirmación "activo ya construido" enlaza a ruta real del repo
   (`crates/agent/identity.rs|envelope.rs|card.rs|canonical.rs`,
   `crates/api/src/v1/agent.rs`, `crates/api/src/v1/agent_orders.rs`,

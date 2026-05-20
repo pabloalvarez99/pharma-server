@@ -2,7 +2,7 @@
 -- SCHEMAFULL. NODE-LEVEL (NOT tenant-scoped): inter-node messaging is between
 -- sovereign pharma-server installs, not between tenants. Each row records one
 -- inbound envelope this node accepted, forming a local-only trust graph
--- (reputation is never centralized — see docs/ecosystem-roadmap.md).
+-- (reputation is never centralized — see docs/strategy/ecosystem-roadmap.md).
 
 DEFINE TABLE agent_interaction SCHEMAFULL;
 DEFINE FIELD peer_did   ON agent_interaction TYPE string ASSERT string::len($value) > 0;

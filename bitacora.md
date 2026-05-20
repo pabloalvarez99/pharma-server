@@ -16,8 +16,9 @@ NO acá.
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
 - **Versión**: `0.1.23` (workspace `Cargo.toml`).
-- **Branch**: `chore/bump-0.1.23` (PR → `feature/erp-parity`).
+- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
+- **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/). Pre-código de licencia/pago.
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -78,37 +79,89 @@ NO acá.
 
 ## BACKLOG
 
-> Lista priorizada única. Consolidé acá todos los "Pendiente" dispersos del log.
+> Lista priorizada única. **Re-priorizada 2026-05-20** post-pivote freemium MSI. Fases renumeradas en [`CLAUDE.md`](./CLAUDE.md) § Roadmap.
 
-1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke
-   install/uninstall en VM Windows limpia (sin firma → SmartScreen warning).
-2. **~~Order fulfillment/settlement agente~~** ✅: `po.status` (comprador
-   consulta), operador accept/reject/fulfill (`/api/v1/agent-orders/{id}/...`)
-   con stock decrement atómico + audit trail. ✅ multi-lot/FEFO split en
-   path federado (migr 0014, PR #27 + #30) — ver log 2026-05-17.
-3. **~~Multi-lot split traceability~~** ✅ (sales path): migración 0013 +
-   `order_item.batches_json` + `OrderItemDto.batches`. ✅ replicado en
-   `agent_fulfill` (path federado, migr 0014, PR #27 + #30).
-4. **~~Drug-interactions ruleset port~~** ✅ (Beers + Vademécum CL, 31 reglas).
-5. **~~Prescription desde POS~~** ✅: receta(s) ligada(s) a la venta + cliente,
-   `controlled` autodetectado vía `product.active_ingredient`.
-6. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
-7. **Fase 10 — sync ERP online opt-in** entre nodos (replicación datos → v1.1.0).
-8. **~~Fase 5-full~~ ✅ COMPLETA**: ✅ PO local create/list/get
-   (migr 0015, PR #35) · ✅ recepción + costo promedio ponderado (WAC) +
-   audit movement (PR #38) · ✅ cuentas por pagar `purchase_payment`
-   (migr 0016, PR #40) · ✅ cancel `draft` PO (PR #45, sin migración).
-   Lifecycle completo: crear → (recibir | cancelar) → pagar.
-9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
-   sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
-   ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
-   v0.1.22. Set de reportes Fase 6 cerrado (sales/margins/top/ABC/near-
-   expiry/rotation). Reportes futuros = extensiones del mismo patrón.
-10. **Fase 8**: cron jobs + backup programado SurrealKv + restore guiado +
-    Swagger UI + desktop Tauri.
-11. **Fase 12 — marketplace de confianza** (`docs/marketplace-master-plan.md`,
-    branch `feature/marketplace-master-plan`): capa B2B sobre el protocolo
-    federado firmado. Estrategia/locked decisions, sin scaffold aún.
+### Inmediato post-pivote (Fases 9-11)
+
+1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke install/uninstall en VM Windows limpia. **BLOQUEADO por cert** (sin firma → SmartScreen warning).
+2. **Fase 10 — License layer MVP local** (sin pagos, sólo entitlement):
+   - **10a** `crates/license` nuevo: Ed25519 verify + parser (reusa `crates/agent::identity` + canonical). Pubkey del licenser embebida.
+   - **10b** Feature gate API `entitled(feature)→bool` + `require(feature)→Result` + `ApiError::payment_required` 402 `FEATURE_REQUIRES_UPGRADE`.
+   - **10c** CLI `pharma license import|status|features|verify|export|clear`.
+   - **10d** 1 feature gateada como POC — sugerencia `reports.margins_daily` (ya existe en `crates/api/src/v1/...`).
+   - **10e** Tests E2E: license-free, license-pro, license-expired, license-tampered, license-revoked.
+3. **Fase 11 — Payment rails + license-server** (REPO SEPARADO `pharma-license-server`):
+   - **11a** Skeleton Next.js + Postgres (Vercel). Endpoints `issue`, `revoke`, webhooks. Sin rails aún.
+   - **11b** Webpay (Oneclick) integration — Pro/Business sub mensual + microtx CL.
+   - **11c** Stripe Checkout — microtx con tarjeta internacional.
+   - **11d** CRL signed distribution vía CDN ([ADR-0006](./docs/adr/0006-revocation-strategy-signed-crl.md)).
+   - **11e** Provider DTE (SimpleAPI) — boleta SII electrónica por cada cobro. ADR-0008 pendiente.
+
+### Mid-term (Fases 12-14)
+
+4. **Fase 12 — Sync online opt-in entre nodos** (paid tier, replicación datos).
+5. **Fase 13 — Marketplace federado B2B** ([`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md)). Locked decisions, sin scaffold aún. Preserva todo.
+6. **Fase 14 — Cloud companion** (web admin + mobile dashboard, opt-in).
+
+### Shippable independiente (sin bloquear pivote)
+
+7. **Relay offline-peer**: cola/relay para nodos federados sin conexión directa.
+8. **Audit-log query** (endpoint filtrable por fecha/usuario/tabla).
+9. **CSV import** (productos masivos al inventario).
+10. **Rate-limit** (per-tenant + per-IP).
+11. **Fase 8 cron + Swagger UI + Tauri desktop** (deprioritized vs. licensing).
+
+### Completadas (referencia histórica)
+
+- **~~Order fulfillment agente~~** ✅: `po.status`, accept/reject/fulfill atómico (PR #27, #30).
+- **~~Multi-lot split traceability~~** ✅ (sales + agent_fulfill).
+- **~~Drug-interactions ruleset~~** ✅ (Beers + Vademécum CL, 31 reglas).
+- **~~Prescription desde POS~~** ✅.
+- **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
+- **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — Pivote freemium + reorganización docs/
+
+- **Qué**: pivote estratégico **decidido por fundador** de modelo "licencia única on-prem" a
+  **MSI nativo Windows freemium estilo League of Legends** (core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time). Esta sesión = 100% docs + cleanup + reordenar roadmap. **Sin código Rust de licensing/pagos**.
+- **Por qué**:
+  - Fricción de licencia upfront (~CLP $300k) limita adopción en farmacias independientes CL.
+  - Freemium → más cajas instaladas → más data → leverage para Fase 13 marketplace federado (network effects reales).
+  - Microtx permiten precio-por-valor diferenciado (módulo SII vale más que theme).
+- **Decisiones lockeadas (ADRs)**:
+  - [ADR-0001](./docs/adr/0001-freemium-pivot.md) — pivote freemium.
+  - [ADR-0002](./docs/adr/0002-license-ed25519-offline.md) — license Ed25519 reusa `crates/agent`, offline-first.
+  - [ADR-0003](./docs/adr/0003-payments-webpay-first.md) — Webpay primary CL, Stripe secundario international.
+  - [ADR-0004](./docs/adr/0004-license-server-separado.md) — `pharma-license-server` repo aparte.
+  - [ADR-0005](./docs/adr/0005-core-gratis-no-locked-in.md) — invariantes core gratis (sin paywall a export, sin kill-switch, telemetry opt-in).
+  - [ADR-0006](./docs/adr/0006-revocation-strategy-signed-crl.md) — revocation CRL firmado vía CDN.
+  - [ADR-0007](./docs/adr/0007-key-rotation-licenser.md) — rotación de claves multi-key con `key_id`.
+- **Estructura `docs/` nueva**:
+  - `docs/product/` ← parity-prisma-models, erp-parity-prompt (movidos con `git mv`).
+  - `docs/strategy/` ← freemium-master-plan ⭐, license-architecture ⭐, payments-cl ⭐, scaling-architecture ⭐, ecosystem-roadmap (movido), b2b-marketplace (movido + renombrado desde marketplace-master-plan.md).
+  - `docs/adr/` ← 7 ADRs (template MADR 3.0) + README con índice + template.
+  - `docs/README.md` ← índice maestro.
+- **`CLAUDE.md` actualizado**: § "Modelo de negocio (freemium, lockeado)" agregada + § "Roadmap (fases 9-14)" renumerado + Estado v0.1.23 + ref `docs/marketplace-master-plan.md` → `docs/strategy/b2b-marketplace.md`. Tabla "Vault Obsidian" extendida con fila docs/strategy + docs/adr.
+- **Refs internas fixed**: `crates/api/src/v1/agent.rs` (2 comentarios), `migrations/0008_agent.surql` (1 comentario), `docs/strategy/ecosystem-roadmap.md` (1 link).
+- **`.gitignore`**: agregado patrón `a*_historial_*.md` + `a_historial_*.md` + `claudeapp.md` (notas locales del fundador, jamás commitear).
+- **BACKLOG re-priorizado** (arriba de este log).
+- **Archivos creados**:
+  - `docs/README.md`, `docs/product/README.md`, `docs/strategy/README.md`, `docs/adr/README.md`.
+  - `docs/strategy/freemium-master-plan.md` — vision, tier matrix, microtx catalog, pricing CL ranges, invariantes lockeadas, anti-piratería razonable, threat model, KPIs, rollout phases, glosario.
+  - `docs/strategy/license-architecture.md` — JSON schema versionado, reuse `crates/agent`, activation flow online/offline/auto, refresh+revocation, key management multi-key, feature gate API, CLI `pharma license`, feature keys catalog inicial, failure modes, threat model.
+  - `docs/strategy/payments-cl.md` — comparativa rails CL, compliance (IVA, SII boleta electrónica, Ley 19.628, Ley 21.521 fintech), idempotency + webhooks, refunds/chargebacks, recomendación staged.
+  - `docs/strategy/scaling-architecture.md` — license-server stateless multi-region, CDN distribution, webhook ingestion design, telemetry pipeline opt-in, fleet management Enterprise, cost model, disaster recovery.
+  - 7 ADRs en `docs/adr/`.
+- **Archivos movidos (git mv, preservan historia)**:
+  - `docs/ecosystem-roadmap.md` → `docs/strategy/ecosystem-roadmap.md`.
+  - `docs/marketplace-master-plan.md` → `docs/strategy/b2b-marketplace.md` (renombrado).
+  - `docs/parity-prisma-models.md` → `docs/product/parity-prisma-models.md`.
+  - `docs/erp-parity-prompt.md` → `docs/product/erp-parity-prompt.md`.
+- **NO se hizo**: cero código Rust, cero migración nueva, cero bump de versión, cero release nueva. Pre-código de `crates/license` (Fase 10). NO scaffolding especulativo.
+- **Próxima sesión**: Fase 10a — `crates/license` skeleton (parse, verify, entitled).
+- **Commit**: pendiente al final de esta sesión.
 
 ---
 

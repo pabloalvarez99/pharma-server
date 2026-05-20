@@ -13,7 +13,7 @@
 //!   (shared Chile vocabulary; no tenant data leaks).
 //!
 //! Reputation is appended to `agent_interaction` (node-level, never
-//! centralized — see docs/ecosystem-roadmap.md).
+//! centralized — see docs/strategy/ecosystem-roadmap.md).
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde_json::json;
@@ -224,7 +224,7 @@ async fn catalog_lookup(
 /// Resolve a tenant by slug and enforce the federation opt-in: the tenant
 /// MUST have `admin_setting` key `federation_enabled` == "true". This is the
 /// gate that keeps tenant pricing/stock private unless the operator opts in
-/// (locked decision — see docs/ecosystem-roadmap.md).
+/// (locked decision — see docs/strategy/ecosystem-roadmap.md).
 async fn resolve_federation_tenant(
     state: &AppState,
     slug: &str,

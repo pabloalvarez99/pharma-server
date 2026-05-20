@@ -17,7 +17,7 @@ Dominio cubierto (16 tablas multi-tenant + 2 globales):
 - compras (subset): `supplier`, `supplier_product_mapping`, `supplier_price_list`
 - clientes/recetas: `customer`, `loyalty_transaction`, `prescription`, `pharmacist_shift`
 
-Dominio pendiente (10 tablas en Tu Farmacia Prisma — referencia `docs/parity-prisma-models.md`):
+Dominio pendiente (10 tablas en Tu Farmacia Prisma — referencia [`../product/parity-prisma-models.md`](../product/parity-prisma-models.md)):
 - ventas/POS: `order`, `order_item`, `devolucion`, `devolucion_item`
 - compras-full: `purchase_order`, `purchase_order_item`, `purchase_payment`
 - finanzas: `caja_cierre`, `gasto_category`, `gasto`, `recurring_expense`
@@ -168,7 +168,7 @@ identidad/liquidación reusable para SMB LATAM.
 El análisis fundador/VC/arquitecto completo (validación de mercado, modelo de negocio,
 arquitectura del Trust Hub, identidad/antifraude, GTM Coquimbo/La Serena, roadmap 24
 meses, financiero, riesgos existenciales, visión unicornio) vive en
-**[`docs/marketplace-master-plan.md`](./marketplace-master-plan.md)**.
+**[`b2b-marketplace.md`](./b2b-marketplace.md)** (renombrado desde `docs/marketplace-master-plan.md` el 2026-05-20).
 
 Resumen ejecutivo: el activo diferencial no es el marketplace sino el protocolo
 federado firmado anclado a un nodo ERP que ya se vende solo; estrategia elegida = B2B
