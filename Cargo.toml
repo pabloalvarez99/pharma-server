@@ -81,6 +81,9 @@ rpassword = "7"
 # base64 (license signature encoding)
 base64 = "0.22"
 
+# lock-free Arc swap for license hot-reload
+arc-swap = "1"
+
 # time
 chrono = { version = "0.4", features = ["serde"] }
 

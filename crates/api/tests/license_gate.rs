@@ -33,7 +33,8 @@ fn state_with_license(lic: License) -> api::AppState {
         metrics_token: None,
         node_identity: None,
         data_dir: None,
-        license: Arc::new(lic),
+        license: Arc::new(arc_swap::ArcSwap::from_pointee(lic)),
+        license_path: None,
     }
 }
 
