@@ -494,6 +494,40 @@ pub async fn get_purchase_payment_summary(
     })
 }
 
+/// Cancel a `draft` purchase order (BACKLOG #8 Fase 5-full slice 4 — closes
+/// the lifecycle: `draft → received` (slice 2) and `draft → cancelled` (here)
+/// are the two valid transitions from `draft`). Refuses:
+/// - status != 'draft' (received already moved stock and recomputed WAC; that
+///   path needs a reversal, not a cancel — out of scope);
+/// - PO has any `purchase_payment` (operator must reverse the payment first
+///   so a cancelled doc never carries paid money against it — keeps the AP
+///   ledger and PO status invariant consistent: `cancelled ⇒ Σ payments = 0`).
+pub async fn cancel_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+) -> DomainResult<PurchaseOrderDto> {
+    let po = parse_typed(id, "purchase_order")?;
+    let (status, _total, _currency) = repo::purchase_order_belongs(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if status != "draft" {
+        return Err(DomainError::Conflict(format!(
+            "orden en estado '{status}' no puede pasar a 'cancelled' (solo desde 'draft')"
+        )));
+    }
+    let already_paid = repo::sum_payments(db, tenant, &po).await?;
+    if already_paid > Decimal::ZERO {
+        return Err(DomainError::Conflict(format!(
+            "no se puede cancelar una OC con pagos asociados (pagado={already_paid}); reverse el pago primero"
+        )));
+    }
+    repo::set_purchase_order_status(db, tenant, &po, "cancelled").await?;
+    repo::get_purchase_order(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

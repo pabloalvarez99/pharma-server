@@ -902,3 +902,95 @@ async fn po_payment_refuses_payment_to_cancelled_order() {
     .unwrap_err();
     assert_eq!(err.code(), "CONFLICT");
 }
+
+// --- cancel purchase order (Fase 5-full slice 4 — closes lifecycle) --------
+
+#[tokio::test]
+async fn po_cancel_marks_draft_as_cancelled_and_blocks_subsequent_receive() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "500").await;
+
+    let cancelled = service::cancel_purchase_order(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+
+    // Receipt on a cancelled PO must fail (guard `status == 'draft'`).
+    let err = service::receive_purchase_order(&db, &t, &po_id, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}
+
+#[tokio::test]
+async fn po_cancel_refuses_when_already_received_or_cancelled() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("S"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("X", "100", Some("50")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "X", 1, "50")],
+        },
+    )
+    .await
+    .unwrap();
+    service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+
+    // received → cancel must refuse (stock already moved; reversal out of scope).
+    let err = service::cancel_purchase_order(&db, &t, &po.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}
+
+#[tokio::test]
+async fn po_cancel_refuses_when_payments_already_recorded() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "1000").await;
+
+    // Prepayment on a draft PO is allowed by the AP slice. Cancelling now
+    // must refuse so the AP ledger never has paid money against a cancelled
+    // doc — operator must reverse the payment first (reversal not yet built).
+    service::create_purchase_payment(
+        &db,
+        &t,
+        &po_id,
+        NewPurchasePayment {
+            amount: dec("100"),
+            currency: None,
+            payment_method: Some("cash".into()),
+            cash_session: None,
+            reference: None,
+            note: None,
+            paid_at: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let err = service::cancel_purchase_order(&db, &t, &po_id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+
+    // PO still draft, payment still there.
+    let got = service::get_purchase_order(&db, &t, &po_id).await.unwrap();
+    assert_eq!(got.status, "draft");
+    let s = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s.paid, dec("100"));
+}
