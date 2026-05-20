@@ -97,7 +97,8 @@ NO acá.
 8. **~~Fase 5-full~~ ✅ COMPLETA**: ✅ PO local create/list/get
    (migr 0015, PR #35) · ✅ recepción + costo promedio ponderado (WAC) +
    audit movement (PR #38) · ✅ cuentas por pagar `purchase_payment`
-   (migr 0016, PR #40). Ciclo completo: crear → recibir → pagar.
+   (migr 0016, PR #40) · ✅ cancel `draft` PO (PR #45, sin migración).
+   Lifecycle completo: crear → (recibir | cancelar) → pagar.
 9. **~~Fase 6 — reportes~~ ✅ COMPLETA**: ~~caja~~ ✅ v0.1.14 · ~~gastos +
    sales-daily~~ ✅ v0.1.15 · ~~near-expiry~~ ✅ v0.1.19 · ~~margins-daily~~
    ✅ v0.1.20 · ~~top-products + ABC~~ ✅ v0.1.21 · ~~stock-rotation~~ ✅
@@ -1034,4 +1035,25 @@ NO acá.
 - **BACKLOG #8 ESTADO**: ✅ PO local create/list/get (PR #35) · ✅
   recepción + WAC (PR #38) · ✅ accounts payable (PR #40) → Fase 5-full
   CIERRA COMPLETA.
+- **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-17 — Cancel `draft` purchase order (BACKLOG #8 Fase 5-full slice 4, lifecycle polish)
+
+- **Qué/por qué**: PR #45. Cierra el ciclo de la OC local con la segunda transición legal desde `draft` → `cancelled` (slice 2 ya tenía `draft → received`). Antes el enum reservaba `cancelled` (migr 0015) pero no había endpoint que lo activara; una OC mal creada quedaba para siempre en `draft`. Sin esto, la única forma de "cancelar" era ignorar la fila — mala higiene de datos.
+- **Sin migración**: el ASSERT `IN ['draft','received','cancelled']` ya estaba en `migrations/0015_purchase_order.surql`.
+- **Domain** (`crates/domain/src/purchasing/service.rs`) `cancel_purchase_order(db, tenant, id)`:
+  - Guard 1: `status == 'draft'` → si no, `DomainError::Conflict("orden en estado '{status}' no puede pasar a 'cancelled' (solo desde 'draft')")`. `received` ya movió stock + recomputó WAC; revertir eso es un flujo separado (no implementado, fuera de scope). `cancelled` idempotente sería ok pero preferimos el guard explícito para que el front sepa que ya estaba.
+  - Guard 2: `repo::sum_payments(po) == 0` → si no, `Conflict("no se puede cancelar una OC con pagos asociados (pagado={amount}); reverse el pago primero")`. Mantiene el **invariante `cancelled ⇒ Σ payments = 0`** que complementa la regla del slice 3 ("no NEW payments a cancelled"). Juntos garantizan que el ledger AP nunca tenga dinero pagado contra una OC cancelada — operador debe reversar primero (reversal de payment aún no construido, intencional: forzar la discusión cuando aparezca el primer caso real).
+  - Flip vía `repo::set_purchase_order_status(po, 'cancelled')` — sin BEGIN/COMMIT atómico porque no se mueve stock ni dinero, una sola statement.
+- **Repo** (`crates/domain/src/purchasing/repo.rs`): nuevo `set_purchase_order_status(db, tenant, po, status)` tenant-scoped. Receipt (slice 2) sigue haciendo su flip dentro de su `BEGIN/COMMIT` atómico (porque ahí sí hay movimientos de stock + WAC); cancel no lo necesita.
+- **API** (`crates/api/src/v1/purchasing.rs`): `POST /api/v1/purchase-orders/{id}/cancel` en el bloque `writes` con `route_layer(role::layer(state, WRITE_ROLES))` — admin/owner only.
+- **Tests** (`crates/domain/tests/purchasing.rs` 18 → **21/21**, +3):
+  - `po_cancel_marks_draft_as_cancelled_and_blocks_subsequent_receive`: cancel una OC `draft` → `status='cancelled'`; intento posterior de `receive_purchase_order` → `CONFLICT` (guard `status=='draft'` lo rechaza). Verifica que el flip se persistió y bloquea la transición opuesta.
+  - `po_cancel_refuses_when_already_received_or_cancelled`: crear OC catalogada, `receive` OK, intento `cancel` → `CONFLICT`. Cubre el primer guard.
+  - `po_cancel_refuses_when_payments_already_recorded`: crear OC `draft` total=1000, prepago 100 cash (permitido por slice 3), `cancel` → `CONFLICT`. Verifica además que después del rechazo la OC sigue `draft` y el `purchase_payment_summary` retorna `paid=100` — el rechazo no debe corromper el ledger.
+- **Gate**: `cargo fmt -- --check` clean, `cargo clippy --workspace --all-targets -- -D warnings` clean, `cargo test --workspace --tests --lib` verde (25 binarios ok), release build verde (exit 0).
+- **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #45 mergeado a `feature/erp-parity`.
+- **Estado vs goal**: ✅ Fase 5-full **cerrada con lifecycle completo** (4 slices: create + receive + AP + cancel). ⏳ Fase 9 firma cert Authenticode + smoke VM (v1.0.0 vendible), Fase 10 sync ERP online opt-in, Fase 12 marketplace (locked estrategia-only), BACKLOG #6 relay offline-peer.
 - **Pendiente**: ver `## BACKLOG` al tope.
