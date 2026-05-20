@@ -18,7 +18,8 @@ NO acá.
 - **Versión**: `0.1.24` (workspace `Cargo.toml`).
 - **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
-- **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/). Pre-código de licencia/pago.
+- **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
+- **Fase 10 MVP local CIERRA** (2026-05-20, PR #47): `crates/license` (Ed25519 offline) + `AppState.license: Arc<License>` (cargado al boot, missing/invalid → `free_default`) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force`. Falta: hot-reload tras import (hoy restart), CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -84,12 +85,13 @@ NO acá.
 ### Inmediato post-pivote (Fases 9-11)
 
 1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke install/uninstall en VM Windows limpia. **BLOQUEADO por cert** (sin firma → SmartScreen warning).
-2. **Fase 10 — License layer MVP local** (sin pagos, sólo entitlement):
-   - **10a** `crates/license` nuevo: Ed25519 verify + parser (reusa `crates/agent::identity` + canonical). Pubkey del licenser embebida.
-   - **10b** Feature gate API `entitled(feature)→bool` + `require(feature)→Result` + `ApiError::payment_required` 402 `FEATURE_REQUIRES_UPGRADE`.
-   - **10c** CLI `pharma license import|status|features|verify|export|clear`.
-   - **10d** 1 feature gateada como POC — sugerencia `reports.margins_daily` (ya existe en `crates/api/src/v1/...`).
-   - **10e** Tests E2E: license-free, license-pro, license-expired, license-tampered, license-revoked.
+2. **~~Fase 10 — License layer MVP local~~** ✅ (PR #47, 2026-05-20):
+   - ~~10a~~ ✅ `crates/license` (Ed25519 offline, 10 tests).
+   - ~~10b~~ ✅ `ApiError::payment_required` + `AppState.license` cargado al boot + `From<GateError>`.
+   - ~~10c~~ ✅ CLI `pharma license import|status|features|verify|export|clear --force`.
+   - ~~10d~~ ✅ POC `GET /api/v1/reports/margins-daily` gated.
+   - **10e pendiente**: tests E2E con license real firmada (requiere Fase 11a license-server o un dev-tool para mintear); hoy cubierto por unit/integration tests con keypair determinista.
+   - **Pendiente cola**: hot-reload sin restart del service (POST `/api/v1/admin/license/reload`), CRL refresh, key real producción.
 3. **Fase 11 — Payment rails + license-server** (REPO SEPARADO `pharma-license-server`):
    - **11a** Skeleton Next.js + Postgres (Vercel). Endpoints `issue`, `revoke`, webhooks. Sin rails aún.
    - **11b** Webpay (Oneclick) integration — Pro/Business sub mensual + microtx CL.
