@@ -852,3 +852,20 @@ pub async fn sum_payments(db: &Db, tenant: &Thing, po: &Thing) -> DomainResult<D
     let s: Option<Decimal> = r.take((0, "s"))?;
     Ok(s.unwrap_or(Decimal::ZERO))
 }
+
+/// Flip the PO status (tenant-scoped). Used by `cancel_purchase_order`
+/// (slice 4); receipt (slice 2) flips status inside its BEGIN/COMMIT.
+pub async fn set_purchase_order_status(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+    status: &str,
+) -> DomainResult<()> {
+    db.query("UPDATE purchase_order SET status = $s WHERE id = $id AND tenant = $t")
+        .bind(("s", status.to_string()))
+        .bind(("id", po.clone()))
+        .bind(("t", tenant.clone()))
+        .await?
+        .check()?;
+    Ok(())
+}
