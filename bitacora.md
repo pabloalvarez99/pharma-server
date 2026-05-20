@@ -15,8 +15,8 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.23` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado).
+- **Versión**: `0.1.24` (workspace `Cargo.toml`).
+- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/). Pre-código de licencia/pago.
 - **Funciona end-to-end**:
@@ -119,6 +119,48 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — Fase 10a `crates/license` skeleton (Ed25519 offline-first)
+
+- **Qué**: nuevo crate `crates/license` que implementa verificación offline de licenses
+  JSON firmadas Ed25519. Reusa `agent::canonical` (hecho público en este commit) +
+  `agent::identity::verify_with_did`. Cero red, cero clock externo.
+- **Módulos**:
+  - `schema` — `License { schema_version, license_id, tenant_id, tier, features,
+    bought_addons, seat_count, issued_at, expires_at?, issuer_did, key_id, signature,
+    metadata? }`. `Tier { Free | Pro | Business | Enterprise }`. `SCHEMA_VERSION = 1`.
+    `License::free_default(tenant)` para fallback (Free + `reports.sales_daily` +
+    `federation.receive_cards`).
+  - `keys` — `LICENSER_KEYS: &[(&str, &str)]` placeholder + `lookup_did`. Real pubkey
+    inyectada en Fase 11a cuando `pharma-license-server` cree keypair KMS.
+  - `verify` — `parse_and_verify(json)` y `parse_and_verify_with_keys(json, keys)`
+    (la última para tests). Valida `schema_version <= SCHEMA_VERSION` (forward-compat
+    error claro), regla `expires_at=null ⇒ tier=free`, `key_id` lookup, `issuer_did`
+    matchea key, base64(sig) 64-byte, Ed25519 verify sobre canonical-JSON sin campo
+    `signature`. No valida expiry (responsabilidad del caller).
+  - `gate` — `entitled(license, feature) -> bool` y `require -> Result<(), GateError>`
+    con `tier_required` (catálogo §9 de `license-architecture.md`). Helpers
+    `is_expired(now, grace)` y `is_in_grace(now, grace)`. Free perpetuo nunca expira.
+  - `store` — `load_from_disk` (verify ⇒ License) y `save_to_disk` (pretty JSON).
+- **Tests (10/10 verde)**: roundtrip firma+verify; tampering detectado; key_id desconocido;
+  schema_version=999 rechazado; gate entitled+require; expiry inside/outside grace; store
+  save→read→verify; free_default shape.
+- **Por qué**:
+  - Implementa Fase 10a del [`roadmap`](./CLAUDE.md) post-pivote.
+  - Cumple [ADR-0002](./docs/adr/0002-license-ed25519-offline.md) (offline-first Ed25519)
+    + [ADR-0007](./docs/adr/0007-key-rotation-licenser.md) (multi-key con `key_id`).
+  - Sienta base para Fase 10b (`ApiError::payment_required`), 10c (CLI `pharma license`),
+    10d (gated endpoint POC).
+- **Archivos**: `crates/license/Cargo.toml`, `crates/license/src/{lib,schema,keys,verify,gate,store}.rs`,
+  `crates/license/tests/{common/mod.rs, verify_roundtrip, verify_tamper, verify_unknown_key,
+  verify_schema_forward_compat, gate_entitled, gate_pro, gate_expiry, store_roundtrip,
+  free_default}.rs`. Workspace: bump `0.1.23 → 0.1.24`, add member, add `base64 = "0.22"`.
+  `crates/agent/src/lib.rs` cambia `mod canonical` → `pub mod canonical`.
+- **No-en-esta-sesión**: integración con `crates/api` AppState (Fase 10b/d), CLI `pharma
+  license import|status|features` (Fase 10c), endpoint gated POC (Fase 10d), CRL refresh
+  (Fase 11+).
 
 ---
 

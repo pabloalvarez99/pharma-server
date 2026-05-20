@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "agent"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "bs58",
  "chrono",
@@ -176,7 +176,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "agent",
  "anyhow",
@@ -539,7 +539,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "auth"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1081,7 +1081,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "agent",
  "anyhow",
@@ -1425,7 +1425,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "db"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1542,7 +1542,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2576,7 +2576,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jobs"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -2699,6 +2699,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "license"
+version = "0.1.24"
+dependencies = [
+ "agent",
+ "base64 0.22.1",
+ "chrono",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -3423,7 +3438,7 @@ dependencies = [
 
 [[package]]
 name = "pharma-core"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4731,7 +4746,7 @@ dependencies = [
 
 [[package]]
 name = "service"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "api",
@@ -5248,7 +5263,7 @@ dependencies = [
 
 [[package]]
 name = "telemetry"
-version = "0.1.23"
+version = "0.1.24"
 dependencies = [
  "anyhow",
  "opentelemetry",

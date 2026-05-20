@@ -11,10 +11,11 @@ members = [
     "crates/cli",
     "crates/domain",
     "crates/agent",
+    "crates/license",
 ]
 
 [workspace.package]
-version = "0.1.23"
+version = "0.1.24"
 edition = "2021"
 rust-version = "1.85"
 license = "Proprietary"
@@ -76,6 +77,9 @@ windows-service = "0.7"
 # cli
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
+
+# base64 (license signature encoding)
+base64 = "0.22"
 
 # time
 chrono = { version = "0.4", features = ["serde"] }
