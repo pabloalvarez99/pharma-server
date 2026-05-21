@@ -15,8 +15,9 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.24` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
+- **Versión**: `0.1.25` (workspace `Cargo.toml`) — bump Fase 11a: pubkey staging real embebida.
+- **Branch**: `feature/erp-parity` (v0.1.23 publicado en GH; v0.1.25 sin release MSI todavía).
+- **Companion repo**: [`pharma-license-server`](https://github.com/pabloalvarez99/pharma-license-server) — scaffold Fase 11a creado 2026-05-20. Next.js + Prisma + Ed25519 signer. Cross-repo contract verde.
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
@@ -122,6 +123,48 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — Fase 11a: pharma-license-server scaffold + pubkey real
+
+- **Qué**:
+  - Nuevo repo separado `pabloalvarez99/pharma-license-server` (privado). Stack
+    Next.js 14 + TS + Tailwind + Prisma + Postgres (Neon target) +
+    `@noble/ed25519` v3 + `@noble/hashes` v2.
+  - Canonical-JSON encoder TS (`src/lib/canonical.ts`) bit-exact con
+    `crates/agent/src/canonical.rs`. Test cross-repo verde
+    (`cargo test -p license --test cross_repo_fixture`).
+  - Schema Prisma con 5 modelos (Tenant, License, Order, LicenserKey, CrlEntry).
+  - Endpoint público `GET /api/licenses/[id]` CDN-cacheable (immutable 5min).
+  - Fixture cross-repo `fixtures/cross-repo-v1.lic` firmado con seed
+    determinista `0x42*32`, DID
+    `did:pharma:3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf`. Copia
+    versionada en `crates/license/tests/fixtures/` para regression contra TS.
+  - **Pubkey real producción staging**: keypair generada (seed en
+    `pharma-license-server/.secrets/prod-key.json`, gitignored, NUNCA push),
+    DID embebido en `crates/license/src/keys.rs`:
+    `("lk-prod-2026-01", "did:pharma:HbL8Gfa3x4HEGseE8jqa85NyA1pRg58D6ZbMfV4C5Ep9")`.
+    Placeholder `lk-dev-2026` mantiene compat con tests viejos.
+  - **Bump workspace version**: `0.1.24 → 0.1.25`.
+  - **ADR-0008** (vive en license-server, no acá por ADR-0004): KMS strategy.
+    Staging = env-stored seed cifrado por Vercel. Producción = GCP KMS
+    asymmetric Ed25519 antes de Fase 11b billing.
+- **Por qué**: cumple `docs/strategy/license-architecture.md` §4 (activation
+  online via license-server) + §10 (separación de repos por ADR-0004) +
+  ADR-0007 (multi-key con `lk-prod-2026-01` como activo). Cross-repo contract
+  verde valida que TS canonical encoder produce bytes idénticos a Rust — sin
+  esto, ningún `.lic` firmado por el server verificaría en el binario.
+- **Archivos pharma-server**: `Cargo.toml` (version bump), `Cargo.lock`,
+  `crates/license/src/keys.rs` (entry prod añadida), `crates/license/tests/
+  cross_repo_fixture.rs` (nuevo), `crates/license/tests/fixtures/cross-repo-v1.{lic,did}`.
+- **Archivos pharma-license-server**: scaffold completo (24 archivos, commit
+  inicial). Ver `pharma-license-server/bitacora.md`.
+- **Commits**: pharma-license-server `main` initial commit + push origin.
+  pharma-server: por crear (`git switch -c feat/license-server-scaffold-fase-11a`).
+- **Falta esta sesión**: Vercel deploy preview, Neon DB provisioning, admin
+  auth (Clerk vs NextAuth decisión pendiente). Próxima sesión Fase 11b:
+  Webpay sandbox + webhook idempotente + `POST /api/licenses/issue`.
 
 ---
 

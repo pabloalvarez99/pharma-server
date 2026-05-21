@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "license_id": "lic_fixture_cross_repo_v1",
+  "tenant_id": "11111111-1111-4111-8111-111111111111",
+  "tier": "pro",
+  "features": [
+    "reports.sales_daily",
+    "reports.margins_daily",
+    "federation.receive_cards"
+  ],
+  "bought_addons": [],
+  "seat_count": 3,
+  "issued_at": "2026-05-20T14:00:00Z",
+  "expires_at": "2027-05-20T14:00:00Z",
+  "key_id": "lk-fixture-2026",
+  "issuer_did": "did:pharma:3F5qRPtKg8GhGNnbd3qCj6nVJxWsGxq7pvH84okYLAqf",
+  "signature": "TRdX0OIdVT7Nu1dMTfVqP6RN+Z+KSakV9oOev1fwa8oyuOdCudC8scn0YU+F0a7HcB9Ur0RyVRIdh9U9JXphDA=="
+}
