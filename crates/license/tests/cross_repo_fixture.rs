@@ -27,8 +27,5 @@ fn ts_signed_license_verifies_in_rust() {
     assert_eq!(parsed.license_id, "lic_fixture_cross_repo_v1");
     assert_eq!(parsed.key_id, FIXTURE_KEY_ID);
     assert_eq!(parsed.seat_count, 3);
-    assert!(parsed
-        .features
-        .iter()
-        .any(|f| f == "reports.margins_daily"));
+    assert!(parsed.features.iter().any(|f| f == "reports.margins_daily"));
 }
