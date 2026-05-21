@@ -125,6 +125,15 @@ NO acá.
 
 ---
 
+## 2026-05-20 — CLI `pharma license reload`
+
+- **Qué**: nuevo subcomando `pharma license reload [--url URL] [--token T]` que POSTea al endpoint admin del server. `--url` default `http://localhost:8080`. `--token` opcional; fallback a env `PHARMA_ADMIN_TOKEN`. Imprime `tier/status/features-count/key_id`. Exit 1 si HTTP no-2xx.
+- **Dep nueva**: `reqwest = "0.12"` con `default-features = false, features = ["json","rustls-tls"]` (rustls vendored — evita libssl en Windows). reqwest ya estaba como transitive; ahora directo en `crates/cli`.
+- **Por qué**: cierra UX del flujo "compré microtx → recibí .lic → activar sin restart" sin necesidad de curl. Tests del endpoint backend cubiertos por `tests/license_admin.rs` (6/6); CLI es thin HTTP client.
+- **Archivos**: `crates/cli/Cargo.toml` (+`reqwest`), `crates/cli/src/main.rs` (+`LicenseCmd::Reload` variant + handler ~30 LOC).
+
+---
+
 ## 2026-05-20 — License hot-reload sin restart (Fase 10 cola)
 
 - **Qué**: `AppState.license` ahora es `Arc<arc_swap::ArcSwap<License>>` (lock-free swap, lectura zero-cost en hot path). Nuevo endpoint admin:

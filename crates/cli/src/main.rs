@@ -134,6 +134,18 @@ enum LicenseCmd {
         #[arg(long)]
         force: bool,
     },
+    /// Call `POST /api/v1/admin/license/reload` on a running pharma-server.
+    /// Useful after `pharma license import` to swap the active license
+    /// without restarting the service. Requires an admin/owner bearer token.
+    Reload {
+        /// Base URL of the running server (e.g. http://localhost:8080).
+        #[arg(long, default_value = "http://localhost:8080")]
+        url: String,
+        /// Bearer token of an admin/owner user. Reads from
+        /// `PHARMA_ADMIN_TOKEN` if omitted.
+        #[arg(long)]
+        token: Option<String>,
+    },
 }
 
 /// Default license path: sibling of the SurrealKv data dir.
@@ -487,6 +499,33 @@ async fn main() -> anyhow::Result<()> {
                 }
                 let bytes = std::fs::read(&path)?;
                 println!("{}", String::from_utf8_lossy(&bytes));
+            }
+            LicenseCmd::Reload { url, token } => {
+                let token = token
+                    .or_else(|| std::env::var("PHARMA_ADMIN_TOKEN").ok())
+                    .ok_or_else(|| {
+                        anyhow!("no token: pasa --token <T> o exporta PHARMA_ADMIN_TOKEN")
+                    })?;
+                let endpoint = format!("{}/api/v1/admin/license/reload", url.trim_end_matches('/'));
+                let client = reqwest::Client::new();
+                let resp = client
+                    .post(&endpoint)
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .with_context(|| format!("POST {endpoint}"))?;
+                let status = resp.status();
+                let body: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+                if !status.is_success() {
+                    return Err(anyhow!("reload failed: HTTP {} body={}", status, body));
+                }
+                println!(
+                    "reloaded: tier={} status={} features={} key_id={}",
+                    body["tier"].as_str().unwrap_or("?"),
+                    body["status"].as_str().unwrap_or("?"),
+                    body["features"].as_array().map(|a| a.len()).unwrap_or(0),
+                    body["key_id"].as_str().unwrap_or("?")
+                );
             }
             LicenseCmd::Clear { force } => {
                 if !force {

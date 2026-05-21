@@ -1102,6 +1102,7 @@ dependencies = [
  "db",
  "license",
  "pharma-core",
+ "reqwest",
  "rpassword",
  "serde",
  "serde_json",
