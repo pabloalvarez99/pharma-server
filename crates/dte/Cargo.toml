@@ -1,0 +1,15 @@
+[package]
+name = "dte"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+
+[dev-dependencies]

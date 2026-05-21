@@ -12,6 +12,7 @@ members = [
     "crates/domain",
     "crates/agent",
     "crates/license",
+    "crates/dte",
 ]
 
 [workspace.package]
