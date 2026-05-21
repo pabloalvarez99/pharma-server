@@ -16,7 +16,7 @@ NO acá.
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
 - **Versión**: `0.1.24` (workspace `Cargo.toml`).
-- **Branch activa**: `feat/dte-fase-9-1` (arranque Fase 9.1 DTEs nativo Rust).
+- **Branch activa**: `feat/dte-9-1-abc-xml-ted-caf` cascading off `feat/dte-fase-9-1` (subtasks 9.1.a XML boleta 39 + 9.1.b TED RSA-SHA1 + 9.1.c CAF parser+folio atómico, 17 tests verdes).
 - **Stack mergeable bloqueado**: PRs #51 (license-server scaffold), #52 (CLI license activate), #53 (MSI UX launcher) OPEN — CI billing-gated (jobs no arrancan, 2-3s failures). License-server PR #1 OPEN MERGEABLE (companion repo).
 - **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
@@ -158,6 +158,30 @@ NO acá.
   - 9.1.k — CLI `pharma dte|caf|cert`.
   - 9.1.l-m — tests integration vs sandbox SII + docs cliente.
 - **Bloqueado por (no impacta este PR)**: CI billing GH Actions (PRs #51/#52/#53 esperando). PR feat/dte-fase-9-1 va en `--draft` para no bloquear cola.
+
+---
+
+## 2026-05-21 — Fase 9.1 subtasks a+b+c: XML boleta 39 + TED RSA-SHA1 + CAF folio atómico
+
+- **Qué** (branch `feat/dte-9-1-abc-xml-ted-caf` cascading off `feat/dte-fase-9-1`):
+  - **9.1.a XML render boleta 39** (`crates/dte/src/xml/`): `schema.rs` con structs serde DTO (DteXml/Documento/Encabezado/IdDoc/Emisor/Receptor/Totales/Detalle), `writer.rs` con declaración UTF-8 y serializer canonical (sin pretty-print), `boleta.rs` convierte `Dte`+`EmisorConfig` y emite XML xsd 1.0 con orden correcto IdDoc→Emisor→Receptor→Totales→Detalle→TmstFirma. Helper `clp_int` trunca decimales a entero (SII), `decimal_str` normaliza cantidad/precio. `render_unsigned` despacha por `DteTipo` (boleta implementada; factura/nc/nd/guía retornan stub explícito apuntando a 9.1.f).
+  - **9.1.b TED RSA-SHA1** (`crates/dte/src/timbre.rs`): `generate(dte,caf)` valida tipo+rango, extrae subtree `<CAF>` y `<RSASK>` del XML AUTORIZACION, arma `<DD>` manual (orden xsd estricto, sin whitespace, CAF inline literal con FRMA SII intacto), firma con `rsa::Pkcs1v15Sign::new::<Sha1>()` + base64, envuelve en `<TED version="1.0">`. `verify(dte,caf,ted)` re-arma DD esperado, compara bytes, decodifica firma y verifica con RSAPUBK. SHA1 documentado: spec SII obligatoria (no decisión nuestra).
+  - **9.1.c CAF parser + folio atómico** (`crates/dte/src/caf.rs`): `parse_xml` extrae RE/TD/RNG/FA via quick-xml::de, valida rango>0 y desde<=hasta, conserva XML entero en `caf.xml`. `assign_next(db,tenant,tipo)` async-genérico sobre `Surreal<C: Connection>`, serializa con `ASSIGN_LOCK: OnceLock<tokio::Mutex>` global + SELECT activo (ORDER BY folio_desde LIMIT 1) + UPDATE `SET next_folio = next_folio + 1 WHERE next_folio <= folio_hasta RETURN BEFORE`. Retry con backoff lineal corto si MVCC conflict (`is_mvcc_conflict` string match). FolioExhausted si no hay CAF activo.
+  - **Nuevo tipo público**: `EmisorConfig` (rut, razon_social, giro, dirección, comuna, ciudad?, acteco?). Caller pasa al renderer; no se infiere del Dte porque cambia por tenant, no por documento.
+  - **Tests** (17 total verdes, +11 vs sesión anterior):
+    - `xml_boleta_minimal_render.rs` (3): campos clave + orden xsd canonical + tipo distinto rechazado.
+    - `caf_parse.rs` (4): extrae campos, XML inválido rechazado, rango invertido rechazado, tipo DTE no soportado.
+    - `caf_folio_atomic.rs` (3): 20 tasks concurrentes asignan folios únicos contiguos 1..=20 (kv-mem, multi_thread tokio test), CAF agotado → FolioExhausted, sin CAF activo → FolioExhausted.
+    - `timbre_roundtrip.rs` (4): roundtrip sign+verify, tamper en `<RR>` post-firma invalida, folio fuera de rango rechazado, tipo mismatch rechazado.
+    - Helper `tests/common/mod.rs` genera CAF synthetic con RSA-1024 (testing only) — fixtures sin commit de claves reales.
+  - **Workspace deps nuevas**: `quick-xml = "0.36"` (feature serialize), `rsa = "0.9"`, `sha1 = "0.10"` (feature `oid` para PKCS#1 v1.5 DigestInfo). dte add deps: surrealdb, tokio, tracing, async-trait; dev: surrealdb kv-mem, rand, rsa pem.
+- **Por qué**:
+  - El siguiente bloqueante del DTE es despachar a SII; ese paso requiere TED (firma SII no acepta xml sin él) y CAF (sin folio asignado el XML es inválido). 9.1.a establece el cuerpo XML, 9.1.b el timbre, 9.1.c el folio — son las 3 piezas sin las cuales nada del resto compila.
+  - XML DSig completo (firma del XML entero con cert empresa) se defiere a 9.1.b.2: requiere C14N + Reference/SignedInfo + manejo de cert PFX, son ~400 líneas adicionales que harían el PR irrevisable.
+  - Lock global en folio assignment vs optimistic: SurrealKV en kv-mem dejó pasar write-write races sobre el mismo record en pruebas concurrentes; el lock global cubre POS holgado (10k folios/s en debug) y se puede granularizar después si la contención mide en hot path.
+- **Archivos**: `Cargo.toml` (+ quick-xml/rsa/sha1), `crates/dte/Cargo.toml` (+ deps), `crates/dte/src/{lib.rs,types.rs,xml/{schema.rs,writer.rs,boleta.rs,mod.rs},caf.rs,timbre.rs}`, `crates/dte/tests/{common/mod.rs,xml_boleta_minimal_render.rs,caf_parse.rs,caf_folio_atomic.rs,timbre_roundtrip.rs}`.
+- **No-en-este-PR**: 9.1.b.2 XML DSig completo, 9.1.d/e envío SII + polling, 9.1.f-h cancel/resend/libro/X-Z, 9.1.i cert encrypt-at-rest, 9.1.j tier gating, 9.1.k CLI, 9.1.l-m integration sandbox SII + docs cliente.
+- **Estado**: `cargo fmt + clippy --workspace --all-targets -- -D warnings + cargo test --workspace` verde. PR draft cascading base `feat/dte-fase-9-1`.
 
 ---
 

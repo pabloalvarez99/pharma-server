@@ -91,6 +91,12 @@ chrono = { version = "0.4", features = ["serde"] }
 # csv import/export
 csv = "1.3"
 
+# DTE XML + RSA-SHA1 (TED firma). SHA1 obligatorio SII (legacy spec) — no
+# usar para nuevos protocolos, sólo compatibilidad SII Chile.
+quick-xml = { version = "0.36", features = ["serialize"] }
+rsa = "0.9"
+sha1 = { version = "0.10", features = ["oid"] }
+
 # backup archives
 tar = "0.4"
 flate2 = "1.0"

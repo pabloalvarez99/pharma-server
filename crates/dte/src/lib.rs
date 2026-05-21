@@ -25,4 +25,4 @@ pub mod types;
 pub mod xml;
 
 pub use error::DteError;
-pub use types::{Caf, CertDigital, Dte, DteEstado, DteItem, DteTipo, SiiEnv};
+pub use types::{Caf, CertDigital, Dte, DteEstado, DteItem, DteTipo, EmisorConfig, SiiEnv};

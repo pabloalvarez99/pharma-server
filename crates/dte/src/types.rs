@@ -153,6 +153,23 @@ impl CertDigital {
     }
 }
 
+/// Datos del emisor (farmacia) necesarios para armar el XML DTE. Vienen del
+/// tenant config; el caller los pasa al renderer. Mantener separado del `Dte`
+/// porque cambian por tenant y no por documento.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EmisorConfig {
+    pub rut: String,
+    pub razon_social: String,
+    pub giro: String,
+    pub direccion: String,
+    pub comuna: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ciudad: Option<String>,
+    /// Código SII actividad económica (acteco). Opcional para boleta (39).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acteco: Option<i32>,
+}
+
 /// Entorno SII al que se envían los DTEs. Default sandbox (test contra
 /// `maullin.sii.cl`). Prod requiere flag explícito (`PHARMA__DTE__SII_ENV=prod`
 /// + CLI `--confirm-prod`).
