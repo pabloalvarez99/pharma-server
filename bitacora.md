@@ -15,12 +15,14 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.25` (workspace `Cargo.toml`) — bump Fase 11a: pubkey staging real embebida.
-- **Branch**: `feature/erp-parity` (v0.1.23 publicado en GH; v0.1.25 sin release MSI todavía).
-- **Companion repo**: [`pharma-license-server`](https://github.com/pabloalvarez99/pharma-license-server) — scaffold Fase 11a creado 2026-05-20. Next.js + Prisma + Ed25519 signer. Cross-repo contract verde.
+- **Versión**: `0.1.26` (workspace `Cargo.toml`) — bump Fase 11b: CLI `license activate`.
+- **Branch activa**: `feat/license-server-scaffold-fase-11a` (PR #51 OPEN — CI rojo por billing GH Actions, no por código).
+- **Companion repo**: [`pharma-license-server`](https://github.com/pabloalvarez99/pharma-license-server) — Fase 11b en branch `feat/webpay-checkout-fase-11b`: Webpay sandbox + NextAuth + admin issuance endpoint + checkout UI + ADR-0009. 19/19 vitest verde. `next build` OK.
+- **PRs en vuelo**: #51 (Fase 11a scaffold, pendiente merge — blocker billing CI). Fase 11b sin PR todavía (Vercel deploy pendiente).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
+- **Fase 11b en progreso** (2026-05-20): CLI `pharma license activate <LICENSE_ID> [--server URL] [--reload-url URL] [--reload-token T]` — fetch GET `/api/licenses/{id}`, parse_and_verify Ed25519 offline, persist `data/license.json`, opcional hot-reload del server local. Companion repo: Webpay sandbox + NextAuth + admin issuance + checkout UI listos. Pendiente: Vercel deploy + smoke E2E con tarjeta test.
 - **Funciona end-to-end**:
   - ERP local: inventario (SKU/lote/vencimiento), POS atómico single-tx con
     decremento FEFO de lotes, idempotencia por `Idempotency-Key`, loyalty.
@@ -123,6 +125,48 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-20 — Fase 11b: CLI `license activate` + Webpay sandbox companion
+
+- **Qué (pharma-server)**:
+  - CLI `pharma license activate <LICENSE_ID> [--server URL] [--reload-url URL] [--reload-token T]`. Hace GET `{server}/api/licenses/{id}`, valida firma Ed25519 offline (`license::parse_and_verify`), confirma `license_id` match, persiste con `license::save_to_disk` y opcionalmente llama `POST /api/v1/admin/license/reload` para hot-reload. Default server: `https://pharma-license.vercel.app`.
+  - Bump workspace version → `0.1.26`.
+  - `cargo fmt --all` aplicado (colapso de un assert multi-línea en `crates/license/tests/cross_repo_fixture.rs`). Cross-repo test sigue verde.
+- **Qué (companion `pharma-license-server`)**:
+  - Branch `feat/webpay-checkout-fase-11b`.
+  - `src/lib/feature-catalog.ts` mirror de `docs/strategy/license-architecture.md §9` — tier base entitlements + ADDON_FEATURES + `deriveFeatures(tier, addonIds)` con dedupe.
+  - `src/lib/pricing.ts` — SUBSCRIPTIONS (pro_monthly 19990, pro_yearly 199900, business_monthly 49990, business_yearly 499900) + MICROTX (branding_pack 9990, sii_unlock 29990, telegram_bot 14990, premium_reports 19990, extra_cashier_seat 9990, premium_support_credits_10 49990). Amounts en CLP enteros. Sandbox cap 999999.
+  - `src/lib/issuance.ts` — `IssueLicenseInputSchema` (zod) con `superRefine`: rechaza `expires_at!=null` para free, requiere `expires_at` para non-free, valida addons contra catálogo. `issueLicense()` carga keypair del env, valida active key DID == DB row DID, firma canonical-JSON via `signLicense`, persiste `License` row.
+  - `src/lib/webpay.ts` — wrapper `transbank-sdk` v6.1.1 con `buildForIntegration` (sandbox default). `commitTransaction(token)` + `isAuthorized()` helper. Production-swap por env `WEBPAY_INTEGRATION_TYPE=PRODUCTION`.
+  - `src/lib/auth.ts` + `src/middleware.ts` + `src/app/api/auth/[...nextauth]/route.ts` — NextAuth v4 credentials provider (JWT strategy), bcrypt-hashed admin password en env. Middleware protege `/admin/*` + `/api/admin/*`.
+  - `src/app/api/admin/licenses/issue/route.ts` — POST emisión manual.
+  - `src/app/api/checkout/start/route.ts` — POST público, crea Order pending + Webpay transaction, devuelve token + redirect URL.
+  - `src/app/api/checkout/return/route.ts` — GET callback Webpay, commit, idempotente por `webpayToken` (now `@unique`). Si authorized: emite license (subscription tier o microtx con addon), marca Order confirmed, redirect a `/checkout/success?license_id=...`. Si no: marca failed, redirect `/checkout/error?reason=...`.
+  - Schema Prisma: agrega `Order.sku` + `Order.webpayToken @unique`. Migración pendiente al provisionar Neon.
+  - Páginas: `/` → redirect `/checkout`. `/checkout` lista planes + microtx. `/checkout/{success,error}`. `/admin/login` + `/admin` placeholder.
+  - `docs/adr/0009-admin-auth.md` — decisión NextAuth credentials over Clerk (Clerk reservado Fase 13 cuando haya multi-admin).
+  - `scripts/hash-admin-password.ts` + `scripts/seed-prod-key.ts` (idempotente upsert `LicenserKey` desde `.secrets/prod-key.json`).
+  - Vitest setup (`vitest.config.ts` con alias `@`) — 19/19 tests verde: feature-catalog (5), pricing (5), issuance schema (9).
+  - `next build` smoke con env placeholder: ✓ Compiled successfully, 12 rutas.
+- **Por qué**: cierra el loop pago → license para freemium MSI. Una sola sesión bridges from "cross-repo fixture works" a "pago real con tarjeta sandbox emite license firmada descargable + activable con un CLI command".
+- **NO en esta sesión** (Fase 11c+): Stripe (microtx internacional), Admin UI CRUD completo (placeholder), CRL endpoint signing (11e), GCP KMS migration, retry logic webhook completo.
+- **Pendiente para cerrar Fase 11b**:
+  - Vercel project link + Neon Postgres provisioning (interactivo).
+  - `npm run prisma:migrate` contra Neon → seed `lk-prod-2026-01` LicenserKey row.
+  - Set env vars en Vercel (DATABASE_URL, LICENSER_PRIVATE_KEY_SEED, LICENSER_KEY_ID, NEXTAUTH_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD_BCRYPT, NEXTAUTH_URL).
+  - `npx vercel --prod` deploy.
+  - Smoke E2E manual: checkout → tarjeta sandbox `4051 8856 0044 6623` RUT `11.111.111-1` clave `123` → license_id → `pharma license activate <id> --server https://...` → gated endpoint 200.
+- **Hard rules nuevas**:
+  - Webpay sandbox amounts <= 999999 CLP (sandbox cap). Producción requiere validación legal Transbank.
+  - `Order.sku` ahora es source-of-truth para issuance (antes ambiguo por amount-collision: pro_monthly==premium_reports==19990).
+  - NextAuth v4 + Next.js 14 OK. v5 cuando se migre a Next 15+.
+  - bcrypt cost factor 12 (~250ms login, aceptable para 1 admin).
+- **Archivos**:
+  - pharma-server: `crates/cli/src/main.rs` (+~80 líneas Activate), `crates/cli/Cargo.toml` (+httpmock,tempfile dev-deps), `Cargo.toml` (0.1.26), `crates/license/tests/cross_repo_fixture.rs` (fmt).
+  - pharma-license-server: `src/lib/{feature-catalog,pricing,issuance,webpay,auth}.ts`, `src/middleware.ts`, `src/app/api/auth/[...nextauth]/route.ts`, `src/app/api/admin/licenses/issue/route.ts`, `src/app/api/checkout/{start,return}/route.ts`, `src/app/page.tsx`, `src/app/checkout/{page,CheckoutForm.tsx,success/page,error/page}.tsx`, `src/app/admin/{login/page,page}.tsx`, `prisma/schema.prisma` (Order.sku + webpayToken @unique), `scripts/{hash-admin-password,seed-prod-key}.ts`, `docs/adr/0009-admin-auth.md`, `vitest.config.ts`, `.env.example`, `package.json`, tests `src/lib/{feature-catalog,pricing,issuance}.test.ts`.
+- **Commits**: TBD push siguiente.
 
 ---
 
