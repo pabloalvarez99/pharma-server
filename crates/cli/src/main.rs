@@ -153,7 +153,7 @@ enum LicenseCmd {
         /// License id (`lic_*` ULID) emitted by the license-server.
         license_id: String,
         /// Base URL of the license-server.
-        #[arg(long, default_value = "https://pharma-license.vercel.app")]
+        #[arg(long, default_value = "https://pharma-license-server.vercel.app")]
         server: String,
         /// If set, POST `/api/v1/admin/license/reload` on the local server
         /// after persisting. Requires --reload-token (or PHARMA_ADMIN_TOKEN).
