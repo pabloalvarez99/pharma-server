@@ -17,7 +17,7 @@ use crate::AppState;
 
 use domain::customers::{model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::{admin_plus, cashier_plus};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -40,24 +40,36 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/loyalty", get(list_loyalty))
         .route("/api/v1/loyalty/stats", get(loyalty_stats));
 
+    // Customer CRUD at POS counter: granular RBAC opens this to cashier+
+    // (counter staff register/update customers during a sale).
     let writes = Router::new()
         .route("/api/v1/clientes", post(create_customer))
         .route(
             "/api/v1/clientes/{id}",
             axum::routing::patch(update_customer).delete(delete_customer),
         )
+        .route_layer(crate::role::layer(state.clone(), cashier_plus()));
+
+    // Bulk admin import stays admin/owner-only — bulk customer upsert is a
+    // back-office operation, NOT a counter action. Keeping the stricter gate
+    // here is deliberate: do not let cashier+ mass-import via this endpoint.
+    let admin_writes = Router::new()
         .route(
             "/api/v1/admin/import-customers",
             post(import_customers_handler),
         )
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
-    reads.merge(writes)
+    reads.merge(writes).merge(admin_writes)
 }
 
 // --- customers -------------------------------------------------------------
 
-async fn list_customers(
+/// Lista clientes del tenant.
+#[utoipa::path(get, path = "/api/v1/clientes", tag = "Customers",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_customers(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<CustomerFilters>,
@@ -67,7 +79,13 @@ async fn list_customers(
     Ok(Json(service::list_customers(&db, &t, filters).await?))
 }
 
-async fn get_customer(
+/// Detalle de cliente.
+#[utoipa::path(get, path = "/api/v1/clientes/{id}", tag = "Customers",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_customer(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -110,7 +128,13 @@ async fn search_customers(
     Ok(Json(service::search_customers(&db, &t, query).await?))
 }
 
-async fn create_customer(
+/// Crea cliente. Requiere cashier+.
+#[utoipa::path(post, path = "/api/v1/clientes", tag = "Customers",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_customer(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewCustomer>,
@@ -120,7 +144,13 @@ async fn create_customer(
     Ok(Json(service::create_customer(&db, &t, input).await?))
 }
 
-async fn update_customer(
+/// Actualiza cliente. Requiere cashier+.
+#[utoipa::path(patch, path = "/api/v1/clientes/{id}", tag = "Customers",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_customer(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -131,7 +161,13 @@ async fn update_customer(
     Ok(Json(service::update_customer(&db, &t, &id, patch).await?))
 }
 
-async fn delete_customer(
+/// Elimina (soft) cliente. Requiere cashier+.
+#[utoipa::path(delete, path = "/api/v1/clientes/{id}", tag = "Customers",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_customer(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -144,7 +180,11 @@ async fn delete_customer(
 
 // --- loyalty (read-only; sales Fase 4 writes the ledger) -------------------
 
-async fn list_loyalty(
+/// Lista del ledger de loyalty (sólo lectura).
+#[utoipa::path(get, path = "/api/v1/loyalty", tag = "Customers",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_loyalty(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<LoyaltyFilters>,
@@ -154,7 +194,11 @@ async fn list_loyalty(
     Ok(Json(service::list_loyalty(&db, &t, filters).await?))
 }
 
-async fn loyalty_stats(
+/// Estadísticas de loyalty.
+#[utoipa::path(get, path = "/api/v1/loyalty/stats", tag = "Customers",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn loyalty_stats(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<LoyaltyStats>, ApiError> {

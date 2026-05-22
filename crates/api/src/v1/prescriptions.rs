@@ -23,8 +23,7 @@ use domain::prescriptions::{model::*, service};
 
 /// Prescriptions creation requires a pharmacist (or higher). Shifts are
 /// administrative.
-const PRESCRIPTION_ROLES: &[&str] = &["admin", "owner", "pharmacist"];
-const SHIFT_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::{admin_plus, pharmacist_plus};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -44,7 +43,7 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     let prescription_writes = Router::new()
         .route("/api/v1/prescriptions", post(create_prescription))
-        .route_layer(crate::role::layer(state.clone(), PRESCRIPTION_ROLES));
+        .route_layer(crate::role::layer(state.clone(), pharmacist_plus()));
 
     let shift_writes = Router::new()
         .route("/api/v1/turnos-farmaceutico", post(create_shift))
@@ -52,14 +51,18 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/api/v1/turnos-farmaceutico/{id}",
             axum::routing::patch(update_shift),
         )
-        .route_layer(crate::role::layer(state, SHIFT_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
     reads.merge(prescription_writes).merge(shift_writes)
 }
 
 // --- prescriptions ---------------------------------------------------------
 
-async fn list_prescriptions(
+/// Lista recetas (todas, no sólo controladas).
+#[utoipa::path(get, path = "/api/v1/prescriptions", tag = "Prescriptions",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_prescriptions(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<PrescriptionFilters>,
@@ -69,7 +72,13 @@ async fn list_prescriptions(
     Ok(Json(service::list_prescriptions(&db, &t, filters).await?))
 }
 
-async fn get_prescription(
+/// Detalle de receta.
+#[utoipa::path(get, path = "/api/v1/prescriptions/{id}", tag = "Prescriptions",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_prescription(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -79,7 +88,13 @@ async fn get_prescription(
     Ok(Json(service::get_prescription(&db, &t, &id).await?))
 }
 
-async fn create_prescription(
+/// Crea una receta (Ley 20.000, immutable). Requiere pharmacist+.
+#[utoipa::path(post, path = "/api/v1/prescriptions", tag = "Prescriptions",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_prescription(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewPrescription>,
@@ -89,7 +104,11 @@ async fn create_prescription(
     Ok(Json(service::create_prescription(&db, &t, input).await?))
 }
 
-async fn list_libro(
+/// Libro de controlados (sólo Ley 20.000).
+#[utoipa::path(get, path = "/api/v1/libro-recetas", tag = "Prescriptions",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_libro(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<PrescriptionFilters>,
@@ -99,7 +118,14 @@ async fn list_libro(
     Ok(Json(service::list_controlled(&db, &t, filters).await?))
 }
 
-async fn export_libro(
+/// CSV del libro de controlados.
+#[utoipa::path(get, path = "/api/v1/libro-recetas/export", tag = "Prescriptions",
+    responses(
+        (status = 200, description = "CSV libro recetas", content_type = "text/csv"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn export_libro(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<PrescriptionFilters>,
@@ -154,7 +180,11 @@ async fn export_libro(
 
 // --- pharmacist shifts -----------------------------------------------------
 
-async fn list_shifts(
+/// Lista turnos del químico farmacéutico.
+#[utoipa::path(get, path = "/api/v1/turnos-farmaceutico", tag = "Prescriptions",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_shifts(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<ShiftFilters>,
@@ -164,7 +194,13 @@ async fn list_shifts(
     Ok(Json(service::list_shifts(&db, &t, filters).await?))
 }
 
-async fn create_shift(
+/// Crea turno del químico. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/turnos-farmaceutico", tag = "Prescriptions",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_shift(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewPharmacistShift>,
@@ -174,7 +210,13 @@ async fn create_shift(
     Ok(Json(service::create_shift(&db, &t, input).await?))
 }
 
-async fn update_shift(
+/// Actualiza turno del químico. Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/turnos-farmaceutico/{id}", tag = "Prescriptions",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_shift(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,

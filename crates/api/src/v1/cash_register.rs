@@ -20,7 +20,7 @@ use crate::AppState;
 
 use domain::cash_register::{model::*, service};
 
-const CAJA_ROLES: &[&str] = &["admin", "owner", "cashier"];
+use crate::role::cashier_plus;
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -45,12 +45,18 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/cash-sessions", post(open_session))
         .route("/api/v1/cash-sessions/{id}/close", post(close_session))
         .route("/api/v1/cash-sessions/{id}/movements", post(add_movement))
-        .route_layer(crate::role::layer(state, CAJA_ROLES));
+        .route_layer(crate::role::layer(state, cashier_plus()));
 
     reads.merge(writes)
 }
 
-async fn open_session(
+/// Apertura de caja. Requiere cashier+.
+#[utoipa::path(post, path = "/api/v1/cash-sessions", tag = "CashRegister",
+    request_body = serde_json::Value,
+    responses((status = 201, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 409, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn open_session(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(body): Json<OpenSessionInput>,
@@ -62,7 +68,11 @@ async fn open_session(
     Ok((StatusCode::CREATED, Json(s)).into_response())
 }
 
-async fn list_sessions(
+/// Lista cash sessions del tenant.
+#[utoipa::path(get, path = "/api/v1/cash-sessions", tag = "CashRegister",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_sessions(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SessionFilters>,
@@ -74,7 +84,13 @@ async fn list_sessions(
     ))
 }
 
-async fn get_session(
+/// Detalle de una cash session.
+#[utoipa::path(get, path = "/api/v1/cash-sessions/{id}", tag = "CashRegister",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_session(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -84,7 +100,13 @@ async fn get_session(
     Ok(Json(service::get_session(db.as_ref(), &tenant, &id).await?))
 }
 
-async fn arqueo(
+/// Arqueo preview de una caja (estado, totales).
+#[utoipa::path(get, path = "/api/v1/cash-sessions/{id}/arqueo", tag = "CashRegister",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn arqueo(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -94,7 +116,14 @@ async fn arqueo(
     Ok(Json(service::arqueo(db.as_ref(), &tenant, &id).await?))
 }
 
-async fn close_session(
+/// Cierre de caja con conteo real (calcula diferencia). Requiere cashier+.
+#[utoipa::path(post, path = "/api/v1/cash-sessions/{id}/close", tag = "CashRegister",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn close_session(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -107,7 +136,13 @@ async fn close_session(
     ))
 }
 
-async fn add_movement(
+/// Crea movimiento de caja (in/out manual). Requiere cashier+.
+#[utoipa::path(post, path = "/api/v1/cash-sessions/{id}/movements", tag = "CashRegister",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 201, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn add_movement(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -120,7 +155,13 @@ async fn add_movement(
     Ok((StatusCode::CREATED, Json(m)).into_response())
 }
 
-async fn list_movements(
+/// Lista movimientos de una caja.
+#[utoipa::path(get, path = "/api/v1/cash-sessions/{id}/movements", tag = "CashRegister",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_movements(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,

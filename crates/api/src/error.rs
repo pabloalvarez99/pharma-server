@@ -16,16 +16,23 @@ use axum::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorBody {
+    /// SCREAMING_SNAKE machine-readable code. Stable contract.
+    #[schema(example = "INVALID_INPUT")]
     pub code: &'static str,
+    /// User-facing message in Spanish.
+    #[schema(example = "RUT inválido")]
     pub message: String,
+    /// Optional free-form payload for field-level errors / retry hints.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Object, nullable = true)]
     pub details: Option<Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
 }

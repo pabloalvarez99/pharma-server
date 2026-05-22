@@ -6,10 +6,18 @@ use serde::{Deserialize, Serialize};
 pub struct Claims {
     pub sub: String,
     pub tenant_id: String,
+    /// Backward-compat: legacy JWTs minted before granular roles existed have
+    /// no `roles` claim. Treat them as `["admin"]` so existing sessions keep
+    /// working without forcing a re-login.
+    #[serde(default = "default_roles_legacy")]
     pub roles: Vec<String>,
     pub iss: String,
     pub iat: i64,
     pub exp: i64,
+}
+
+fn default_roles_legacy() -> Vec<String> {
+    vec!["admin".to_string()]
 }
 
 pub fn issue(

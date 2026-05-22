@@ -1,8 +1,8 @@
 //! Swagger UI / OpenAPI integration tests.
 //!
 //! Exercises the config-gated docs mount wired in `api::build_router`:
-//! * `/api-docs/openapi.json` serves the `ApiDoc` document when docs are on,
-//! * `/swagger-ui` is served (303 → `/swagger-ui/` → 200) when docs are on,
+//! * `/docs/openapi.json` serves the `ApiDoc` document when docs are on,
+//! * `/docs` is served (303 → `/docs/` → 200) when docs are on,
 //! * both 404 when docs are disabled via `AppState.docs_enabled = false`.
 //!
 //! Harness mirrors `tests/auth.rs`: a no-DB `AppState` + `oneshot`.
@@ -61,7 +61,7 @@ async fn get(app: &axum::Router, uri: &str) -> axum::http::Response<Body> {
 #[tokio::test]
 async fn openapi_json_served_and_parses() {
     let app = api::build_router(state(true));
-    let resp = get(&app, "/api-docs/openapi.json").await;
+    let resp = get(&app, "/docs/openapi.json").await;
     assert_eq!(resp.status(), StatusCode::OK);
 
     let body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -77,11 +77,11 @@ async fn openapi_json_served_and_parses() {
         "expected OpenAPI 3.x, got {version}"
     );
 
-    // The document is non-trivial: the registered domain schema is present.
+    // The document is non-trivial: the registered error-envelope schema is
+    // present (the granular-RBAC OpenAPI doc registers `ErrorEnvelope`).
     assert!(
-        doc.pointer("/components/schemas/StockMovementDto")
-            .is_some(),
-        "expected registered StockMovementDto schema in components, body: {doc}"
+        doc.pointer("/components/schemas/ErrorEnvelope").is_some(),
+        "expected registered ErrorEnvelope schema in components, body: {doc}"
     );
 }
 
@@ -89,16 +89,16 @@ async fn openapi_json_served_and_parses() {
 async fn swagger_ui_is_served() {
     let app = api::build_router(state(true));
 
-    // `/swagger-ui` (no trailing slash) redirects to `/swagger-ui/`.
-    let resp = get(&app, "/swagger-ui").await;
+    // `/docs` (no trailing slash) redirects to `/docs/`.
+    let resp = get(&app, "/docs").await;
     assert!(
         resp.status().is_redirection(),
-        "expected 3xx redirect at /swagger-ui, got {}",
+        "expected 3xx redirect at /docs, got {}",
         resp.status()
     );
 
     // The UI index itself returns 200.
-    let resp = get(&app, "/swagger-ui/").await;
+    let resp = get(&app, "/docs/").await;
     assert_eq!(
         resp.status(),
         StatusCode::OK,
@@ -110,17 +110,17 @@ async fn swagger_ui_is_served() {
 async fn docs_disabled_returns_404() {
     let app = api::build_router(state(false));
 
-    let resp = get(&app, "/api-docs/openapi.json").await;
+    let resp = get(&app, "/docs/openapi.json").await;
     assert_eq!(
         resp.status(),
         StatusCode::NOT_FOUND,
         "openapi.json must 404 when docs are disabled"
     );
 
-    let resp = get(&app, "/swagger-ui").await;
+    let resp = get(&app, "/docs").await;
     assert_eq!(
         resp.status(),
         StatusCode::NOT_FOUND,
-        "swagger-ui must 404 when docs are disabled"
+        "/docs must 404 when docs are disabled"
     );
 }
