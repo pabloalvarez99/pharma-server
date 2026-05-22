@@ -470,7 +470,91 @@ pub async fn stats(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductSta
     })
 }
 
-/// Returns number of products repriced.
+// --- bulk price update (safe, type-driven) ---------------------------------
+
+/// Arithmetic op applied to `price` in a tenant-scoped bulk update.
+/// Each variant carries a [`Decimal`] — values are bound via `.bind()` and
+/// never interpolated into SQL strings. The repo composes a fixed-shape
+/// SurrealQL template per variant, so there is no path for a caller to
+/// inject arbitrary SQL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PriceOp {
+    /// New price = `$v` (clamped by `floor_at_zero` if set).
+    SetExact(Decimal),
+    /// New price = `price * $v` — pass a multiplier (e.g. `1.10` for +10%).
+    MultiplyPct(Decimal),
+    /// New price = `price + $v` (signed).
+    DeltaAbs(Decimal),
+}
+
+/// Full repricing request: arithmetic op + post-processing flags. See
+/// [`PriceOp`]. Built by `catalog::service::bulk_price` from typed input
+/// validated at the HTTP boundary.
+#[derive(Debug, Clone, Copy)]
+pub struct PriceUpdate {
+    pub op: PriceOp,
+    /// Wrap result in `math::max([0dec, ...])` so the new price never goes
+    /// negative.
+    pub floor_at_zero: bool,
+    /// Round the (post-floor) result to the nearest whole unit.
+    pub round: bool,
+}
+
+/// Safe replacement for [`bulk_update_price`] (deprecated). The op +
+/// flags are translated into a fixed-shape SurrealQL template and the
+/// numeric operand is bound — no user-controlled string is interpolated.
+pub async fn bulk_update_price_typed(
+    db: &Db,
+    tenant: &Thing,
+    update: PriceUpdate,
+    category: Option<Thing>,
+) -> DomainResult<usize> {
+    // Per-op template. `$v` is the only numeric operand, always bound.
+    let core_expr = match update.op {
+        PriceOp::SetExact(_) => "$v",
+        PriceOp::MultiplyPct(_) => "price * $v",
+        PriceOp::DeltaAbs(_) => "price + $v",
+    };
+    let v = match update.op {
+        PriceOp::SetExact(d) | PriceOp::MultiplyPct(d) | PriceOp::DeltaAbs(d) => d,
+    };
+    let guarded = if update.floor_at_zero {
+        format!("math::max([0dec, {core_expr}])")
+    } else {
+        core_expr.to_string()
+    };
+    let expr = if update.round {
+        format!("math::round({guarded})")
+    } else {
+        guarded
+    };
+    // `cond` is a literal in each branch — no user input reaches the SQL.
+    let cond = if category.is_some() {
+        "tenant = $t AND active = true AND category = $cat"
+    } else {
+        "tenant = $t AND active = true"
+    };
+    let q = format!("UPDATE product SET price = {expr} WHERE {cond} RETURN id");
+    let mut r = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("cat", category))
+        .bind(("v", dec_val(v)))
+        .await?;
+    let ids: Vec<Thing> = r.take((0, "id"))?;
+    Ok(ids.len())
+}
+
+/// SQL-injection-prone: `expr` is interpolated raw into the UPDATE.
+/// Kept temporarily for backward-compat of any external caller.
+///
+/// TODO(caller-impact): `crates/api/`, `crates/cli/` (a parallel agent owns
+/// those crates) — none should reach this directly; the safe path is
+/// `service::bulk_price` → [`bulk_update_price_typed`]. Remove once the
+/// other agent confirms no out-of-tree callers.
+#[deprecated(
+    note = "use `bulk_update_price_typed` — interpolates raw SurrealQL, SQL-injection-prone"
+)]
 pub async fn bulk_update_price(
     db: &Db,
     tenant: &Thing,
@@ -492,13 +576,47 @@ pub async fn bulk_update_price(
     Ok(ids.len())
 }
 
+// --- etiquetas (typed column whitelist) ------------------------------------
+
+/// Whitelisted `product` text columns queryable via [`etiquetas`]. Each
+/// variant maps to a hardcoded column literal — the value of any user
+/// input never reaches the SurrealQL string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagField {
+    Laboratory,
+    ActiveIngredient,
+    TherapeuticAction,
+}
+
+impl TagField {
+    /// Column literal injected into the SurrealQL template. Safe: every
+    /// variant resolves to a compile-time `&'static str`. Exhaustive
+    /// `match` — adding a variant is a compile error until the literal is
+    /// added here.
+    pub const fn column(self) -> &'static str {
+        match self {
+            TagField::Laboratory => "laboratory",
+            TagField::ActiveIngredient => "active_ingredient",
+            TagField::TherapeuticAction => "therapeutic_action",
+        }
+    }
+}
+
 pub async fn etiquetas(db: &Db, tenant: &Thing, q: &str) -> DomainResult<EtiquetaResults> {
-    async fn distinct(db: &Db, tenant: &Thing, field: &str, q: &str) -> DomainResult<Vec<String>> {
+    async fn distinct(
+        db: &Db,
+        tenant: &Thing,
+        field: TagField,
+        q: &str,
+    ) -> DomainResult<Vec<String>> {
+        // `field.column()` is always a hardcoded literal from `TagField`.
+        // The user-supplied `q` is bound, never interpolated.
+        let col = field.column();
         let sql = format!(
-            "SELECT VALUE {field} FROM product \
-             WHERE tenant = $t AND {field} != NONE \
-             AND string::lowercase({field}) CONTAINS $q \
-             GROUP BY {field} LIMIT 20"
+            "SELECT VALUE {col} FROM product \
+             WHERE tenant = $t AND {col} != NONE \
+             AND string::lowercase({col}) CONTAINS $q \
+             GROUP BY {col} LIMIT 20"
         );
         let mut r = db
             .query(sql)
@@ -509,8 +627,54 @@ pub async fn etiquetas(db: &Db, tenant: &Thing, q: &str) -> DomainResult<Etiquet
         Ok(vs)
     }
     Ok(EtiquetaResults {
-        laboratories: distinct(db, tenant, "laboratory", q).await?,
-        active_ingredients: distinct(db, tenant, "active_ingredient", q).await?,
-        therapeutic_actions: distinct(db, tenant, "therapeutic_action", q).await?,
+        laboratories: distinct(db, tenant, TagField::Laboratory, q).await?,
+        active_ingredients: distinct(db, tenant, TagField::ActiveIngredient, q).await?,
+        therapeutic_actions: distinct(db, tenant, TagField::TherapeuticAction, q).await?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The point of `TagField` is that callers cannot pass arbitrary
+    // strings into the column interpolation. This test pins the
+    // whitelist + ensures every variant is matched (exhaustive `match`
+    // below means adding a variant without a literal is a compile error).
+    #[test]
+    fn tag_field_only_accepts_whitelist() {
+        let cases: &[(TagField, &str)] = &[
+            (TagField::Laboratory, "laboratory"),
+            (TagField::ActiveIngredient, "active_ingredient"),
+            (TagField::TherapeuticAction, "therapeutic_action"),
+        ];
+        for (f, expected) in cases {
+            // Exhaustive match — adding a TagField variant is a compile
+            // error until handled here.
+            let got: &str = match f {
+                TagField::Laboratory => "laboratory",
+                TagField::ActiveIngredient => "active_ingredient",
+                TagField::TherapeuticAction => "therapeutic_action",
+            };
+            assert_eq!(got, *expected);
+            assert_eq!(f.column(), *expected);
+        }
+    }
+
+    // Compile-time guarantee: `bulk_update_price_typed` cannot accept a
+    // free-form SQL string. Variants only take `Decimal`. The classic
+    // `; DROP TABLE x;` injection isn't even expressible at the type
+    // level — `Decimal::from_str(...)` will fail on any non-numeric
+    // input, and there is no string field on `PriceOp` to smuggle SQL
+    // through.
+    #[test]
+    fn bulk_update_price_rejects_arbitrary_sql() {
+        use std::str::FromStr;
+        // Cannot construct a PriceOp from a SQL string — only from a
+        // Decimal. This is a compile-time guarantee asserted by example.
+        let _ok = PriceOp::SetExact(Decimal::from_str("1.10").unwrap());
+        let _ok = PriceOp::MultiplyPct(Decimal::from_str("1.10").unwrap());
+        let _ok = PriceOp::DeltaAbs(Decimal::from_str("-500").unwrap());
+        assert!(Decimal::from_str("; DROP TABLE product; --").is_err());
+    }
 }

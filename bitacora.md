@@ -16,7 +16,7 @@ NO acá.
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
 - **Versión**: `0.1.24` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
+- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH). Rama de trabajo activa: `feat/quality-p0-sql-tenant-guards` (fix P0 SQL injection catalog + tenant guard expenses, ver entrada 2026-05-22 abajo).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
@@ -122,6 +122,28 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-22 — P0 fix: SQL injection catalog + tenant guard expenses
+
+- **Qué**:
+  1. `crates/domain/src/catalog/repo.rs::bulk_update_price` — fix SQL-injection: el `expr: &str` raw que se interpolaba al UPDATE se reemplaza por API type-driven `PriceUpdate { op: PriceOp, floor_at_zero, round }` con `PriceOp::{SetExact,MultiplyPct,DeltaAbs}(Decimal)`. La función nueva `bulk_update_price_typed` arma templates SurrealQL fijos por variante y `.bind("v", ...)` el operando numérico — ningún string controlable por usuario llega al SQL. Función vieja queda `#[deprecated]` con `TODO(caller-impact)` por compat (la usa nadie externo, pero el agente paralelo de `crates/api/`+`crates/cli/` debe confirmarlo). `service::bulk_price` ya migrado al typed API.
+  2. `crates/domain/src/catalog/repo.rs::etiquetas` — el `field: &str` interpolado en `format!("UPDATE product SET {field} ...")` (en el `SELECT` distinct) reemplazado por `enum TagField { Laboratory, ActiveIngredient, TherapeuticAction }` con `column() -> &'static str` exhaustivo. Agregar variantes nuevas exige tocar la whitelist explícitamente (compile error si no).
+  3. `crates/domain/src/expenses/service.rs::{top_products, stock_rotation}` — refactor a helper privado `build_where_with_tenant(tenant, extra_clauses, binds) -> String` que **siempre** pone `tenant = $tenant` primero y `AND`-junta las cláusulas extra. `debug_assert!` que `extra_clauses` no mencione `tenant` (evita duplicados). Garantía estructural: imposible que un futuro refactor pierda el guard.
+- **Por qué**: audit arquitectural identificó 3 P0 — uno de seguridad (SQL injection), otro de integridad multi-tenant (cross-tenant leak por refactor accidental), otro de fragilidad (whitelist de columnas implícita). Los tres ahora son imposibles por tipos.
+- **Tests nuevos** (4, todos passing):
+  - `catalog::repo::tests::bulk_update_price_rejects_arbitrary_sql` — compile-time guarantee + Decimal parse rechaza `; DROP TABLE`.
+  - `catalog::repo::tests::tag_field_only_accepts_whitelist` — pin del map enum→literal.
+  - `expenses::service::tests::expenses_query_always_includes_tenant` — la salida del helper siempre arranca con `WHERE tenant = $tenant`.
+  - `expenses::service::tests::build_where_panics_on_duplicate_tenant` — `should_panic` cuando el caller intenta repetir `tenant`.
+- **Resultado**: 183 tests passing workspace-wide, 0 failed, 1 ignored (pre-existente). `cargo fmt --check + cargo clippy --workspace --all-targets -- -D warnings` verdes.
+- **Archivos tocados**: `crates/domain/src/catalog/repo.rs`, `crates/domain/src/catalog/service.rs`, `crates/domain/src/expenses/service.rs`, `bitacora.md`. **NO** se tocó `crates/api/`, `crates/cli/`, migrations ni otros crates (agente paralelo trabaja ahí).
+- **No-en-este-PR**:
+  - Remover `#[deprecated] bulk_update_price` raw — pendiente confirmación del agente paralelo (api/cli) que no haya callers.
+  - Aplicar `build_where_with_tenant` a `list_expenses`, `sales_daily`, `margins_daily` (mismo patrón, los dos call-sites prioritarios del audit ya migrados; resto = mecánico siguiente PR).
+  - Tests de integración E2E que ejerciten `bulk_update_price_typed` contra `kv-mem` (los unitarios cubren la garantía de tipos; tests E2E en `tests/catalog.rs` ya cubren el path via `service::bulk_price`).
+- **Rama**: `feat/quality-p0-sql-tenant-guards` (desde `feature/erp-parity`). No push aún — revisión humana primero.
 
 ---
 
