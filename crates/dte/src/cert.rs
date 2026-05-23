@@ -104,9 +104,9 @@ fn aead_decrypt(key: &[u8; 32], blob: &[u8]) -> Result<Vec<u8>, DteError> {
     let key = Key::<Aes256Gcm>::from_slice(key);
     let cipher = Aes256Gcm::new(key);
     let nonce = Nonce::from_slice(nonce_bytes);
-    cipher
-        .decrypt(nonce, ct)
-        .map_err(|_| DteError::CertInvalid("AES-GCM decrypt: tag inválido o clave incorrecta".to_string()))
+    cipher.decrypt(nonce, ct).map_err(|_| {
+        DteError::CertInvalid("AES-GCM decrypt: tag inválido o clave incorrecta".to_string())
+    })
 }
 
 /// Cifra el PFX bytes y el password con claves derivadas por argon2id +
