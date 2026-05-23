@@ -182,10 +182,33 @@ pub enum SiiEnv {
 }
 
 impl SiiEnv {
+    /// Host base del entorno (sandbox `maullin.sii.cl` / prod `palena.sii.cl`).
+    pub fn host(self) -> &'static str {
+        match self {
+            SiiEnv::Sandbox => "https://maullin.sii.cl",
+            SiiEnv::Prod => "https://palena.sii.cl",
+        }
+    }
+
     pub fn upload_endpoint(self) -> &'static str {
         match self {
             SiiEnv::Sandbox => "https://maullin.sii.cl/cgi_dte/UPL/DTEUpload",
             SiiEnv::Prod => "https://palena.sii.cl/cgi_dte/UPL/DTEUpload",
         }
+    }
+
+    /// Endpoint que entrega la semilla (`getSeed`). SOAP service.
+    pub fn seed_endpoint(self) -> String {
+        format!("{}/DTEWS/CrSeed.jws", self.host())
+    }
+
+    /// Endpoint que canjea semilla firmada por token (`getToken`). SOAP service.
+    pub fn token_endpoint(self) -> String {
+        format!("{}/DTEWS/GetTokenFromSeed.jws", self.host())
+    }
+
+    /// Endpoint de consulta de estado de envío (`getEstUp`). SOAP service.
+    pub fn estado_endpoint(self) -> String {
+        format!("{}/DTEWS/QueryEstUp.jws", self.host())
     }
 }
