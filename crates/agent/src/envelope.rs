@@ -45,7 +45,7 @@ impl Envelope {
         msg_id: impl Into<String>,
         topic: impl Into<String>,
         body: Value,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut env = Self {
             from: id.did(),
             to: to_did.into(),
@@ -55,9 +55,9 @@ impl Envelope {
             body,
             sig: String::new(),
         };
-        let bytes = canonical_bytes(&env.unsigned_value());
+        let bytes = canonical_bytes(&env.unsigned_value())?;
         env.sig = hex::encode(id.sign(&bytes).to_bytes());
-        env
+        Ok(env)
     }
 
     fn unsigned_value(&self) -> Value {
@@ -74,13 +74,14 @@ impl Envelope {
     /// Verify `sig` against the key embedded in `from`.
     pub fn verify(&self) -> Result<()> {
         let sig_bytes = hex::decode(&self.sig)
-            .map_err(|e| AgentError::Key(format!("sig hex inválido: {e}")))?;
+            .map_err(|e| AgentError::Base64(format!("sig hex inválido: {e}")))?;
         let arr: [u8; 64] = sig_bytes
             .as_slice()
             .try_into()
-            .map_err(|_| AgentError::BadSignature)?;
+            .map_err(|_| AgentError::SignatureInvalid)?;
         let sig = ed25519_dalek::Signature::from_bytes(&arr);
-        verify_with_did(&self.from, &canonical_bytes(&self.unsigned_value()), &sig)
+        let canonical = canonical_bytes(&self.unsigned_value())?;
+        verify_with_did(&self.from, &canonical, &sig)
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -88,7 +89,7 @@ impl Envelope {
     }
 
     pub fn from_json(s: &str) -> Result<Self> {
-        Ok(serde_json::from_str(s)?)
+        serde_json::from_str(s).map_err(|e| AgentError::Envelope(format!("envelope json: {e}")))
     }
 }
 
@@ -98,7 +99,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn signed_envelope_verifies() {
+    fn signed_envelope_verifies() -> Result<()> {
         let alice = Identity::generate();
         let bob = Identity::generate();
         let env = Envelope::create(
@@ -107,12 +108,12 @@ mod tests {
             "msg-1",
             "quote.request",
             json!({ "items": [{ "barcode": "7800001", "qty": 10 }] }),
-        );
-        env.verify().expect("valid");
+        )?;
+        env.verify()
     }
 
     #[test]
-    fn tampered_body_fails() {
+    fn tampered_body_fails() -> Result<()> {
         let alice = Identity::generate();
         let mut env = Envelope::create(
             &alice,
@@ -120,26 +121,28 @@ mod tests {
             "m",
             "po.create",
             json!({ "total": 1000 }),
-        );
+        )?;
         env.body = json!({ "total": 999999 });
         assert!(env.verify().is_err());
+        Ok(())
     }
 
     #[test]
-    fn forged_from_fails() {
+    fn forged_from_fails() -> Result<()> {
         // Sign as alice but claim to be bob.
         let alice = Identity::generate();
         let bob = Identity::generate();
-        let mut env = Envelope::create(&alice, "did:pharma:x", "m", "ping", json!({}));
+        let mut env = Envelope::create(&alice, "did:pharma:x", "m", "ping", json!({}))?;
         env.from = bob.did();
         assert!(env.verify().is_err());
+        Ok(())
     }
 
     #[test]
-    fn json_roundtrip() {
+    fn json_roundtrip() -> Result<()> {
         let id = Identity::generate();
-        let env = Envelope::create(&id, "did:pharma:y", "m2", "ping", json!({"n":1}));
-        let back = Envelope::from_json(&env.to_json().unwrap()).unwrap();
-        back.verify().expect("survives roundtrip");
+        let env = Envelope::create(&id, "did:pharma:y", "m2", "ping", json!({"n":1}))?;
+        let back = Envelope::from_json(&env.to_json()?)?;
+        back.verify()
     }
 }

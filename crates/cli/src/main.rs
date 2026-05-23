@@ -371,7 +371,7 @@ async fn main() -> anyhow::Result<()> {
                     "lab" => agent::AgentKind::Lab,
                     other => return Err(anyhow!("kind inválido: {other}")),
                 };
-                let card = agent::AgentCard::new(&id, name, kind, region, endpoint);
+                let card = agent::AgentCard::new(&id, name, kind, region, endpoint)?;
                 println!("{}", card.to_json()?);
             }
             AgentCmd::Verify { file } => {

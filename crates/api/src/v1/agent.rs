@@ -144,13 +144,23 @@ async fn inbox(State(state): State<AppState>, body: String) -> axum::response::R
         "po.status" => "po.status.result",
         _ => "ack",
     };
-    let reply = agent::Envelope::create(
+    let reply = match agent::Envelope::create(
         node.as_ref(),
         env.from.clone(),
         uuid::Uuid::new_v4().to_string(),
         reply_topic,
         reply_body,
-    );
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            record_interaction(&state, &env.from, &env.topic, &env.msg_id, "error").await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("construir respuesta: {e}") })),
+            )
+                .into_response();
+        }
+    };
     record_interaction(&state, &env.from, &env.topic, &env.msg_id, "ok").await;
 
     match reply.to_json() {

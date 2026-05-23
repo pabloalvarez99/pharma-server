@@ -91,7 +91,8 @@ async fn ping_returns_signed_pong() {
         "msg-ping-1",
         "ping",
         serde_json::json!({}),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
 
@@ -111,7 +112,8 @@ async fn tampered_envelope_is_rejected_401() {
 
     let peer = agent::Identity::generate();
     let mut env =
-        agent::Envelope::create(&peer, node_did, "m", "ping", serde_json::json!({ "x": 1 }));
+        agent::Envelope::create(&peer, node_did, "m", "ping", serde_json::json!({ "x": 1 }))
+            .expect("envelope build");
     // Tamper after signing.
     env.body = serde_json::json!({ "x": 999 });
     let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
@@ -140,7 +142,8 @@ async fn catalog_lookup_matches_global_barcode_catalog() {
         "lookup-1",
         "catalog.lookup",
         serde_json::json!({ "barcodes": ["7800001112223", "0000000000000"] }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
 
@@ -215,7 +218,8 @@ async fn quote_request_returns_priced_lines_when_federation_enabled() {
             "tenant": "drogueria-x",
             "items": [{ "barcode": "7801234567890", "qty": 10 }]
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let reply = agent::Envelope::from_json(&body).unwrap();
@@ -247,7 +251,8 @@ async fn quote_request_blocked_when_federation_disabled() {
             "tenant": "private-co",
             "items": [{ "barcode": "7801234567890", "qty": 1 }]
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "opt-out tenant must reject");
 }
@@ -270,7 +275,8 @@ async fn po_create_records_order_and_acks() {
             "lines": [{ "barcode": "7801234567890", "qty": 24, "unit_price": 1490 }],
             "buyer_note": "urgente fin de semana"
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let reply = agent::Envelope::from_json(&body).unwrap();
@@ -327,7 +333,8 @@ async fn po_create_rejects_buyer_supplied_price_and_uses_canonical() {
             "tenant": "drogueria-z",
             "lines": [{ "barcode": "7801234567890", "qty": 10, "unit_price": 1 }]
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let reply = agent::Envelope::from_json(&body).unwrap();
@@ -377,7 +384,8 @@ async fn po_create_marks_adjusted_when_product_unknown() {
             "tenant": "drogueria-w",
             "lines": [{ "barcode": "0000000000000", "qty": 5, "unit_price": 100 }]
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let reply = agent::Envelope::from_json(&body).unwrap();
@@ -407,7 +415,8 @@ async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
             "tenant": "drogueria-s",
             "lines": [{ "barcode": "7801234567890", "qty": 3, "unit_price": 1 }]
         }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, create.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let ack = agent::Envelope::from_json(&body).unwrap();
@@ -421,7 +430,8 @@ async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
         "po-s2",
         "po.status",
         serde_json::json!({ "order_id": order_id }),
-    );
+    )
+    .expect("envelope build");
     let (status, body) = post_inbox(&app, q.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "body={body}");
     let reply = agent::Envelope::from_json(&body).unwrap();
@@ -440,7 +450,8 @@ async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
         "po-s3",
         "po.status",
         serde_json::json!({ "order_id": order_id }),
-    );
+    )
+    .expect("envelope build");
     let (status, _) = post_inbox(&app, evil.to_json().unwrap()).await;
     assert_eq!(
         status,
@@ -462,7 +473,8 @@ async fn po_status_unknown_order_is_not_found() {
         "po-s4",
         "po.status",
         serde_json::json!({ "order_id": "agent_order:doesnotexist" }),
-    );
+    )
+    .expect("envelope build");
     let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -480,7 +492,8 @@ async fn unknown_topic_rejected_400() {
         "m",
         "totally.unknown",
         serde_json::json!({}),
-    );
+    )
+    .expect("envelope build");
     let (status, _) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
