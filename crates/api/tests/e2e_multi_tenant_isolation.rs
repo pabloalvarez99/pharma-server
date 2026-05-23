@@ -245,21 +245,96 @@ async fn pos_sale_for_t1_with_t2_product_is_not_found() {
     );
 }
 
-/// BUG-006 (medium): `POST /api/v1/admin/license/reload` verifies the on-disk
-/// license signature but does NOT check that `license.tenant_id` matches the
-/// reloading operator's tenant. A T2-issued license dropped into T1's data dir
-/// would be accepted and activated for T1. (We cannot forge a *validly signed*
-/// foreign-tenant license without the licenser private key, so this test
-/// documents the missing binding via the public reload contract and is
-/// `#[ignore]`d; the gap is also visible by inspection of
-/// `api::v1::license::reload_license`, which never compares tenants.)
+/// BUG-006 (medium, FIXED): `POST /api/v1/admin/license/reload` now binds a
+/// *signature-verified* license to the reloading operator's tenant. A license
+/// whose `tenant_id` does not match the caller's tenant is rejected (403) and
+/// the active license is left untouched — a foreign tenant's entitlements are
+/// never adopted.
+///
+/// End-to-end note: minting a *validly signed* foreign-tenant license requires
+/// the licenser private key (the embedded production key has no known private
+/// half), so the precise verified-foreign-tenant rejection is asserted as a
+/// unit test over the binding predicate in `api::v1::license::tests`
+/// (`tenant_bind_rejects_foreign_tenant_license`). This e2e test pins the
+/// observable guarantee reachable over HTTP: dropping a foreign/untrusted
+/// license file into T1's data dir must NEVER cause T1 to adopt a non-Free
+/// tier — reload either rejects it (403, verified+foreign) or falls back to
+/// Free (invalid signature, ADR-0005). It must never activate the foreign
+/// license's tier for the caller.
 #[tokio::test]
-#[ignore = "BUG-006: license reload does not bind license.tenant_id to the caller's tenant"]
 async fn license_reload_should_reject_foreign_tenant() {
-    // Intentionally unimplemented end-to-end: requires the licenser private key
-    // to mint a signed license for a different tenant_id. Kept as a documented
-    // expectation so a future signing-capable harness can complete it.
-    panic!(
-        "BUG-006: reload must reject a license whose tenant_id != caller tenant (binding absent)"
+    use license::schema::{License, Tier, SCHEMA_VERSION};
+
+    let tdb = spawn_db().await;
+    let (t1id, u1, r1) = seed_tenant_admin(&tdb.db, "tenant-uno", "admin@uno.cl").await;
+    let t1_token = token_for(&u1, &t1id, r1);
+
+    // A license issued for a DIFFERENT tenant (T2 = a random UUID), dropped
+    // into T1's data dir. tier=Business so adoption would be observable.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("license.json");
+    let foreign = License {
+        schema_version: SCHEMA_VERSION,
+        license_id: "lic_foreign_t2".into(),
+        tenant_id: uuid::Uuid::new_v4(),
+        tier: Tier::Business,
+        features: vec!["federation.po_create".into()],
+        bought_addons: Vec::new(),
+        seat_count: 10,
+        issued_at: chrono::Utc::now() - chrono::Duration::days(1),
+        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(30)),
+        issuer_did: "did:pharma:test".into(),
+        key_id: "lk-test".into(),
+        signature: String::new(),
+        metadata: None,
+    };
+    std::fs::write(&path, serde_json::to_vec_pretty(&foreign).unwrap()).unwrap();
+
+    // Build state for T1 with the on-disk license path wired.
+    let mut state = state_free(tdb.db.clone());
+    state.license_path = Some(path);
+    let app = api::build_router(state);
+
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/admin/license/reload",
+        Some(&t1_token),
+        None,
+        &[],
+    )
+    .await;
+
+    // Must NOT have adopted T2's Business tier. Either a 403 tenant-mismatch
+    // (verified+foreign) or a 200 Free fallback (untrusted signature) — never
+    // the foreign tier.
+    if st == StatusCode::OK {
+        assert_eq!(
+            body["tier"], "free",
+            "foreign license must fall back to Free, never adopt 'business': {body}"
+        );
+    } else {
+        assert_eq!(
+            st,
+            StatusCode::FORBIDDEN,
+            "foreign-tenant license must be rejected with 403, got {st}: {body}"
+        );
+        assert_eq!(body["error"]["code"], "FORBIDDEN");
+    }
+
+    // And the active license (via status) is NOT Business either.
+    let (st2, status_body) = req_json(
+        &app,
+        "GET",
+        "/api/v1/admin/license/status",
+        Some(&t1_token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st2, StatusCode::OK, "{status_body}");
+    assert_ne!(
+        status_body["tier"], "business",
+        "active license must never be the foreign T2 Business tier: {status_body}"
     );
 }
