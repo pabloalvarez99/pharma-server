@@ -299,7 +299,6 @@ async fn admin_lists_own_tenant_only() {
 }
 
 #[tokio::test]
-#[ignore = "BUG-audit-tenant-leak: with `path=` filter, tenant-bound `tenant = $t` query unexpectedly matches a row owned by tenant_b (got 3, expected 2). Other tenant-scoped tests in this file pass; suspect SurrealDB Thing-binding interaction with path string filter. Needs deeper investigation."]
 async fn filter_by_path_only_returns_that_path() {
     let fx = fixture().await;
     let token = token_for(&fx.tenant_a, &fx.user_a, "owner");

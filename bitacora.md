@@ -125,6 +125,17 @@ NO acá.
 
 ---
 
+## 2026-05-23 — Fix BUG-audit-tenant-leak (audit-log count tenant filter)
+
+- **Qué**: el endpoint `GET /api/v1/audit-log` reportaba `total` incorrecto cuando el filtro `path=` estaba presente: el `SELECT` de filas devolvía 2 (tenant_a correcto) pero `total: 3` (incluía la fila `/api/v1/expenses` de tenant_b). El test `filter_by_path_only_returns_that_path` estaba `#[ignore]` por esto.
+- **Root cause**: la SQL anterior `SELECT count() AS c FROM audit_log WHERE tenant = $t AND path = $p GROUP ALL` permitía al planner de SurrealKv elegir el índice single-column `audit_log_path_ts` y saltarse la condición AND restante. El `SELECT` de filas (que usa proyección de columnas + `ORDER BY created_at DESC`) sí filtraba correctamente — solo el `count() GROUP ALL` leakeaba a través del tenant.
+- **Fix**: envolver el conteo en sub-query `SELECT count() AS c FROM (SELECT id FROM audit_log WHERE {where_clause}) GROUP ALL`. La sub-query materializa el conjunto filtrado primero (forzando ambas condiciones AND) y luego el `count()` externo agrega sobre ese set. Cero cambios en `LIMIT`/`START`, cero cambios en binds.
+- **Verificación**: 9/9 tests verdes en `crates/api/tests/audit_log.rs` (los 8 existentes + el ex-ignored). GATE clean: `cargo fmt --all -- --check` · `cargo clippy --workspace --all-targets -- -D warnings` · `cargo test --test audit_log -p api`.
+- **Archivos**: `crates/api/src/v1/audit.rs` (sub-query wrap + comment de root cause), `crates/api/tests/audit_log.rs` (un-ignore — assertion sin cambios).
+- **Gotcha aprendida**: con `GROUP ALL` + WHERE multi-condición, el planner de SurrealKv 2.x puede usar un índice secundario y saltarse las condiciones no-indexadas. Pattern seguro: `SELECT count() FROM (subquery WHERE ...) GROUP ALL`.
+
+---
+
 ## 2026-05-20 — CLI `pharma license reload`
 
 - **Qué**: nuevo subcomando `pharma license reload [--url URL] [--token T]` que POSTea al endpoint admin del server. `--url` default `http://localhost:8080`. `--token` opcional; fallback a env `PHARMA_ADMIN_TOKEN`. Imprime `tier/status/features-count/key_id`. Exit 1 si HTTP no-2xx.

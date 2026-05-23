@@ -241,12 +241,19 @@ async fn list_audit_log(
     // Single round-trip: rows + count. `LIMIT`/`START` are inlined as
     // already-clamped integers (SurrealKv 2.x has been flaky with bound
     // params there, and the values are not user-influenced after clamping).
+    //
+    // The count is computed via a subquery — wrapping the WHERE in a derived
+    // table forces SurrealKv's planner to materialize the filtered set first
+    // and only then aggregate. The naïve `count() ... GROUP ALL` form lets the
+    // planner pick a single-column index (e.g. `audit_log_path_ts`) and skip
+    // the other AND conditions, which previously leaked rows across tenants
+    // (BUG-audit-tenant-leak). See `bitacora.md` for the trace.
     let sql = format!(
         "SELECT id, tenant, user, user_email, method, path, status, \
          payload_hash, ip, user_agent, created_at \
          FROM audit_log WHERE {where_clause} \
          ORDER BY created_at DESC LIMIT {limit} START {offset}; \
-         SELECT count() AS c FROM audit_log WHERE {where_clause} GROUP ALL;"
+         SELECT count() AS c FROM (SELECT id FROM audit_log WHERE {where_clause}) GROUP ALL;"
     );
 
     let mut qb = db.query(sql).bind(("t", tenant));
