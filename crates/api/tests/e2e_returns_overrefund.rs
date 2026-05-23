@@ -167,7 +167,6 @@ async fn single_request_over_refund_is_blocked() {
 /// the guard accumulates already-refunded quantities (sum existing
 /// `devolucion_item.quantity` for the order's products).
 #[tokio::test]
-#[ignore = "BUG-005: over-refund guard only checks within one request; sequential partial refunds can exceed sold qty"]
 async fn cross_request_over_refund_should_be_blocked() {
     let (db, tenant, pid, order, _tdb) = setup().await;
 

@@ -564,7 +564,6 @@ async fn non_refunded_revenue(day: &Day) -> Decimal {
 /// behavior asserted here; ignored until the refund path returns units to a
 /// lot (or otherwise keeps the batch sum reconciled).
 #[tokio::test]
-#[ignore = "BUG-007: refund restock bumps product.stock + ledger but never restores product_batch.stock, breaking Σ batch == product.stock"]
 async fn batch_sum_matches_product_stock_after_returns() {
     let day = build_day().await;
     let (orders, _cash) = run_sales(&day).await;

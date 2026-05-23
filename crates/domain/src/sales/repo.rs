@@ -457,6 +457,14 @@ pub struct AppliedRefund {
 /// never written outside the audit trail — same invariant as the sale path).
 /// When `order` is set, the order is moved to `status='refunded'` in the same
 /// tx so a crash can't leave a refunded order still marked paid.
+///
+/// `restock_plans[i]` aligns with `req.items[i]`: `Some(allocs)` restores the
+/// returned units to those specific `product_batch` lots (so the
+/// `product.stock == Σ product_batch.stock` invariant holds for batch-tracked
+/// SKUs — BUG-007); `None` = no batch attribution (line not restocked, or the
+/// originating product is not batch-tracked) → `product.stock` bump only,
+/// legacy behavior. The batch increments are grouped at the tail so the
+/// per-item result indices stay fixed.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_refund(
     db: &Db,
@@ -464,6 +472,7 @@ pub async fn apply_refund(
     processed_by: Option<&Thing>,
     order: Option<&Thing>,
     req: &NewDevolucion,
+    restock_plans: &[Option<Vec<FefoAllocation>>],
     total: Decimal,
 ) -> DomainResult<AppliedRefund> {
     let did = uuid::Uuid::new_v4().simple().to_string();
@@ -511,6 +520,19 @@ pub async fn apply_refund(
     if order_marked {
         q.push_str("UPDATE order SET status='refunded' WHERE id=$ord AND tenant=$t; ");
     }
+    // Batch restocks grouped at the tail (no RETURN, results not read) so the
+    // per-item statement indices above stay fixed regardless of allocation
+    // count — same layout discipline as the sale path's FEFO decrements.
+    let mut ralloc_idx = 0usize;
+    for allocs in restock_plans.iter().flatten() {
+        for _ in allocs {
+            q.push_str(&format!(
+                "UPDATE product_batch SET stock = stock + $rba{ralloc_idx} \
+                 WHERE id = $rbid{ralloc_idx} AND tenant = $t; ",
+            ));
+            ralloc_idx += 1;
+        }
+    }
     q.push_str("COMMIT;");
 
     let mut qb = db
@@ -539,6 +561,18 @@ pub async fn apply_refund(
             .bind((format!("qty{i}"), it.quantity))
             .bind((format!("up{i}"), dec_val(it.unit_price)))
             .bind((format!("rs{i}"), it.restock));
+    }
+    // Bind the tail batch-restock params in the same order they were emitted.
+    let mut ralloc_idx = 0usize;
+    for allocs in restock_plans.iter().flatten() {
+        for a in allocs {
+            let bid = surrealdb::sql::thing(&a.batch)
+                .map_err(|_| DomainError::Invalid(format!("batch id inválido: {}", a.batch)))?;
+            qb = qb
+                .bind((format!("rba{ralloc_idx}"), a.qty))
+                .bind((format!("rbid{ralloc_idx}"), bid));
+            ralloc_idx += 1;
+        }
     }
     let mut r = qb.await?.check()?;
 
@@ -583,6 +617,47 @@ pub async fn apply_refund(
         movement_ids: movements_out,
         order_marked_refunded: order_marked,
     })
+}
+
+/// Sum already-refunded quantity per product across ALL prior `devolucion`s
+/// linked to `order` (tenant-scoped). Used by [`super::service::create_refund`]
+/// to enforce the cumulative over-refund guard: a new refund plus everything
+/// previously refunded for a product may not exceed what the order sold.
+/// Keyed by the product record-id string (matches `OrderItemDto.product`).
+pub async fn sum_prior_refunds_by_product(
+    db: &Db,
+    tenant: &Thing,
+    order: &Thing,
+) -> DomainResult<std::collections::HashMap<String, i64>> {
+    #[derive(Debug, Deserialize)]
+    struct Row {
+        product: Option<Thing>,
+        qty: i64,
+    }
+    // `devolucion_item` carries no `order` field; resolve the order's
+    // devoluciones via a subquery on `devolucion.order`, then group the item
+    // quantities by product. Lines with no product (unidentified) are ignored
+    // — they never restock and can't be over-refunded against a product.
+    let mut r = db
+        .query(
+            "SELECT product, math::sum(quantity) AS qty FROM devolucion_item \
+             WHERE tenant = $t \
+               AND devolucion IN (SELECT VALUE id FROM devolucion \
+                                  WHERE tenant = $t AND order = $o) \
+             GROUP BY product",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("o", order.clone()))
+        .await?
+        .check()?;
+    let rows: Vec<Row> = r.take(0)?;
+    let mut out = std::collections::HashMap::new();
+    for row in rows {
+        if let Some(p) = row.product {
+            out.insert(p.to_string(), row.qty);
+        }
+    }
+    Ok(out)
 }
 
 pub async fn list_devoluciones(

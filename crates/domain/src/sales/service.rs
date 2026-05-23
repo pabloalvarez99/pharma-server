@@ -390,19 +390,59 @@ pub async fn create_refund(
         .map(|s| parse_tenant_thing(s, "order"))
         .transpose()?;
 
+    // Per-line batch-restock plan, aligned with `req.items`. Filled below from
+    // the originating order's consumed FEFO allocations so restock keeps
+    // `product.stock == Σ product_batch.stock` (BUG-007). `None` = no batch
+    // attribution (no order, line not restocked, or product not batch-tracked)
+    // → `product.stock` bump only.
+    let mut restock_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
+        vec![None; req.items.len()];
+
     if let Some(ord) = order_thing.as_ref() {
         let (_order, sold_items) = repo::get_order(db, tenant, ord)
             .await?
             .ok_or(DomainError::NotFound)?;
         let mut sold: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        // Consumed FEFO lots per product (earliest-expiry first, as recorded by
+        // the sale), used to plan where returned units go back.
+        let mut consumed: std::collections::HashMap<String, Vec<(String, i64)>> =
+            std::collections::HashMap::new();
         for si in &sold_items {
             if let Some(p) = &si.product {
                 *sold.entry(p.clone()).or_default() += si.quantity;
+                if let Some(allocs) = &si.batches {
+                    let lots = consumed.entry(p.clone()).or_default();
+                    for a in allocs {
+                        lots.push((a.batch.clone(), a.qty));
+                    }
+                }
             }
         }
-        let mut refunding: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        for it in &req.items {
+        // Cumulative over-refund guard: count what was ALREADY refunded for
+        // this order in prior `devolucion`s, not just the lines in this
+        // request. Otherwise N sequential partial refunds can each pass the
+        // within-request check yet sum past the sold qty (refund-fraud vector,
+        // BUG-005). The running tally seeds from prior refunds and adds the
+        // current request line-by-line.
+        let prior = repo::sum_prior_refunds_by_product(db, tenant, ord).await?;
+        // Reserve the lot capacity already consumed by prior refunds (FEFO
+        // order) so the current restock fills only what is still outstanding —
+        // keeps the batch sum exact across multiple sequential refunds.
+        let mut lot_used: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for (p, mut already) in prior.clone() {
+            if let Some(lots) = consumed.get(&p) {
+                for (batch, cap) in lots {
+                    if already == 0 {
+                        break;
+                    }
+                    let take = already.min(*cap);
+                    *lot_used.entry(batch.clone()).or_default() += take;
+                    already -= take;
+                }
+            }
+        }
+        let mut refunding: std::collections::HashMap<String, i64> = prior;
+        for (i, it) in req.items.iter().enumerate() {
             if let Some(p) = &it.product {
                 let acc = refunding.entry(p.clone()).or_default();
                 *acc += it.quantity;
@@ -417,6 +457,34 @@ pub async fn create_refund(
                         "devolución de {p} excede lo vendido ({acc} > {sold_qty})"
                     )));
                 }
+                // Plan the restock into the consumed lots with remaining
+                // capacity (FEFO order). Only batch-tracked, restocked lines
+                // get a plan; the rest stay `None` (product.stock-only).
+                if it.restock {
+                    if let Some(lots) = consumed.get(p) {
+                        let mut remaining = it.quantity;
+                        let mut plan = Vec::new();
+                        for (batch, cap) in lots {
+                            if remaining == 0 {
+                                break;
+                            }
+                            let used = lot_used.entry(batch.clone()).or_default();
+                            let free = (*cap - *used).max(0);
+                            let take = remaining.min(free);
+                            if take > 0 {
+                                plan.push(crate::inventory::model::FefoAllocation {
+                                    batch: batch.clone(),
+                                    qty: take,
+                                });
+                                *used += take;
+                                remaining -= take;
+                            }
+                        }
+                        if !plan.is_empty() {
+                            restock_plans[i] = Some(plan);
+                        }
+                    }
+                }
             }
         }
     }
@@ -427,8 +495,16 @@ pub async fn create_refund(
         .map(|i| i.unit_price * Decimal::from(i.quantity))
         .sum();
 
-    let applied =
-        repo::apply_refund(db, tenant, processed_by, order_thing.as_ref(), &req, total).await?;
+    let applied = repo::apply_refund(
+        db,
+        tenant,
+        processed_by,
+        order_thing.as_ref(),
+        &req,
+        &restock_plans,
+        total,
+    )
+    .await?;
 
     Ok(RefundResponse {
         devolucion: applied.devolucion,
