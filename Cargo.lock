@@ -1588,6 +1588,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "pharma-core",
  "quick-xml",
  "rand 0.8.6",
  "rsa",
