@@ -1,3 +1,5 @@
+mod dte_cmd;
+
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
@@ -67,6 +69,21 @@ enum Cmd {
     License {
         #[command(subcommand)]
         cmd: LicenseCmd,
+    },
+    /// DTE (Documentos Tributarios Electrónicos SII) — listar, ver, exportar, anular, stats.
+    Dte {
+        #[command(subcommand)]
+        cmd: dte_cmd::DteCmd,
+    },
+    /// CAF (Códigos de Autorización de Folios SII) — import, list, peek next folio.
+    Caf {
+        #[command(subcommand)]
+        cmd: dte_cmd::CafCmd,
+    },
+    /// Cert digital (.pfx) — import encrypt-at-rest, list, info.
+    Cert {
+        #[command(subcommand)]
+        cmd: dte_cmd::CertCmd,
     },
 }
 
@@ -541,6 +558,9 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
+        Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
+        Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,
     }
     Ok(())
 }
