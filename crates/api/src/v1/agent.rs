@@ -27,7 +27,16 @@ pub fn router(state: AppState) -> Router<AppState> {
         .with_state(state)
 }
 
-async fn did(State(state): State<AppState>) -> impl IntoResponse {
+/// Identidad federada (DID) de este nodo. No autenticada — la identidad es
+/// pública por diseño (mismo rol que un host en una red mesh).
+#[utoipa::path(
+    get, path = "/agent/did", tag = "Agent",
+    responses(
+        (status = 200, description = "DID del nodo", body = serde_json::Value),
+        (status = 503, description = "Node identity not configured", body = crate::error::ErrorEnvelope),
+    )
+)]
+pub async fn did(State(state): State<AppState>) -> impl IntoResponse {
     match &state.node_identity {
         Some(id) => (StatusCode::OK, Json(json!({ "did": id.did() }))).into_response(),
         None => (
@@ -55,7 +64,25 @@ async fn record_interaction(
         .await;
 }
 
-async fn inbox(State(state): State<AppState>, body: String) -> axum::response::Response {
+/// Buzón federado para envelopes Ed25519-firmados (NO autenticado por JWT;
+/// la firma del envelope provee autenticidad). Topics soportados:
+/// `ping`, `catalog.lookup`, `quote.request`, `po.create`, `po.status`.
+#[utoipa::path(
+    post, path = "/agent/inbox", tag = "Agent",
+    request_body(content = String, description = "JSON envelope (`agent::Envelope`) firmado",
+                 content_type = "application/json"),
+    responses(
+        (status = 200, description = "Envelope respuesta firmado", body = serde_json::Value),
+        (status = 400, description = "Envelope inválido o topic no soportado", body = crate::error::ErrorEnvelope),
+        (status = 401, description = "Firma del envelope inválida", body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Tenant destino no habilitó federación", body = crate::error::ErrorEnvelope),
+        (status = 404, description = "Recurso (tenant/orden) no encontrado", body = crate::error::ErrorEnvelope),
+        (status = 421, description = "Envelope dirigido a otro nodo (Misdirected)", body = crate::error::ErrorEnvelope),
+        (status = 500, description = "Error interno", body = crate::error::ErrorEnvelope),
+        (status = 503, description = "Identidad o DB no disponible", body = crate::error::ErrorEnvelope),
+    )
+)]
+pub async fn inbox(State(state): State<AppState>, body: String) -> axum::response::Response {
     let Some(node) = state.node_identity.clone() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
