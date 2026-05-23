@@ -10,6 +10,51 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub backup: BackupConfig,
+    #[serde(default)]
+    pub jobs: JobsConfig,
+}
+
+/// Cron job toggles for the `jobs` crate. Every flag defaults true so a fresh
+/// install opts in to the full nightly hygiene set without extra config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobsConfig {
+    /// Daily 03:00 UTC purge of `idempotency_key` rows whose 24h TTL has
+    /// elapsed.
+    #[serde(default = "JobsConfig::default_true")]
+    pub idempotency_purge_enabled: bool,
+    /// Daily 08:00 UTC scan that writes a `notification` row per tenant with
+    /// `admin_setting near_expiry_alert_enabled = "true"` and at least one
+    /// batch with `expiry_date <= now + 30d AND stock > 0`.
+    #[serde(default = "JobsConfig::default_true")]
+    pub near_expiry_alert_enabled: bool,
+    /// Daily 02:00 UTC tar.gz snapshot of the SurrealKv data dir + `agent.key`
+    /// to `<data_dir>/backups/`.
+    #[serde(default = "JobsConfig::default_true")]
+    pub backup_auto_enabled: bool,
+    /// Backups older than this (mtime) are pruned after each auto-run. `0` =
+    /// keep forever.
+    #[serde(default = "JobsConfig::default_retention")]
+    pub backup_retention_days: u32,
+}
+
+impl JobsConfig {
+    fn default_true() -> bool {
+        true
+    }
+    fn default_retention() -> u32 {
+        7
+    }
+}
+
+impl Default for JobsConfig {
+    fn default() -> Self {
+        Self {
+            idempotency_purge_enabled: true,
+            near_expiry_alert_enabled: true,
+            backup_auto_enabled: true,
+            backup_retention_days: 7,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

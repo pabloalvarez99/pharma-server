@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 pharma-core = { path = "../core" }
+db = { path = "../db" }
+domain = { path = "../domain" }
 tokio.workspace = true
 tokio-cron-scheduler.workspace = true
 async-nats.workspace = true
@@ -15,3 +17,14 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
+surrealdb.workspace = true
+tar.workspace = true
+flate2.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = "3"
+filetime = "0.2"
+# kv-mem for integration tests; not enabled in the shipped binary build.
+surrealdb = { workspace = true, features = ["kv-mem"] }

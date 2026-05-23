@@ -53,9 +53,11 @@ NO acá.
     reglas, 12 grupos): cada venta tokeniza `product.active_ingredient` de
     cada item y devuelve `interaction_warnings` ordenados por severidad. No
     bloquea la venta (caveat clínico).
-  - Caja apertura/cierre/arqueo, gastos, scheduler nocturno + retención de
-    backups, backup on-demand `POST /api/v1/admin/backup`, cron auto-purga de
-    `idempotency_key` (v0.1.14–0.1.18).
+  - Caja apertura/cierre/arqueo, gastos, **scheduler real `crates/jobs`**
+    (Fase 8, 2026-05-23): backup-auto 02:00 UTC + retención configurable,
+    idempotency-purge 03:00 UTC, near-expiry-alert 08:00 UTC (opt-in por
+    tenant → `notification` row). Backup on-demand `POST /api/v1/admin/backup`
+    sin cambios.
   - **Reportes**: `GET /api/v1/reports/sales-daily` (rollup diario UTC),
     `GET /api/v1/reports/margins-daily` (revenue Σ`order_item.subtotal` −
     cost Σ`qty×product.cost_price`; `margin`, `margin_pct` 2dp,
@@ -112,7 +114,7 @@ NO acá.
 8. **Audit-log query** (endpoint filtrable por fecha/usuario/tabla).
 9. **CSV import** (productos masivos al inventario).
 10. **Rate-limit** (per-tenant + per-IP).
-11. **Fase 8 cron + Swagger UI + Tauri desktop** (deprioritized vs. licensing).
+11. **~~Fase 8 cron~~** ✅ (2026-05-23, `feat/jobs-cron-activate`): scheduler real activado vía `crates/jobs/Scheduler::start`. Tres jobs registrados: `backup-auto` (02:00 UTC), `idempotency-purge` (03:00 UTC), `near-expiry-alert` (08:00 UTC). Toggles en `config/default.toml [jobs]`. Swagger UI + Tauri siguen deprioritized.
 
 ### Completadas (referencia histórica)
 
@@ -122,6 +124,33 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-23 — Fase 8 cron activado (scheduler real con 3 jobs)
+
+- **Qué**: `crates/jobs/` deja de ser stub. Nueva API `jobs::Scheduler::start(db, data_dir, opts)` + `Scheduler::shutdown()` que monta un único `tokio_cron_scheduler::JobScheduler` con tres jobs:
+  - **`backup-auto`** (`0 0 2 * * *` UTC): `run_backup_auto` tar+gz del SurrealKv data dir + sibling `agent.key` → `<data_dir>/backups/auto-<YYYY-MM-DD>.snapshot` (1 archivo/día por diseño, overwrite intencional). `prune_auto_backups` borra `auto-*.snapshot` con `mtime < cutoff` (sólo toca patrón auto, deja libres on-demand `pharma-backup-*.tar.gz`).
+  - **`idempotency-purge`** (`0 0 3 * * *` UTC): delega a `domain::sales::service::purge_expired_idempotency`. Log INFO con contador, ERROR si falla, nunca propaga.
+  - **`near-expiry-alert`** (`0 0 8 * * *` UTC): por cada tenant con `admin_setting key='near_expiry_alert_enabled' value='true'`, escanea `product_batch WHERE active=true AND stock>0 AND expiry_date <= now + 30d ORDER BY expiry_date ASC` y crea **una sola** `notification` (`kind='near_expiry'`, `seen=false`) con payload `{window_days, generated_at, count, batches:[{batch_id, product, batch_code, expiry_date, days_to_expiry, stock}]}`. Tenant sin opt-in → cero rows (no spamea installs existentes; ADR-0005 invariante 5 "sin dark patterns").
+- **Migración nueva `0017_notification.surql`** (no renombra ninguna previa): tabla `notification SCHEMAFULL` con `tenant`, `kind`, `payload FLEXIBLE TYPE object`, `created_at`, `seen` + 3 índices (tenant+seen, tenant+created_at, tenant+kind+created_at). **`FLEXIBLE` crítico**: sin esa keyword `SCHEMAFULL` strippea silenciosamente toda sub-key sin `DEFINE FIELD` y el payload queda como `{}` (root cause del test que el agente previo dejó "rojo"; al introducir `FLEXIBLE` el `serde_json::Value` roundtripea con todas las keys intactas y `payload.get("count")` devuelve el contador real).
+- **Wiring en `crates/api/src/lib.rs`**: el hub viejo (`spawn_scheduler_hub` + `backup_job` + `idempotency_purge_job` privados con `loop sleep(3600)`) se reemplaza por `jobs::Scheduler::start(state.db, state.data_dir, SchedulerOpts::from_config(&cfg.jobs))`. Además: `axum::serve` ahora corre con `with_graceful_shutdown(shutdown_signal())` y, al volver, se llama `scheduler.shutdown().await` → drain de jobs en vuelo antes de salir del proceso. Si la DB o `data_dir` están `None`, los jobs respectivos se saltan con `tracing::warn` — startup nunca falla por scheduler.
+- **Config nueva en `crates/core/src/config.rs`**: `JobsConfig { idempotency_purge_enabled, near_expiry_alert_enabled, backup_auto_enabled, backup_retention_days }`, todos `Default = true`/`7`. Sección `[jobs]` en `config/default.toml` con override por env `PHARMA__JOBS__*`. `SchedulerOpts::from_config(&cfg.jobs)` mapea 1:1 sin que `jobs` dependa de `pharma_core` en cascada hacia abajo.
+- **Tests (9/9 verde en `crates/jobs`)**:
+  - Unit (4): `opts_default_matches_jobs_config_default`, `start_with_all_disabled_still_starts_and_shuts_down`, `prune_auto_backups_noop_when_dir_missing`, `prune_auto_backups_zero_retention_is_noop`.
+  - Integration `tests/idempotency_purge.rs` (1): `idempotency_purge_drops_only_expired_keys` — verifica que sólo `expires_at < now` se borran.
+  - Integration `tests/backup_retention.rs` (2): `prune_keeps_seven_newest_of_ten_daily_snapshots` (touch mtimes manualmente para simular 10 días), `prune_zero_retention_keeps_everything`.
+  - Integration `tests/near_expiry.rs` (2): `near_expiry_alerts_only_urgent_batches_for_opted_in_tenants` (tenant A opted-in con 5 batches mixtos → 1 notification con count=2 sobre los 2 urgentes+activos+stock>0; tenant B sin opt-in → 0 rows), `near_expiry_no_optin_writes_nothing`.
+- **Por qué**:
+  - Cierra el último item operacional crítico antes de Fase 9 (MSI vendible): el ERP ahora se auto-mantiene durante la noche sin intervención (backup nocturno + housekeeping + alertas accionables al admin), invariante para "instalación 1 click + offline-first".
+  - El gate del payload `FLEXIBLE` se promueve a gotcha del proyecto (ver § "SurrealDB SCHEMAFULL strip" en `brain/pharma-server-gotchas.md` cuando se actualice el vault) — futura `notification.kind` distinta podrá reusar el slot sin migración.
+  - Mantener `[jobs]` toggles independientes permite a un sysadmin apagar selectivamente sin recompilar (e.g. desactivar backup-auto si ya tiene snapshot externo).
+- **Archivos**: `crates/jobs/src/lib.rs` (+579 LOC), `crates/jobs/Cargo.toml` (+`anyhow`, `chrono`, `flate2`, `tar`, `serde`, `surrealdb`, `tempfile`, `tokio`, `domain`, `db`), `crates/jobs/tests/{idempotency_purge,backup_retention,near_expiry}.rs` (nuevos), `migrations/0017_notification.surql` (nueva), `crates/api/src/lib.rs` (delegación + graceful shutdown), `crates/api/src/v1/{mod,backup}.rs` (re-exports), `crates/api/Cargo.toml` (+`jobs`), `crates/core/src/config.rs` (`JobsConfig`), `config/default.toml` (sección `[jobs]`).
+- **No-en-este-PR**:
+  - Métricas Prometheus de los jobs (count/errors/latency) — actualmente sólo `tracing`. Trivial agregar con `axum-prometheus` ya wired.
+  - Job admin endpoint para disparo manual (e.g. `POST /api/v1/admin/jobs/near-expiry/run`).
+  - Locking distribuido (cuando un tenant tenga >1 instancia activa). Hoy single-node por diseño.
+  - Renumeración de `0017_notification.surql` vs sibling DTE: ambas branches reclamaron el slot; resuelve quien mergee segundo (filename = id en tracking, rename = migración).
 
 ---
 

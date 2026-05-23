@@ -39,6 +39,7 @@ hex.workspace = true
 tar.workspace = true
 flate2.workspace = true
 tokio-cron-scheduler.workspace = true
+jobs = { path = "../jobs" }
 
 [dev-dependencies]
 tower = { workspace = true }

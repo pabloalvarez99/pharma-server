@@ -195,117 +195,73 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         )
         .with_state(state.clone());
 
-    // Scheduler hub (Fase 8). One `JobScheduler` hosts every cron-driven
-    // job: nightly backup + retention prune, hourly idempotency_key TTL
-    // purge. Spawned even if the backup schedule is empty, so the TTL purge
-    // still runs.
-    let sched_db = state.db.clone();
-    let sched_data = state.data_dir.clone();
-    let backup_sched = cfg.backup.schedule.clone();
-    let retention = cfg.backup.retention_days;
-    tokio::spawn(async move {
-        if let Err(e) = spawn_scheduler_hub(backup_sched, sched_data, retention, sched_db).await {
-            tracing::error!(error = %e, "scheduler hub failed to start");
+    // Scheduler hub (Fase 8). Owned by `crates/jobs/`: one `JobScheduler`
+    // hosts the nightly backup (02:00 UTC), the daily `idempotency_key`
+    // purge (03:00 UTC) and the near-expiry alert (08:00 UTC). Toggles live
+    // in `cfg.jobs` (`config/default.toml` § `[jobs]`); jobs whose handles
+    // (`db`, `data_dir`) are missing are skipped — startup never fails on
+    // a degraded DB connect.
+    let scheduler_opts = jobs::SchedulerOpts::from_config(&cfg.jobs);
+    let scheduler = match jobs::Scheduler::start(
+        state.db.clone(),
+        state.data_dir.clone(),
+        scheduler_opts,
+    )
+    .await
+    {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::error!(error = %e, "scheduler failed to start; cron jobs disabled this run");
+            None
         }
-    });
+    };
 
     let app = build_router(state).merge(metrics_router).layer(prom_layer);
 
     let addr: SocketAddr = cfg.bind.parse()?;
     tracing::info!(%addr, "pharma-api listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let serve_result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+
+    // Drain in-flight jobs before returning so the next start() doesn't race
+    // on a half-stopped scheduler.
+    if let Some(s) = scheduler {
+        if let Err(e) = s.shutdown().await {
+            tracing::warn!(error = %e, "scheduler shutdown returned error");
+        }
+    }
+
+    serve_result?;
     Ok(())
 }
 
-/// Scheduler hub. One `JobScheduler` hosts every cron-driven job:
-/// * backup (`backup_schedule`, if non-empty) + retention prune,
-/// * idempotency_key TTL purge (hourly, always on when a DB is present).
-async fn spawn_scheduler_hub(
-    backup_schedule: Option<String>,
-    db_path: Option<std::path::PathBuf>,
-    retention_days: u32,
-    db: Option<Arc<db::Db>>,
-) -> anyhow::Result<()> {
-    let sched = tokio_cron_scheduler::JobScheduler::new().await?;
-
-    // Backup job (optional).
-    if let (Some(schedule), Some(db_path)) = (
-        backup_schedule.as_ref().filter(|s| !s.is_empty()).cloned(),
-        db_path.clone(),
-    ) {
-        let job = backup_job(&schedule, db_path, retention_days)?;
-        sched.add(job).await?;
-        tracing::info!(%schedule, retention_days, "backup scheduler started");
-    }
-
-    // Idempotency TTL purge (fixed cadence; hourly is plenty given the 24h
-    // TTL of stored keys). Skipped if no DB handle is wired.
-    if let Some(db) = db.clone() {
-        let job = idempotency_purge_job(db)?;
-        sched.add(job).await?;
-        tracing::info!("idempotency TTL purge job started (hourly)");
-    }
-
-    sched.start().await?;
-    // Hold the scheduler alive for the lifetime of the process.
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-    }
-}
-
-fn backup_job(
-    schedule: &str,
-    db_path: std::path::PathBuf,
-    retention_days: u32,
-) -> anyhow::Result<tokio_cron_scheduler::Job> {
-    let job_path = db_path.clone();
-    let job = tokio_cron_scheduler::Job::new_async(schedule, move |_uuid, _l| {
-        let p = job_path.clone();
-        Box::pin(async move {
-            let p_run = p.clone();
-            let result = tokio::task::spawn_blocking(move || v1::backup_now(&p_run)).await;
-            match result {
-                Ok(Ok(rep)) => {
-                    tracing::info!(
-                        path = %rep.path, bytes = rep.bytes, sha256 = %rep.sha256,
-                        duration_ms = rep.duration_ms,
-                        "scheduled backup completed"
-                    );
-                }
-                Ok(Err(e)) => tracing::error!(error = %e, "scheduled backup failed"),
-                Err(e) => tracing::error!(error = %e, "scheduled backup task panicked"),
+/// Listen for Ctrl-C (and SIGTERM on unix) so axum returns and the scheduler
+/// drains cleanly. Used by `axum::serve(...).with_graceful_shutdown(...)`.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::error!(error = %e, "failed to install Ctrl-C handler");
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
             }
-            if retention_days > 0 {
-                let p_prune = p.clone();
-                if let Ok(Ok(removed)) =
-                    tokio::task::spawn_blocking(move || v1::prune_backups(&p_prune, retention_days))
-                        .await
-                {
-                    if removed > 0 {
-                        tracing::info!(removed, "pruned old backups");
-                    }
-                }
-            }
-        })
-    })?;
-    Ok(job)
-}
+            Err(e) => tracing::error!(error = %e, "failed to install SIGTERM handler"),
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
 
-/// Hourly job that drops `idempotency_key` rows whose `expires_at` has passed.
-/// `0 0 * * * *` = every hour, second 0.
-fn idempotency_purge_job(db: Arc<db::Db>) -> anyhow::Result<tokio_cron_scheduler::Job> {
-    let job = tokio_cron_scheduler::Job::new_async("0 0 * * * *", move |_uuid, _l| {
-        let db = db.clone();
-        Box::pin(async move {
-            match domain::sales::service::purge_expired_idempotency(db.as_ref()).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(removed = n, "purged expired idempotency keys"),
-                Err(e) => tracing::error!(error = %e, "idempotency purge failed"),
-            }
-        })
-    })?;
-    Ok(job)
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("shutdown signal: Ctrl-C"),
+        _ = terminate => tracing::info!("shutdown signal: SIGTERM"),
+    }
 }
 
 /// Read + verify a license from disk, falling back to `License::free_default`
@@ -355,6 +311,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
+        jobs: pharma_core::config::JobsConfig::default(),
     }
 }
 

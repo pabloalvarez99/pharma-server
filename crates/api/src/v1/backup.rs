@@ -53,6 +53,12 @@ pub struct BackupReport {
 
 /// Prune `<data_dir>/backups/pharma-backup-*.tar.gz` older than
 /// `retention_days`. `0` means keep forever.
+///
+/// Retained for the on-demand backup artifact lifecycle (and exercised by the
+/// unit test below). The nightly auto-backup retention now lives in
+/// `crates/jobs` (`prune_auto_backups`, which targets `auto-*.snapshot`), so
+/// this has no caller in the shipped binary today.
+#[allow(dead_code)]
 pub fn prune_backups(db_path: &Path, retention_days: u32) -> std::io::Result<usize> {
     if retention_days == 0 {
         return Ok(0);

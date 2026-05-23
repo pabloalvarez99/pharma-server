@@ -17,3 +17,12 @@ service_name = "pharma-api"
 [metrics]
 # Empty = /metrics returns 401. Set via PHARMA__METRICS__TOKEN in prod.
 token = ""
+
+# Cron job toggles for the `jobs` crate. All run on the same JobScheduler at
+# fixed UTC times. Override via env: PHARMA__JOBS__IDEMPOTENCY_PURGE_ENABLED=false
+# etc.
+[jobs]
+idempotency_purge_enabled = true   # daily 03:00 UTC
+near_expiry_alert_enabled = true   # daily 08:00 UTC, opt-in per tenant
+backup_auto_enabled = true         # daily 02:00 UTC
+backup_retention_days = 7          # prune backups older than this; 0 = keep forever
