@@ -80,6 +80,17 @@ impl Modify for SecurityAddon {
         (name = "CashRegister", description = "Apertura, cierre, arqueo, movimientos de caja."),
         (name = "Customers", description = "Clientes y loyalty (read-only)."),
         (name = "Prescriptions", description = "Recetas y libro de controlados (Ley 20.000)."),
+        (name = "Expenses", description = "Gastos + reportes (sales/margins/top/rotación/vencimientos). \
+            `margins-daily` license-gated (Pro+ o microtx `reports.margins_daily`)."),
+        (name = "Purchasing", description = "Proveedores, supplier prices, órdenes de compra, \
+            recepción + WAC, cuentas por pagar, CSV import."),
+        (name = "Agent", description = "Federación entre nodos: DID + buzón firmado Ed25519 \
+            (`ping`, `catalog.lookup`, `quote.request`, `po.create`, `po.status`). \
+            NO autenticado por JWT — la firma del envelope provee autenticidad."),
+        (name = "AgentOrders", description = "Operador supplier maneja órdenes federadas \
+            entrantes (list/get/accept/reject/fulfill). JWT + tenant-scoped."),
+        (name = "Backup", description = "Backup on-demand del data dir (SurrealKv + agent.key)."),
+        (name = "License", description = "Hot-reload + status de licencia activa. Admin only."),
     ),
     paths(
         // Sales
@@ -150,6 +161,46 @@ impl Modify for SecurityAddon {
         crate::v1::prescriptions::list_shifts,
         crate::v1::prescriptions::create_shift,
         crate::v1::prescriptions::update_shift,
+        // Expenses + reports
+        crate::v1::expenses::create_expense,
+        crate::v1::expenses::list_expenses,
+        crate::v1::expenses::sales_daily,
+        crate::v1::expenses::margins_daily,
+        crate::v1::expenses::top_products,
+        crate::v1::expenses::stock_rotation,
+        crate::v1::expenses::near_expiry,
+        // Purchasing
+        crate::v1::purchasing::list_suppliers,
+        crate::v1::purchasing::get_supplier,
+        crate::v1::purchasing::create_supplier,
+        crate::v1::purchasing::update_supplier,
+        crate::v1::purchasing::delete_supplier,
+        crate::v1::purchasing::map_product,
+        crate::v1::purchasing::list_prices,
+        crate::v1::purchasing::create_price,
+        crate::v1::purchasing::compare_prices,
+        crate::v1::purchasing::list_purchase_orders,
+        crate::v1::purchasing::get_purchase_order,
+        crate::v1::purchasing::create_purchase_order,
+        crate::v1::purchasing::receive_purchase_order,
+        crate::v1::purchasing::get_po_payments,
+        crate::v1::purchasing::create_po_payment,
+        crate::v1::purchasing::cancel_purchase_order,
+        crate::v1::purchasing::import_prices,
+        // Agent federation (PR #64)
+        crate::v1::agent::did,
+        crate::v1::agent::inbox,
+        // Agent orders (PR #64)
+        crate::v1::agent_orders::list,
+        crate::v1::agent_orders::get_one,
+        crate::v1::agent_orders::accept,
+        crate::v1::agent_orders::reject,
+        crate::v1::agent_orders::fulfill,
+        // Backup (PR #64)
+        crate::v1::backup::create_backup,
+        // License admin (PR #64)
+        crate::v1::license::reload_license,
+        crate::v1::license::license_status,
     ),
     components(schemas(ErrorEnvelope, ErrorBody)),
     modifiers(&SecurityAddon),
