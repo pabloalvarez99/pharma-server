@@ -93,15 +93,38 @@ pub async fn post_sale(
         }
     }
 
-    // Idempotency replay: short-circuit if cached.
-    if let Some(key) = idempotency_key {
-        if let Some((cached, _status)) = repo::lookup_idempotency(db, tenant, key).await? {
-            // The api crate decodes `cached` JSON back into PosSaleResponse
-            // and returns it verbatim. We surface via a sentinel error so
-            // the handler controls the response status.
-            return Err(DomainError::Conflict(format!(
-                "IDEMPOTENCY_CACHED:{cached}"
-            )));
+    // Idempotency replay: short-circuit on (tenant, key) match. The body
+    // fingerprint guards against BUG-002 — same key with a *different* body is
+    // a 409 reuse-conflict, NOT a silent replay. Computed once here and reused
+    // on `store_idempotency` below so the persisted row matches the request
+    // bit-for-bit.
+    let body_fp = if idempotency_key.is_some() {
+        Some(repo::body_fingerprint(&req)?)
+    } else {
+        None
+    };
+    if let (Some(key), Some(fp)) = (idempotency_key, body_fp.as_deref()) {
+        match repo::lookup_idempotency(db, tenant, key, fp).await? {
+            repo::IdempotencyHit::Replay { response_json, .. } => {
+                // The api crate decodes `response_json` back into PosSaleResponse
+                // and returns it verbatim. We surface via a sentinel error so
+                // the handler controls the response status.
+                return Err(DomainError::Conflict(format!(
+                    "IDEMPOTENCY_CACHED:{response_json}"
+                )));
+            }
+            repo::IdempotencyHit::Conflict => {
+                // BUG-002: caller reused the same key with a different body —
+                // canonical "Idempotency-Key" semantics (RFC draft + Stripe).
+                // The api crate maps `DomainError::Conflict` → 409 + code
+                // `CONFLICT`.
+                return Err(DomainError::Conflict(
+                    "IDEMPOTENCY_KEY_REUSE_CONFLICT: la misma Idempotency-Key \
+                     se reutilizó con un body distinto"
+                        .to_string(),
+                ));
+            }
+            repo::IdempotencyHit::None => {}
         }
     }
 
@@ -241,10 +264,12 @@ pub async fn post_sale(
         low_stock_alerts: Vec::new(),
     };
 
-    // Cache idempotent response.
-    if let Some(key) = idempotency_key {
+    // Cache idempotent response. `body_fp` was computed above (same struct =
+    // same bytes) so the persisted row matches the request bit-for-bit, which
+    // is what `lookup_idempotency` compares on replay.
+    if let (Some(key), Some(fp)) = (idempotency_key, body_fp.as_deref()) {
         let json = serde_json::to_string(&resp).map_err(|e| DomainError::Other(e.into()))?;
-        repo::store_idempotency(db, tenant, key, &json, 200).await?;
+        repo::store_idempotency(db, tenant, key, fp, &json, 200).await?;
     }
 
     Ok(resp)

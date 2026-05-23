@@ -820,6 +820,32 @@ pub async fn upsert_setting(
 struct IdempotencyRow {
     response_json: String,
     status_code: i64,
+    #[serde(default)]
+    body_fingerprint: Option<String>,
+}
+
+/// Build the canonical body fingerprint persisted with an `Idempotency-Key`
+/// row. Same struct shape → same bytes (serde_json emits fields in source
+/// order for structs); a different request body → different bytes → BUG-002
+/// reuse-conflict on cache lookup. Bodies are small (POS carts ~1-2KB), so
+/// storing the canonical bytes verbatim avoids pulling a SHA dep AND removes
+/// digest-collision risk.
+pub fn body_fingerprint(req: &PosSaleRequest) -> DomainResult<String> {
+    serde_json::to_string(req)
+        .map_err(|e| DomainError::Other(anyhow::anyhow!("body fingerprint serialize: {e}")))
+}
+
+/// Outcome of an `Idempotency-Key` lookup against a freshly-computed body
+/// fingerprint.
+pub enum IdempotencyHit {
+    /// Same key + same body → replay the cached response verbatim.
+    Replay { response_json: String, status_code: u16 },
+    /// Same key + DIFFERENT body → caller MUST NOT replay; surface a 409
+    /// reuse-conflict instead (canonical "Idempotency-Key" semantics —
+    /// RFC draft + Stripe).
+    Conflict,
+    /// No row for `(tenant, key)` within the TTL → process the request as new.
+    None,
 }
 
 /// Delete `idempotency_key` rows whose `expires_at` has passed. Tenant-wide
@@ -848,22 +874,48 @@ pub async fn purge_expired_idempotency(db: &Db) -> DomainResult<u64> {
     Ok(n)
 }
 
-/// Returns cached response if `key` already resolved for `tenant` within TTL.
+/// Resolve an `Idempotency-Key` lookup against `body_fp` (the canonical
+/// fingerprint of the *current* request body).
+///
+/// * No row in TTL → [`IdempotencyHit::None`] (process as new).
+/// * Row present AND `body_fingerprint` matches `body_fp` (or row predates
+///   migration 0017 → NULL fingerprint, treat as legacy match) →
+///   [`IdempotencyHit::Replay`].
+/// * Row present AND `body_fingerprint` differs from `body_fp` →
+///   [`IdempotencyHit::Conflict`] (BUG-002: key reused with a different body).
 pub async fn lookup_idempotency(
     db: &Db,
     tenant: &Thing,
     key: &str,
-) -> DomainResult<Option<(String, u16)>> {
+    body_fp: &str,
+) -> DomainResult<IdempotencyHit> {
     let mut r = db
         .query(
-            "SELECT response_json, status_code FROM idempotency_key \
+            "SELECT response_json, status_code, body_fingerprint \
+             FROM idempotency_key \
              WHERE tenant = $t AND key = $k AND expires_at > time::now() LIMIT 1",
         )
         .bind(("t", tenant.clone()))
         .bind(("k", key.to_string()))
         .await?;
     let row: Option<IdempotencyRow> = r.take(0)?;
-    Ok(row.map(|r| (r.response_json, r.status_code as u16)))
+    Ok(match row {
+        None => IdempotencyHit::None,
+        Some(r) => match r.body_fingerprint.as_deref() {
+            // Legacy row (pre-migration 0017) carries no fingerprint —
+            // grandfather as match so in-flight rows stay valid until their
+            // 24h TTL expires.
+            None => IdempotencyHit::Replay {
+                response_json: r.response_json,
+                status_code: r.status_code as u16,
+            },
+            Some(stored) if stored == body_fp => IdempotencyHit::Replay {
+                response_json: r.response_json,
+                status_code: r.status_code as u16,
+            },
+            Some(_) => IdempotencyHit::Conflict,
+        },
+    })
 }
 
 // --- loyalty ---------------------------------------------------------------
@@ -901,19 +953,21 @@ pub async fn store_idempotency(
     db: &Db,
     tenant: &Thing,
     key: &str,
+    body_fp: &str,
     response_json: &str,
     status_code: u16,
 ) -> DomainResult<()> {
     let expires = Utc::now() + Duration::hours(IDEMPOTENCY_TTL_HOURS);
     db.query(
         "CREATE idempotency_key SET tenant=$t, key=$k, response_json=$r, \
-             status_code=$s, expires_at=$exp",
+             status_code=$s, expires_at=$exp, body_fingerprint=$bf",
     )
     .bind(("t", tenant.clone()))
     .bind(("k", key.to_string()))
     .bind(("r", response_json.to_string()))
     .bind(("s", status_code as i64))
     .bind(("exp", dt_val(expires)))
+    .bind(("bf", body_fp.to_string()))
     .await?
     .check()?;
     Ok(())

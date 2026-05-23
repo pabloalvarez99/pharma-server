@@ -149,7 +149,6 @@ async fn no_key_each_sale_is_distinct() {
 /// body hash and the handler maps the mismatch to 409
 /// `IDEMPOTENCY_KEY_REUSE_CONFLICT`.
 #[tokio::test]
-#[ignore = "BUG-002: idempotency cache ignores body; reuse with different body silently replays instead of 409"]
 async fn replay_same_key_different_body_should_conflict() {
     let (db, tenant, pid, _tdb) = setup().await;
 
