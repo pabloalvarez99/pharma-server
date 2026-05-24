@@ -57,6 +57,7 @@ fn state_with(lic: License, license_path: Option<std::path::PathBuf>) -> api::Ap
         license: Arc::new(ArcSwap::from_pointee(lic)),
         license_path,
         rate_limit: None,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 

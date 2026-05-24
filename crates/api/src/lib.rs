@@ -43,6 +43,9 @@ pub struct AppState {
     /// Per-tenant + per-IP rate-limit state. `None` disables both limiters
     /// (most unit tests). Production wires it from `AppConfig.rate_limit`.
     pub rate_limit: Option<Arc<rate_limit::RateLimitState>>,
+    /// Public read-only catalog endpoint config. Default `enabled = false` so
+    /// the route returns 404 (ADR-0005 opt-in).
+    pub public_catalog: pharma_core::config::PublicCatalogConfig,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -174,6 +177,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         rate_limit: Some(Arc::new(rate_limit::RateLimitState::new(
             cfg.rate_limit.clone(),
         ))),
+        public_catalog: cfg.public_catalog.clone(),
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -362,6 +366,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
         rate_limit: pharma_core::config::RateLimitConfig::default(),
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 
@@ -442,6 +447,7 @@ mod tests {
             )),
             license_path: None,
             rate_limit: None,
+            public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         }
     }
 

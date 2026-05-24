@@ -36,6 +36,7 @@ fn state_with_license(lic: License) -> api::AppState {
         license: Arc::new(arc_swap::ArcSwap::from_pointee(lic)),
         license_path: None,
         rate_limit: None,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 

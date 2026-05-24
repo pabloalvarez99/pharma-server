@@ -27,6 +27,7 @@ fn state() -> api::AppState {
         )),
         license_path: None,
         rate_limit: None,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 
