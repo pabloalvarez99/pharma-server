@@ -72,6 +72,7 @@ async fn spawn() -> (axum::Router, String, TempDir, std::path::PathBuf) {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        stock_webhook: Arc::new(pharma_core::config::StockWebhookConfig::default()),
     };
     (api::build_router(state), token, tmp, db_path)
 }

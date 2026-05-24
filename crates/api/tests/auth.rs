@@ -26,6 +26,7 @@ fn state() -> api::AppState {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        stock_webhook: std::sync::Arc::new(pharma_core::config::StockWebhookConfig::default()),
     }
 }
 

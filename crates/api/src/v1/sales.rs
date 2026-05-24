@@ -78,6 +78,14 @@ async fn post_sale(
     let key = idempotency_key(&headers);
     let sold_by_name = Some(claims.sub.as_str());
 
+    // Capture sold lines (product id + qty) before `body` is moved, so the
+    // stock-webhook dispatcher can report post-sale stock without re-parsing.
+    let sold_lines: Vec<(String, i64)> = body
+        .items
+        .iter()
+        .map(|i| (i.product.clone(), i.quantity))
+        .collect();
+
     match service::post_sale(
         db.as_ref(),
         &tenant,
@@ -88,7 +96,12 @@ async fn post_sale(
     )
     .await
     {
-        Ok(resp) => Ok((StatusCode::CREATED, Json(resp)).into_response()),
+        Ok(resp) => {
+            // ERP→web stock push (ADR-0013): fire-and-forget, never blocks the
+            // POS hot path. No-op when disabled/unconfigured.
+            crate::stock_webhook::notify_sale(&state, tenant.clone(), sold_lines);
+            Ok((StatusCode::CREATED, Json(resp)).into_response())
+        }
         Err(domain::DomainError::Conflict(msg)) if msg.starts_with("IDEMPOTENCY_CACHED:") => {
             // Replay cached payload verbatim with 200 OK.
             let json = msg.trim_start_matches("IDEMPOTENCY_CACHED:");

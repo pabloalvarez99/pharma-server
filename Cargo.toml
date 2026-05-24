@@ -47,7 +47,7 @@ include_dir = "0.7"
 # auth
 jsonwebtoken = "9"
 argon2 = "0.5"
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
 
 # openapi
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
@@ -100,6 +100,10 @@ rand = "0.8"
 bs58 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
+hmac = "0.12"
+
+# outbound HTTP (stock webhook ADR-0013; rustls to avoid OpenSSL on Windows)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [profile.release]
 opt-level = 3

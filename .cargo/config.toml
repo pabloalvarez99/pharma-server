@@ -1,0 +1,8 @@
+# Worktree-local target dir. Overrides the user-global
+# `~/.cargo/config.toml` `target-dir = D:/dev-cache/targets/global`, which is
+# SHARED across every worktree and would cause file-lock contention and
+# cross-branch artifact interference. Each agent worktree must build into its
+# own isolated target (agent task rule: "NEVER set CARGO_TARGET_DIR shared.
+# Worktree-local."). Kept on the fast D: cache disk, keyed to this worktree.
+[build]
+target-dir = "D:/dev-cache/worktrees-pharma-targets/agent-a1492c00b9741e031"

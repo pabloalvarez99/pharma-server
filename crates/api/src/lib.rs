@@ -15,6 +15,7 @@ mod health;
 mod middleware;
 mod openapi;
 mod routes;
+pub mod stock_webhook;
 mod v1;
 
 pub use middleware::{audit, role};
@@ -40,6 +41,9 @@ pub struct AppState {
     /// On-disk path that `POST /api/v1/admin/license/reload` re-reads. `None`
     /// only in unit tests with kv-mem.
     pub license_path: Option<std::path::PathBuf>,
+    /// ERP→web stock-change webhook config (ADR-0013). Always present; a
+    /// disabled/empty config makes the dispatcher a no-op (the common case).
+    pub stock_webhook: Arc<stock_webhook::StockWebhookConfig>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -168,7 +172,14 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
         license,
         license_path,
+        stock_webhook: Arc::new(cfg.stock_webhook.clone()),
     };
+    if state.stock_webhook.enabled && !state.stock_webhook.target_url.is_empty() {
+        tracing::info!(
+            target = %state.stock_webhook.target_url,
+            "stock webhook enabled (ERP→web push, ADR-0013)"
+        );
+    }
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
         .with_prefix("pharma")
@@ -355,6 +366,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
+        stock_webhook: pharma_core::config::StockWebhookConfig::default(),
     }
 }
 
@@ -434,6 +446,7 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            stock_webhook: Arc::new(stock_webhook::StockWebhookConfig::default()),
         }
     }
 
