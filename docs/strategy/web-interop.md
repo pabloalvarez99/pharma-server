@@ -2,7 +2,7 @@
 title: Interop web ↔ pharma-server — Guía del operador
 status: Draft — 2026-05-24
 owners: pabloalvarez99
-adr: ADR-0012
+adr: ADR-0012, ADR-0013
 ---
 
 # Conectar tu web/storefront a pharma-server
@@ -12,8 +12,10 @@ funcionando** (storefront Next.js, Astro, WordPress, Shopify headless, lo que se
 quiere que esa web muestre el catálogo y stock que vive en su pharma-server local,
 **sin migrar nada al cloud y sin perder el control de sus datos**.
 
-> Decisión arquitectónica detrás de esta guía: [ADR-0012](../adr/0012-web-onprem-interop.md).
-> Si querés entender *por qué* hacemos esto vía HTTP en vez de DB compartida, leelo
+> Decisiones arquitectónicas detrás de esta guía:
+> [ADR-0012](../adr/0012-web-onprem-interop.md) (3 patrones HTTP),
+> [ADR-0013](../adr/0013-sync-bidireccional-stock.md) (stock sync + matriz canónica).
+> Si querés entender *por qué* hacemos esto vía HTTP en vez de DB compartida, leelos
 > primero.
 
 ## Resumen en 30 segundos
@@ -24,7 +26,7 @@ necesités otra cosa:
 | Patrón | Dirección | Cuándo usarlo | Requiere puerto entrante |
 |---|---|---|---|
 | **A. Pull** (default) | web ← pharma-server | Mostrar catálogo/precios/stock con freshness de minutos/horas. | No (con VPN/tunnel) o Sí (IP pública) |
-| **B. Push stock**     | pharma-server → web | Storefront necesita freshness <5 min en tiempo real. | No (saliente desde la farmacia) |
+| **B. Push stock**     | pharma-server → web | Storefront necesita freshness <10s en tiempo real. | No (saliente desde la farmacia) |
 | **C. Push pedidos**   | web → pharma-server | Recibir pedidos online en el ERP del local. | **Sí** (pharma-server alcanzable desde internet) |
 
 Patrón **A** se puede activar hoy con el catálogo público. **B** y **C** son
@@ -145,40 +147,101 @@ Si recibís `401` → revisá la API key. `403` → el tenant no está en
 
 ## Patrón B — Push stock (pharma-server → web)
 
-> Endpoint del lado pharma-server: **roadmap**. Esta sección fija el contrato para
-> que el web pueda implementar el receptor en paralelo.
+> Endpoint del lado pharma-server: **roadmap** (rama futura `feat/api-stock-webhook`,
+> ver [ADR-0013](../adr/0013-sync-bidireccional-stock.md) § Next steps). Esta sección
+> fija el contrato para que el web pueda implementar el receptor en paralelo.
 
-### Contrato
+### Cuándo se dispara un webhook
 
-Pharma-server emite un POST cada vez que cambia stock o precio:
+El ERP emite **un POST por cada `stock_movement` con `delta != 0`** de un producto
+con flag `publish_to_web = true`. Tipos de movimiento que disparan:
+
+- `pos.sale` — venta normal POS (delta negativo).
+- `pos.refund` — devolución (delta positivo).
+- `po.receive` — recepción de orden de compra (delta positivo).
+- `manual.adjust` — ajuste manual desde admin (delta cualquiera).
+- `expiry.write_off` — write-off por vencimiento (delta negativo).
+
+**NO disparan** (ruido innecesario):
+- `inventory.recount` con `delta == 0`.
+- SKUs con `publish_to_web = false` (productos internos no comercializados online).
+- Tenants sin `[webhooks.stock]` configurado en `config/local.toml`.
+
+**Coalescing**: si llegan varios movimientos del mismo SKU dentro de una ventana de
+**2 segundos**, el ERP emite **un solo webhook** con el stock final. Esto absorbe
+ráfagas (e.g. ajuste masivo, recarga de stock) sin saturar al web.
+
+### Contrato del payload
 
 ```http
-POST https://tu-farmacia-coquimbo.cl/api/webhooks/pharma-stock
+POST https://<web>/api/webhooks/pharma-stock
 Content-Type: application/json
-X-Pharma-Signature: sha256=<HMAC-SHA256(body, SHARED_SECRET)>
-X-Pharma-Event-Id: 8f3e1d2c-4a5b-6c7d-8e9f-0a1b2c3d4e5f
-X-Pharma-Tenant: coquimbo-centro
+X-Pharma-Signature: sha256=<HMAC-SHA256(body, PHARMA_STOCK_WEBHOOK_SECRET)>
 X-Pharma-Timestamp: 2026-05-24T15:34:12Z
+X-Pharma-Tenant: coquimbo-centro
+Idempotency-Key: 01J0K5R8X2HTZN3M5VC4P9KQ7T
 
 {
   "schema_version": "1.0",
-  "event_id": "8f3e1d2c-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
-  "event_type": "stock_changed",
-  "tenant": "coquimbo-centro",
-  "sku": "PARA-500-20",
-  "stock_after": 42,
-  "price_clp": 1990
+  "tenant_slug": "coquimbo-centro",
+  "external_id": "PARA-500-20",
+  "new_stock": 42,
+  "in_stock": true,
+  "ts": "2026-05-24T15:34:12Z",
+  "idempotency_key": "01J0K5R8X2HTZN3M5VC4P9KQ7T"
 }
 ```
 
-Responsabilidades del **web** (no de pharma-server):
-- Verificar `X-Pharma-Signature` (HMAC-SHA256 con `PHARMA_WEBHOOK_SHARED_SECRET`).
+Campos clave:
+- `new_stock`: **stock final** después del movimiento (no el delta — el delta
+  rompería idempotencia).
+- `in_stock`: `new_stock > umbral_minimo`. Conveniencia para el web.
+- `ts`: timestamp del movimiento (no del envío). Web descarta si llega out-of-order
+  (`ts < last_applied_ts` para ese SKU).
+- `idempotency_key`: UUID v7 (incluye timestamp) o hash determinístico del
+  movement_id interno. El web persiste claves recibidas y skipea duplicados.
+
+### Responsabilidades del **web** (no del ERP)
+
+- Verificar `X-Pharma-Signature` con `crypto.timingSafeEqual` (Node) — timing-safe
+  compare obligatorio.
 - Rechazar `X-Pharma-Timestamp` con drift > 5 min (replay defense).
-- Idempotencia por `X-Pharma-Event-Id` (skip si ya procesado).
+- Idempotencia por `Idempotency-Key`: tabla `webhook_received(idempotency_key PK,
+  applied_at)`, skipear duplicados con 200 OK.
+- Out-of-order: comparar `ts` payload vs `last_applied_ts(sku)` en Cloud SQL;
+  si payload es más viejo, ack con 200 pero **no aplicar**.
 - Responder `2xx` rápido (<2s). Procesamiento pesado → en background.
 
-Si el web responde `5xx` o timeout, pharma-server reintenta con backoff exponencial
-hasta 6 veces.
+### Política de retry y fallo
+
+Si el web responde 5xx, timeout o conexión rechazada, el ERP reintenta:
+
+| Intento | Espera previa |
+|---|---|
+| 1 (inmediato) | 0s |
+| 2 | 1s |
+| 3 | 5s |
+| 4 (último) | 30s |
+
+Tras 4 intentos fallidos, el ERP:
+- **Drop** el webhook (no se persiste para reintento futuro).
+- **Log WARN** con `event_id`, `sku`, último status.
+- **Métrica** `pharma_stock_webhook_dropped_total{tenant,reason}` para alerting.
+- **NUNCA bloquea** la venta POS — el webhook es side-effect best-effort.
+
+Status `4xx` (excepto 408/429) se considera **error de contrato** (firma inválida,
+payload malformado): NO se reintenta, log ERROR, drop inmediato.
+
+### Reconcile nightly (garantía de consistencia)
+
+El push best-effort puede dropear eventos en outages prolongados. Para garantizar
+**convergencia eventual**, el web debe correr el script `pull-catalog.mjs`
+(Patrón A) **al menos una vez al día**, recomendado cron nocturno 03:00 hora local.
+
+El pull trae el estado completo del catálogo (incluyendo `in_stock`) y reconcilia
+cualquier drift acumulado por webhooks dropeados. **Cuando pull y webhook
+discrepan, gana el más reciente en wall-clock** — el pull a las 03:00 se asume
+implícitamente más reciente que cualquier webhook anterior.
 
 ### Activación (futura)
 
@@ -186,8 +249,18 @@ hasta 6 veces.
 [webhooks.stock]
 enabled = true
 url = "https://tu-farmacia-coquimbo.cl/api/webhooks/pharma-stock"
-secret_env = "PHARMA_WEBHOOK_SHARED_SECRET"   # Lee de env var, no del toml.
+hmac_secret_env = "PHARMA_STOCK_WEBHOOK_SECRET"   # Lee de env var, no del toml.
 tenants = ["coquimbo-centro"]
+coalesce_window_ms = 2000
+publish_to_web_filter = true   # Sólo SKUs con flag publish_to_web=true.
+```
+
+Generá el secret:
+
+```bash
+openssl rand -hex 32
+# → ponelo en env var del server (PHARMA_STOCK_WEBHOOK_SECRET) y en el secrets
+#   manager del web. NUNCA en config/local.toml commiteado.
 ```
 
 ---
@@ -203,7 +276,7 @@ Cuando el cliente confirma compra online, el web POSTea al pharma-server:
 ```http
 POST https://farmacia-acme.trycloudflare.com/api/v1/public/orders/web
 Content-Type: application/json
-X-Pharma-Signature: sha256=<HMAC-SHA256(body, SHARED_SECRET)>
+X-Pharma-Signature: sha256=<HMAC-SHA256(body, PHARMA_ORDERS_WEBHOOK_SECRET)>
 Idempotency-Key: order-web-2026-05-24-0001
 X-Pharma-Tenant: coquimbo-centro
 
@@ -241,20 +314,65 @@ Pharma-server responde:
 }
 ```
 
+> Si el stock cayó entre que el web lo mostró disponible y el POST, el ERP
+> responde **409 Conflict** con un payload de qué SKUs se quedaron sin stock.
+> El web debe manejar este caso (refund, oferta de sustituto, etc.) — el ERP
+> es canónico para stock, no acepta overselling.
+
 Requiere que pharma-server sea alcanzable desde internet (a diferencia de A y B).
+
+---
+
+## Stock sync — modelo canónico (ADR-0013)
+
+> Esta sección formaliza **quién manda en cada campo** cuando el ERP y el web
+> tienen el mismo dato. Es la fuente única de resolución de conflictos. Referenciada
+> en [ADR-0013](../adr/0013-sync-bidireccional-stock.md).
+
+### Matriz de verdad
+
+| Dominio / Campo | Canon | Razón | Replicado a |
+|---|---|---|---|
+| **Catálogo: name, laboratory, category, active_ingredient, image_url** | **Web** | El operador edita en admin del web (marketing-friendly, multi-canal). | ERP via import manual / CSV (no auto). |
+| **Catálogo: external_id (SKU)** | **ERP** | Llave operativa interna; el web la copia pero no la inventa. | Web via Patrón A. |
+| **Precio de venta online** | **Web** | Operador maneja precios online (campañas, descuentos por canal). Patrón A trae un "precio sugerido" del ERP, el web decide. | ERP no recibe. |
+| **Precio de venta POS** | **ERP** | El POS físico tiene su propia tabla (convenios isapre, descuentos cash). | Web no recibe. |
+| **Costo, margen, proveedor** | **ERP** | Nunca se publica. No sale del LAN. | Nada. |
+| **Stock (cantidad)** | **ERP** | El POS decrementa; sólo el ERP escribe stock real. | Web via Patrón B push + Patrón A reconcile. |
+| **Stock (booleano `in_stock`)** | **ERP** | Derivado de `stock > umbral_minimo`. | Web via Patrón B + Patrón A. |
+| **Pedido online (al crearse)** | **Web (origen)** → **ERP (autoritativo tras aceptar)** | El cliente compra online, el web crea el pedido y lo POSTea via Patrón C. Aceptado en el ERP, el ERP pasa a ser la verdad (estado preparación, stock descontado). | Web recibe updates de estado via webhook futuro. |
+| **Cliente / RUT / dirección** | **Web** (pedidos online) o **ERP** (POS físico) | Cada canal crea su propia ficha. Reconciliar es problema separado (Fase 13 CRM). | No replicado en v1. |
+| **Boleta electrónica DTE** | **ERP** | Sólo el ERP habla con SII. | Nada. |
+
+**Regla de oro**: cuando un campo aparece en ambos sistemas con valores distintos:
+1. Si está en la matriz: gana el sistema canónico (sin merge).
+2. Si NO está en la matriz: documentar acá antes de implementar — no inventar
+   resolución ad-hoc.
+
+### Garantía de consistencia
+
+- **Patrón B push** = latencia típica <10s.
+- **Patrón A pull nightly** = convergencia garantizada en <24h (cubre webhooks
+  dropeados durante outages).
+- **Stock real-time** (cliente online compra justo cuando POS también vende) =
+  resuelto por **Patrón C 409 Conflict** — el ERP es la única autoridad para
+  decrementar, no acepta overselling.
 
 ---
 
 ## Seguridad — checklist mínimo
 
-- [ ] `PHARMA_PUBLIC_READ_KEY` y `PHARMA_WEBHOOK_SHARED_SECRET` viven en el secrets
-      manager del web, **nunca en el repo**.
-- [ ] El secret de HMAC tiene ≥ 32 bytes random (`openssl rand -hex 32`).
+- [ ] `PHARMA_PUBLIC_READ_KEY`, `PHARMA_STOCK_WEBHOOK_SECRET` y
+      `PHARMA_ORDERS_WEBHOOK_SECRET` viven en el secrets manager del web,
+      **nunca en el repo**.
+- [ ] Cada secret HMAC tiene ≥ 32 bytes random (`openssl rand -hex 32`).
 - [ ] TLS obligatorio en cualquier URL pública (sin TLS = sin API key válida).
 - [ ] Rate limit activo (`rate_limit_per_min` en config).
 - [ ] El endpoint público sirve **subset publicable** del catálogo. Datos sensibles
       (costo, margen, proveedor) **no se exponen** vía `public_catalog`.
 - [ ] Rotá las keys cada 6 meses (`pharma public-key rotate <key_id>`).
+- [ ] Webhook secrets se rotan **independiente** del read-key (blast radius
+      separado).
 
 ---
 
@@ -269,7 +387,17 @@ local también sigue funcionando: pharma-server es offline-first, no depende del
 
 **P: ¿Y si la web se cae?**
 R: Pharma-server sigue operando normalmente. Los webhooks del Patrón B se reintentan
-con backoff exponencial; si la web vuelve, recibe el catch-up.
+con backoff (1s/5s/30s, 4 intentos). Si no responden, se dropean y el reconcile
+nightly del Patrón A los cubre.
+
+**P: ¿Y si el web aplica stock viejo (out-of-order)?**
+R: El payload del webhook trae `ts` del movimiento. Si el web ya aplicó un evento
+con `ts` posterior para el mismo SKU, descarta el viejo. Es responsabilidad del
+receptor — el ERP no garantiza orden de entrega (los reintentos pueden re-ordenar).
+
+**P: ¿Quién manda si edito un precio en el web y otro en el ERP?**
+R: Ver la matriz canónica arriba. **Precio online = web**. **Precio POS = ERP**. Son
+campos distintos y conviven sin merge.
 
 **P: ¿Puedo usar esto con WordPress / Shopify / Astro?**
 R: Sí. El script `pull-catalog.mjs` es Node puro sin dependencias; podés portarlo a
@@ -285,7 +413,12 @@ el server.
 
 ## Referencias
 
-- [ADR-0012](../adr/0012-web-onprem-interop.md) — decisión arquitectónica completa.
-- [ADR-0005](../adr/0005-core-gratis-no-locked-in.md) — invariantes que esta guía respeta.
-- [`../../scripts/web-sync/`](../../scripts/web-sync/) — script de referencia para Patrón A.
+- [ADR-0012](../adr/0012-web-onprem-interop.md) — decisión arquitectónica de los 3
+  patrones HTTP.
+- [ADR-0013](../adr/0013-sync-bidireccional-stock.md) — diseño concreto del Patrón B
+  (stock sync) + matriz canónica.
+- [ADR-0005](../adr/0005-core-gratis-no-locked-in.md) — invariantes offline-first
+  que estas guías respetan.
+- [`../../scripts/web-sync/`](../../scripts/web-sync/) — script de referencia para
+  Patrón A.
 - [CLAUDE.md § "Scope de este repo"](../../CLAUDE.md) — separación de repos.
