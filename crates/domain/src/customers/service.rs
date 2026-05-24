@@ -62,6 +62,47 @@ pub async fn get_customer(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Cus
         .ok_or(DomainError::NotFound)
 }
 
+/// Customer detail + lifetime purchase aggregates. 404 when not found for the
+/// tenant.
+pub async fn get_customer_detail(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+) -> DomainResult<CustomerDetailDto> {
+    let id = parse_thing(id)?;
+    repo::get_customer_detail(db, tenant, &id)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
+/// A customer's realized-purchase history, newest first. 404 when the customer
+/// doesn't exist for the tenant (so callers don't confuse "no orders" with
+/// "wrong customer/tenant").
+pub async fn customer_history(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+    filters: CustomerHistoryFilters,
+) -> DomainResult<Vec<CustomerOrderDto>> {
+    let cid = parse_thing(id)?;
+    if repo::get_customer(db, tenant, &cid).await?.is_none() {
+        return Err(DomainError::NotFound);
+    }
+    repo::customer_history(db, tenant, &cid, filters.limit.unwrap_or(50)).await
+}
+
+/// Fuzzy customer search (name/rut/phone). Empty/whitespace `q` yields `[]`.
+pub async fn search_customers(
+    db: &Db,
+    tenant: &Thing,
+    query: CustomerSearchQuery,
+) -> DomainResult<Vec<CustomerDto>> {
+    match query.q.as_deref() {
+        Some(q) => repo::search_customers(db, tenant, q).await,
+        None => Ok(Vec::new()),
+    }
+}
+
 pub async fn update_customer(
     db: &Db,
     tenant: &Thing,
