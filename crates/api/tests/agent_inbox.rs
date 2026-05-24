@@ -1,4 +1,4 @@
-//! Agent federation transport integration tests — exercises POST /agent/inbox
+//! Agent federation transport integration tests â€” exercises POST /agent/inbox
 //! end-to-end: a peer identity signs an Envelope, the node verifies it,
 //! dispatches the topic, and replies with its own signed Envelope. Confirms
 //! the cross-node trust handshake works without JWT/tenant context.
@@ -58,6 +58,7 @@ fn node_state(db: Arc<db::Db>) -> (api::AppState, String) {
         license_path: None,
         rate_limit: None,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     };
     (state, did)
 }
@@ -282,7 +283,7 @@ async fn po_create_records_order_and_acks() {
     assert_eq!(reply.body["total"], 35760.0);
     assert_eq!(
         reply.body["price_adjusted"], false,
-        "buyer sent canonical price → no adjustment"
+        "buyer sent canonical price â†’ no adjustment"
     );
     let l0 = &reply.body["lines"][0];
     assert_eq!(l0["unit_price_canonical"], 1490.0);
@@ -341,7 +342,7 @@ async fn po_create_rejects_buyer_supplied_price_and_uses_canonical() {
     );
     assert_eq!(
         reply.body["price_adjusted"], true,
-        "buyer price diverged from canonical → flag must be set"
+        "buyer price diverged from canonical â†’ flag must be set"
     );
     let l0 = &reply.body["lines"][0];
     assert_eq!(l0["unit_price_canonical"], 1490.0);
@@ -398,7 +399,7 @@ async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
     let (state, node_did) = node_state(tdb.db.clone());
     let app = api::build_router(state);
 
-    // Buyer places an order with a bad price → supplier reprices.
+    // Buyer places an order with a bad price â†’ supplier reprices.
     let buyer = agent::Identity::generate();
     let create = agent::Envelope::create(
         &buyer,
@@ -431,7 +432,7 @@ async fn po_status_returns_persisted_state_scoped_to_buyer_did() {
     reply.verify().expect("signed");
     assert_eq!(reply.body["status"], "received");
     assert_eq!(reply.body["price_adjusted"], true);
-    assert_eq!(reply.body["total"], 4470.0); // 3 × canonical 1490
+    assert_eq!(reply.body["total"], 4470.0); // 3 Ã— canonical 1490
     assert_eq!(reply.body["currency"], "CLP");
 
     // A different peer cannot read this order (DID-scoped).

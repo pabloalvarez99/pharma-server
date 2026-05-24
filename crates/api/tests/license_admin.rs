@@ -58,6 +58,7 @@ fn state_with(lic: License, license_path: Option<std::path::PathBuf>) -> api::Ap
         license_path,
         rate_limit: None,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     }
 }
 
@@ -117,7 +118,7 @@ async fn reload_forbidden_without_admin_role() {
 
 #[tokio::test]
 async fn reload_without_path_returns_503() {
-    // `license_path` not configured (test default) → reload cannot find a
+    // `license_path` not configured (test default) â†’ reload cannot find a
     // file to re-read. The endpoint exists in the table; admin is allowed;
     // failure mode is 503, not 500.
     let app = api::build_router(state_with(pro_license(), None));
@@ -127,7 +128,7 @@ async fn reload_without_path_returns_503() {
 
 #[tokio::test]
 async fn reload_with_missing_file_falls_back_to_free() {
-    // license_path points at a non-existent file → loader logs + returns
+    // license_path points at a non-existent file â†’ loader logs + returns
     // free_default (ADR-0005). Endpoint returns 200 with the fallback summary.
     let dir = tempdir().unwrap();
     let path = dir.path().join("license.json");

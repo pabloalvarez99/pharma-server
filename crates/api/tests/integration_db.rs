@@ -93,6 +93,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         license_path: None,
         rate_limit: None,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     }
 }
 
@@ -256,7 +257,7 @@ async fn mutation_writes_audit_log_row() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let token = json["token"].as_str().unwrap().to_string();
 
-    // Authenticated POST (unknown path → 404, still audited because layer wraps the router).
+    // Authenticated POST (unknown path â†’ 404, still audited because layer wraps the router).
     let _ = app
         .oneshot(
             Request::builder()
