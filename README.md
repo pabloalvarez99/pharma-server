@@ -82,3 +82,19 @@ msiexec /x target\wix\pharma-server-0.1.0-x86_64.msi /qn
 ```
 
 The MSI installs to `%ProgramFiles%\PharmaServer\`, registers the `PharmaServer` service (auto-start, LocalSystem), creates `%ProgramData%\PharmaServer\`, and opens inbound TCP 8080 in Windows Firewall.
+
+## Producción
+
+Antes de poner el servidor en producción en una farmacia real (offline-first,
+LAN-only), seguir la guía de operaciones:
+
+- [`config/production.toml.example`](config/production.toml.example) — plantilla
+  de configuración de producción (todo secreto como placeholder, se inyecta por
+  `PHARMA__*`; bind LAN-only, telemetría OFF, backup programado).
+- [`docs/ops/production-checklist.md`](docs/ops/production-checklist.md) —
+  checklist de go-live: secreto JWT fuerte, token de métricas, firewall a la
+  LAN, backup verificado + restauración probada, servicio auto-start, licencia,
+  telemetría opt-in, DB sin datos demo.
+- [`docs/ops/backup-restore.md`](docs/ops/backup-restore.md) — cómo funciona el
+  backup SurrealKv programado/manual y cómo restaurar (copia manual; la
+  restauración guiada es roadmap).
