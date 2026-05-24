@@ -75,8 +75,14 @@
             </Component>
         </ComponentGroup>
 
+        <!--
+          Data dir holds the customer's SurrealDB (their own data). Per the
+          "no data loss / no lock-in" invariant it MUST survive uninstall and
+          upgrade. Permanent="yes" guarantees WiX never schedules this folder
+          for removal. Do NOT add <RemoveFolder> here.
+        -->
         <ComponentGroup Id="DataDirComponents" Directory="DATAFOLDER">
-            <Component Id="PharmaDataDir" Guid="7E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E71">
+            <Component Id="PharmaDataDir" Guid="7E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E71" Permanent="yes">
                 <CreateFolder />
             </Component>
         </ComponentGroup>
