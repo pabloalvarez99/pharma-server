@@ -16,7 +16,7 @@ agent = { path = "../agent" }
 license = { path = "../license" }
 chrono.workspace = true
 uuid.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true

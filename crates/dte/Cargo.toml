@@ -19,9 +19,11 @@ surrealdb.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 rand.workspace = true
 rsa = { workspace = true, features = ["pem"] }
+wiremock.workspace = true

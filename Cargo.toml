@@ -97,6 +97,13 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 rsa = "0.9"
 sha1 = { version = "0.10", features = ["oid"] }
 
+# HTTP client (DTE upload SII + CLI license reload). rustls-tls evita libssl
+# en Windows. `multipart` requerido por DTE upload (SII espera form-data).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+
+# Mock HTTP server para tests offline contra endpoints SII (dev-only).
+wiremock = "0.6"
+
 # backup archives
 tar = "0.4"
 flate2 = "1.0"
