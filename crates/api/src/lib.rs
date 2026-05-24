@@ -40,6 +40,10 @@ pub struct AppState {
     /// On-disk path that `POST /api/v1/admin/license/reload` re-reads. `None`
     /// only in unit tests with kv-mem.
     pub license_path: Option<std::path::PathBuf>,
+    /// Serve interactive API docs (Swagger UI + OpenAPI JSON). Mirrors
+    /// `AppConfig.docs.enabled`. Default `true`; flip off on hardened boxes to
+    /// keep the API surface off the wire.
+    pub docs_enabled: bool,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -47,7 +51,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/app", get(app_index))
         .merge(health::router())
-        .merge(openapi::router())
+        .merge(openapi::router(&state))
         .merge(routes::router())
         .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
@@ -168,6 +172,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
         license,
         license_path,
+        docs_enabled: cfg.docs.enabled,
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -355,6 +360,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
+        docs: pharma_core::config::DocsConfig::default(),
     }
 }
 
@@ -434,6 +440,7 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            docs_enabled: true,
         }
     }
 

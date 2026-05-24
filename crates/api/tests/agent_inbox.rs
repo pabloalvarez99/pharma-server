@@ -56,6 +56,7 @@ fn node_state(db: Arc<db::Db>) -> (api::AppState, String) {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        docs_enabled: true,
     };
     (state, did)
 }

@@ -101,6 +101,7 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            docs_enabled: true,
         }
     }
 
