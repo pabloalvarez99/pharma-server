@@ -18,6 +18,7 @@
 pub mod caf;
 pub mod cert;
 pub mod error;
+pub mod gating;
 pub mod sign;
 pub mod sii;
 pub mod timbre;
@@ -25,4 +26,5 @@ pub mod types;
 pub mod xml;
 
 pub use error::DteError;
+pub use gating::{min_tier_for, require_send_allowed, SendTier};
 pub use types::{Caf, CertDigital, Dte, DteEstado, DteItem, DteTipo, EmisorConfig, SiiEnv};
