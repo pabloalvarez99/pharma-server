@@ -14,8 +14,10 @@ import {
 import { renderInventory } from "./inventory";
 import { renderPos } from "./pos";
 import { renderReports } from "./reports";
+import { renderDashboard } from "./dashboard";
 
 const NAV = [
+  { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
@@ -58,10 +60,13 @@ function healthDot(h: HealthInfo | null): string {
   return `<span class="dot dot-warn"></span> Degradado (db: ${h.db})`;
 }
 
-/** Route a nav id to its view, rendering into the content host. Inventario is
- *  the landing view (core ERP, always available on every tier). */
+/** Route a nav id to its view, rendering into the content host. Panel
+ *  (Dashboard) is the landing view (core ERP, always available on every tier). */
 function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
   switch (id) {
+    case "dashboard":
+      renderDashboard(host, serverUrl);
+      break;
     case "pos":
       renderPos(host, serverUrl);
       break;
@@ -80,9 +85,9 @@ export function renderShell(
   serverUrl: string,
   onLogout: () => void,
 ): void {
-  // Landing view = Inventario (index 1 in NAV) so the operator opens onto real
-  // stock data rather than an empty POS cart.
-  const LANDING: NavId = "inventory";
+  // Landing view = Panel (Dashboard) so the operator opens onto an exec overview
+  // of the day rather than an empty POS cart or a raw table.
+  const LANDING: NavId = "dashboard";
 
   root.innerHTML = `
     <div class="shell">
