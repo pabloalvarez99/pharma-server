@@ -1,6 +1,8 @@
-// AppShell — phase 2 placeholder. Shows tenant, license tier badge, and live
-// server status. Nav items (POS / Inventario / Reportes) are stubs for later
-// waves. This is the "produced game" the launcher hands off to.
+// AppShell — the ERP frame the launcher hands off to after login. Persistent
+// sidebar (nav) + topbar (tenant, license tier, live health) + a swappable
+// content host. `dispatchNav` is the in-shell router: each nav id maps to a
+// view module that renders into `#view-host`. Views fetch their own data via
+// the typed wrappers in ../api (which call the Rust Tauri commands).
 import {
   licenseStatus,
   serverHealth,
@@ -9,12 +11,16 @@ import {
   type LicenseSummary,
   type HealthInfo,
 } from "../api";
+import { renderInventory } from "./inventory";
+import { renderReports } from "./reports";
 
 const NAV = [
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
-];
+] as const;
+
+type NavId = (typeof NAV)[number]["id"];
 
 function tierClass(tier: string): string {
   switch (tier.toLowerCase()) {
@@ -51,12 +57,33 @@ function healthDot(h: HealthInfo | null): string {
   return `<span class="dot dot-warn"></span> Degradado (db: ${h.db})`;
 }
 
+/** Route a nav id to its view, rendering into the content host. Inventario is
+ *  the landing view (core ERP, always available on every tier). */
+function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
+  switch (id) {
+    case "pos":
+      // POS view lands in the next commit; placeholder keeps the route live.
+      host.innerHTML = `<section class="view"><h2>POS</h2><p class="muted">Punto de venta — cargando módulo…</p></section>`;
+      break;
+    case "inventory":
+      renderInventory(host, serverUrl);
+      break;
+    case "reports":
+      renderReports(host, serverUrl);
+      break;
+  }
+}
+
 export function renderShell(
   root: HTMLElement,
   session: SessionInfo,
   serverUrl: string,
   onLogout: () => void,
 ): void {
+  // Landing view = Inventario (index 1 in NAV) so the operator opens onto real
+  // stock data rather than an empty POS cart.
+  const LANDING: NavId = "inventory";
+
   root.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
@@ -66,8 +93,8 @@ export function renderShell(
         </div>
         <nav id="nav">
           ${NAV.map(
-            (n, i) => `
-            <button class="nav-item ${i === 0 ? "active" : ""}" data-nav="${n.id}">
+            (n) => `
+            <button class="nav-item ${n.id === LANDING ? "active" : ""}" data-nav="${n.id}">
               <span class="nav-label">${n.label}</span>
               <span class="nav-hint">${n.hint}</span>
             </button>`,
@@ -83,45 +110,25 @@ export function renderShell(
             <strong>${prettyTenant(session.tenant_id)}</strong>
           </div>
           <div class="topbar-meta">
+            <span class="muted topbar-user">${session.user_id}</span>
             <span id="tier-badge" class="badge tier-free">…</span>
             <span id="health" class="health">${healthDot(null)}</span>
           </div>
         </header>
 
-        <section class="panel">
-          <h2 id="panel-title">POS</h2>
-          <p class="muted">Módulo en construcción. Esta es la base del shell ERP — las vistas reales llegan en olas posteriores.</p>
-          <div class="info-grid">
-            <div class="info-card">
-              <span class="muted">Usuario</span>
-              <strong>${session.user_id}</strong>
-            </div>
-            <div class="info-card">
-              <span class="muted">Roles</span>
-              <strong>${session.roles.length ? session.roles.join(", ") : "—"}</strong>
-            </div>
-            <div class="info-card">
-              <span class="muted">Servidor</span>
-              <strong>${serverUrl}</strong>
-            </div>
-            <div class="info-card" id="license-card">
-              <span class="muted">Licencia</span>
-              <strong id="license-detail">Cargando…</strong>
-            </div>
-          </div>
-        </section>
+        <div id="view-host"></div>
       </main>
     </div>
   `;
 
-  // Nav stubs: swap the panel title only (no real routing yet).
+  const host = root.querySelector<HTMLDivElement>("#view-host")!;
   const navButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".nav-item"));
-  const title = root.querySelector<HTMLHeadingElement>("#panel-title")!;
   navButtons.forEach((b) => {
     b.addEventListener("click", () => {
+      if (b.classList.contains("active")) return; // already here — no re-fetch
       navButtons.forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
-      title.textContent = b.querySelector(".nav-label")?.textContent ?? "";
+      dispatchNav(host, b.dataset.nav as NavId, serverUrl);
     });
   });
 
@@ -134,32 +141,38 @@ export function renderShell(
     onLogout();
   });
 
+  // Initial view + topbar hydration.
+  dispatchNav(host, LANDING, serverUrl);
   void hydrateLicense(root, serverUrl);
   void hydrateHealth(root, serverUrl);
 }
 
 async function hydrateLicense(root: HTMLElement, serverUrl: string): Promise<void> {
   const badge = root.querySelector<HTMLSpanElement>("#tier-badge")!;
-  const detail = root.querySelector<HTMLElement>("#license-detail")!;
   try {
     const lic: LicenseSummary = await licenseStatus(serverUrl);
     badge.textContent = lic.tier.toUpperCase();
     badge.className = `badge ${tierClass(lic.tier)}`;
     const exp = lic.expires_at ? ` · vence ${lic.expires_at.slice(0, 10)}` : "";
-    detail.textContent = `${lic.status} · ${lic.seat_count} asiento(s)${exp}`;
+    badge.title = `${lic.status} · ${lic.seat_count} asiento(s)${exp}`;
   } catch (err) {
     badge.textContent = "N/D";
     badge.className = "badge tier-free";
-    detail.textContent = typeof err === "string" ? err : "No disponible";
+    badge.title = typeof err === "string" ? err : "Licencia no disponible";
   }
 }
 
 async function hydrateHealth(root: HTMLElement, serverUrl: string): Promise<void> {
   const el = root.querySelector<HTMLSpanElement>("#health")!;
-  try {
-    const h = await serverHealth(serverUrl);
-    el.innerHTML = healthDot(h);
-  } catch {
-    el.innerHTML = healthDot({ status: "down", db: "—", reachable: false });
-  }
+  const tick = async () => {
+    try {
+      const h = await serverHealth(serverUrl);
+      el.innerHTML = healthDot(h);
+    } catch {
+      el.innerHTML = healthDot({ status: "down", db: "—", reachable: false });
+    }
+  };
+  await tick();
+  // Light poll so the operator sees the server drop without a manual refresh.
+  window.setInterval(tick, 15000);
 }
