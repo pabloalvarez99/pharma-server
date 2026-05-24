@@ -343,6 +343,67 @@ pub async fn get_order(
         .ok_or(DomainError::NotFound)
 }
 
+/// Build the printable receipt/boleta for an order. Read-only: composes the
+/// order + its items + the tenant name + the loyalty points awarded into a
+/// self-contained [`ReceiptDto`]. 404 (`DomainError::NotFound`) if the order
+/// is missing or belongs to another tenant.
+///
+/// `change` = `cash_amount - total` for cash sales (`pos_cash`), else `None`.
+/// `line_total` = `qty * unit_price` per line.
+pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ReceiptDto> {
+    let order_thing = parse_tenant_thing(id, "order")?;
+    let (order, items) = repo::get_order(db, tenant, &order_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+
+    let tenant_name = repo::tenant_name(db, tenant).await?.unwrap_or_default();
+    let loyalty_points_awarded = repo::loyalty_awarded_for_order(db, tenant, &order_thing).await?;
+
+    let receipt_items: Vec<ReceiptItem> = items
+        .iter()
+        .map(|it| ReceiptItem {
+            name: it.product_name.clone(),
+            qty: it.quantity,
+            unit_price: it.unit_price,
+            line_total: it.unit_price * Decimal::from(it.quantity),
+        })
+        .collect();
+
+    // Cash change is only meaningful for a pure-cash counter sale. Mixed/card
+    // sales have no "vuelto" to print.
+    let change = if order.payment_method == "pos_cash" {
+        order.cash_amount.map(|cash| cash - order.total)
+    } else {
+        None
+    };
+
+    // Prefer the SII folio when the boleta was issued; otherwise the local
+    // record-id key is the human-facing ticket number.
+    let folio_or_number = order
+        .external_ref
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| order_thing.id.to_raw());
+
+    Ok(ReceiptDto {
+        order_id: order.id,
+        folio_or_number,
+        datetime: order.created_at,
+        tenant_name,
+        items: receipt_items,
+        subtotal: order.subtotal,
+        discount: order.discount,
+        total: order.total,
+        payment_method: order.payment_method,
+        cash_amount: order.cash_amount,
+        card_amount: order.card_amount,
+        change,
+        loyalty_points_awarded,
+        cashier: order.sold_by_name,
+        footer_note: RECEIPT_FOOTER_NOTE.to_string(),
+    })
+}
+
 /// Validate + persist a refund/return atomically.
 ///
 /// Rules enforced before the tx:

@@ -48,6 +48,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/orders", get(list_orders))
         .route("/api/v1/orders/{id}", get(get_order))
+        .route("/api/v1/orders/{id}/receipt", get(get_receipt))
         .route("/api/v1/returns", get(list_refunds))
         .route("/api/v1/interactions/check", post(check_interactions))
         .route("/api/v1/settings/{key}", get(get_setting));
@@ -128,6 +129,19 @@ async fn get_order(
     let tenant = tenant_of(&claims)?;
     let (order, items) = service::get_order(db.as_ref(), &tenant, &id).await?;
     Ok(Json(OrderDetail { order, items }))
+}
+
+/// `GET /api/v1/orders/{id}/receipt` — printable boleta data for a sale.
+/// Read-only, tenant-scoped. 404 if the order is not in this tenant.
+async fn get_receipt(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<ReceiptDto>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let receipt = service::get_receipt(db.as_ref(), &tenant, &id).await?;
+    Ok(Json(receipt))
 }
 
 // --- returns / devoluciones ------------------------------------------------
