@@ -24,7 +24,6 @@ aes-gcm.workspace = true
 argon2.workspace = true
 zeroize.workspace = true
 rand.workspace = true
-pharma-core = { path = "../core" }
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
