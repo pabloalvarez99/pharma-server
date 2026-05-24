@@ -82,7 +82,29 @@ fn resolve_data_path(p: &str) -> String {
     install_data_base().join(rel).to_string_lossy().into_owned()
 }
 
+/// Placeholder JWT secret shipped in `config/default.toml`. Booting production
+/// with this value means every issued token is forgeable by anyone who reads
+/// the public default config → full auth bypass + cross-tenant access.
+const PLACEHOLDER_JWT_SECRET: &str = "change-me-in-production";
+
+/// SECURITY (preprod review F3): reject the placeholder JWT secret unless the
+/// caller explicitly opts into insecure local dev. `allow_insecure` is normally
+/// `env PHARMA_ALLOW_INSECURE_JWT == "1"`. Returns `Err` when boot must refuse.
+fn check_jwt_secret(secret: &str, allow_insecure: bool) -> anyhow::Result<()> {
+    if secret == PLACEHOLDER_JWT_SECRET && !allow_insecure {
+        anyhow::bail!(
+            "JWT secret es el placeholder por defecto ('{PLACEHOLDER_JWT_SECRET}'). \
+             Inyecta un secreto fuerte vía PHARMA__JWT__SECRET (ej: `openssl rand -hex 32`) \
+             antes de iniciar en producción. Para desarrollo local: PHARMA_ALLOW_INSECURE_JWT=1."
+        );
+    }
+    Ok(())
+}
+
 pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    let allow_insecure = std::env::var("PHARMA_ALLOW_INSECURE_JWT").as_deref() == Ok("1");
+    check_jwt_secret(&cfg.jwt.secret, allow_insecure)?;
+
     let resolved = resolve_data_path(&cfg.db.path);
     if resolved != cfg.db.path {
         tracing::info!(from = %cfg.db.path, to = %resolved, "db path anchored to install data dir");
@@ -417,6 +439,22 @@ async fn app_index() -> Html<&'static str> {
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
+
+    #[test]
+    fn jwt_guard_rejects_placeholder_without_optin() {
+        let err = check_jwt_secret(PLACEHOLDER_JWT_SECRET, false).unwrap_err();
+        assert!(err.to_string().contains("PHARMA__JWT__SECRET"));
+    }
+
+    #[test]
+    fn jwt_guard_allows_placeholder_with_dev_optin() {
+        assert!(check_jwt_secret(PLACEHOLDER_JWT_SECRET, true).is_ok());
+    }
+
+    #[test]
+    fn jwt_guard_allows_real_secret() {
+        assert!(check_jwt_secret("a-strong-injected-secret-xyz", false).is_ok());
+    }
 
     fn state_with(token: Option<&str>) -> AppState {
         AppState {
