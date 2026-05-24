@@ -180,6 +180,51 @@ pub struct CashCloseSummary {
     pub movements_out: String,
 }
 
+// --- customers -------------------------------------------------------------
+
+/// Mirrors `crates/domain/src/customers/model.rs::CustomerDto` (search results).
+#[derive(Serialize, Deserialize)]
+pub struct Customer {
+    pub id: String,
+    pub name: String,
+    pub rut: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+    pub loyalty_points: i64,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `customers/model.rs::CustomerDetailDto` (lifetime aggregates).
+/// `total_spent` is a STRING (Decimal). Lives on `feat/customers-loyalty-history`.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerDetail {
+    pub id: String,
+    pub name: String,
+    pub rut: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+    pub loyalty_points: i64,
+    pub total_spent: String,
+    pub visit_count: i64,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `customers/model.rs::CustomerOrderDto` (one purchase-history row).
+/// `total` is a STRING (Decimal). Lives on `feat/customers-loyalty-history`.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerOrder {
+    pub id: String,
+    pub status: String,
+    pub payment_method: String,
+    pub total: String,
+    pub items_count: i64,
+    pub created_at: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -652,6 +697,107 @@ async fn close_cash_session(
         .map_err(|e| format!("Respuesta de cierre inválida del servidor: {e}"))
 }
 
+// --- customers commands -----------------------------------------------------
+//
+// The `/api/v1/customers/{search,{id},{id}/history}` surface lives on
+// `feat/customers-loyalty-history`, which is NOT guaranteed to be merged into
+// this client's server. So every customer command treats a 404 as a soft
+// "module not deployed" signal and rejects with a STABLE sentinel string the
+// view recognises — the Clientes view then renders a friendly upgrade note
+// instead of a hard error. Any other status maps through `error_message`.
+
+/// Sentinel the customer commands reject with on 404 so the view can branch and
+/// show "módulo requiere merge de customers-loyalty" instead of a raw error.
+const CUSTOMERS_MISSING: &str = "CUSTOMERS_MODULE_MISSING";
+
+/// GET `/api/v1/customers/search?q=` (Bearer). 404 → [`CUSTOMERS_MISSING`].
+#[tauri::command]
+async fn customer_search(
+    state: State<'_, SessionState>,
+    server_url: String,
+    q: String,
+) -> Result<Vec<Customer>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/customers/search"))
+        .query(&[("q", &q)])
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de clientes inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/customers/{id}` (Bearer) — detail w/ lifetime aggregates.
+/// 404 → [`CUSTOMERS_MISSING`] (the endpoint itself, not a missing customer;
+/// a real missing-customer comes back through the server envelope on the merged
+/// branch, but here a 404 most likely means the route doesn't exist).
+#[tauri::command]
+async fn customer_detail(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<CustomerDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/customers/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/customers/{id}/history?limit=N` (Bearer). 404 →
+/// [`CUSTOMERS_MISSING`]. Read-only projection of the customer's orders.
+#[tauri::command]
+async fn customer_history(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    limit: Option<u32>,
+) -> Result<Vec<CustomerOrder>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/customers/{id}/history"))
+        .bearer_auth(token);
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de historial inválida del servidor: {e}"))
+}
+
 /// GET `/health/ready`. Public (no token). 200 → healthy; 503 → degraded but
 /// still "reachable" (server is up). Connection errors → `Err`.
 #[tauri::command]
@@ -726,7 +872,10 @@ pub fn run() {
             cash_sessions,
             open_cash_session,
             cash_arqueo,
-            close_cash_session
+            close_cash_session,
+            customer_search,
+            customer_detail,
+            customer_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

@@ -240,3 +240,77 @@ export function closeCashSession(
     notes,
   });
 }
+
+// --- clientes / customers --------------------------------------------------
+
+/** A customer search result (`CustomerDto`). */
+export interface Customer {
+  id: string;
+  name: string;
+  rut: string | null;
+  phone: string | null;
+  email: string | null;
+  loyalty_points: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Customer detail w/ lifetime aggregates (`CustomerDetailDto`). `total_spent`
+ *  is a STRING (Decimal). Served by feat/customers-loyalty-history. */
+export interface CustomerDetail {
+  id: string;
+  name: string;
+  rut: string | null;
+  phone: string | null;
+  email: string | null;
+  loyalty_points: number;
+  total_spent: string;
+  visit_count: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One purchase-history row (`CustomerOrderDto`). `total` is a STRING (Decimal). */
+export interface CustomerOrder {
+  id: string;
+  status: string;
+  payment_method: string;
+  total: string;
+  items_count: number;
+  created_at: string;
+}
+
+/** Sentinel the customer commands reject with when the server lacks the
+ *  `/customers/*` surface (404). Matches `CUSTOMERS_MISSING` in lib.rs — the
+ *  Clientes view shows an upgrade note instead of a hard error. */
+export const CUSTOMERS_MODULE_MISSING = "CUSTOMERS_MODULE_MISSING";
+
+/** GET /api/v1/customers/search?q= (Bearer). Rejects with
+ *  {@link CUSTOMERS_MODULE_MISSING} when the endpoint is not deployed (404). */
+export function customerSearch(
+  serverUrl: string,
+  q: string,
+): Promise<Customer[]> {
+  return invoke<Customer[]>("customer_search", { serverUrl, q });
+}
+
+/** GET /api/v1/customers/{id} (Bearer). Rejects with
+ *  {@link CUSTOMERS_MODULE_MISSING} when not deployed (404). */
+export function customerDetail(
+  serverUrl: string,
+  id: string,
+): Promise<CustomerDetail> {
+  return invoke<CustomerDetail>("customer_detail", { serverUrl, id });
+}
+
+/** GET /api/v1/customers/{id}/history?limit=N (Bearer). Rejects with
+ *  {@link CUSTOMERS_MODULE_MISSING} when not deployed (404). */
+export function customerHistory(
+  serverUrl: string,
+  id: string,
+  limit?: number,
+): Promise<CustomerOrder[]> {
+  return invoke<CustomerOrder[]>("customer_history", { serverUrl, id, limit });
+}
