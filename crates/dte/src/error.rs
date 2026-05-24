@@ -18,6 +18,12 @@ pub enum DteError {
     #[error("cert digital inválido: {0}")]
     CertInvalid(String),
 
+    #[error("cert digital cifrado falló: {0}")]
+    CertEncrypt(String),
+
+    #[error("cert digital descifrado falló: {0}")]
+    CertDecrypt(String),
+
     #[error("SII rechazó el DTE: {glosa}")]
     SiiRejected { glosa: String },
 
@@ -37,6 +43,12 @@ pub enum DteError {
     InvalidTransition {
         actual: crate::types::DteEstado,
         target: crate::types::DteEstado,
+    },
+
+    #[error("transición de estado DTE inválida: {from:?} → {to:?}")]
+    InvalidStateTransition {
+        from: crate::types::DteEstado,
+        to: crate::types::DteEstado,
     },
 
     #[error("io: {0}")]
