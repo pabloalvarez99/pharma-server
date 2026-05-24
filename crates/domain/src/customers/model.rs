@@ -83,3 +83,49 @@ pub struct LoyaltyFilters {
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
+
+// --- bulk import (Supabase migration) -------------------------------------
+//
+// Idempotent batch ingestion. Upsert key is `(tenant, email)` because the
+// `customer` schema (migration 0005) is SCHEMAFULL and has no `external_id`
+// column — accepting `external_id` in the DTO keeps the import script
+// agnostic of source-system internals but it is currently ignored for
+// persistence (re-runs match on email only).
+
+/// Maximum customers per `POST /api/v1/admin/import-customers` request.
+/// Each row is a small object (≤1 KB), so 200 keeps the worst-case payload
+/// well under the default body limit and bounds DB roundtrips.
+pub const IMPORT_CUSTOMERS_MAX_BATCH: usize = 200;
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ImportCustomerInput {
+    pub email: String,
+    pub name: String,
+    #[serde(default)]
+    pub phone: Option<String>,
+    #[serde(default)]
+    pub rut: Option<String>,
+    /// Optional foreign key to the source system (e.g. Supabase user id).
+    /// Accepted for forward compatibility; not persisted yet (no migration).
+    #[serde(default)]
+    pub external_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ImportCustomersRequest {
+    pub customers: Vec<ImportCustomerInput>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportError {
+    /// 0-based index in the original request `customers` array.
+    pub idx: usize,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportCustomersResponse {
+    pub created: u32,
+    pub updated: u32,
+    pub errors: Vec<ImportError>,
+}

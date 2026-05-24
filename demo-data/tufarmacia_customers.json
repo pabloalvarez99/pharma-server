@@ -1,0 +1,21 @@
+{
+  "customers": [
+    {
+      "email": "adanardiles5@gmail.com",
+      "name": "Adan Ardiles",
+      "external_id": "d2c551a9-c336-422d-a7c1-36d3730f15d5",
+      "phone": "+56974713824"
+    },
+    {
+      "email": "admin@pharmacy.com",
+      "name": "Admin",
+      "external_id": "1f932f9d-21c5-42eb-a17b-24cfcb2355c3"
+    },
+    {
+      "email": "gloriapelu56@gmail.com",
+      "name": "Gloria Cortes",
+      "external_id": "34cef7ed-c965-41c7-a532-9b3d02103d59",
+      "phone": "+56933413228"
+    }
+  ]
+}
