@@ -31,6 +31,7 @@ utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 axum-prometheus.workspace = true
 chrono.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 surrealdb.workspace = true
 uuid.workspace = true
 csv.workspace = true
