@@ -202,11 +202,12 @@ async fn receive_purchase_order(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
+    Json(input): Json<ReceivePurchaseOrder>,
 ) -> Result<Json<PurchaseOrderDto>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(
-        service::receive_purchase_order(&db, &t, &id, Some(&claims.sub)).await?,
+        service::receive_purchase_order_lines(&db, &t, &id, input, Some(&claims.sub)).await?,
     ))
 }
 
