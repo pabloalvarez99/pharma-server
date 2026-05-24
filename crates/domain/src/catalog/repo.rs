@@ -224,6 +224,23 @@ pub async fn product_slug_exists(db: &Db, tenant: &Thing, slug: &str) -> DomainR
     Ok(row.is_some())
 }
 
+/// Returns the product id for a given tenant + external_id, if present.
+/// Backs upsert-by-external_id semantics in the bulk import endpoint
+/// (catalog migrations: re-running must NOT duplicate rows).
+pub async fn find_id_by_external_id(
+    db: &Db,
+    tenant: &Thing,
+    external_id: &str,
+) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query("SELECT id FROM product WHERE tenant = $t AND external_id = $x LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .bind(("x", external_id.to_string()))
+        .await?;
+    let row: Option<Thing> = r.take((0, "id"))?;
+    Ok(row)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_product(
     db: &Db,
