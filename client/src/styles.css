@@ -1351,3 +1351,308 @@ button {
     transition: opacity 0.2s ease;
   }
 }
+
+/* ================================================================ CAJA
+ * Open/close lifecycle + arqueo. Reuses kpi-card for the open-session strip;
+ * the empty state + close-flow modal get their own chrome below.
+ */
+.caja-empty,
+.cli-missing {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 44px 24px;
+  text-align: center;
+  background: var(--bg-1);
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+}
+
+.caja-empty h3,
+.cli-missing h3 {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.caja-empty p,
+.cli-missing p {
+  max-width: 42ch;
+}
+
+.cli-missing code {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 12px;
+  color: var(--accent-3);
+  background: var(--bg-2);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.caja-empty-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: var(--muted);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.caja-open {
+  width: auto;
+  padding: 12px 26px;
+  margin-top: 6px;
+}
+
+/* ---- secondary / ghost buttons (reused by Caja + modals) ---- */
+.btn-ghost,
+.btn-ghost-danger {
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--muted-strong);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.btn-ghost:hover {
+  color: var(--text);
+  border-color: #364158;
+}
+.btn-ghost-danger:hover {
+  color: var(--danger);
+  border-color: rgba(255, 93, 108, 0.45);
+}
+
+/* ---- modal (open/close caja) ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 8, 12, 0.62);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: modalFade 0.16s ease;
+}
+
+@keyframes modalFade {
+  from {
+    opacity: 0;
+  }
+}
+
+.modal {
+  width: min(420px, 100%);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.modal-field {
+  margin-bottom: 0;
+}
+
+.modal-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--muted-strong);
+  margin-bottom: 7px;
+}
+
+.modal-field input {
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.modal-field input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.modal-confirm {
+  width: auto;
+  margin-top: 0;
+  padding: 11px 22px;
+}
+
+/* ---- arqueo preview (close modal) ---- */
+.arqueo-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(10, 13, 18, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.arqueo-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+.arqueo-row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.arqueo-total {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.arqueo-total strong {
+  color: var(--accent-3);
+}
+
+.arqueo-diff {
+  padding: 9px 12px;
+  font-size: 13px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+}
+.arqueo-diff strong {
+  font-variant-numeric: tabular-nums;
+}
+.arqueo-ok {
+  color: var(--ok);
+  border-color: rgba(24, 209, 168, 0.4);
+  background: rgba(24, 209, 168, 0.08);
+}
+.arqueo-warn {
+  color: var(--warn);
+  border-color: rgba(240, 180, 41, 0.4);
+  background: rgba(240, 180, 41, 0.08);
+}
+.arqueo-danger {
+  color: var(--danger);
+  border-color: rgba(255, 93, 108, 0.4);
+  background: var(--danger-soft);
+}
+
+/* ================================================================ CLIENTES
+ * Two-column: results list (left) + detail panel (right). Collapses under 920px.
+ */
+.clientes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 920px) {
+  .clientes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cli-result {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 1px solid rgba(42, 50, 69, 0.5);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.cli-result:last-child {
+  border-bottom: none;
+}
+.cli-result:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.cli-result.active {
+  background: linear-gradient(180deg, rgba(24, 209, 168, 0.14), rgba(24, 209, 168, 0.04));
+  border-color: rgba(24, 209, 168, 0.4);
+  border-radius: 10px;
+}
+
+.cli-points {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.cli-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cli-detail-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.cli-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+.cli-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.cli-stat strong {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.cli-hist-title {
+  margin-top: 16px;
+}

@@ -15,11 +15,13 @@ import { renderInventory } from "./inventory";
 import { renderPos } from "./pos";
 import { renderReports } from "./reports";
 import { renderDashboard } from "./dashboard";
+import { renderCaja } from "./caja";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
+  { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
 ] as const;
 
@@ -72,6 +74,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "inventory":
       renderInventory(host, serverUrl);
+      break;
+    case "caja":
+      renderCaja(host, serverUrl);
       break;
     case "reports":
       renderReports(host, serverUrl);
