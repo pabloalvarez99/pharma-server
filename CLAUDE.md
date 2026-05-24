@@ -158,6 +158,22 @@ Crates (`Cargo.toml` raíz):
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
 
+9. **Auto push+PR tras GATE; releases manuales**: una branch que pasa GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) y está committeada → push a origin + abrir PR contra `feature/erp-parity` automáticamente. **Los MSI releases siguen siendo explícitos/manuales**, gated por smoke-test en Sandbox + triage de bugs conocidos. NUNCA auto-deployar trabajo no verificado ni mid-flight (ver Fase 9 ship gate: cert Authenticode + smoke VM limpia). El push/PR es reversible; cortar release a canal público no lo es.
+
+10. **Distribución = binario, NO source (decidido 2026-05-23)**: el repo source `pabloalvarez99/pharma-server` se mantiene **PRIVADO**. "Deploy/open source" significa publicar el **MSI binario** al mirror público `pharma-server-releases` (vía `release-publisher.yml` workflow_dispatch) — NUNCA hacer público el source. Open-sourcing del source rompería el license enforcement (`license::require` vive en el código) + diferido a Fase 13+ ([NO en esta sesión]). Antes de cualquier consideración futura de source-public: secret-scan del history completo (esp. que la clave privada del licenser nunca tocó este repo — vive solo en `pharma-license-server`).
+
+## Modo de trabajo por defecto — "continue working with team of agents ultrathink"
+
+Directiva permanente del fundador (2026-05-23). Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar como **pipeline paralelo saturado de ~5 agentes** trabajando autónomamente sobre el BACKLOG, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
+
+- **Saturación 5 slots**: mantener ~5 agentes/builds activos. Slot libre → despachar siguiente tarea de la cola sin idle. Pensar profundo (ultrathink) qué es lo más importante a continuación.
+- **Worktrees aislados, scope disjunto**: 1 agente = 1 worktree, paths sin solape (cero contención de merge). Cascada de branches dependientes off su base correcta.
+- **GATE obligatorio antes de PR**: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`. Verde → commit + push + PR contra base correcta (regla #9). NUNCA debilitar asserts para forzar verde; bug real → `#[ignore]` con nota + reportar.
+- **Quota wall**: "session limit · resets <hora>" mata spawns nuevos. Cuando esté walled, NO quemar despachos — rescatar trabajo uncommitted de worktrees vía **cargo local en main thread** (los builds locales NO dependen del quota de agentes), y re-saturar a 5 al reset. Agentes que mueren dejan trabajo **uncommitted** (HEAD intacto) — verificar estado real (`git -C <wt> status/log`) antes de confiar en cualquier wrap-up.
+- **Verificar antes de confiar**: notificaciones de background pueden reportar exit 0 con output truncado — re-grep sin truncar antes de declarar verde.
+- **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
+- Ver memoria `[[parallel-agent-pipeline]]` para el detalle operativo.
+
 ## Vault Obsidian — leer bajo demanda
 
 Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
