@@ -49,3 +49,14 @@ flate2.workspace = true
 tar.workspace = true
 serde_json.workspace = true
 filetime = "0.2"
+# Bench-only extras. `surrealdb` here re-declares with `kv-mem` so benches can
+# spin up an in-memory store (the prod build keeps `kv-surrealkv` only).
+# Cargo merges features across the two declarations for the test/bench build,
+# but the bin still ships kv-surrealkv only.
+surrealdb = { workspace = true, features = ["kv-mem"] }
+rust_decimal = "1.37"
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+
+[[bench]]
+name = "pos_sale"
+harness = false
