@@ -12,6 +12,7 @@ import {
   type HealthInfo,
 } from "../api";
 import { renderInventory } from "./inventory";
+import { renderPos } from "./pos";
 import { renderReports } from "./reports";
 
 const NAV = [
@@ -62,8 +63,7 @@ function healthDot(h: HealthInfo | null): string {
 function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
   switch (id) {
     case "pos":
-      // POS view lands in the next commit; placeholder keeps the route live.
-      host.innerHTML = `<section class="view"><h2>POS</h2><p class="muted">Punto de venta — cargando módulo…</p></section>`;
+      renderPos(host, serverUrl);
       break;
     case "inventory":
       renderInventory(host, serverUrl);
