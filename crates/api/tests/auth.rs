@@ -26,6 +26,7 @@ fn state() -> api::AppState {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        rate_limit: None,
     }
 }
 

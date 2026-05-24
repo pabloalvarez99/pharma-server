@@ -10,6 +10,57 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub backup: BackupConfig,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+}
+
+/// Per-tenant + per-IP rate-limit settings. Token-bucket (governor crate).
+/// All fields default to sane production values; missing config section keeps
+/// the limiter enabled with defaults. Set `enabled = false` to disable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    #[serde(default = "default_rl_enabled")]
+    pub enabled: bool,
+    /// Per-tenant sustained rate (requests per minute).
+    #[serde(default = "default_tenant_per_min")]
+    pub tenant_per_min: u32,
+    /// Per-tenant burst capacity (max tokens stored).
+    #[serde(default = "default_tenant_burst")]
+    pub tenant_burst: u32,
+    /// Per-IP sustained rate (requests per minute).
+    #[serde(default = "default_ip_per_min")]
+    pub ip_per_min: u32,
+    /// Per-IP burst capacity (max tokens stored).
+    #[serde(default = "default_ip_burst")]
+    pub ip_burst: u32,
+}
+
+fn default_rl_enabled() -> bool {
+    true
+}
+fn default_tenant_per_min() -> u32 {
+    120
+}
+fn default_tenant_burst() -> u32 {
+    30
+}
+fn default_ip_per_min() -> u32 {
+    60
+}
+fn default_ip_burst() -> u32 {
+    20
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_rl_enabled(),
+            tenant_per_min: default_tenant_per_min(),
+            tenant_burst: default_tenant_burst(),
+            ip_per_min: default_ip_per_min(),
+            ip_burst: default_ip_burst(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

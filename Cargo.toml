@@ -84,6 +84,10 @@ base64 = "0.22"
 # lock-free Arc swap for license hot-reload
 arc-swap = "1"
 
+# rate limiting (token bucket, in-memory, keyed)
+governor = "0.7"
+nonzero_ext = "0.3"
+
 # time
 chrono = { version = "0.4", features = ["serde"] }
 

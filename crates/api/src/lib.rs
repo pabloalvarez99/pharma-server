@@ -17,7 +17,7 @@ mod openapi;
 mod routes;
 mod v1;
 
-pub use middleware::{audit, role};
+pub use middleware::{audit, rate_limit, role};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -40,6 +40,9 @@ pub struct AppState {
     /// On-disk path that `POST /api/v1/admin/license/reload` re-reads. `None`
     /// only in unit tests with kv-mem.
     pub license_path: Option<std::path::PathBuf>,
+    /// Per-tenant + per-IP rate-limit state. `None` disables both limiters
+    /// (most unit tests). Production wires it from `AppConfig.rate_limit`.
+    pub rate_limit: Option<Arc<rate_limit::RateLimitState>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -168,6 +171,9 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
         license,
         license_path,
+        rate_limit: Some(Arc::new(rate_limit::RateLimitState::new(
+            cfg.rate_limit.clone(),
+        ))),
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -355,6 +361,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
+        rate_limit: pharma_core::config::RateLimitConfig::default(),
     }
 }
 
@@ -434,6 +441,7 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            rate_limit: None,
         }
     }
 
