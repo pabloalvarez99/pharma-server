@@ -12,7 +12,9 @@
 //    and the onSuccess(session, serverUrl) callback are untouched.
 import { login, type SessionInfo } from "../api";
 
-const DEFAULT_SERVER = "http://localhost:8080";
+const DEFAULT_SERVER = "http://127.0.0.1:8080";
+const DEFAULT_TENANT = "tufarmacia";
+const DEFAULT_EMAIL = "admin@tufarmacia.cl";
 
 interface FieldId {
   input: string;
@@ -40,25 +42,22 @@ export function renderLogin(
       <div class="login-frame">
         <aside class="login-brand-panel" aria-hidden="true">
           <div class="brand-stack">
-            <div class="brand-mark" aria-label="Pharma">
-              <svg viewBox="0 0 48 48" width="32" height="32" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 8h14a8 8 0 0 1 0 16h-10v16"></path>
-                <path d="M28 24l12 16"></path>
-              </svg>
+            <div class="brand-mark" aria-label="Tu Farmacia">
+              <img src="/tu-farmacia-logo.jpeg" alt="Tu Farmacia" width="44" height="44" />
             </div>
             <div class="brand-wordmark">
-              <span class="wm-main">PHARMA</span>
-              <span class="wm-sub">ERP · ON-PREM</span>
+              <span class="wm-main">Tu Farmacia</span>
+              <span class="wm-sub">COQUIMBO · CHILE</span>
             </div>
           </div>
 
           <div class="brand-tagline">
             <h2>Tu farmacia, lista.</h2>
-            <p>Sin nube. Sin lock-in. Tus datos donde tienen que estar.</p>
+            <p>Tu catálogo, tus ventas y tus recetas — siempre en tu local.</p>
           </div>
 
           <ul class="brand-pillars">
-            <li><span class="pillar-dot"></span> Offline-first</li>
+            <li><span class="pillar-dot"></span> Funciona sin internet</li>
             <li><span class="pillar-dot"></span> Boleta SII · ISP · recetas</li>
             <li><span class="pillar-dot"></span> POS en menos de 50 ms</li>
           </ul>
@@ -82,6 +81,7 @@ export function renderLogin(
                 autocomplete="organization"
                 spellcheck="false"
                 placeholder="ej: principal"
+                value="${DEFAULT_TENANT}"
                 aria-describedby="${FIELDS.tenant.err}"
                 required
               />
@@ -99,6 +99,7 @@ export function renderLogin(
                 autocomplete="username"
                 spellcheck="false"
                 placeholder="usuario@farmacia.cl"
+                value="${DEFAULT_EMAIL}"
                 aria-describedby="${FIELDS.email.err}"
                 required
               />
