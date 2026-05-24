@@ -286,6 +286,8 @@ export function renderLogin(
 
     try {
       const session = await login(serverUrl, tenant, email, password);
+      // Friendly tenant label for the shell (server /me only returns the record id).
+      try { sessionStorage.setItem("tenant_slug", tenant); } catch { /* noop */ }
       btn.classList.remove("loading");
       btn.classList.add("ok");
       btnLabel.textContent = "LISTO";

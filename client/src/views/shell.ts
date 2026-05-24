@@ -29,6 +29,21 @@ function tierClass(tier: string): string {
   }
 }
 
+// Server /me returns the raw tenant record id (e.g. "tenant:pp3v…"). Show the
+// friendly slug captured at login instead, title-cased.
+function prettyTenant(tenantId: string): string {
+  const slug = (() => {
+    try { return sessionStorage.getItem("tenant_slug"); } catch { return null; }
+  })();
+  if (slug) {
+    return slug
+      .split(/[-_]/)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+  return tenantId.replace(/^tenant:/, "");
+}
+
 function healthDot(h: HealthInfo | null): string {
   if (!h) return `<span class="dot dot-unknown"></span> Comprobando…`;
   if (!h.reachable) return `<span class="dot dot-down"></span> Sin conexión`;
@@ -45,7 +60,10 @@ export function renderShell(
   root.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="sidebar-brand">PHARMA</div>
+        <div class="sidebar-brand">
+          <img src="/tu-farmacia-logo.jpeg" alt="" width="26" height="26" />
+          <span>Tu Farmacia</span>
+        </div>
         <nav id="nav">
           ${NAV.map(
             (n, i) => `
@@ -62,7 +80,7 @@ export function renderShell(
         <header class="topbar">
           <div class="topbar-id">
             <span class="muted">Sucursal</span>
-            <strong>${session.tenant_id}</strong>
+            <strong>${prettyTenant(session.tenant_id)}</strong>
           </div>
           <div class="topbar-meta">
             <span id="tier-badge" class="badge tier-free">…</span>

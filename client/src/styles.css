@@ -604,10 +604,26 @@ button {
 }
 
 .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 800;
-  letter-spacing: 3px;
-  color: var(--accent);
+  letter-spacing: 0.5px;
+  font-size: 17px;
+  color: var(--text);
   padding: 4px 8px 22px;
+}
+
+.sidebar-brand img {
+  border-radius: 7px;
+  flex: 0 0 auto;
+}
+
+.sidebar-brand span {
+  background: linear-gradient(90deg, var(--text), var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 #nav {
