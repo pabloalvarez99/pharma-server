@@ -20,7 +20,9 @@
 //! errors with backoff `[1, 5, 30]` s (≈36 s max wall-clock). A `4xx` other
 //! than 408/429 is a contract error (bad signature, malformed payload) → no
 //! retry, log ERROR, drop. After exhausting retries → WARN + drop (no
-//! persistence: avoids unbounded memory growth during long outages).
+//! persistence: avoids unbounded memory growth during long outages). Every
+//! drop increments `pharma_stock_webhook_dropped_total{tenant,reason}` so
+//! oncall can alert on a web storefront that stops accepting pushes.
 //!
 //! ## Pure core
 //!
@@ -261,6 +263,20 @@ fn build_client() -> reqwest::Result<reqwest::Client> {
         .build()
 }
 
+/// Increment `pharma_stock_webhook_dropped_total{tenant,reason}` (ADR-0013 §
+/// "Política de retry"). Lets oncall alert when the web storefront stops
+/// accepting pushes. Rendered through the global Prometheus recorder the api
+/// installs for `/metrics`; `reason` is a bounded set so label cardinality
+/// stays small (`external_id` is deliberately NOT a label).
+fn record_drop(tenant_slug: &str, reason: &'static str) {
+    metrics::counter!(
+        "pharma_stock_webhook_dropped_total",
+        "tenant" => tenant_slug.to_string(),
+        "reason" => reason,
+    )
+    .increment(1);
+}
+
 /// Deliver one payload with the ADR-0013 retry policy. Best-effort: every exit
 /// path is a log line, never an error propagated to the caller.
 async fn deliver(client: &reqwest::Client, cfg: &StockWebhookConfig, payload: &StockChangePayload) {
@@ -315,6 +331,7 @@ async fn deliver(client: &reqwest::Client, cfg: &StockWebhookConfig, payload: &S
                 if status.is_client_error() && !retriable_4xx {
                     tracing::error!(sku = %payload.external_id, status = status.as_u16(),
                         "stock webhook: contract error (4xx); dropping without retry");
+                    record_drop(&payload.tenant_slug, "contract_error_4xx");
                     return;
                 }
                 tracing::warn!(sku = %payload.external_id, status = status.as_u16(),
@@ -334,6 +351,7 @@ async fn deliver(client: &reqwest::Client, cfg: &StockWebhookConfig, payload: &S
         attempts = max_attempts,
         "stock webhook giving up after retries; dropping (web reconciles via nightly pull)"
     );
+    record_drop(&payload.tenant_slug, "retry_exhausted");
 }
 
 #[cfg(test)]
@@ -432,5 +450,29 @@ mod tests {
                 delta: -1,
             }],
         );
+    }
+
+    #[test]
+    fn record_drop_increments_labelled_counter() {
+        use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        metrics::with_local_recorder(&recorder, || {
+            record_drop("coquimbo-centro", "retry_exhausted");
+            record_drop("coquimbo-centro", "retry_exhausted");
+        });
+
+        let hit = snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .find(|(ck, _, _, _)| ck.key().name() == "pharma_stock_webhook_dropped_total");
+        let (ck, _, _, value) = hit.expect("dropped counter recorded");
+        assert!(matches!(value, DebugValue::Counter(2)), "got {value:?}");
+        // Labels carry tenant + reason for alerting.
+        let labels: Vec<_> = ck.key().labels().map(|l| (l.key(), l.value())).collect();
+        assert!(labels.contains(&("tenant", "coquimbo-centro")));
+        assert!(labels.contains(&("reason", "retry_exhausted")));
     }
 }

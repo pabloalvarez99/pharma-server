@@ -38,7 +38,6 @@ pub struct StockWebhookConfig {
     pub retry: RetryConfig,
 }
 
-
 /// Bounded retry policy for webhook delivery (ADR-0013): 3 retries with
 /// backoff `[1, 5, 30]` seconds, then drop + WARN. Never blocks the POS path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
