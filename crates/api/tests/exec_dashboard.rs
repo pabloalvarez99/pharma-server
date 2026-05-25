@@ -217,9 +217,14 @@ async fn seeded_sale_today_reflected_in_ventas_hoy_and_top() {
     // Top products: catalogued line (rev 2000) ranks above free-text (500).
     let top = j["top_productos"].as_array().unwrap();
     assert_eq!(top.len(), 2);
-    assert_eq!(top[0]["name"], "Paracetamol");
+    assert_eq!(top[0]["product_name"], "Paracetamol");
     assert_eq!(top[0]["qty_sold"], 2);
     assert_eq!(top[0]["revenue"], "2000");
+    // Full ranking fields the client consumes: rank, revenue_pct, abc_class.
+    // 2000 of 2500 total = 80% cumulative → bucket A for the top row.
+    assert_eq!(top[0]["rank"], 1);
+    assert_eq!(top[0]["abc_class"], "A");
+    assert!(top[0]["revenue_pct"].is_string());
 }
 
 #[tokio::test]
@@ -340,4 +345,21 @@ async fn unauthenticated_returns_401() {
     let h = spawn(License::free_default(Uuid::nil())).await;
     let (status, _) = get_dashboard(&h.app, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn cajero_role_is_forbidden() {
+    // The dashboard surfaces revenue/margin: cajero is excluded by the role
+    // gate even with a valid token for the right tenant.
+    let h = spawn(License::free_default(Uuid::nil())).await;
+    let cajero = auth::issue(
+        &jwt_cfg(),
+        &h.user.to_string(),
+        &h.tenant.to_string(),
+        vec!["cajero".into()],
+    )
+    .unwrap();
+    let (status, j) = get_dashboard(&h.app, Some(&cajero)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(j["error"]["code"], "FORBIDDEN");
 }

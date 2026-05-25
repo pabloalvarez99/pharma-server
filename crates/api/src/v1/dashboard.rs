@@ -14,7 +14,13 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, routing::get, Json, Router};
+use axum::{
+    extract::State,
+    http::header,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
 use chrono::{Datelike, TimeZone, Utc};
 use rust_decimal::Decimal;
 use surrealdb::sql::Thing;
@@ -35,9 +41,15 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
     s.db.clone().ok_or_else(ApiError::service_unavailable)
 }
 
+/// Roles allowed to read the executive overview. Excludes `cajero`: the
+/// dashboard surfaces revenue/margin figures meant for management, matching the
+/// role posture of the other report endpoints.
+const DASHBOARD_ROLES: &[&str] = &["admin", "owner", "quimico"];
+
 pub fn router(state: AppState) -> Router<AppState> {
-    let _ = state;
-    Router::new().route("/api/v1/reports/dashboard", get(dashboard))
+    Router::new()
+        .route("/api/v1/reports/dashboard", get(dashboard))
+        .route_layer(crate::role::layer(state, DASHBOARD_ROLES))
 }
 
 /// `[from, to]` covering "today" in UTC: `[00:00:00, 23:59:59.999999999]`.
@@ -72,14 +84,42 @@ fn month_range() -> SalesReportFilters {
 async fn dashboard(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Response, ApiError> {
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
 
-    // --- ventas_hoy / ventas_mes ------------------------------------------
-    // `sales_daily` buckets by UTC day; with a single-day window it yields at
-    // most one row, with a month window up to ~31 — fold them into one total.
-    let today = reports::sales_daily(db.as_ref(), &tenant, today_range()).await?;
+    // "today" bounds computed once and reused by the sales, top-products and
+    // margin queries (was previously recomputed three times).
+    let tr = today_range();
+    let (t_from, t_to) = (tr.from, tr.to);
+
+    // Fan out the independent read-only aggregates concurrently. All four
+    // futures hold only shared borrows of `db`/`tenant`; the first error
+    // short-circuits. Wall-clock is ~max(calls) instead of the sum.
+    let (today, month, stats, top, expiring) = tokio::try_join!(
+        reports::sales_daily(
+            db.as_ref(),
+            &tenant,
+            SalesReportFilters {
+                from: t_from,
+                to: t_to,
+            },
+        ),
+        reports::sales_daily(db.as_ref(), &tenant, month_range()),
+        catalog::stats(db.as_ref(), &tenant),
+        reports::top_products(
+            db.as_ref(),
+            &tenant,
+            TopProductsFilters {
+                from: t_from,
+                to: t_to,
+                limit: Some(5),
+            },
+        ),
+        reports::near_expiry(db.as_ref(), &tenant, NearExpiryFilters { days: Some(30) }),
+    )?;
+
+    // `sales_daily` buckets by UTC day; fold the (1 today / ~31 month) rows.
     let (mut t_orders, mut t_rev, mut t_cash, mut t_card) =
         (0i64, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
     for row in &today {
@@ -88,48 +128,30 @@ async fn dashboard(
         t_cash += row.cash;
         t_card += row.card;
     }
-
-    let month = reports::sales_daily(db.as_ref(), &tenant, month_range()).await?;
     let (mut m_orders, mut m_rev) = (0i64, Decimal::ZERO);
     for row in &month {
         m_orders += row.orders;
         m_rev += row.revenue;
     }
 
-    // --- inventario -------------------------------------------------------
-    let stats = catalog::stats(db.as_ref(), &tenant).await?;
-
-    // --- top_productos (today, 5) -----------------------------------------
-    let top = reports::top_products(
-        db.as_ref(),
-        &tenant,
-        TopProductsFilters {
-            from: today_range().from,
-            to: today_range().to,
-            limit: Some(5),
-        },
-    )
-    .await?;
-    let top_json: Vec<serde_json::Value> = top
-        .into_iter()
-        .map(|r| {
-            serde_json::json!({
-                "name": r.product_name,
-                "qty_sold": r.qty_sold,
-                "revenue": r.revenue.to_string(),
-            })
-        })
-        .collect();
-
-    // --- por_vencer (count near-expiry <=30d) -----------------------------
-    let expiring =
-        reports::near_expiry(db.as_ref(), &tenant, NearExpiryFilters { days: Some(30) }).await?;
+    // Emit the domain's full ranking rows (rank, revenue_pct, abc_class — the
+    // ABC bucket is computed domain-side over the returned ranking) so the
+    // Tauri client renders ABC badges without recomputing anything.
+    let top_productos = serde_json::to_value(&top).unwrap_or_else(|_| serde_json::json!([]));
     let por_vencer = expiring.len() as i64;
 
     // --- margen_hoy (license-gated; degrade to null, never 402) -----------
     let lic = state.license.load();
     let margen_hoy: serde_json::Value = if license::entitled(&lic, "reports.margins_daily") {
-        let rows = reports::margins_daily(db.as_ref(), &tenant, today_range()).await?;
+        let rows = reports::margins_daily(
+            db.as_ref(),
+            &tenant,
+            SalesReportFilters {
+                from: t_from,
+                to: t_to,
+            },
+        )
+        .await?;
         let (mut rev, mut cost) = (Decimal::ZERO, Decimal::ZERO);
         for row in &rows {
             rev += row.revenue;
@@ -150,7 +172,7 @@ async fn dashboard(
         serde_json::Value::Null
     };
 
-    Ok(Json(serde_json::json!({
+    let body = serde_json::json!({
         "ventas_hoy": {
             "orders": t_orders,
             "revenue": t_rev.to_string(),
@@ -168,8 +190,12 @@ async fn dashboard(
             "out_of_stock": stats.out_of_stock,
             "value": stats.inventory_value.to_string(),
         },
-        "top_productos": top_json,
+        "top_productos": top_productos,
         "por_vencer": por_vencer,
         "margen_hoy": margen_hoy,
-    })))
+    });
+
+    // Short private cache so repeated tab navigations don't re-fan-out the
+    // aggregate queries on every render.
+    Ok(([(header::CACHE_CONTROL, "private, max-age=30")], Json(body)).into_response())
 }
