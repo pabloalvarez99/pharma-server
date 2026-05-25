@@ -116,9 +116,7 @@ pub enum WebOrderStatus {
 /// Normalise + validate request inputs. Does not touch the DB.
 pub fn validate(req: &WebOrderRequest) -> DomainResult<()> {
     if req.external_order_id.trim().is_empty() {
-        return Err(DomainError::Invalid(
-            "external_order_id requerido".into(),
-        ));
+        return Err(DomainError::Invalid("external_order_id requerido".into()));
     }
     if !WEB_METHODS.contains(&req.payment_method.as_str()) {
         return Err(DomainError::Invalid(format!(
@@ -158,9 +156,7 @@ pub fn validate(req: &WebOrderRequest) -> DomainResult<()> {
         return Err(DomainError::Invalid("total negativo".into()));
     }
     if req.customer.name.trim().is_empty() {
-        return Err(DomainError::Invalid(
-            "nombre de cliente requerido".into(),
-        ));
+        return Err(DomainError::Invalid("nombre de cliente requerido".into()));
     }
     Ok(())
 }
@@ -216,10 +212,7 @@ pub async fn ingest(
             order_id: existing.id.to_string(),
             external_order_id: req.external_order_id,
             status: WebOrderStatus::IdempotentReplay,
-            customer_id: existing
-                .customer
-                .map(|t| t.to_string())
-                .unwrap_or_default(),
+            customer_id: existing.customer.map(|t| t.to_string()).unwrap_or_default(),
             total: existing.total.to_string(),
             created_at: existing.created_at,
         });
@@ -230,7 +223,8 @@ pub async fn ingest(
     let cust_phone = clean_opt(req.customer.phone.as_deref());
     let cust_email = clean_opt(req.customer.email.as_deref());
     let cust_rut = clean_opt(req.customer.rut.as_deref()).map(|r| normalize_rut(&r));
-    let customer_id = upsert_customer(db, tenant, &cust_name, &cust_rut, &cust_phone, &cust_email).await?;
+    let customer_id =
+        upsert_customer(db, tenant, &cust_name, &cust_rut, &cust_phone, &cust_email).await?;
 
     // --- product resolution: map external_id → product Thing --------------
     let externals: Vec<String> = req.items.iter().map(|i| i.external_id.clone()).collect();
@@ -417,9 +411,7 @@ async fn persist_web_order(
     }
     q.push_str("COMMIT;");
 
-    let dec_val = |d: Decimal| -> surrealdb::sql::Value {
-        surrealdb::sql::Number::from(d).into()
-    };
+    let dec_val = |d: Decimal| -> surrealdb::sql::Value { surrealdb::sql::Number::from(d).into() };
 
     let mut qb = db
         .query(q)
