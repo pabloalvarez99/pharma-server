@@ -12,9 +12,42 @@
 //    and the onSuccess(session, serverUrl) callback are untouched.
 import { login, type SessionInfo } from "../api";
 
-const DEFAULT_SERVER = "http://127.0.0.1:8080";
+const FALLBACK_SERVER = "http://127.0.0.1:8080";
 const DEFAULT_TENANT = "tufarmacia";
 const DEFAULT_EMAIL = "admin@tufarmacia.cl";
+const SERVER_STORE_KEY = "pharma:last-server";
+
+/** Build-time override baked by Vite (`VITE_SERVER_URL`), if any. Lets a
+ *  field-install build ship pointing at the pharmacy's real server IP. */
+function envServer(): string | undefined {
+  // No vite/client types in this project, so reach `import.meta.env` via an
+  // unknown cast rather than augmenting global ImportMeta.
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  return env?.VITE_SERVER_URL?.trim() || undefined;
+}
+
+/** Last server the user logged into successfully, persisted across launches. */
+function storedServer(): string | undefined {
+  try {
+    return localStorage.getItem(SERVER_STORE_KEY)?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Resolve the server field's initial value and whether this looks like a
+ *  never-configured first launch. Priority: persisted > build-time env >
+ *  loopback. On a fresh install with no env, the loopback is only a guess — so
+ *  we surface the "Conexión avanzada" panel by default so a LAN client on a
+ *  different machine isn't silently pointed at its own localhost. */
+function resolveServer(): { value: string; firstLaunch: boolean } {
+  const stored = storedServer();
+  const env = envServer();
+  return {
+    value: stored ?? env ?? FALLBACK_SERVER,
+    firstLaunch: !stored && !env,
+  };
+}
 
 interface FieldId {
   input: string;
@@ -32,6 +65,7 @@ export function renderLogin(
   root: HTMLElement,
   onSuccess: (session: SessionInfo, serverUrl: string) => void,
 ): void {
+  const initialServer = resolveServer();
   root.innerHTML = `
     <div class="login-stage" role="main">
       <div class="login-bg" aria-hidden="true">
@@ -141,7 +175,7 @@ export function renderLogin(
               <p id="${FIELDS.password.err}" class="field-error" role="alert" hidden></p>
             </div>
 
-            <details class="advanced" id="adv-conn">
+            <details class="advanced" id="adv-conn"${initialServer.firstLaunch ? " open" : ""}>
               <summary>
                 <span>Conexión avanzada</span>
                 <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -156,11 +190,11 @@ export function renderLogin(
                     name="server"
                     type="text"
                     spellcheck="false"
-                    value="${DEFAULT_SERVER}"
+                    value="${initialServer.value}"
                     aria-describedby="${FIELDS.server.err}"
                   />
                   <p id="${FIELDS.server.err}" class="field-error" role="alert" hidden></p>
-                  <p class="field-hint">LAN local por defecto. Cambia solo si tu servidor corre en otra IP o puerto.</p>
+                  <p class="field-hint">Si el servidor corre en otro equipo de la red, escribe su IP y puerto (ej: http://192.168.1.50:8080).</p>
                 </div>
               </div>
             </details>
@@ -288,6 +322,9 @@ export function renderLogin(
       const session = await login(serverUrl, tenant, email, password);
       // Friendly tenant label for the shell (server /me only returns the record id).
       try { sessionStorage.setItem("tenant_slug", tenant); } catch { /* noop */ }
+      // Remember the server that worked so the next launch pre-fills it (and
+      // the advanced panel stays collapsed — this machine is configured now).
+      try { localStorage.setItem(SERVER_STORE_KEY, serverUrl); } catch { /* noop */ }
       btn.classList.remove("loading");
       btn.classList.add("ok");
       btnLabel.textContent = "LISTO";
