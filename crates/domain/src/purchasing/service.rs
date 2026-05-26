@@ -411,7 +411,10 @@ pub async fn receive_purchase_order_lines(
         .ok_or(DomainError::NotFound)?;
     // Multi-receipt path: `partially_received` must accept further receipts
     // until the PO completes to `received`.
-    if !matches!(current.status.as_str(), "sent" | "approved" | "partially_received") {
+    if !matches!(
+        current.status.as_str(),
+        "sent" | "approved" | "partially_received"
+    ) {
         return Err(DomainError::Conflict(format!(
             "orden en estado '{}' no puede recibir mercadería (solo desde 'sent', 'approved' o 'partially_received')",
             current.status
