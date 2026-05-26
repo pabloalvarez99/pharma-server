@@ -36,6 +36,12 @@ jobs:
       - name: test
         run: cargo test --workspace
 
+      # Compile + run the Criterion harness once in test mode (no measurement),
+      # so a drift in PosSaleRequest/AppState breaks CI instead of silently
+      # rotting the benchmark. See docs/ops/performance.md.
+      - name: bench smoke
+        run: cargo bench -p api --bench pos_sale -- --test
+
       - name: upload api binary
         uses: actions/upload-artifact@v4
         with:
