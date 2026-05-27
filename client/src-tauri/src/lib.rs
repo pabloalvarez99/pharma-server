@@ -86,6 +86,145 @@ pub struct HealthInfo {
     pub reachable: bool,
 }
 
+/// Subset of `crates/domain/src/catalog/model.rs::ProductDto` the client needs
+/// for the POS picker + inventory. Money (`price`) crosses the wire as a STRING
+/// (`rust_decimal::serde::str`) — kept as `String` here and parsed/formatted in
+/// the webview, never as f64.
+#[derive(Serialize, Deserialize)]
+pub struct Product {
+    pub id: String,
+    pub name: String,
+    pub price: String,
+    pub stock: i64,
+    pub active: bool,
+    pub laboratory: Option<String>,
+    pub active_ingredient: Option<String>,
+}
+
+/// Mirrors `crates/domain/src/catalog/model.rs::ProductStats` (the
+/// `/products/stats` payload). `inventory_value` is a STRING (Decimal).
+#[derive(Serialize, Deserialize)]
+pub struct InventorySummary {
+    pub total: i64,
+    pub active: i64,
+    pub low_stock: i64,
+    pub out_of_stock: i64,
+    pub inventory_value: String,
+    pub expired: i64,
+}
+
+/// Mirrors `crates/domain/src/expenses/model.rs::DailySalesRow`. Money fields
+/// (`revenue`/`cash`/`card`) are STRINGS.
+#[derive(Serialize, Deserialize)]
+pub struct DailySalesRow {
+    pub date: String,
+    pub orders: i64,
+    pub revenue: String,
+    pub cash: String,
+    pub card: String,
+}
+
+/// Mirrors `crates/domain/src/expenses/model.rs::TopProductRow`. `revenue` /
+/// `revenue_pct` are STRINGS; `abc_class` is `"A" | "B" | "C"`.
+#[derive(Serialize, Deserialize)]
+pub struct TopProductRow {
+    pub rank: i64,
+    pub product_id: Option<String>,
+    pub product_name: String,
+    pub qty_sold: i64,
+    pub revenue: String,
+    pub revenue_pct: String,
+    pub abc_class: String,
+}
+
+/// One cart line sent up from the webview → forwarded verbatim to
+/// `POST /pos/sale` (`crates/domain/src/sales/model.rs::PosSaleItem`).
+/// `unit_price` is a STRING per the server contract.
+#[derive(Serialize, Deserialize)]
+pub struct PosItem {
+    pub product: String,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_price: String,
+}
+
+// --- cash register (caja) --------------------------------------------------
+
+/// Mirrors `crates/domain/src/cash_register/model.rs::CashSessionDto`. Money
+/// fields cross the wire as STRINGS (`rust_decimal::serde::str*`); the optional
+/// closing/discrepancy fields are absent while the session is still open.
+#[derive(Serialize, Deserialize)]
+pub struct CashSession {
+    pub id: String,
+    pub user: String,
+    pub register_name: String,
+    pub opening_cash: String,
+    pub opening_notes: Option<String>,
+    pub closing_cash_counted: Option<String>,
+    pub closing_cash_expected: Option<String>,
+    pub discrepancia: Option<String>,
+    pub closing_notes: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub status: String,
+}
+
+/// Mirrors `crates/domain/src/cash_register/model.rs::CloseSummary`. Returned by
+/// both `cash_arqueo` (preview, session still open) and `close_cash_session`.
+/// Money fields are STRINGS.
+#[derive(Serialize, Deserialize)]
+pub struct CashCloseSummary {
+    pub session: CashSession,
+    pub cash_sales: String,
+    pub movements_in: String,
+    pub movements_out: String,
+}
+
+// --- customers -------------------------------------------------------------
+
+/// Mirrors `crates/domain/src/customers/model.rs::CustomerDto` (search results).
+#[derive(Serialize, Deserialize)]
+pub struct Customer {
+    pub id: String,
+    pub name: String,
+    pub rut: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+    pub loyalty_points: i64,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `customers/model.rs::CustomerDetailDto` (lifetime aggregates).
+/// `total_spent` is a STRING (Decimal). Lives on `feat/customers-loyalty-history`.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerDetail {
+    pub id: String,
+    pub name: String,
+    pub rut: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+    pub loyalty_points: i64,
+    pub total_spent: String,
+    pub visit_count: i64,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `customers/model.rs::CustomerOrderDto` (one purchase-history row).
+/// `total` is a STRING (Decimal). Lives on `feat/customers-loyalty-history`.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerOrder {
+    pub id: String,
+    pub status: String,
+    pub payment_method: String,
+    pub total: String,
+    pub items_count: i64,
+    pub created_at: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -95,7 +234,6 @@ struct ErrorEnvelope {
 
 #[derive(Deserialize)]
 struct ErrorBody {
-    #[allow(dead_code)]
     code: String,
     message: String,
 }
@@ -139,6 +277,40 @@ fn conn_error(e: reqwest::Error) -> String {
     } else {
         format!("Error de red: {e}")
     }
+}
+
+/// Pull the in-memory JWT or return the Spanish "no session" error. Shared by
+/// every authenticated command (license_status, list_products, reports, POS).
+fn token_of(state: &State<'_, SessionState>) -> Result<String, String> {
+    let guard = state
+        .inner
+        .lock()
+        .map_err(|_| "Estado de sesión corrupto.".to_string())?;
+    guard
+        .as_ref()
+        .map(|s| s.token.clone())
+        .ok_or_else(|| "No hay sesión activa. Inicia sesión primero.".to_string())
+}
+
+/// Like [`error_message`] but preserves the server `code` so the frontend can
+/// branch on it (e.g. `INSUFFICIENT_STOCK`). Encodes as `"CODE|message"`; when
+/// no envelope is present the code half is empty (`"|message"`). The JS side
+/// splits on the first `|`.
+async fn coded_error(resp: reqwest::Response) -> String {
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if let Ok(env) = serde_json::from_str::<ErrorEnvelope>(&body) {
+        return format!("{}|{}", env.error.code, env.error.message);
+    }
+    let msg = match status.as_u16() {
+        401 => "Credenciales inválidas.".to_string(),
+        403 => "Permiso denegado para esta operación.".to_string(),
+        404 => "Recurso no encontrado en el servidor.".to_string(),
+        422 => "No se pudo procesar la venta.".to_string(),
+        503 => "Servicio no disponible. Intenta nuevamente.".to_string(),
+        other => format!("Error del servidor ({other})."),
+    };
+    format!("|{msg}")
 }
 
 // ---------------------------------------------------------------------------
@@ -214,16 +386,7 @@ async fn license_status(
     state: State<'_, SessionState>,
     server_url: String,
 ) -> Result<LicenseSummary, String> {
-    let token = {
-        let guard = state
-            .inner
-            .lock()
-            .map_err(|_| "Estado de sesión corrupto.".to_string())?;
-        guard
-            .as_ref()
-            .map(|s| s.token.clone())
-            .ok_or_else(|| "No hay sesión activa. Inicia sesión primero.".to_string())?
-    };
+    let token = token_of(&state)?;
 
     let http = client()?;
     let base = base(&server_url);
@@ -241,6 +404,398 @@ async fn license_status(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de licencia inválida del servidor: {e}"))
+}
+
+// --- catalog / inventory ---------------------------------------------------
+
+/// GET `/api/v1/products` (Bearer). `search` filters by name/ingredient on the
+/// server; `limit` caps rows. Returns the trimmed [`Product`] projection.
+#[tauri::command]
+async fn list_products(
+    state: State<'_, SessionState>,
+    server_url: String,
+    search: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Product>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+
+    let mut req = http
+        .get(format!("{base}/api/v1/products"))
+        .bearer_auth(token);
+    if let Some(s) = search.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("search", s)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de productos inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/products/stats` (Bearer) → inventory KPIs (count, low/out of
+/// stock, total valuation). Reused by both Inventario and Reportes.
+#[tauri::command]
+async fn inventory_summary(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<InventorySummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/products/stats"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de inventario inválida del servidor: {e}"))
+}
+
+// --- reports ---------------------------------------------------------------
+
+/// GET `/api/v1/reports/sales-daily` (Bearer). One row per UTC day with orders
+/// + revenue split by tender. Free tier (sales-daily is core, not gated).
+#[tauri::command]
+async fn sales_daily(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<Vec<DailySalesRow>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/reports/sales-daily"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de ventas inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/top-products?limit=N` (Bearer). Pareto ABC ranking by
+/// revenue over the default window.
+#[tauri::command]
+async fn top_products(
+    state: State<'_, SessionState>,
+    server_url: String,
+    limit: Option<u32>,
+) -> Result<Vec<TopProductRow>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/top-products"))
+        .bearer_auth(token);
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de ranking inválida del servidor: {e}"))
+}
+
+// --- POS sale --------------------------------------------------------------
+
+/// POST `/api/v1/pos/sale` (Bearer + a FRESH `Idempotency-Key` minted here so
+/// every "Cobrar" click is a distinct sale). `cash_amount` / `card_amount` are
+/// optional STRINGS forwarded verbatim. On a non-2xx, the error is returned as
+/// `"CODE|message"` (see [`coded_error`]) so the UI can special-case
+/// `INSUFFICIENT_STOCK`. Returns the raw server JSON (order + items + alerts).
+#[tauri::command]
+async fn pos_sale(
+    state: State<'_, SessionState>,
+    server_url: String,
+    items: Vec<PosItem>,
+    payment_method: String,
+    cash_amount: Option<String>,
+    card_amount: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if items.is_empty() {
+        return Err("|El carrito está vacío.".to_string());
+    }
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+
+    let mut body = serde_json::json!({
+        "items": items,
+        "payment_method": payment_method,
+    });
+    if let Some(c) = cash_amount.filter(|s| !s.is_empty()) {
+        body["cash_amount"] = serde_json::Value::String(c);
+    }
+    if let Some(c) = card_amount.filter(|s| !s.is_empty()) {
+        body["card_amount"] = serde_json::Value::String(c);
+    }
+
+    let key = uuid::Uuid::new_v4().to_string();
+    let resp = http
+        .post(format!("{base}/api/v1/pos/sale"))
+        .bearer_auth(token)
+        .header("Idempotency-Key", key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de venta inválida del servidor: {e}"))
+}
+
+// --- cash register (caja) commands -----------------------------------------
+
+/// GET `/api/v1/cash-sessions?status=open&limit=1` (Bearer). Returns the list
+/// (newest first server-side); the view picks `[0]` as the current open session
+/// or shows "sin caja abierta" when empty. Caja is core/free on every tier.
+#[tauri::command]
+async fn cash_sessions(
+    state: State<'_, SessionState>,
+    server_url: String,
+    status: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<CashSession>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/cash-sessions"))
+        .bearer_auth(token);
+    if let Some(s) = status.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("status", s)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cajas inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/cash-sessions` (Bearer) — open a register. Body shape:
+/// `{ register_name, opening_cash (STRING), notes? }`. Returns the new session.
+#[tauri::command]
+async fn open_cash_session(
+    state: State<'_, SessionState>,
+    server_url: String,
+    register_name: String,
+    opening_cash: String,
+    notes: Option<String>,
+) -> Result<CashSession, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "register_name": register_name,
+        "opening_cash": opening_cash,
+    });
+    if let Some(n) = notes.filter(|s| !s.is_empty()) {
+        body["notes"] = serde_json::Value::String(n);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/cash-sessions"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de apertura inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/cash-sessions/{id}/arqueo` (Bearer) — non-mutating close
+/// preview: expected vs (no count yet). Used to show the operator the expected
+/// cash before they count + confirm the close.
+#[tauri::command]
+async fn cash_arqueo(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<CashCloseSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/cash-sessions/{id}/arqueo"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de arqueo inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/cash-sessions/{id}/close` (Bearer). Body:
+/// `{ closing_cash_counted (STRING), notes? }`. Returns the close summary with
+/// expected vs counted + the discrepancy on the embedded session.
+#[tauri::command]
+async fn close_cash_session(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    closing_cash_counted: String,
+    notes: Option<String>,
+) -> Result<CashCloseSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "closing_cash_counted": closing_cash_counted,
+    });
+    if let Some(n) = notes.filter(|s| !s.is_empty()) {
+        body["notes"] = serde_json::Value::String(n);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/cash-sessions/{id}/close"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cierre inválida del servidor: {e}"))
+}
+
+// --- customers commands -----------------------------------------------------
+//
+// The `/api/v1/customers/{search,{id},{id}/history}` surface lives on
+// `feat/customers-loyalty-history`, which is NOT guaranteed to be merged into
+// this client's server. So every customer command treats a 404 as a soft
+// "module not deployed" signal and rejects with a STABLE sentinel string the
+// view recognises — the Clientes view then renders a friendly upgrade note
+// instead of a hard error. Any other status maps through `error_message`.
+
+/// Sentinel the customer commands reject with on 404 so the view can branch and
+/// show "módulo requiere merge de customers-loyalty" instead of a raw error.
+const CUSTOMERS_MISSING: &str = "CUSTOMERS_MODULE_MISSING";
+
+/// GET `/api/v1/customers/search?q=` (Bearer). 404 → [`CUSTOMERS_MISSING`].
+#[tauri::command]
+async fn customer_search(
+    state: State<'_, SessionState>,
+    server_url: String,
+    q: String,
+) -> Result<Vec<Customer>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/customers/search"))
+        .query(&[("q", &q)])
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de clientes inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/customers/{id}` (Bearer) — detail w/ lifetime aggregates.
+/// 404 → [`CUSTOMERS_MISSING`] (the endpoint itself, not a missing customer;
+/// a real missing-customer comes back through the server envelope on the merged
+/// branch, but here a 404 most likely means the route doesn't exist).
+#[tauri::command]
+async fn customer_detail(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<CustomerDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/customers/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/customers/{id}/history?limit=N` (Bearer). 404 →
+/// [`CUSTOMERS_MISSING`]. Read-only projection of the customer's orders.
+#[tauri::command]
+async fn customer_history(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    limit: Option<u32>,
+) -> Result<Vec<CustomerOrder>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/customers/{id}/history"))
+        .bearer_auth(token);
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de historial inválida del servidor: {e}"))
 }
 
 /// GET `/health/ready`. Public (no token). 200 → healthy; 503 → degraded but
@@ -308,7 +863,19 @@ pub fn run() {
             login,
             license_status,
             server_health,
-            logout
+            logout,
+            list_products,
+            inventory_summary,
+            sales_daily,
+            top_products,
+            pos_sale,
+            cash_sessions,
+            open_cash_session,
+            cash_arqueo,
+            close_cash_session,
+            customer_search,
+            customer_detail,
+            customer_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

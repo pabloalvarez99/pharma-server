@@ -38,6 +38,9 @@ serde_json = "1"
 # the project's "no libclang/OpenSSL on Windows" stance (see CLAUDE.md stack).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["sync"] }
+# v4 random UUID for per-request Idempotency-Key on POS sales (generated
+# server-side in the Tauri command so each "Cobrar" click is a distinct sale).
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 # Default feature set; custom protocols toggled by Tauri tooling when needed.
