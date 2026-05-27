@@ -60,6 +60,7 @@ fn state_with(lic: License, license_path: Option<std::path::PathBuf>) -> api::Ap
         docs_enabled: true,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: Arc::new(pharma_core::config::StockWebhookConfig::default()),
     }
 }
 

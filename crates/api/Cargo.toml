@@ -30,16 +30,19 @@ utoipa.workspace = true
 utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 axum-prometheus.workspace = true
+# Same `metrics` facade version axum-prometheus 0.7 records through, so custom
+# counters land in the global recorder rendered at /metrics.
+metrics = "0.23"
 chrono.workspace = true
 rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 surrealdb.workspace = true
 uuid.workspace = true
 csv.workspace = true
 sha2 = "0.10"
-hex.workspace = true
 hmac.workspace = true
+hex.workspace = true
 subtle.workspace = true
-rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+reqwest.workspace = true
 tar.workspace = true
 flate2.workspace = true
 tokio-cron-scheduler.workspace = true
@@ -59,3 +62,4 @@ rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 hmac.workspace = true
 sha2 = "0.10"
 hex.workspace = true
+metrics-util = { version = "0.17", features = ["debugging"] }

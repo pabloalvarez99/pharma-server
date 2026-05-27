@@ -24,6 +24,10 @@ pub struct AppConfig {
     pub public_catalog: PublicCatalogConfig,
     #[serde(default)]
     pub public_orders: PublicOrdersConfig,
+    /// ERP→web stock-change push webhook (ADR-0013). Disabled by default; the
+    /// common case (no web storefront) carries zero runtime overhead.
+    #[serde(default)]
+    pub stock_webhook: StockWebhookConfig,
 }
 
 /// Public web-push orders endpoint (ADR-0012 pattern 2).
@@ -173,6 +177,57 @@ fn default_true() -> bool {
 
 fn default_docs_enabled() -> DocsConfig {
     DocsConfig::default()
+}
+
+/// Configuration for the stock-change webhook (ADR-0013 Patrón B).
+///
+/// When `enabled` is false or `target_url` is empty the dispatcher is a
+/// no-op. The HMAC secret should be injected via env
+/// (`PHARMA__STOCK_WEBHOOK__HMAC_SECRET`) and never committed in
+/// `config/local.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StockWebhookConfig {
+    /// Master switch. Default `false` — opt-in per ADR-0005 invariants.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Absolute URL of the web endpoint, e.g.
+    /// `https://tu-farmacia.cl/api/webhooks/pharma-stock`. Empty = no-op.
+    #[serde(default)]
+    pub target_url: String,
+    /// Shared HMAC-SHA256 secret. Empty = no-op (refuse to sign with nothing).
+    #[serde(default)]
+    pub hmac_secret: String,
+    #[serde(default)]
+    pub retry: RetryConfig,
+}
+
+/// Bounded retry policy for webhook delivery (ADR-0013): 3 retries with
+/// backoff `[1, 5, 30]` seconds, then drop + WARN. Never blocks the POS path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Number of retries *after* the first attempt. Default `3`.
+    #[serde(default = "default_retry_tries")]
+    pub tries: u32,
+    /// Seconds to wait before each retry. Default `[1, 5, 30]`.
+    #[serde(default = "default_retry_backoff")]
+    pub backoff_secs: Vec<u64>,
+}
+
+fn default_retry_tries() -> u32 {
+    3
+}
+
+fn default_retry_backoff() -> Vec<u64> {
+    vec![1, 5, 30]
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            tries: default_retry_tries(),
+            backoff_secs: default_retry_backoff(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

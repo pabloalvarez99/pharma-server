@@ -45,6 +45,7 @@ fn state() -> api::AppState {
         docs_enabled: true,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: Arc::new(pharma_core::config::StockWebhookConfig::default()),
     }
 }
 

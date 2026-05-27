@@ -103,6 +103,11 @@ async fn spawn(license: License) -> Harness {
         data_dir: Some(db_path.clone()),
         license: Arc::new(arc_swap::ArcSwap::from_pointee(license)),
         license_path: None,
+        rate_limit: None,
+        docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: std::sync::Arc::new(pharma_core::config::StockWebhookConfig::default()),
     };
     Harness {
         app: api::build_router(state),

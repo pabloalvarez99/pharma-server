@@ -106,6 +106,7 @@ fn state(db: Arc<db::Db>, enabled: bool, secret: &str) -> api::AppState {
             enabled,
             hmac_secret: secret.into(),
         },
+        stock_webhook: std::sync::Arc::new(pharma_core::config::StockWebhookConfig::default()),
     }
 }
 

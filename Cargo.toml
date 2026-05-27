@@ -48,7 +48,7 @@ include_dir = "0.7"
 # auth
 jsonwebtoken = "9"
 argon2 = "0.5"
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
 
 # openapi
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
@@ -122,9 +122,9 @@ rand = "0.8"
 bs58 = "0.5"
 sha2 = "0.10"
 hex = "0.4"
+hmac = "0.12"
 
 # HMAC-SHA256 + constant-time comparison (web push orders signature verify)
-hmac = "0.12"
 subtle = "2"
 
 [profile.release]

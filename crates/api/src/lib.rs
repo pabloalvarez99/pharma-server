@@ -15,6 +15,7 @@ mod health;
 mod middleware;
 mod openapi;
 mod routes;
+pub mod stock_webhook;
 mod v1;
 
 pub use middleware::{audit, rate_limit, role};
@@ -53,6 +54,9 @@ pub struct AppState {
     /// Public web-push orders endpoint config (ADR-0012 pattern 2). Default
     /// `enabled = false` + empty secret so the route returns 404.
     pub public_orders: pharma_core::config::PublicOrdersConfig,
+    /// ERP→web stock-change webhook config (ADR-0013). Always present; a
+    /// disabled/empty config makes the dispatcher a no-op (the common case).
+    pub stock_webhook: Arc<stock_webhook::StockWebhookConfig>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -187,7 +191,14 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         docs_enabled: cfg.docs.enabled,
         public_catalog: cfg.public_catalog.clone(),
         public_orders: cfg.public_orders.clone(),
+        stock_webhook: Arc::new(cfg.stock_webhook.clone()),
     };
+    if state.stock_webhook.enabled && !state.stock_webhook.target_url.is_empty() {
+        tracing::info!(
+            target = %state.stock_webhook.target_url,
+            "stock webhook enabled (ERP→web push, ADR-0013)"
+        );
+    }
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
         .with_prefix("pharma")
@@ -378,6 +389,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         docs: pharma_core::config::DocsConfig::default(),
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: pharma_core::config::StockWebhookConfig::default(),
     }
 }
 
@@ -461,6 +473,7 @@ mod tests {
             docs_enabled: true,
             public_catalog: pharma_core::config::PublicCatalogConfig::default(),
             public_orders: pharma_core::config::PublicOrdersConfig::default(),
+            stock_webhook: Arc::new(stock_webhook::StockWebhookConfig::default()),
         }
     }
 
