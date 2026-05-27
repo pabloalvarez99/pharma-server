@@ -97,6 +97,10 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 rsa = "0.9"
 sha1 = { version = "0.10", features = ["oid"] }
 
+# DTE cert encrypt-at-rest (PFX AES-256-GCM + Argon2id KDF).
+aes-gcm = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+
 # backup archives
 tar = "0.4"
 flate2 = "1.0"

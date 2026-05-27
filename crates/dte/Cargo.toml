@@ -20,6 +20,11 @@ surrealdb.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
+aes-gcm.workspace = true
+argon2.workspace = true
+zeroize.workspace = true
+rand.workspace = true
+pharma-core = { path = "../core" }
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
