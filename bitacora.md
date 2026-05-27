@@ -18,9 +18,10 @@ NO acá.
 - **Versión**: `0.1.25` (workspace `Cargo.toml`) — bump por integration cut 2026-05-27.
 - **Branch activa**: `integration/0.1.25` PUSHED → **PR #78** abierta vs `feature/erp-parity` (87 commits, 26 plan steps merged off erp-parity, GATE green fmt+clippy+check+test-no-run real exit 0).
 - **Branches cherry-pick "missing" — FALSO**: prior session marcó `feat/msi-installer-complete`, `chore/production-hardening`, `fix/catalog-import-upsert` como pendientes; verificado 2026-05-27 que las 3 SON ancestros de `integration/0.1.25`. Ya están dentro. No hay cherry-pick necesario.
-- **PRs open post-integration (10 — owner triage)**: #76 docs-CHANGELOG (MERGEABLE), #68 openapi-fase2-rest (MERGEABLE), #67 sales-concurrency (MERGEABLE), #66 jobs-cron-activate, #64 openapi-fase2 partial (MERGEABLE), #63 fix-sales-bugs (MERGEABLE), #62 fix-license-tenant (MERGEABLE), #61 agent-unwrap-fix, #58 ci-hardening, #56 quality-p0-sql-tenant-guards. Plus DTE drop-list: #60, #55, #54. Plus old: #51, #52, #53.
+- **PRs P0/P1 mergeadas a integration 2026-05-27**: #56 (SQL injection + tenant guard), #67 (idempotency BUG-002 body-fingerprint, mig 0020), #63 (over-refund + restock, transitivo), #62 (BUG-006 license-tenant), #61 (agent panic-elim), #53 (MSI UX launcher Fase 9). Pendientes triage owner: #76 docs-CHANGELOG, #68 openapi-fase2-rest (supersede #64, rebase 6 conflicts), #66 jobs-cron (SCOPE CREEP — remueve features, NO auto-merge), #58 ci-hardening (billing concern + supersede audit.toml), #60 DTE cert (rebase). Close-as-merged: #54, #55, #64 (superseded), #59 (transitivo).
 - **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH; integration PR #78 pending review antes de fast-forward).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23 — **deploy 0.1.25 PARKED** (rule #9): cert Authenticode missing (SmartScreen) + smoke VM pending + 10 PRs unresolved en triage. **Workaround $0 documentado 2026-05-27** → [`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md): self-sign cert ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md), scripts `installer/sign/`) + Hyper-V smoke (scripts `installer/smoke/`) + MP/Stripe pilot pagos ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)) + license-server blueprint ([`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)). Camino completo a primer cobro con 0 USD gastados.
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23 — **deploy 0.1.25 PARKED** (rule #9): cert Authenticode missing (SmartScreen) + smoke VM pending. **Workaround $0 documentado 2026-05-27** → [`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md): self-sign cert ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md), scripts `installer/sign/`) + Hyper-V smoke (scripts `installer/smoke/`) + MP/Stripe pilot pagos ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)). **GAP CRÍTICO**: `crates/license/src/keys.rs` placeholder `lk-dev-2026`; prod key `lk-prod-2026-01` (ya en license-server) NO embebida → binario no verifica licencias reales.
+- **MSI mirror público** (Fase 9): https://github.com/pabloalvarez99/pharma-server-releases (descarga sin login). Workflow `release-publisher.yml` recibe artifacts vía `workflow_dispatch`.
 - **`cargo audit` baseline 2026-05-27**: 6 vulns, 5 unmaintained. Crítico RUSTSEC-2021-0046 "telemetry" es **FALSO POSITIVO** — nombre colisiona con crate abandonado de crates.io; nuestro `crates/telemetry` es local + sólo depende de tracing/otel. TODO: renombrar a `pharma-telemetry` para silenciar. Resto upstream-driven: rsa Marvin 5.9 med (surrealdb transitive), rustls-webpki 4× (0.102→0.103 fix; surrealdb/reqwest pin), unmaintained atomic-polyfill/bincode/paste/rustls-pemfile/lru. Documentado como known-known.
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
@@ -340,6 +341,45 @@ NO acá.
 - **Archivos**: `crates/agent/src/{error.rs(new),lib.rs,identity.rs,card.rs,canonical.rs,envelope.rs}`,
   `crates/agent/tests/error_paths.rs (new)`, `crates/{license/src/verify.rs,cli/src/main.rs,api/src/v1/agent.rs,api/tests/agent_inbox.rs}`.
 - **Commit**: `refactor(agent): replace unwrap/expect with Result chain + AgentError enum`.
+
+---
+
+## 2026-05-21 — Fase 9 UX launcher + repo público + roadmap paridad
+
+- **Qué**:
+  - **MSI UX launcher** (entregable 2.5 del prompt): `installer/wix/main.wxs` agregó `ProgramMenuFolder` con shortcut "Pharma Server > Pharma Server Dashboard" (target = `Pharma Server.url` file con `URL=http://localhost:8080/app`). `CustomAction LaunchDashboardWait` ejecuta `launch-wait.ps1` After `InstallFinalize` bajo guard `NOT REMOVE AND UILevel >= 3` (silent `/quiet` no abre browser; passive y full UI sí). PS1 polea `GET /` cada 500ms hasta 15s antes de `Start-Process` — evita race condition launch-vs-service-ready.
+  - **`crates/service/Cargo.toml`**: `metadata.wix.extensions = []` — colisión con built-in `WixUtilExtension`. Flags CLI siguen necesarios para `WixFirewallExtension` (`-C -ext -C WixFirewallExtension -L -ext -L WixFirewallExtension`).
+  - **MSI buildeado verde**: `target/wix/pharma-server-0.1.24-x86_64.msi` (12.36 MB).
+  - **Sandbox smoke wired**: `installer/sandbox/smoke.wsb` + `smoke-inside.ps1`. Doble-click `smoke.wsb` post-reboot abre VM efímera Windows Sandbox que monta el MSI, lo instala en passive, valida service + endpoint + shortcut. Procedure: `docs/install/smoke-procedure.md`.
+  - **Repo público nuevo**: `pabloalvarez99/pharma-server-releases` con README explicativo + workflow stub `release-publisher.yml`. CI privado del repo source puede llamar `workflow_dispatch` con `version`, `msi_url`, `sha256` para publicar release pública sin abrir el código.
+  - **Análisis competidores serio**: `docs/strategy/competitor-parity-analysis.md` mapea SICO, GOLAN, t-Farmacias, iFarmacias, ControlMagistral, Bsale, Defontana, ERP Fusion. 10 features Tier S no tenemos; 8 features Tier A; 7 diferenciadores únicos pharma-server (MSI 1-click, offline real, license Ed25519 offline, no lock-in, compromiso continuidad ADR-0005, federación Fase 13, freemium permanente).
+  - **ADR-0010** (`docs/adr/0010-roadmap-fase-9-parity.md`): roadmap Fase 9.x secuenciada — 9.1 DTEs, 9.2 multi-caja, 9.3 multi-bodega, 9.4 max/min auto-PO, 9.5 Webpay POS = paridad mínima vendible (8-10 semanas dev). 9.6-9.14 = microtx specialization (12-16 semanas adicionales).
+  - **CHANGELOG.md** inicial Keep-A-Changelog con 0.1.24 + Unreleased + back-fill 0.1.23 + 0.1.4.
+  - **SmartScreen doc** (`docs/install/smartscreen-warning.md`): bypass instructions cliente + plan compra cert diferido Fase 9.1.
+
+- **Por qué**:
+  - **Pillar producto "instalación 1-click"** se rompía: cliente instalaba MSI v0.1.23 pero no veía nada porque el dashboard estaba en `http://localhost:8080/app` sin acceso visible. Mata UX vendible. Fix con shortcut + auto-launch.
+  - **Mercado CL exige paridad mínima**: análisis confirmó que sin DTEs SII completos + multi-caja + Webpay POS, pharma-server NO es vendible vs SICO/GOLAN/Bsale. ADR-0010 lockea secuencia ordenada para llegar ahí sin desviarse.
+  - **Distribución pública**: clientes no pueden descargar desde repo privado. Repo separado mirror permite distribución sin abrir source code aún.
+
+- **Decisiones tomadas esta sesión**:
+  - Scope confirmado **farmacia-first** (no pivote ERP genérico).
+  - **Skip Authenticode cert** v0.1.24 — documentar SmartScreen, comprar cert Fase 9.1.
+  - **Distribución vía repo público separado** (no Vercel Blob, no CDN externo).
+  - **Smoke vía Windows Sandbox** (built-in Pro feature, VM efímera) — feature ya habilitada, reboot pendiente.
+  - **NO bumpear versión esta branch** — queda 0.1.24, próximo bump natural Fase 9.1.
+  - **Persistencia análisis vía ADR + docs/strategy** (no solo memoria).
+
+- **Bloqueado**:
+  - PRs #51, #52, license-server #1: CI bloqueada por billing GH Actions ("job not started because recent account payments have failed or your spending limit needs to be increased"). Código local verde (fmt + clippy + tests). Resolución billing https://github.com/settings/billing → re-trigger.
+
+- **Archivos**: `installer/wix/main.wxs`, `installer/wix/launch-dashboard.url`, `installer/wix/launch-wait.ps1`, `crates/service/Cargo.toml`, `installer/sandbox/smoke.wsb`, `installer/sandbox/smoke-inside.ps1`, `docs/adr/0010-roadmap-fase-9-parity.md`, `docs/strategy/competitor-parity-analysis.md`, `docs/install/smartscreen-warning.md`, `docs/install/smoke-procedure.md`, `CHANGELOG.md`, `bitacora.md`. Repo nuevo `pabloalvarez99/pharma-server-releases` con `README.md` + `.github/workflows/release-publisher.yml`.
+
+- **Pendiente próxima sesión**:
+  1. Reboot Windows → smoke MSI v0.1.24 en Sandbox (procedure documentada).
+  2. Mergear PRs #51, #52 (post-billing-fix) + #1 license-server.
+  3. Publicar release v0.1.24 en repo público vía workflow_dispatch.
+  4. Empezar Fase 9.1 — DTEs completos (boleta + factura + NC + ND + GD + X/Z fiscales).
 
 ---
 

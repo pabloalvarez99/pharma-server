@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  pharma-server — WiX installer (cargo-wix / WiX v3 toolset).
+  pharma-server WiX installer (cargo-wix / WiX v3 toolset).
 
   Installs:
     - pharma-service.exe to %ProgramFiles%\PharmaServer\
     - Windows service "PharmaServer" (auto-start, LocalSystem)
     - Data dir %ProgramData%\PharmaServer\
     - Inbound firewall rule on TCP 8080
+    - Start Menu shortcut "Pharma Server > Pharma Server Dashboard"
+    - Launch helper (PowerShell healthcheck + browser open) post-install in interactive modes
 
-  Build via cargo-wix; see project README.
+  Build via cargo-wix. WiX extensions: util, fire.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
-     xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension">
+     xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
     <Product Id="*"
              Name="Pharma Server"
              Manufacturer="Pablo Alvarez"
@@ -30,6 +33,8 @@
         <Feature Id="MainFeature" Title="Pharma Server" Level="1">
             <ComponentGroupRef Id="ServiceComponents" />
             <ComponentGroupRef Id="DataDirComponents" />
+            <ComponentGroupRef Id="UxComponents" />
+            <ComponentGroupRef Id="ShortcutComponents" />
         </Feature>
 
         <Directory Id="TARGETDIR" Name="SourceDir">
@@ -38,6 +43,9 @@
             </Directory>
             <Directory Id="CommonAppDataFolder">
                 <Directory Id="DATAFOLDER" Name="PharmaServer" />
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="PharmaShortcutFolder" Name="Pharma Server" />
             </Directory>
         </Directory>
 
@@ -86,5 +94,49 @@
                 <CreateFolder />
             </Component>
         </ComponentGroup>
+
+        <ComponentGroup Id="UxComponents" Directory="INSTALLFOLDER">
+            <Component Id="DashboardUrlFile" Guid="A1B2C3D4-1111-4F00-8000-000000000001">
+                <File Id="DashboardUrl"
+                      Name="Pharma Server.url"
+                      Source="$(var.CargoTargetBinDir)\..\..\installer\wix\launch-dashboard.url"
+                      KeyPath="yes" />
+            </Component>
+            <Component Id="LaunchScriptFile" Guid="A1B2C3D4-1111-4F00-8000-000000000002">
+                <File Id="LaunchScript"
+                      Name="launch-wait.ps1"
+                      Source="$(var.CargoTargetBinDir)\..\..\installer\wix\launch-wait.ps1"
+                      KeyPath="yes" />
+            </Component>
+        </ComponentGroup>
+
+        <ComponentGroup Id="ShortcutComponents" Directory="PharmaShortcutFolder">
+            <Component Id="DashboardShortcut" Guid="A1B2C3D4-1111-4F00-8000-000000000003">
+                <Shortcut Id="DashboardShortcutSC"
+                          Name="Pharma Server Dashboard"
+                          Description="Abre el panel de Pharma Server en tu navegador."
+                          Target="[INSTALLFOLDER]Pharma Server.url" />
+                <RemoveFolder Id="RemovePharmaShortcutFolder"
+                              Directory="PharmaShortcutFolder"
+                              On="uninstall" />
+                <RegistryValue Root="HKCU"
+                               Key="Software\PharmaServer"
+                               Name="installed"
+                               Type="integer"
+                               Value="1"
+                               KeyPath="yes" />
+            </Component>
+        </ComponentGroup>
+
+        <CustomAction Id="LaunchDashboardWait"
+                      Directory="INSTALLFOLDER"
+                      ExeCommand='powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "[#LaunchScript]"'
+                      Execute="immediate"
+                      Impersonate="yes"
+                      Return="asyncNoWait" />
+
+        <InstallExecuteSequence>
+            <Custom Action="LaunchDashboardWait" After="InstallFinalize">NOT REMOVE AND UILevel &gt;= 3</Custom>
+        </InstallExecuteSequence>
     </Product>
 </Wix>
