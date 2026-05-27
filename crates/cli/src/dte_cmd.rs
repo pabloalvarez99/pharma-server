@@ -159,6 +159,15 @@ pub struct CertImportArgs {
     /// oculto. La passphrase NUNCA viene por flag directo (shell history).
     #[arg(long)]
     pub passphrase_env: Option<String>,
+    /// RUT del propietario del cert (formato `12345678-9`).
+    #[arg(long)]
+    pub rut: String,
+    /// Vigencia desde (YYYY-MM-DD, UTC).
+    #[arg(long)]
+    pub from: String,
+    /// Vigencia hasta (YYYY-MM-DD, UTC).
+    #[arg(long)]
+    pub to: String,
 }
 
 #[derive(Args, Debug)]
@@ -429,19 +438,86 @@ async fn dte_export(db: &Db, args: DteExportArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn dte_cancel(_db: &Db, args: DteCancelArgs) -> anyhow::Result<()> {
+async fn dte_cancel(db: &Db, args: DteCancelArgs) -> anyhow::Result<()> {
     if !args.confirm {
         bail!(
             "destructive op — pass --confirm to cancel DTE {}",
             args.dte_id
         );
     }
-    // TODO(fase-9.1.f): wire `dte::cancel::transition_to_cancelled` cuando
-    // merge la branch `feat/dte-9-1-fgh-cancel-libro-xz`. Hoy es stub.
-    bail!(
-        "not yet wired — depends on branch feat/dte-9-1-fgh-cancel-libro-xz (reason recorded: {})",
-        args.reason
+    let thing = parse_thing(&args.dte_id, "dte")?;
+    // Cargar la fila para conocer el estado actual y validar la transición
+    // antes de tocar DB. NO cargamos el `dte::Dte` completo (la migración 0017
+    // no persiste items/metadata en el formato que `Dte::deserialize` espera);
+    // construimos un `Dte` mínimo, dejamos que `cancel_dte` valide la regla, y
+    // persistimos solo `estado` + `metadata` (este último append-only).
+    let mut res = db
+        .query("SELECT * FROM $id")
+        .bind(("id", thing.clone()))
+        .await
+        .context("SELECT dte por id")?;
+    let row: Option<DteRow> = res.take(0)?;
+    let row = row.ok_or_else(|| anyhow!("DTE no encontrado: {}", args.dte_id))?;
+    let mut minimal = stub_dte_for_transition(&row)?;
+    dte::cancel::cancel_dte(&mut minimal, args.reason.clone()).with_context(|| {
+        format!(
+            "cancel_dte rechazó la transición desde estado {}",
+            row.estado
+        )
+    })?;
+    let metadata = minimal.metadata.clone();
+    let mut upd = db
+        .query("UPDATE $id SET estado = $estado, metadata = $metadata RETURN AFTER")
+        .bind(("id", thing))
+        .bind(("estado", "cancelled".to_string()))
+        .bind(("metadata", metadata))
+        .await
+        .context("UPDATE dte estado=cancelled")?;
+    let updated: Option<DteRow> = upd.take(0)?;
+    let updated = updated.ok_or_else(|| anyhow!("UPDATE no retornó la fila"))?;
+    println!(
+        "DTE cancelado: id={} folio={} estado={} reason=\"{}\"",
+        updated.id, updated.folio, updated.estado, args.reason
     );
+    Ok(())
+}
+
+/// Construye un `dte::Dte` mínimo a partir de un `DteRow` para alimentar a
+/// `cancel_dte`/`resend_dte` (que validan transiciones de estado + escriben
+/// metadata). Los campos no leídos por la transición se rellenan con valores
+/// neutros — no van a DB porque el UPDATE solo toca `estado` + `metadata`.
+fn stub_dte_for_transition(row: &DteRow) -> anyhow::Result<dte::Dte> {
+    use rust_decimal::Decimal;
+    let estado = match row.estado.as_str() {
+        "draft" => dte::DteEstado::Draft,
+        "signed" => dte::DteEstado::Signed,
+        "sent" => dte::DteEstado::Sent,
+        "accepted" => dte::DteEstado::Accepted,
+        "rejected" => dte::DteEstado::Rejected,
+        "cancelled" => dte::DteEstado::Cancelled,
+        other => bail!("estado en DB desconocido '{other}'"),
+    };
+    let tipo = dte::DteTipo::from_code(row.tipo).map_err(|e| anyhow!("{e}"))?;
+    Ok(dte::Dte {
+        id: uuid::Uuid::nil(),
+        tipo,
+        folio: row.folio,
+        fecha_emision: row.fecha_emision,
+        rut_emisor: row.rut_emisor.clone(),
+        rut_receptor: row.rut_receptor.clone(),
+        razon_social_receptor: row.razon_social_receptor.clone(),
+        monto_neto: Decimal::ZERO,
+        iva: Decimal::ZERO,
+        monto_exento: Decimal::ZERO,
+        monto_total: row.monto_total,
+        items: Vec::new(),
+        estado,
+        xml_firmado: row.xml_firmado.clone(),
+        timbre: None,
+        track_id: row.track_id,
+        sii_glosa: row.sii_glosa.clone(),
+        metadata: None,
+    })
 }
 
 async fn dte_stats(db: &Db, args: DteStatsArgs) -> anyhow::Result<()> {
@@ -625,19 +701,46 @@ async fn caf_next(db: &Db, args: CafNextArgs) -> anyhow::Result<()> {
 // `cert ...` handlers.
 // ============================================================================
 
-async fn cert_import(_db: &Db, args: CertImportArgs) -> anyhow::Result<()> {
-    let _pfx_bytes =
+async fn cert_import(db: &Db, args: CertImportArgs) -> anyhow::Result<()> {
+    let tenant_row = resolve_tenant(db, args.tenant.as_deref()).await?;
+    let pfx_bytes =
         std::fs::read(&args.file).with_context(|| format!("read {}", args.file.display()))?;
-    let _passphrase = match &args.passphrase_env {
+    if pfx_bytes.is_empty() {
+        bail!("PFX vacío: {}", args.file.display());
+    }
+    let passphrase = match &args.passphrase_env {
         Some(var) => std::env::var(var)
-            .with_context(|| format!("env var {var} not set (passphrase source)"))?,
+            .with_context(|| format!("env var {var} no seteada (passphrase source)"))?,
         None => rpassword::prompt_password("PFX passphrase: ").context("read passphrase")?,
     };
-    // TODO(fase-9.1.i): wire `dte::cert::encrypt_at_rest` cuando merge
-    // `feat/dte-9-1-i-cert-encrypt`. Hoy `encrypt_at_rest` retorna stub error.
-    bail!(
-        "not yet wired — depends on branch feat/dte-9-1-i-cert-encrypt (cert encrypt-at-rest stub)"
+    if passphrase.is_empty() {
+        bail!("passphrase vacía");
+    }
+    let desde = parse_date(&args.from, "from")?;
+    let hasta = parse_date(&args.to, "to")?;
+    if hasta < desde {
+        bail!(
+            "vigencia invertida: --from {} > --to {}",
+            args.from,
+            args.to
+        );
+    }
+    let encrypted = dte::cert::encrypt_pfx(&pfx_bytes, &passphrase)
+        .map_err(|e| anyhow!("encrypt_pfx falló: {e}"))?;
+    // El TenantId espera el `id` part (ej. "abc") del Thing `tenant:abc`.
+    let tenant_id = pharma_core::tenant::TenantId::new(tenant_row.id.id.to_raw());
+    let id = dte::cert::store_cert(db, tenant_id, &encrypted, (desde, hasta), &args.rut)
+        .await
+        .map_err(|e| anyhow!("store_cert falló: {e}"))?;
+    println!(
+        "cert imported: id={} rut={} vigencia={}..{} blob={} bytes",
+        id,
+        args.rut,
+        desde.format("%Y-%m-%d"),
+        hasta.format("%Y-%m-%d"),
+        encrypted.blob.len()
     );
+    Ok(())
 }
 
 async fn cert_list(db: &Db, args: CertListArgs) -> anyhow::Result<()> {
@@ -672,11 +775,26 @@ async fn cert_list(db: &Db, args: CertListArgs) -> anyhow::Result<()> {
 
 async fn cert_info(db: &Db, args: CertInfoArgs) -> anyhow::Result<()> {
     let tenant = resolve_tenant(db, args.tenant.as_deref()).await?;
+    // `dte::cert::load_cert` retorna el blob + KdfParams del cert vigente
+    // (filtra por activo + vigencia_desde/hasta vs `time::now()`). Si retorna
+    // `None`, no hay cert utilizable — short-circuit antes de leer metadata.
+    let tenant_id = pharma_core::tenant::TenantId::new(tenant.id.id.to_raw());
+    let encrypted = dte::cert::load_cert(db, tenant_id)
+        .await
+        .map_err(|e| anyhow!("load_cert falló: {e}"))?;
+    let Some(blob) = encrypted else {
+        println!("No active cert for tenant '{}'.", tenant.slug);
+        return Ok(());
+    };
+    // Metadata (RUT, nombre, vigencia) NO viene en `EncryptedPfx` — leer por
+    // separado del mismo registro vigente. Nunca imprimir blob ni KDF params.
     let mut res = db
         .query(
             "SELECT id, tenant, rut_propietario, nombre_propietario, \
              vigencia_desde, vigencia_hasta, activo \
-             FROM cert_digital WHERE tenant = $tenant AND activo = true LIMIT 1",
+             FROM cert_digital WHERE tenant = $tenant AND activo = true \
+               AND vigencia_desde <= time::now() AND vigencia_hasta >= time::now() \
+             ORDER BY created_at DESC LIMIT 1",
         )
         .bind(("tenant", tenant.id.clone()))
         .await
@@ -692,6 +810,7 @@ async fn cert_info(db: &Db, args: CertInfoArgs) -> anyhow::Result<()> {
             println!("Vigencia desde:  {}", r.vigencia_desde);
             println!("Vigencia hasta:  {}", r.vigencia_hasta);
             println!("Activo:          {}", r.activo);
+            println!("Blob bytes:      {}", blob.blob.len());
         }
         None => println!("No active cert for tenant '{}'.", tenant.slug),
     }
