@@ -29,6 +29,7 @@ fn state() -> api::AppState {
         rate_limit: None,
         docs_enabled: true,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     }
 }
 

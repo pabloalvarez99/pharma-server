@@ -29,5 +29,6 @@ pub mod interactions;
 pub mod model;
 pub mod repo;
 pub mod service;
+pub mod web_order;
 
 pub use model::*;

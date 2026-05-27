@@ -1,4 +1,4 @@
-//! Role-gating middleware.
+﻿//! Role-gating middleware.
 //!
 //! Usage on a router/route:
 //! ```ignore
@@ -113,6 +113,7 @@ mod tests {
             rate_limit: None,
             docs_enabled: true,
             public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+            public_orders: pharma_core::config::PublicOrdersConfig::default(),
         }
     }
 

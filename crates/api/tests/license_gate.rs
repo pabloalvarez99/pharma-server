@@ -1,7 +1,7 @@
 //! Integration tests for the license gate on `reports.margins_daily`
 //! (Fase 10d POC). Verifies:
-//! * Free tier → 402 FEATURE_REQUIRES_UPGRADE before any DB work.
-//! * Pro tier with the feature → gate passes (and we see the downstream
+//! * Free tier â†’ 402 FEATURE_REQUIRES_UPGRADE before any DB work.
+//! * Pro tier with the feature â†’ gate passes (and we see the downstream
 //!   "no DB wired" 503 instead of a 402, proving the gate let us through).
 
 use std::sync::Arc;
@@ -38,6 +38,7 @@ fn state_with_license(lic: License) -> api::AppState {
         rate_limit: None,
         docs_enabled: true,
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     }
 }
 
@@ -93,7 +94,7 @@ async fn pro_tier_passes_gate_then_hits_db_unavailable() {
         "reports.margins_daily",
     )));
     let (status, _) = get_margins(app).await;
-    // Gate let us through; downstream sees no DB → 503. Proves the gate is
+    // Gate let us through; downstream sees no DB â†’ 503. Proves the gate is
     // not the blocker.
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }

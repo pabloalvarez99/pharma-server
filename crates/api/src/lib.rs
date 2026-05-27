@@ -50,6 +50,9 @@ pub struct AppState {
     /// Public read-only catalog endpoint config. Default `enabled = false` so
     /// the route returns 404 (ADR-0005 opt-in).
     pub public_catalog: pharma_core::config::PublicCatalogConfig,
+    /// Public web-push orders endpoint config (ADR-0012 pattern 2). Default
+    /// `enabled = false` + empty secret so the route returns 404.
+    pub public_orders: pharma_core::config::PublicOrdersConfig,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -183,6 +186,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         ))),
         docs_enabled: cfg.docs.enabled,
         public_catalog: cfg.public_catalog.clone(),
+        public_orders: cfg.public_orders.clone(),
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -373,6 +377,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         rate_limit: pharma_core::config::RateLimitConfig::default(),
         docs: pharma_core::config::DocsConfig::default(),
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
     }
 }
 
@@ -455,6 +460,7 @@ mod tests {
             rate_limit: None,
             docs_enabled: true,
             public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+            public_orders: pharma_core::config::PublicOrdersConfig::default(),
         }
     }
 

@@ -22,6 +22,46 @@ pub struct AppConfig {
     pub docs: DocsConfig,
     #[serde(default)]
     pub public_catalog: PublicCatalogConfig,
+    #[serde(default)]
+    pub public_orders: PublicOrdersConfig,
+}
+
+/// Public web-push orders endpoint (ADR-0012 pattern 2).
+///
+/// `POST /api/v1/public/orders/web` receives HMAC-signed orders from the
+/// external Tu Farmacia website and writes them into the on-prem ERP with
+/// `channel='web'`. The endpoint is unauthenticated — the caller proves
+/// identity via the `X-Pharma-Signature` header (HMAC-SHA256 of the raw
+/// request body using [`Self::hmac_secret`]).
+///
+/// **Opt-in by design (ADR-0005 "no surprise public exposure").** When
+/// [`Self::enabled`] is `false` (default) OR [`Self::hmac_secret`] is empty,
+/// the route returns 404 from inside the handler — identical to the
+/// "unknown tenant" response, so a probe cannot tell whether the feature
+/// is configured.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicOrdersConfig {
+    /// Default `false` — opt-in only.
+    #[serde(default = "default_public_orders_enabled")]
+    pub enabled: bool,
+    /// Shared HMAC-SHA256 secret. Empty string disables the endpoint
+    /// (returns 404). Inject via `PHARMA__PUBLIC_ORDERS__HMAC_SECRET` env
+    /// var in production; never commit a real value.
+    #[serde(default)]
+    pub hmac_secret: String,
+}
+
+fn default_public_orders_enabled() -> bool {
+    false
+}
+
+impl Default for PublicOrdersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_public_orders_enabled(),
+            hmac_secret: String::new(),
+        }
+    }
 }
 
 /// Public read-only catalog endpoint exposure (Fase 12 sync online opt-in).
