@@ -20,7 +20,7 @@ NO acá.
 - **Branches cherry-pick "missing" — FALSO**: prior session marcó `feat/msi-installer-complete`, `chore/production-hardening`, `fix/catalog-import-upsert` como pendientes; verificado 2026-05-27 que las 3 SON ancestros de `integration/0.1.25`. Ya están dentro. No hay cherry-pick necesario.
 - **PRs open post-integration (10 — owner triage)**: #76 docs-CHANGELOG (MERGEABLE), #68 openapi-fase2-rest (MERGEABLE), #67 sales-concurrency (MERGEABLE), #66 jobs-cron-activate, #64 openapi-fase2 partial (MERGEABLE), #63 fix-sales-bugs (MERGEABLE), #62 fix-license-tenant (MERGEABLE), #61 agent-unwrap-fix, #58 ci-hardening, #56 quality-p0-sql-tenant-guards. Plus DTE drop-list: #60, #55, #54. Plus old: #51, #52, #53.
 - **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH; integration PR #78 pending review antes de fast-forward).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23 — **deploy 0.1.25 PARKED** (rule #9): cert Authenticode missing (SmartScreen) + smoke VM pending + 10 PRs unresolved en triage.
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23 — **deploy 0.1.25 PARKED** (rule #9): cert Authenticode missing (SmartScreen) + smoke VM pending + 10 PRs unresolved en triage. **Workaround $0 documentado 2026-05-27** → [`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md): self-sign cert ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md), scripts `installer/sign/`) + Hyper-V smoke (scripts `installer/smoke/`) + MP/Stripe pilot pagos ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)) + license-server blueprint ([`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)). Camino completo a primer cobro con 0 USD gastados.
 - **`cargo audit` baseline 2026-05-27**: 6 vulns, 5 unmaintained. Crítico RUSTSEC-2021-0046 "telemetry" es **FALSO POSITIVO** — nombre colisiona con crate abandonado de crates.io; nuestro `crates/telemetry` es local + sólo depende de tracing/otel. TODO: renombrar a `pharma-telemetry` para silenciar. Resto upstream-driven: rsa Marvin 5.9 med (surrealdb transitive), rustls-webpki 4× (0.102→0.103 fix; surrealdb/reqwest pin), unmaintained atomic-polyfill/bincode/paste/rustls-pemfile/lru. Documentado como known-known.
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
@@ -103,7 +103,7 @@ NO acá.
    - **11b** Webpay (Oneclick) integration — Pro/Business sub mensual + microtx CL.
    - **11c** Stripe Checkout — microtx con tarjeta internacional.
    - **11d** CRL signed distribution vía CDN ([ADR-0006](./docs/adr/0006-revocation-strategy-signed-crl.md)).
-   - **11e** Provider DTE (SimpleAPI) — boleta SII electrónica por cada cobro. ADR-0008 pendiente.
+   - **11e** Provider DTE (Native Rust) — boleta SII electrónica por cada cobro. Ver [ADR-0011](./docs/adr/0011-dte-provider-native-rust.md) (la "ADR-0008 pendiente" original quedó obsoleta; el slot 0008 ahora es self-sign cert).
 
 ### Mid-term (Fases 12-14)
 
@@ -127,6 +127,59 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-27 — Plan zero-cost a primer cobro: ADR-0008/0009 + scripts sign/smoke + license-server blueprint
+
+- **Qué** (docs-only, sin tocar código Rust):
+  - **[ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md)** (Accepted): firma MSI pilot con
+    **self-signed cert PowerShell** ($0) en vez de cert Authenticode pago ($80-600/año).
+    Onboarding cliente: importar `pilot.cer` a Trusted Publishers (15 min asistido).
+    Upgrade staged: MSIX MS Store $19 (1er cliente) → Azure Trusted Signing $10/mes (>10
+    clientes) → EV $400-600/año (mainstream). Respeta regla #10 (descarta SignPath OSS
+    que exige repo público).
+  - **[ADR-0009](./docs/adr/0009-pilot-payment-provider.md)** (Accepted, amends ADR-0003
+    *priority order* en pilot): **Mercado Pago Chile + Stripe** antes de Webpay. Razón:
+    Webpay requiere RUT empresa + onboarding 2-4 sem; MP/Stripe $0 setup + RUT persona
+    natural OK. Webpay sigue siendo target de escala (se reactiva al constituir SpA).
+    `PaymentProvider` trait garantiza que agregar Webpay después no exige refactor.
+  - **[`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md)**
+    (lockeado v1): documento operativo single-source-of-truth. 3 bloqueos (cert, smoke,
+    cobro) → workaround $0 cada uno → camino crítico día-a-día → handoff para agentes
+    nuevos (§8). Costo total runway hasta primer cobro = **0 USD**.
+  - **[`docs/strategy/license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)**
+    (blueprint v1, no implementado): contrato para bootstrap del repo separado
+    `pharma-license-server`. Stack $0 (Vercel Hobby + Neon free + Resend free + MP/Stripe).
+    DB schema, license JSON canonical (byte-equal vs `crates/license`), key management
+    (privkey solo en Vercel env), payment flow, bootstrap checklist 1-2 días.
+  - **`installer/sign/`** (4 scripts PowerShell + README): `generate-pilot-cert.ps1`
+    (genera pilot.pfx+pilot.cer), `sign-msi.ps1` (signtool + timestamp RFC3161),
+    `verify-signature.ps1`, `import-pilot-cert.ps1` (client-side). `pilot.pfx` añadido a
+    `.gitignore` (secret); `pilot.cer` es público committeable.
+  - **`installer/smoke/`** (3 scripts PowerShell + README): `setup-vm.ps1` (crea VM
+    Hyper-V + snapshot baseline desde Win11 Dev ISO gratis), `run-smoke.ps1` (revert +
+    copy MSI + invoke + report), `smoke-install.ps1` (corre dentro de VM: install →
+    service `PharmaServer` Running → `GET /health/ready` 200 → uninstall → gone).
+- **Por qué**: el fundador pidió explícitamente camino $0 ("no se puede avanzar gratis?").
+  Los 3 bloqueos de Fase 9/11 (regla #9) tenían costo asumido (cert + Webpay onboarding).
+  Cada uno tiene workaround gratis ejecutable hoy sin comprometer invariantes (regla #10
+  repo privado, ADR-0005 core gratis offline, ADR-0004 license-server separado).
+- **Archivos**: `docs/adr/{0008,0009}-*.md`, `docs/adr/0003-*.md` (fix ref stale ADR-0008
+  → ADR-0011 para DTE), `docs/strategy/{zero-cost-launch-plan,license-server-skeleton}.md`,
+  `installer/sign/{generate-pilot-cert,sign-msi,verify-signature,import-pilot-cert}.ps1`
+  + `README.md`, `installer/smoke/{setup-vm,run-smoke,smoke-install}.ps1` + `README.md`,
+  `.gitignore` (+ `installer/sign/*.pfx`), `bitacora.md`, `CLAUDE.md`,
+  `.claude/NEXT_SESSION_PROMPT.md`.
+- **Nota numeración ADR**: slots 0008/0009/0010 estaban libres (DTE provider landeó como
+  0011, no 0008 como decían refs viejas en ADR-0003 + BACKLOG 11e — corregidas). Usé
+  0008 (cert) + 0009 (pagos pilot). 0010 sigue libre (reservar para "upgrade a Azure
+  Trusted Signing" cuando ocurra).
+- **No-en-este-PR (próximos pasos del plan, §5 día-a-día)**: generar pilot.pfx real,
+  habilitar Hyper-V, build+firmar MSI 0.1.25, run smoke VM, publicar al mirror, crear
+  repo `pharma-license-server`. Todo $0.
+- **Estado**: docs-only, no toca código → GATE (fmt/clippy/test) no afectado; verificar
+  igual por regla #2.
 
 ---
 

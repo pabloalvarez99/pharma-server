@@ -60,7 +60,11 @@ pagar con tarjeta personal o internacional).
 - Webpay tiene onboarding pesado (~2-4 semanas KYC + certificación).
 - Sin Stripe inicial → no se monetiza dueños fuera de CL hasta Fase 11.1.
 - Provider DTE (boleta SII electrónica) requiere decisión separada
-  (ADR-0008 pendiente).
+  (resuelta en [ADR-0011](./0011-dte-provider-native-rust.md); el slot 0008 ahora es
+  self-sign cert MSI).
+- **Orden de providers diferido en pilot**: ver [ADR-0009](./0009-pilot-payment-provider.md)
+  — Mercado Pago + Stripe van primero en pilot phase (Webpay requiere RUT empresa +
+  onboarding 2-4 sem). Webpay sigue siendo el target de escala de este ADR.
 
 #### Neutras
 - Fees ~3% son competitivos en CL.

@@ -68,25 +68,28 @@ Decidido 2026-05-20. **Pivote** de licencia única → **MSI Windows freemium es
 - License-server vive en **repo separado** `pharma-license-server` ([ADR-0004](./docs/adr/0004-license-server-separado.md)).
 
 **Pagos** ([`docs/strategy/payments-cl.md`](./docs/strategy/payments-cl.md), [ADR-0003](./docs/adr/0003-payments-webpay-first.md)):
-- Webpay primario (Pro/Business sub + microtx CL).
+- Webpay primario (Pro/Business sub + microtx CL) — **target de escala**.
 - Stripe secundario (microtx con tarjeta internacional, Fase 11.1).
 - Khipu para Enterprise (Fase 11.2).
 - Mercado Pago para LATAM multi-país (Fase 11.3+).
+- **Orden pilot DIFERIDO** ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)): en pilot phase **Mercado Pago + Stripe van primero** (Webpay requiere RUT empresa + onboarding 2-4 sem). Webpay se reactiva al constituir SpA.
+
+**Camino $0 a primer cobro** ([`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md), 2026-05-27): plan operativo para desbloquear Fase 9+11 con **0 USD gastados** hasta el primer cobro. Self-sign MSI ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md), scripts `installer/sign/`) + smoke Hyper-V (scripts `installer/smoke/`) + MP/Stripe pilot ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)) + license-server free-tier ([`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)). **Si el fundador dice "continúa con el plan zero-cost" → ejecutar siguiente paso pendiente del §5 día-a-día.**
 
 ## Roadmap (fases)
 
 Renumerado 2026-05-20 post-pivote. Estado en `bitacora.md` ## BACKLOG.
 
-- **Fase 9** — MSI vendible v1.0.0 (firma Authenticode + smoke VM Windows limpia). **BLOQUEADO por cert**.
+- **Fase 9** — MSI vendible v1.0.0 (firma Authenticode + smoke VM Windows limpia). **Workaround $0** ([`zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md)): self-sign cert pilot ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md)) + Hyper-V smoke desbloquean sin gastar; cert pago/MSIX cuando entre revenue.
 - **Fase 10** — License/entitlement layer:
   - 10a `crates/license` crate nuevo (Ed25519 verify + parser, reusa `crates/agent`).
   - 10b Feature gate API (`entitled`/`require`) + `ApiError::payment_required` 402.
   - 10c CLI `pharma license import|status|features`.
   - 10d 1 feature gated POC (sugerencia: `reports.margins_daily`).
-- **Fase 11** — Payment rails + license-server integration (repo separado, online activation):
-  - 11a `pharma-license-server` skeleton (Next.js + Postgres).
-  - 11b Webpay integration (Pro/Business sub).
-  - 11c Stripe Checkout (microtx).
+- **Fase 11** — Payment rails + license-server integration (repo separado, online activation). Blueprint completo: [`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md).
+  - 11a `pharma-license-server` skeleton (Next.js + Neon free + Resend free; ver blueprint).
+  - 11b **Mercado Pago + Stripe primero** en pilot ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)); Webpay diferido a escala.
+  - 11c Webpay (Oneclick) cuando SpA constituida.
 - **Fase 12** — Sync online opt-in entre nodos (paid tier).
 - **Fase 13** — Marketplace federado B2B ([`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md)). Capa de confianza/reputación.
 - **Fase 14** — Cloud companion (web admin + mobile dashboard, opt-in).
@@ -195,7 +198,8 @@ Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
 | Tocar `crates/api/` (rutas axum, middleware, handlers) | `reference/pharma-server-api.md` |
 | Tocar `crates/cli/` | `reference/pharma-server-cli.md` |
 | Tocar `crates/service/` | `reference/pharma-server-msi.md` + `brain/pharma-server-gotchas.md` |
-| Tocar `installer/` o `*.wxs` | `reference/pharma-server-msi.md` |
+| Tocar `installer/wix/` o `*.wxs` | `reference/pharma-server-msi.md` |
+| Tocar `installer/sign/` o `installer/smoke/` | repo `docs/strategy/zero-cost-launch-plan.md` §2-3 + [ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md) |
 | Tocar `.github/workflows/` | `reference/pharma-server-ci.md` |
 | Tocar `config/`, `rust-toolchain.toml` o env | `reference/pharma-server-env.md` |
 | Histórico / decisiones pasadas | `work/active/pharma-server/decisions-log-index.md` → `bitacora.md` |
@@ -205,6 +209,7 @@ Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
 | Arquitectura general (crates, flujo, multi-tenant) | `reference/pharma-server-architecture.md` |
 | Decisiones técnicas (por qué X) | `brain/pharma-server-decisions.md` + repo `docs/adr/` |
 | **Modelo de negocio / freemium / licencia / pagos** | repo `docs/strategy/` + `docs/adr/` |
+| **Plan $0 a primer cobro / cómo desbloquear venta sin gastar** | repo `docs/strategy/zero-cost-launch-plan.md` (single source of truth) |
 
 SessionStart hook (`.claude/hooks/vault-hint.sh`) sugiere refs según archivos cambiados — leer hints, NO duplicar lectura.
 
