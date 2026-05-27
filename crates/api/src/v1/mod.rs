@@ -14,6 +14,7 @@ pub mod expenses;
 pub mod inventory;
 pub mod license;
 pub mod prescriptions;
+pub mod public_catalog;
 pub mod purchasing;
 pub mod sales;
 
@@ -34,5 +35,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(backup::router(state.clone()))
         .merge(license::router(state.clone()))
         .merge(audit::router(state.clone()))
+        .merge(public_catalog::router(state.clone()))
         .merge(agent::router(state))
 }

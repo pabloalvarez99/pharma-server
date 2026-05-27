@@ -47,6 +47,9 @@ pub struct AppState {
     /// `AppConfig.docs.enabled`. Default `true`; flip off on hardened boxes to
     /// keep the API surface off the wire.
     pub docs_enabled: bool,
+    /// Public read-only catalog endpoint config. Default `enabled = false` so
+    /// the route returns 404 (ADR-0005 opt-in).
+    pub public_catalog: pharma_core::config::PublicCatalogConfig,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -179,6 +182,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
             cfg.rate_limit.clone(),
         ))),
         docs_enabled: cfg.docs.enabled,
+        public_catalog: cfg.public_catalog.clone(),
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -368,6 +372,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         backup: pharma_core::config::BackupConfig::default(),
         rate_limit: pharma_core::config::RateLimitConfig::default(),
         docs: pharma_core::config::DocsConfig::default(),
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 
@@ -449,6 +454,7 @@ mod tests {
             license_path: None,
             rate_limit: None,
             docs_enabled: true,
+            public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         }
     }
 

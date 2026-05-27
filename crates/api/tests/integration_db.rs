@@ -93,6 +93,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
         license_path: None,
         rate_limit: None,
         docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 

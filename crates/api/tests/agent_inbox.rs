@@ -58,6 +58,7 @@ fn node_state(db: Arc<db::Db>) -> (api::AppState, String) {
         license_path: None,
         rate_limit: None,
         docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     };
     (state, did)
 }

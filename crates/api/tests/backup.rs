@@ -74,6 +74,7 @@ async fn spawn() -> (axum::Router, String, TempDir, std::path::PathBuf) {
         license_path: None,
         rate_limit: None,
         docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     };
     (api::build_router(state), token, tmp, db_path)
 }

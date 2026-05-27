@@ -20,6 +20,49 @@ pub struct AppConfig {
     /// key) deserializing to the default-on behavior.
     #[serde(default = "default_docs_enabled")]
     pub docs: DocsConfig,
+    #[serde(default)]
+    pub public_catalog: PublicCatalogConfig,
+}
+
+/// Public read-only catalog endpoint exposure (Fase 12 sync online opt-in).
+///
+/// **Opt-in by design (ADR-0005 "no surprise public exposure").** When
+/// `enabled = false` (default), `GET /api/v1/public/catalog` returns 404 — the
+/// route effectively doesn't exist. Only operators who *explicitly* set
+/// `enabled = true` accept the trade-off of letting an unauthed peer read a
+/// scrubbed subset of their catalog (name, price, in-stock bool, active
+/// ingredient — never cost_price, never internal id, never stock count).
+///
+/// `cors_origins` is a strict allow-list. Requests with `Origin` headers not
+/// in the list get no `Access-Control-Allow-Origin` header (browser will
+/// reject the cross-origin response). Server-to-server clients (no Origin
+/// header) are unaffected — the rate-limit middleware still applies.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicCatalogConfig {
+    /// Default `false` — opt-in only.
+    #[serde(default = "default_public_catalog_enabled")]
+    pub enabled: bool,
+    /// Allowed browser origins for CORS. Default: official Tu Farmacia website.
+    /// Set to `[]` (or any explicit list) to override.
+    #[serde(default = "default_public_catalog_cors_origins")]
+    pub cors_origins: Vec<String>,
+}
+
+fn default_public_catalog_enabled() -> bool {
+    false
+}
+
+fn default_public_catalog_cors_origins() -> Vec<String> {
+    vec!["https://tu-farmacia.cl".to_string()]
+}
+
+impl Default for PublicCatalogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_public_catalog_enabled(),
+            cors_origins: default_public_catalog_cors_origins(),
+        }
+    }
 }
 
 /// Per-tenant + per-IP rate-limit settings. Token-bucket (governor crate).

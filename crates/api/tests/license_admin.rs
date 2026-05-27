@@ -58,6 +58,7 @@ fn state_with(lic: License, license_path: Option<std::path::PathBuf>) -> api::Ap
         license_path,
         rate_limit: None,
         docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
     }
 }
 
