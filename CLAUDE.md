@@ -86,10 +86,11 @@ Renumerado 2026-05-20 post-pivote. Estado en `bitacora.md` ## BACKLOG.
   - 10b Feature gate API (`entitled`/`require`) + `ApiError::payment_required` 402.
   - 10c CLI `pharma license import|status|features`.
   - 10d 1 feature gated POC (sugerencia: `reports.margins_daily`).
-- **Fase 11** — Payment rails + license-server integration (repo separado, online activation). Blueprint completo: [`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md).
-  - 11a `pharma-license-server` skeleton (Next.js + Neon free + Resend free; ver blueprint).
-  - 11b **Mercado Pago + Stripe primero** en pilot ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)); Webpay diferido a escala.
-  - 11c Webpay (Oneclick) cuando SpA constituida.
+- **Fase 11** — Payment rails + license-server integration. **El repo `pharma-license-server` YA EXISTE** (privado, Fase 11b code-complete con Webpay sandbox). Estado real + gaps: [`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md).
+  - 11a ✅ Scaffold Next.js 14 + Prisma + `@noble/ed25519`, canonical JSON cross-repo verificado.
+  - 11b ✅ (code-complete, deploy pendiente) Webpay sandbox + admin issuance + checkout UI.
+  - 11b-gap **embeber prod key `lk-prod-2026-01` en `crates/license/src/keys.rs`** (hoy placeholder `lk-dev-2026`) + deploy Vercel+Neon free.
+  - 11c **Mercado Pago** como primer rail LIVE para cobro real sin SpA ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)); Webpay LIVE cuando SpA; Stripe (schema listo) para internacional.
 - **Fase 12** — Sync online opt-in entre nodos (paid tier).
 - **Fase 13** — Marketplace federado B2B ([`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md)). Capa de confianza/reputación.
 - **Fase 14** — Cloud companion (web admin + mobile dashboard, opt-in).
