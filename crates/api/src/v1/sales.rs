@@ -21,7 +21,7 @@ use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
 use crate::AppState;
 
-use domain::sales::{model::*, service};
+use domain::sales::{historic, model::*, service};
 
 const WRITE_ROLES: &[&str] = &["admin", "owner"];
 const POS_ROLES: &[&str] = &["admin", "owner", "cashier"];
@@ -60,6 +60,10 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     let writes = Router::new()
         .route("/api/v1/settings/{key}", axum::routing::put(set_setting))
+        .route(
+            "/api/v1/admin/import-historic-orders",
+            post(import_historic_orders),
+        )
         .route_layer(crate::role::layer(state, WRITE_ROLES));
 
     reads.merge(pos).merge(writes)
@@ -244,4 +248,29 @@ async fn set_setting(
     let tenant = tenant_of(&claims)?;
     let out = service::set_setting(db.as_ref(), &tenant, &key, &body.value).await?;
     Ok(Json(out))
+}
+
+// --- POST /admin/import-historic-orders ------------------------------------
+
+/// Bulk-load PAST sales (data migration tool). Tenant-scoped via JWT, gated
+/// to admin/owner roles by the router layer.
+///
+/// Differs from `/pos/sale` in three deliberate ways: `created_at` is taken
+/// from the input, `product.stock` stays untouched (current stock is already
+/// correct), and per-order failures don't abort the batch — they surface in
+/// `errors` with the offending index. 200 OK even on partial failure; clients
+/// reconcile via the `created` count + `errors` list.
+async fn import_historic_orders(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<historic::HistoricImportRequest>,
+) -> Result<Json<historic::ImportReport>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let user = user_of(&claims).ok();
+    let sold_by_name = Some(claims.sub.as_str());
+    let report =
+        historic::import_historic_orders(db.as_ref(), &tenant, user.as_ref(), sold_by_name, body)
+            .await?;
+    Ok(Json(report))
 }
