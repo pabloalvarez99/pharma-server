@@ -24,10 +24,11 @@ aes-gcm.workspace = true
 argon2.workspace = true
 zeroize.workspace = true
 rand.workspace = true
-pharma-core = { path = "../core" }
+reqwest.workspace = true
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 rand.workspace = true
 rsa = { workspace = true, features = ["pem"] }
+wiremock.workspace = true
