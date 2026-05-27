@@ -14,6 +14,8 @@ db = { path = "../db" }
 auth = { path = "../auth" }
 agent = { path = "../agent" }
 license = { path = "../license" }
+dte = { path = "../dte" }
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 chrono.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
