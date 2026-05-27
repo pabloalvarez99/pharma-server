@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod agent_orders;
+pub mod audit;
 pub mod backup;
 pub use backup::{backup_now, prune_backups};
 pub mod cash_register;
@@ -32,5 +33,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(expenses::router(state.clone()))
         .merge(backup::router(state.clone()))
         .merge(license::router(state.clone()))
+        .merge(audit::router(state.clone()))
         .merge(agent::router(state))
 }
