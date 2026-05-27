@@ -180,12 +180,14 @@ NO acá.
   + `README.md`, `installer/smoke/{setup-vm,run-smoke,smoke-install}.ps1` + `README.md`,
   `.gitignore` (+ `installer/sign/*.pfx`), `bitacora.md`, `CLAUDE.md`,
   `.claude/NEXT_SESSION_PROMPT.md`.
-- **Nota numeración ADR (2 niveles)**: (a) en pharma-server slots 0008/0009/0010 estaban
+- **Nota numeración ADR (2 niveles)**: (a) en pharma-server los slots 0008/0009 estaban
   libres (DTE landeó como 0011, no 0008 como decían refs viejas en ADR-0003 + BACKLOG 11e
-  — corregidas); usé 0008 (cert) + 0009 (pagos pilot), 0010 sigue libre (reservar para
-  "upgrade Azure Trusted Signing"). (b) **COLISIÓN cross-repo**: `pharma-license-server`
-  tiene SU PROPIO `docs/adr/0008-kms-strategy.md` + `0009-admin-auth.md`, distintos a los
-  míos. Cada repo = namespace ADR independiente; citar siempre con prefijo de repo.
+  — corregidas); usé 0008 (cert) + 0009 (pagos pilot). **0010 NO está libre**: ya existe
+  `0010-roadmap-fase-9-parity.md` (materializó en disco durante esta sesión vía worktree/
+  agente paralelo — el `ls` inicial no lo mostró). Lo agregué al índice `README.md`.
+  (b) **COLISIÓN cross-repo**: `pharma-license-server` tiene SU PROPIO
+  `docs/adr/0008-kms-strategy.md` + `0009-admin-auth.md`, distintos a los míos. Cada repo
+  = namespace ADR independiente; citar siempre con prefijo de repo.
 - **No-en-este-PR (próximos pasos del plan, §5 día-a-día)**: generar pilot.pfx real,
   habilitar Hyper-V, build+firmar MSI 0.1.25, run smoke VM, publicar al mirror (NO
   autónomo), cerrar deploy Fase 11b del license-server (que YA existe), embeber prod key

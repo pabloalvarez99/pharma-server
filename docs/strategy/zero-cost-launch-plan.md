@@ -9,7 +9,7 @@ related_adrs:
   - ADR-0001 (pivote freemium)
   - ADR-0003 (Webpay-first, diferido en pilot por ADR-0009)
   - ADR-0008 (self-sign pilot MSI)
-  - ADR-0009 (MP + Stripe antes de Webpay en pilot)
+  - ADR-0009 (Mercado Pago primer rail LIVE; Webpay ya en sandbox, va live al constituir SpA)
 last_review: 2026-05-27
 ---
 

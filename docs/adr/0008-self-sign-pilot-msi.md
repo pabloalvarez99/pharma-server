@@ -5,6 +5,11 @@
 - **Deciders**: pabloalvarez99 (fundador)
 - **Tags**: distribución, msi, presupuesto, fase-9
 
+> **Nota de numeración**: este es el ADR-0008 de **pharma-server** (self-sign cert MSI).
+> El repo `pharma-license-server` tiene su PROPIO `docs/adr/0008-kms-strategy.md`
+> (estrategia de claves KMS), que es un documento distinto. Cada repo tiene su namespace
+> ADR independiente; citar siempre con prefijo de repo.
+
 ## Context and Problem Statement
 
 `bitacora.md` (estado actual 2026-05-27) marca **Fase 9 vendible v1.0.0 BLOQUEADA por
