@@ -39,6 +39,19 @@ pub enum DteError {
     #[error("tipo DTE no soportado: {0}")]
     UnsupportedTipo(i32),
 
+    #[error(
+        "el envío automático al SII del tipo DTE {tipo} requiere tier '{required_tier}' \
+         (licencia actual: '{tier}')"
+    )]
+    SendNotEntitled {
+        /// Tier actual de la licencia (etiqueta: `free|pro|business|enterprise`).
+        tier: String,
+        /// Código SII del tipo DTE que se intentó enviar.
+        tipo: i32,
+        /// Tier mínimo requerido para enviar ese tipo (etiqueta).
+        required_tier: String,
+    },
+
     #[error("DTE en estado {actual:?} no permite la transición a {target:?}")]
     InvalidTransition {
         actual: crate::types::DteEstado,

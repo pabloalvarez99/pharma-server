@@ -19,6 +19,7 @@ pub mod caf;
 pub mod cancel;
 pub mod cert;
 pub mod error;
+pub mod gating;
 pub mod reports;
 pub mod sign;
 pub mod sii;
@@ -28,5 +29,6 @@ pub mod xml;
 
 pub use cancel::{cancel_dte, resend_dte};
 pub use error::DteError;
+pub use gating::{min_tier_for, require_send_allowed, SendTier};
 pub use reports::{x_report, z_report, DailyReport, ReportKind, TipoBreakdown};
 pub use types::{Caf, CertDigital, Dte, DteEstado, DteItem, DteTipo, EmisorConfig, SiiEnv};
