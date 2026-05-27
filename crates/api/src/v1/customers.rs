@@ -31,6 +31,12 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/clientes", get(list_customers))
         .route("/api/v1/clientes/{id}", get(get_customer))
+        // English customer-lookup surface (POS counter): detail + history +
+        // fuzzy search. Any authenticated role can read — cashiers need it.
+        // `search` is a static segment so it never collides with `{id}`.
+        .route("/api/v1/customers/search", get(search_customers))
+        .route("/api/v1/customers/{id}", get(get_customer_detail))
+        .route("/api/v1/customers/{id}/history", get(customer_history))
         .route("/api/v1/loyalty", get(list_loyalty))
         .route("/api/v1/loyalty/stats", get(loyalty_stats));
 
@@ -65,6 +71,39 @@ async fn get_customer(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::get_customer(&db, &t, &id).await?))
+}
+
+async fn get_customer_detail(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<CustomerDetailDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::get_customer_detail(&db, &t, &id).await?))
+}
+
+async fn customer_history(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    Query(filters): Query<CustomerHistoryFilters>,
+) -> Result<Json<Vec<CustomerOrderDto>>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(
+        service::customer_history(&db, &t, &id, filters).await?,
+    ))
+}
+
+async fn search_customers(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(query): Query<CustomerSearchQuery>,
+) -> Result<Json<Vec<CustomerDto>>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::search_customers(&db, &t, query).await?))
 }
 
 async fn create_customer(
