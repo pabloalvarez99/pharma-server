@@ -123,7 +123,11 @@ fn multipart_body(csv: &str) -> Vec<u8> {
     body
 }
 
-async fn post_import(app: &axum::Router, token: &str, csv: &str) -> (StatusCode, serde_json::Value) {
+async fn post_import(
+    app: &axum::Router,
+    token: &str,
+    csv: &str,
+) -> (StatusCode, serde_json::Value) {
     let body = multipart_body(csv);
     let res = app
         .clone()
@@ -146,9 +150,9 @@ async fn post_import(app: &axum::Router, token: &str, csv: &str) -> (StatusCode,
     let json: serde_json::Value = if bytes.is_empty() {
         serde_json::Value::Null
     } else {
-        serde_json::from_slice(&bytes).unwrap_or_else(|_| {
-            serde_json::json!({ "_raw": String::from_utf8_lossy(&bytes).to_string() })
-        })
+        serde_json::from_slice(&bytes).unwrap_or_else(
+            |_| serde_json::json!({ "_raw": String::from_utf8_lossy(&bytes).to_string() }),
+        )
     };
     (status, json)
 }
@@ -234,12 +238,11 @@ async fn import_duplicate_external_id_in_second_batch_updates_row() {
         price: rust_decimal::Decimal,
         active_ingredient: Option<String>,
     }
-    let mut q = s
-        .db
-        .query("SELECT name, price, active_ingredient FROM product WHERE tenant=$t LIMIT 1")
-        .bind(("t", s.tenant.clone()))
-        .await
-        .unwrap();
+    let mut q =
+        s.db.query("SELECT name, price, active_ingredient FROM product WHERE tenant=$t LIMIT 1")
+            .bind(("t", s.tenant.clone()))
+            .await
+            .unwrap();
     let rows: Vec<Row> = q.take(0).unwrap();
     let row = rows.first().expect("one product");
     assert_eq!(row.name, "Paracetamol 500mg Genfar");
