@@ -46,6 +46,11 @@ async fn supplier_node() -> (axum::Router, String, Arc<db::Db>, Thing, TestDb) {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        rate_limit: None,
+        docs_enabled: true,
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: Arc::new(api::stock_webhook::StockWebhookConfig::default()),
     };
     let app = api::build_router(state);
 

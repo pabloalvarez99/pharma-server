@@ -881,7 +881,10 @@ pub fn body_fingerprint(req: &PosSaleRequest) -> DomainResult<String> {
 /// fingerprint.
 pub enum IdempotencyHit {
     /// Same key + same body → replay the cached response verbatim.
-    Replay { response_json: String, status_code: u16 },
+    Replay {
+        response_json: String,
+        status_code: u16,
+    },
     /// Same key + DIFFERENT body → caller MUST NOT replay; surface a 409
     /// reuse-conflict instead (canonical "Idempotency-Key" semantics —
     /// RFC draft + Stripe).
