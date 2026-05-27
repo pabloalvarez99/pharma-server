@@ -17,6 +17,34 @@ fn dec_val(d: Decimal) -> surrealdb::sql::Value {
 
 const VALID_PM: &[&str] = &["cash", "bank", "card", "transfer"];
 
+/// Builds a `WHERE` clause that **always** starts with `tenant = $tenant`
+/// and `AND`-joins any `extra_clauses`. The tenant operand is appended to
+/// `binds` so the caller only needs to bind its own extras.
+///
+/// Why a helper: report queries here used to compose the WHERE by pushing
+/// `"tenant = $t"` as the first element of a `Vec<String>` at every call
+/// site — a refactor could silently drop the tenant guard and leak rows
+/// across tenants. Centralising it makes the guard structurally
+/// guaranteed and unit-testable.
+///
+/// `extra_clauses` must NOT reference `tenant` directly — the debug
+/// assertion catches obvious duplicates during development.
+fn build_where_with_tenant(
+    tenant: &Thing,
+    extra_clauses: &[&str],
+    binds: &mut Vec<(&'static str, surrealdb::sql::Value)>,
+) -> String {
+    debug_assert!(
+        !extra_clauses.iter().any(|c| c.contains("tenant")),
+        "extra_clauses must not reference `tenant` — it is added by the helper",
+    );
+    binds.push(("tenant", surrealdb::sql::Value::from(tenant.clone())));
+    let mut clauses: Vec<&str> = Vec::with_capacity(1 + extra_clauses.len());
+    clauses.push("tenant = $tenant");
+    clauses.extend_from_slice(extra_clauses);
+    format!("WHERE {}", clauses.join(" AND "))
+}
+
 #[derive(Debug, Deserialize)]
 struct Row {
     id: Thing,
@@ -484,18 +512,21 @@ pub async fn top_products(
     tenant: &Thing,
     f: TopProductsFilters,
 ) -> DomainResult<Vec<TopProductRow>> {
-    let mut conds = vec![
-        "tenant = $t".to_string(),
-        "status NOT IN ['refunded','cancelled']".to_string(),
-    ];
+    let mut extra: Vec<&str> = vec!["status NOT IN ['refunded','cancelled']"];
     if f.from.is_some() {
-        conds.push("created_at >= $a".to_string());
+        extra.push("created_at >= $a");
     }
     if f.to.is_some() {
-        conds.push("created_at <= $b".to_string());
+        extra.push("created_at <= $b");
     }
-    let sql = format!("SELECT id FROM order WHERE {}", conds.join(" AND "));
-    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    let mut binds: Vec<(&'static str, surrealdb::sql::Value)> = Vec::new();
+    let where_clause = build_where_with_tenant(tenant, &extra, &mut binds);
+    debug_assert!(where_clause.contains("tenant = $tenant"));
+    let sql = format!("SELECT id FROM order {where_clause}");
+    let mut qb = db.query(sql);
+    for (k, v) in binds {
+        qb = qb.bind((k, v));
+    }
     if let Some(a) = f.from {
         qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
     }
@@ -618,18 +649,21 @@ pub async fn stock_rotation(
     tenant: &Thing,
     f: SalesReportFilters,
 ) -> DomainResult<Vec<StockRotationRow>> {
-    let mut conds = vec![
-        "tenant = $t".to_string(),
-        "status NOT IN ['refunded','cancelled']".to_string(),
-    ];
+    let mut extra: Vec<&str> = vec!["status NOT IN ['refunded','cancelled']"];
     if f.from.is_some() {
-        conds.push("created_at >= $a".to_string());
+        extra.push("created_at >= $a");
     }
     if f.to.is_some() {
-        conds.push("created_at <= $b".to_string());
+        extra.push("created_at <= $b");
     }
-    let sql = format!("SELECT id FROM order WHERE {}", conds.join(" AND "));
-    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    let mut binds: Vec<(&'static str, surrealdb::sql::Value)> = Vec::new();
+    let where_clause = build_where_with_tenant(tenant, &extra, &mut binds);
+    debug_assert!(where_clause.contains("tenant = $tenant"));
+    let sql = format!("SELECT id FROM order {where_clause}");
+    let mut qb = db.query(sql);
+    for (k, v) in binds {
+        qb = qb.bind((k, v));
+    }
     if let Some(a) = f.from {
         qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
     }
@@ -743,4 +777,41 @@ pub async fn stock_rotation(
         (None, None) => x.product_name.cmp(&y.product_name),
     });
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_tenant() -> Thing {
+        Thing::from(("tenant", "abc"))
+    }
+
+    #[test]
+    fn expenses_query_always_includes_tenant() {
+        // No extras: the WHERE clause must still pin tenant.
+        let mut binds: Vec<(&'static str, surrealdb::sql::Value)> = Vec::new();
+        let t = fake_tenant();
+        let w = build_where_with_tenant(&t, &[], &mut binds);
+        assert_eq!(w, "WHERE tenant = $tenant");
+        assert!(binds.iter().any(|(k, _)| *k == "tenant"));
+
+        // With extras: tenant is first, extras are AND-joined after it.
+        let mut binds: Vec<(&'static str, surrealdb::sql::Value)> = Vec::new();
+        let w =
+            build_where_with_tenant(&t, &["status NOT IN ['x']", "created_at >= $a"], &mut binds);
+        assert!(w.contains("tenant = $tenant"));
+        assert!(w.starts_with("WHERE tenant = $tenant AND "));
+        assert!(w.contains("status NOT IN ['x']"));
+        assert!(w.contains("created_at >= $a"));
+    }
+
+    #[test]
+    #[should_panic(expected = "extra_clauses must not reference `tenant`")]
+    fn build_where_panics_on_duplicate_tenant() {
+        let mut binds: Vec<(&'static str, surrealdb::sql::Value)> = Vec::new();
+        let t = fake_tenant();
+        // Caller tries to add their own tenant clause — debug_assert fires.
+        let _ = build_where_with_tenant(&t, &["tenant = $other"], &mut binds);
+    }
 }

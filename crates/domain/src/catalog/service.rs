@@ -255,28 +255,34 @@ pub async fn stats(db: &Db, tenant: &Thing) -> DomainResult<ProductStats> {
 
 pub async fn bulk_price(db: &Db, tenant: &Thing, req: BulkPrice) -> DomainResult<usize> {
     let v = req.value;
-    let inner = match req.mode {
+    // Translate the API-layer mode into a type-safe `PriceOp`. The repo
+    // binds the numeric operand — no SQL string is built from user input.
+    let op = match req.mode {
         BulkPriceMode::Percent => {
             if v <= Decimal::from(-100) {
                 return Err(DomainError::Invalid(
                     "el porcentaje dejaría el precio en cero o negativo".into(),
                 ));
             }
-            format!("price * (100dec + {v}dec) / 100dec")
+            // `Percent(v)` semantics: new = price * (100 + v) / 100
+            //                       = price * ((100 + v) / 100)
+            // Precompute the multiplier here so the repo only sees a
+            // bound Decimal.
+            let multiplier = (Decimal::from(100) + v) / Decimal::from(100);
+            repo::PriceOp::MultiplyPct(multiplier)
         }
-        BulkPriceMode::Amount => format!("price + {v}dec"),
-    };
-    let guarded = format!("math::max([0dec, {inner}])");
-    let expr = if req.round {
-        format!("math::round({guarded})")
-    } else {
-        guarded
+        BulkPriceMode::Amount => repo::PriceOp::DeltaAbs(v),
     };
     let category = match req.category.as_deref() {
         Some(s) if !s.is_empty() => Some(resolve_category(db, tenant, s).await?),
         _ => None,
     };
-    repo::bulk_update_price(db, tenant, &expr, category).await
+    let update = repo::PriceUpdate {
+        op,
+        floor_at_zero: true,
+        round: req.round,
+    };
+    repo::bulk_update_price_typed(db, tenant, update, category).await
 }
 
 pub async fn etiquetas(db: &Db, tenant: &Thing, q: &str) -> DomainResult<EtiquetaResults> {

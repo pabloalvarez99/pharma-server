@@ -187,6 +187,28 @@ NO acá.
 
 ---
 
+## 2026-05-22 — P0 fix: SQL injection catalog + tenant guard expenses
+
+- **Qué**:
+  1. `crates/domain/src/catalog/repo.rs::bulk_update_price` — fix SQL-injection: el `expr: &str` raw que se interpolaba al UPDATE se reemplaza por API type-driven `PriceUpdate { op: PriceOp, floor_at_zero, round }` con `PriceOp::{SetExact,MultiplyPct,DeltaAbs}(Decimal)`. La función nueva `bulk_update_price_typed` arma templates SurrealQL fijos por variante y `.bind("v", ...)` el operando numérico — ningún string controlable por usuario llega al SQL. Función vieja queda `#[deprecated]` con `TODO(caller-impact)` por compat (la usa nadie externo, pero el agente paralelo de `crates/api/`+`crates/cli/` debe confirmarlo). `service::bulk_price` ya migrado al typed API.
+  2. `crates/domain/src/catalog/repo.rs::etiquetas` — el `field: &str` interpolado en `format!("UPDATE product SET {field} ...")` (en el `SELECT` distinct) reemplazado por `enum TagField { Laboratory, ActiveIngredient, TherapeuticAction }` con `column() -> &'static str` exhaustivo. Agregar variantes nuevas exige tocar la whitelist explícitamente (compile error si no).
+  3. `crates/domain/src/expenses/service.rs::{top_products, stock_rotation}` — refactor a helper privado `build_where_with_tenant(tenant, extra_clauses, binds) -> String` que **siempre** pone `tenant = $tenant` primero y `AND`-junta las cláusulas extra. `debug_assert!` que `extra_clauses` no mencione `tenant` (evita duplicados). Garantía estructural: imposible que un futuro refactor pierda el guard.
+- **Por qué**: audit arquitectural identificó 3 P0 — uno de seguridad (SQL injection), otro de integridad multi-tenant (cross-tenant leak por refactor accidental), otro de fragilidad (whitelist de columnas implícita). Los tres ahora son imposibles por tipos.
+- **Tests nuevos** (4, todos passing):
+  - `catalog::repo::tests::bulk_update_price_rejects_arbitrary_sql` — compile-time guarantee + Decimal parse rechaza `; DROP TABLE`.
+  - `catalog::repo::tests::tag_field_only_accepts_whitelist` — pin del map enum→literal.
+  - `expenses::service::tests::expenses_query_always_includes_tenant` — la salida del helper siempre arranca con `WHERE tenant = $tenant`.
+  - `expenses::service::tests::build_where_panics_on_duplicate_tenant` — `should_panic` cuando el caller intenta repetir `tenant`.
+- **Resultado**: 183 tests passing workspace-wide, 0 failed, 1 ignored (pre-existente). `cargo fmt --check + cargo clippy --workspace --all-targets -- -D warnings` verdes.
+- **Archivos tocados**: `crates/domain/src/catalog/repo.rs`, `crates/domain/src/catalog/service.rs`, `crates/domain/src/expenses/service.rs`, `bitacora.md`. **NO** se tocó `crates/api/`, `crates/cli/`, migrations ni otros crates (agente paralelo trabaja ahí).
+- **No-en-este-PR**:
+  - Remover `#[deprecated] bulk_update_price` raw — pendiente confirmación del agente paralelo (api/cli) que no haya callers.
+  - Aplicar `build_where_with_tenant` a `list_expenses`, `sales_daily`, `margins_daily` (mismo patrón, los dos call-sites prioritarios del audit ya migrados; resto = mecánico siguiente PR).
+  - Tests de integración E2E que ejerciten `bulk_update_price_typed` contra `kv-mem` (los unitarios cubren la garantía de tipos; tests E2E en `tests/catalog.rs` ya cubren el path via `service::bulk_price`).
+- **Rama**: `feat/quality-p0-sql-tenant-guards` (desde `feature/erp-parity`). No push aún — revisión humana primero.
+
+---
+
 ## 2026-05-20 — CLI `pharma license reload`
 
 - **Qué**: nuevo subcomando `pharma license reload [--url URL] [--token T]` que POSTea al endpoint admin del server. `--url` default `http://localhost:8080`. `--token` opcional; fallback a env `PHARMA_ADMIN_TOKEN`. Imprime `tier/status/features-count/key_id`. Exit 1 si HTTP no-2xx.
