@@ -84,3 +84,4 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0006](./0006-revocation-strategy-signed-crl.md) | Revocación vía CRL firmado distribuido por CDN | Accepted | licencia, seguridad, infra |
 | [0007](./0007-key-rotation-licenser.md) | Rotación de claves del licenser con key-id en license | Accepted | licencia, seguridad |
 | [0011](./0011-dte-provider-native-rust.md) | DTE (boleta/factura SII) implementado nativo en Rust | Accepted | producto, compliance, integraciones |
+| [0012](./0012-web-onprem-interop.md) | Interop web ↔ pharma-server vía HTTP only (3 patrones) | Accepted | producto, infra, protocolo, interop |
