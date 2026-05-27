@@ -35,9 +35,10 @@ Cada uno tiene workaround $0 ejecutable hoy:
    ([ADR-0008](../adr/0008-self-sign-pilot-msi.md)).
 2. → **Hyper-V + Windows 11 Dev VM** (image MS gratis 90 días, snapshot baseline,
    re-imagen on demand).
-3. → **Mercado Pago Chile + Stripe Checkout** ($0 onboarding, RUT persona natural OK),
-   `pharma-license-server` en Vercel Hobby + Neon free tier
-   ([ADR-0009](../adr/0009-pilot-payment-provider.md) +
+3. → license-server **ya existe** (`pharma-license-server`, Webpay sandbox code-complete)
+   y corre gratis en Vercel Hobby + Neon free. Para cobrar **dinero real sin SpA**:
+   **Mercado Pago** (RUT persona natural, $0); Webpay-prod cuando haya SpA; Stripe para
+   internacional ([ADR-0009](../adr/0009-pilot-payment-provider.md) +
    [`license-server-skeleton.md`](./license-server-skeleton.md)).
 
 **Upgrade staged a costo real cuando entren ingresos**:
@@ -152,45 +153,48 @@ verificado en dry-run (`cargo wix --no-build`) pero **nunca se instaló en VM li
 
 ## 4. Bloqueo 3 — Cobrar (Fase 11)
 
-### 4.1 Estado actual
+### 4.1 Estado actual (CORREGIDO 2026-05-27)
 
 - `crates/license` (Fase 10) ya firma/verifica licenses offline (Ed25519). PR #47 mergeado.
 - `crates/cli` tiene `pharma license import|status|features|verify|export|clear`.
-- **No existe** el license-server real — el binario hoy carga `pilot.pfx` placeholder
-  vía `License::free_default()` si no hay archivo.
-- **No existe** rail de pago integrado.
+- **El license-server SÍ EXISTE**: repo separado `pharma-license-server` (privado, creado
+  2026-05-21), **Fase 11b code-complete con Webpay sandbox**. Stack real: Next.js 14 +
+  **Prisma** + Postgres(Neon) + `@noble/ed25519` + `transbank-sdk`. PR #1 abierto. Estado
+  detallado: [`license-server-skeleton.md`](./license-server-skeleton.md) (es resumen
+  cross-repo; el `bitacora.md` del propio repo es la fuente de verdad).
+- **Gap cross-repo**: `crates/license/src/keys.rs` aún tiene placeholder `lk-dev-2026`; la
+  prod key `lk-prod-2026-01` del license-server NO está embebida todavía (pendiente PR a
+  pharma-server). Sin esto el binario no verifica licencias reales.
 
 ### 4.2 Workaround $0
 
-[ADR-0009](../adr/0009-pilot-payment-provider.md) decide: **Mercado Pago Chile + Stripe**
-antes de Webpay. Repo separado `pharma-license-server` (ver
-[ADR-0004](../adr/0004-license-server-separado.md)) implementa:
+El license-server ya corre **gratis** por diseño: **Vercel Hobby (free)** + **Neon free** +
+Webpay **sandbox** (test cards, $0). El único costo/espera real para cobrar **dinero real**:
 
-- **Vercel Hobby (free)** — hosting Next.js.
-- **Neon free tier** — Postgres 0.5GB (~50k licenses cabe holgado).
-- **Resend free tier** — envío email license `.json` al cliente (100 emails/día).
-- **Mercado Pago Checkout Pro** — $0 onboarding, RUT persona natural OK.
-- **Stripe Checkout** — backup para tarjeta internacional.
-- **Ed25519 priv key** vive sólo en Vercel env var (cifrado at rest); pub key
-  embebida en binario pharma-server (`crates/license/src/keys.rs`).
-
-Blueprint completo de implementación: [`license-server-skeleton.md`](./license-server-skeleton.md).
+- **Webpay producción** → RUT empresa + cert Transbank (~2-4 sem). NO es $0/inmediato.
+- **Alternativa $0/días** → [ADR-0009](../adr/0009-pilot-payment-provider.md): **Mercado
+  Pago** (persona natural CL, $0, <24h) como primer rail LIVE; Webpay (ya construido) se
+  activa al constituir SpA; Stripe (schema ya tiene `Order.stripeSessionId`) cuando haya
+  banca US.
 
 ### 4.3 Pasos ejecutables (próxima semana)
 
-1. **Crear repo `pharma-license-server`** (separado, ADR-0004). Cuenta GitHub
-   `pabloalvarez99`, repo privado.
-2. **Bootstrap Next.js 14 App Router** + Postgres schema + Stripe + MP webhooks.
-   Ver `license-server-skeleton.md` §4 para skeleton checklist.
-3. **Generar keypair Ed25519** localmente:
-   ```bash
-   openssl genpkey -algorithm ed25519 -out license-signer.pem
-   openssl pkey -in license-signer.pem -pubout -out license-signer.pub
-   ```
-4. **Embed pub key** en `crates/license/src/keys.rs` (reemplaza placeholder).
-5. **Deploy Vercel** + provisionar Neon + Stripe test keys + MP test keys.
-6. **Landing `/buy`** con 4 botones (Free, Pro $X/mes, Business $Y/mes, Microtx $Z).
-7. **Webhook handler** → emite license JSON firmado → email Resend al cliente.
+**NO crear el repo — ya existe.** Cerrar Fase 11b + el gap cross-repo:
+
+1. **Deploy license-server free** (checklist en
+   [`license-server-skeleton.md`](./license-server-skeleton.md) §4.1): `vercel link` +
+   provisionar Neon + `prisma migrate` + `prodkey:seed` + env vars + `vercel --prod`.
+   Todo $0 (Webpay queda en `WEBPAY_INTEGRATION_TYPE=TEST`).
+2. **Embeber prod key** en `crates/license/src/keys.rs` (reemplaza placeholder
+   `lk-dev-2026` por `lk-prod-2026-01` /
+   `did:pharma:HbL8Gfa3x4HEGseE8jqa85NyA1pRg58D6ZbMfV4C5Ep9`). PR aparte a pharma-server +
+   GATE. **Crítico**: sin esto el binario no verifica licencias reales.
+3. **Smoke E2E sandbox**: tarjeta `4051 8856 0044 6623` → emite license → `pharma license
+   import` → `pharma license status` muestra tier.
+4. **Para primer cobro REAL sin SpA**: implementar rail Mercado Pago en license-server
+   (~1 día, reusa patrón checkout existente; ver ADR-0009 §Architecture).
+5. **Webpay LIVE**: cuando el fundador constituya SpA → cert Transbank → switch
+   `WEBPAY_INTEGRATION_TYPE=PRODUCTION` (código ya listo, cero reescritura).
 
 ### 4.4 Cuándo subir de nivel
 
@@ -198,8 +202,9 @@ Blueprint completo de implementación: [`license-server-skeleton.md`](./license-
 |---|---|
 | Primer ingreso real | Pagar dominio custom $12/año (Cloudflare Registrar = at-cost) |
 | Más de 50k licenses | Upgrade Neon Pro ($19/mes) |
-| Necesidad Webpay (B2B confianza) | Constituir SpA → onboarding Transbank → integrar `WebpayProvider` en license-server |
-| Más de 100 emails/día | Resend pro ($20/mes) o Mailgun |
+| Cobrar dinero real CL sin SpA | Implementar rail Mercado Pago (persona natural, $0) — ADR-0009 |
+| Webpay LIVE (B2B confianza máxima) | Constituir SpA → cert Transbank → `WEBPAY_INTEGRATION_TYPE=PRODUCTION` |
+| Prod key seguridad | Migrar seed env → GCP KMS (license-server `docs/adr/0008-kms-strategy.md`) |
 
 ---
 
@@ -209,7 +214,7 @@ Blueprint completo de implementación: [`license-server-skeleton.md`](./license-
 DÍA 0 (HOY)
 ├── [✅ HECHO]    Scripts installer/sign + installer/smoke escritos
 ├── [✅ HECHO]    ADR-0008 + ADR-0009 escritos
-├── [✅ HECHO]    Blueprint license-server-skeleton.md escrito
+├── [✅ HECHO]    license-server-skeleton.md = estado real (repo YA existe, no blueprint)
 └── [✅ HECHO]    Bitácora + vault + memoria actualizados
 
 DÍA 1
@@ -227,11 +232,11 @@ DÍA 3
 ├── Subir pilot.cer al mirror público (release asset)
 └── Probar instalación end-to-end desde laptop limpia (proxy de farmacia piloto)
 
-DÍA 4-7 (paralelo a outreach piloto)
-├── Crear repo pharma-license-server
-├── Bootstrap Next.js + Neon + Stripe test + MP test
-├── Embed pub key en crates/license
-└── Deploy Vercel + landing /buy + webhooks
+DÍA 4-7 (paralelo a outreach piloto) — license-server YA existe, sólo cerrar 11b
+├── Deploy license-server free (vercel link + Neon + prisma migrate + prodkey:seed + vercel --prod)
+├── Embed prod key lk-prod-2026-01 en crates/license/src/keys.rs (PR + GATE) ← gap crítico
+├── Smoke E2E sandbox (tarjeta 4051 8856 0044 6623 → emite → pharma license import)
+└── (opcional) implementar rail Mercado Pago para cobro real sin SpA (~1 día)
 
 DÍA 8-14 (outreach piloto)
 ├── Identificar 3-5 farmacias en Coquimbo/La Serena
@@ -268,7 +273,7 @@ que pilotos paguen.
 | MP CL rechaza cuenta persona natural | Baja | Stripe como backup → Khipu como tercer plano |
 | Vercel Hobby limit 100GB bandwidth | Baja | No-issue early (license JSON ~2KB cada uno) |
 | Neon free 0.5GB se llena | Baja | ~50k licenses cabe; upgrade $19/mes cuando llegue |
-| Resend 100 emails/día se queda corto | Media | Stripe/MP webhook tienen retry — re-emitir on demand. Migrar a Mailgun si frecuente. |
+| Cliente pierde el `.lic` descargado | Media | License-server expone `GET /api/licenses/[id]` (re-descarga idempotente); el admin puede re-emitir desde `/admin`. |
 | Primer cliente no quiere self-sign | Alta | Acelerar MSIX MS Store ($19 sale del primer cobro o del fundador como inversión) |
 
 ---
@@ -281,8 +286,8 @@ que pilotos paguen.
 2. `bitacora.md` § ESTADO ACTUAL + § BACKLOG — qué hay y qué falta.
 3. [ADR-0008](../adr/0008-self-sign-pilot-msi.md) — política cert.
 4. [ADR-0009](../adr/0009-pilot-payment-provider.md) — política pagos pilot.
-5. [`license-server-skeleton.md`](./license-server-skeleton.md) — cómo bootstrap el
-   repo separado.
+5. [`license-server-skeleton.md`](./license-server-skeleton.md) — estado real del
+   license-server (repo YA existe, Webpay sandbox completo) + gaps pendientes.
 6. `installer/sign/README.md` — operativa de firma.
 7. `installer/smoke/README.md` — operativa de smoke VM.
 

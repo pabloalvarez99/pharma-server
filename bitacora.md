@@ -152,10 +152,15 @@ NO acá.
     cobro) → workaround $0 cada uno → camino crítico día-a-día → handoff para agentes
     nuevos (§8). Costo total runway hasta primer cobro = **0 USD**.
   - **[`docs/strategy/license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)**
-    (blueprint v1, no implementado): contrato para bootstrap del repo separado
-    `pharma-license-server`. Stack $0 (Vercel Hobby + Neon free + Resend free + MP/Stripe).
-    DB schema, license JSON canonical (byte-equal vs `crates/license`), key management
-    (privkey solo en Vercel env), payment flow, bootstrap checklist 1-2 días.
+    (estado real v2 — resumen cross-repo): **CORRECCIÓN clave de esta sesión**. Verifiqué
+    con `gh repo view` que `pharma-license-server` **YA EXISTE** (privado, creado
+    2026-05-21, **Fase 11b code-complete con Webpay sandbox**, PR #1 abierto). Stack real:
+    Next.js 14 + **Prisma 6** (no Drizzle) + Postgres(Neon) + `@noble/ed25519` v3 +
+    `transbank-sdk` 6.1.1 + NextAuth v4. Canonical JSON ya bit-exact cross-repo + fixture
+    verificada en Rust. Prod key `lk-prod-2026-01` ya generada. El doc lista estado real +
+    gaps (NO es blueprint desde cero). **Gap crítico detectado**: `crates/license/src/keys.rs`
+    aún tiene placeholder `lk-dev-2026` — la prod key del license-server NO está embebida
+    todavía (pendiente PR a pharma-server; sin esto el binario no verifica licencias reales).
   - **`installer/sign/`** (4 scripts PowerShell + README): `generate-pilot-cert.ps1`
     (genera pilot.pfx+pilot.cer), `sign-msi.ps1` (signtool + timestamp RFC3161),
     `verify-signature.ps1`, `import-pilot-cert.ps1` (client-side). `pilot.pfx` añadido a
@@ -174,13 +179,16 @@ NO acá.
   + `README.md`, `installer/smoke/{setup-vm,run-smoke,smoke-install}.ps1` + `README.md`,
   `.gitignore` (+ `installer/sign/*.pfx`), `bitacora.md`, `CLAUDE.md`,
   `.claude/NEXT_SESSION_PROMPT.md`.
-- **Nota numeración ADR**: slots 0008/0009/0010 estaban libres (DTE provider landeó como
-  0011, no 0008 como decían refs viejas en ADR-0003 + BACKLOG 11e — corregidas). Usé
-  0008 (cert) + 0009 (pagos pilot). 0010 sigue libre (reservar para "upgrade a Azure
-  Trusted Signing" cuando ocurra).
+- **Nota numeración ADR (2 niveles)**: (a) en pharma-server slots 0008/0009/0010 estaban
+  libres (DTE landeó como 0011, no 0008 como decían refs viejas en ADR-0003 + BACKLOG 11e
+  — corregidas); usé 0008 (cert) + 0009 (pagos pilot), 0010 sigue libre (reservar para
+  "upgrade Azure Trusted Signing"). (b) **COLISIÓN cross-repo**: `pharma-license-server`
+  tiene SU PROPIO `docs/adr/0008-kms-strategy.md` + `0009-admin-auth.md`, distintos a los
+  míos. Cada repo = namespace ADR independiente; citar siempre con prefijo de repo.
 - **No-en-este-PR (próximos pasos del plan, §5 día-a-día)**: generar pilot.pfx real,
-  habilitar Hyper-V, build+firmar MSI 0.1.25, run smoke VM, publicar al mirror, crear
-  repo `pharma-license-server`. Todo $0.
+  habilitar Hyper-V, build+firmar MSI 0.1.25, run smoke VM, publicar al mirror (NO
+  autónomo), cerrar deploy Fase 11b del license-server (que YA existe), embeber prod key
+  `lk-prod-2026-01` en `crates/license/src/keys.rs`. Todo $0 salvo Webpay-prod (RUT empresa).
 - **Estado**: docs-only, no toca código → GATE (fmt/clippy/test) no afectado; verificar
   igual por regla #2.
 
