@@ -17,3 +17,40 @@ service_name = "pharma-api"
 [metrics]
 # Empty = /metrics returns 401. Set via PHARMA__METRICS__TOKEN in prod.
 token = ""
+
+[backup]
+# Empty schedule disables the cron job. Recommended: "0 0 3 * * *" (daily 03:00).
+schedule = ""
+# 0 = keep forever. Prune older snapshots after each run when > 0.
+retention_days = 0
+
+[rate_limit]
+# Token-bucket per tenant + per IP (governor). Defaults are production-safe.
+enabled = true
+tenant_per_min = 120
+tenant_burst = 30
+ip_per_min = 60
+ip_burst = 20
+
+[docs]
+# Swagger UI at /swagger-ui + OpenAPI JSON at /api-docs/openapi.json.
+# Flip off on hardened prod (PHARMA__DOCS__ENABLED=false).
+enabled = true
+
+[public_catalog]
+# Opt-in only (ADR-0005). Default 404 to peers.
+enabled = false
+cors_origins = ["https://tu-farmacia.cl"]
+
+[public_orders]
+# HMAC-signed web→ERP order ingest (ADR-0012 pattern 2).
+# Disabled by default; inject hmac_secret via PHARMA__PUBLIC_ORDERS__HMAC_SECRET.
+enabled = false
+hmac_secret = ""
+
+[stock_webhook]
+# ERP→web stock-change push (ADR-0013). Disabled = dispatcher is a no-op.
+# Inject hmac_secret via PHARMA__STOCK_WEBHOOK__HMAC_SECRET, never commit.
+enabled = false
+target_url = ""
+hmac_secret = ""
