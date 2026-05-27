@@ -696,6 +696,48 @@ pub async fn get_order(
     )))
 }
 
+/// Tenant display name for the receipt header. `None` if the tenant row is
+/// gone (shouldn't happen for a live JWT, but the projection stays total).
+pub async fn tenant_name(db: &Db, tenant: &Thing) -> DomainResult<Option<String>> {
+    #[derive(Debug, Deserialize)]
+    struct R {
+        name: String,
+    }
+    let mut r = db
+        .query("SELECT name FROM tenant WHERE id = $id LIMIT 1")
+        .bind(("id", tenant.clone()))
+        .await?
+        .check()?;
+    let row: Option<R> = r.take(0)?;
+    Ok(row.map(|r| r.name))
+}
+
+/// Sum the loyalty points awarded for a sale (`loyalty_transaction` rows whose
+/// `ref` is the order id and `reason = 'sale'`). Points live on their own
+/// append-only ledger, not on the order row, so the receipt reads them back.
+/// Returns 0 when the sale had no customer / awarded nothing.
+pub async fn loyalty_awarded_for_order(
+    db: &Db,
+    tenant: &Thing,
+    order: &Thing,
+) -> DomainResult<i64> {
+    #[derive(Debug, Deserialize)]
+    struct R {
+        total: Option<i64>,
+    }
+    let mut r = db
+        .query(
+            "SELECT math::sum(delta) AS total FROM loyalty_transaction \
+             WHERE tenant = $t AND reason = 'sale' AND ref = $ref GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ref", order.to_string()))
+        .await?
+        .check()?;
+    let row: Option<R> = r.take(0)?;
+    Ok(row.and_then(|r| r.total).unwrap_or(0))
+}
+
 // --- admin_setting ---------------------------------------------------------
 
 pub async fn get_setting(
