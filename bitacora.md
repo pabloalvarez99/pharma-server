@@ -15,11 +15,13 @@ NO acá.
 
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
-- **Versión**: `0.1.24` (workspace `Cargo.toml`).
-- **Branch activa**: `feat/dte-9-1-abc-xml-ted-caf` cascading off `feat/dte-fase-9-1` (subtasks 9.1.a XML boleta 39 + 9.1.b TED RSA-SHA1 + 9.1.c CAF parser+folio atómico, 17 tests verdes).
-- **Stack mergeable bloqueado**: PRs #51 (license-server scaffold), #52 (CLI license activate), #53 (MSI UX launcher) OPEN — CI billing-gated (jobs no arrancan, 2-3s failures). License-server PR #1 OPEN MERGEABLE (companion repo).
-- **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
-- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
+- **Versión**: `0.1.25` (workspace `Cargo.toml`) — bump por integration cut 2026-05-27.
+- **Branch activa**: `integration/0.1.25` PUSHED → **PR #78** abierta vs `feature/erp-parity` (87 commits, 26 plan steps merged off erp-parity, GATE green fmt+clippy+check+test-no-run real exit 0).
+- **Branches cherry-pick "missing" — FALSO**: prior session marcó `feat/msi-installer-complete`, `chore/production-hardening`, `fix/catalog-import-upsert` como pendientes; verificado 2026-05-27 que las 3 SON ancestros de `integration/0.1.25`. Ya están dentro. No hay cherry-pick necesario.
+- **PRs open post-integration (10 — owner triage)**: #76 docs-CHANGELOG (MERGEABLE), #68 openapi-fase2-rest (MERGEABLE), #67 sales-concurrency (MERGEABLE), #66 jobs-cron-activate, #64 openapi-fase2 partial (MERGEABLE), #63 fix-sales-bugs (MERGEABLE), #62 fix-license-tenant (MERGEABLE), #61 agent-unwrap-fix, #58 ci-hardening, #56 quality-p0-sql-tenant-guards. Plus DTE drop-list: #60, #55, #54. Plus old: #51, #52, #53.
+- **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH; integration PR #78 pending review antes de fast-forward).
+- **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23 — **deploy 0.1.25 PARKED** (rule #9): cert Authenticode missing (SmartScreen) + smoke VM pending + 10 PRs unresolved en triage.
+- **`cargo audit` baseline 2026-05-27**: 6 vulns, 5 unmaintained. Crítico RUSTSEC-2021-0046 "telemetry" es **FALSO POSITIVO** — nombre colisiona con crate abandonado de crates.io; nuestro `crates/telemetry` es local + sólo depende de tracing/otel. TODO: renombrar a `pharma-telemetry` para silenciar. Resto upstream-driven: rsa Marvin 5.9 med (surrealdb transitive), rustls-webpki 4× (0.102→0.103 fix; surrealdb/reqwest pin), unmaintained atomic-polyfill/bincode/paste/rustls-pemfile/lru. Documentado como known-known.
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
 - **Funciona end-to-end**:
@@ -1269,3 +1271,13 @@ NO acá.
 - **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #45 mergeado a `feature/erp-parity`.
 - **Estado vs goal**: ✅ Fase 5-full **cerrada con lifecycle completo** (4 slices: create + receive + AP + cancel). ⏳ Fase 9 firma cert Authenticode + smoke VM (v1.0.0 vendible), Fase 10 sync ERP online opt-in, Fase 12 marketplace (locked estrategia-only), BACKLOG #6 relay offline-peer.
 - **Pendiente**: ver `## BACKLOG` al tope.
+
+## 2026-05-27 — integration/0.1.25 push + PR #78 + audit baseline + cherry-pick non-issue
+
+- **Qué**: GATE re-verificado verde (fmt+clippy real exit 0; test --no-run verificado prior session). Branch `integration/0.1.25` pushed a origin + PR #78 abierta vs `feature/erp-parity` (87 commits incluyendo bump docs CLAUDE.md rule #9 auto-push+deploy + stack default Opus 4.7 max ultrathink).
+- **Por qué**: rule #9 actualizada por fundador 2026-05-27 → commit+push+PR+deploy automático tras GATE green. Deploy parked por prerequisitos faltantes (cert Authenticode + smoke VM + bugs P0=0).
+- **Falso gap descubierto**: prior session marcó 3 commits "golive-only" no incluidos en integration (`feat/msi-installer-complete`, `chore/production-hardening`, `fix/catalog-import-upsert`). Verificado con `git merge-base`: las 3 SON ancestros de `integration/0.1.25`. No hay cherry-pick pendiente. Saved memory `[[integration-0125-merge-state]]` corrige el error.
+- **`cargo audit` baseline**: 6 vulns + 5 unmaintained. **Crítico FALSO POSITIVO**: RUSTSEC-2021-0046 matchea por nombre `telemetry`; nuestro `crates/telemetry` local sólo depende de tracing/opentelemetry. Acción diferida: renombrar a `pharma-telemetry`. Resto upstream (surrealdb→rsa Marvin 5.9, reqwest→rustls-webpki 4×, unmaintained transitives). Documentado known-known en ESTADO ACTUAL.
+- **Archivos**: `CLAUDE.md` (commit `3e90797` rule #9 + stack default), `bitacora.md` (ESTADO ACTUAL + esta entry).
+- **Estado**: PR #78 en mano del owner para review + decisiones triage de 10 PRs restantes. No autonomous merges per [[parallel-agent-pipeline]] regla "decisiones owner-only".
+- **Commit**: HEAD `integration/0.1.25` post-update.
