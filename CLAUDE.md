@@ -158,13 +158,24 @@ Crates (`Cargo.toml` raíz):
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
 
-9. **Auto push+PR tras GATE; releases manuales**: una branch que pasa GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) y está committeada → push a origin + abrir PR contra `feature/erp-parity` automáticamente. **Los MSI releases siguen siendo explícitos/manuales**, gated por smoke-test en Sandbox + triage de bugs conocidos. NUNCA auto-deployar trabajo no verificado ni mid-flight (ver Fase 9 ship gate: cert Authenticode + smoke VM limpia). El push/PR es reversible; cortar release a canal público no lo es.
+9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático. **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
+   - cert Authenticode válido cargado (sin esto el MSI sale con SmartScreen warning — bloqueante técnico, no de policy);
+   - smoke-test instalación limpia en VM Windows verde;
+   - no hay bugs P0 abiertos en triage.
+   Si los 3 prerequisitos están verdes → deploy auto sin pedir confirmación. Si falta alguno → push+PR sí, deploy queda parked con razón anotada en `bitacora.md`. **Excepciones que siguen requiriendo confirmación explícita**: force-push, public-source de este repo (regla #10), acciones destructivas/irreversibles fuera del flujo normal release. NUNCA auto-deployar trabajo no verificado, mid-flight, o con GATE roto — debilitar el GATE para forzar verde está prohibido (bug real → `#[ignore]` con nota + reportar).
 
 10. **Distribución = binario, NO source (decidido 2026-05-23)**: el repo source `pabloalvarez99/pharma-server` se mantiene **PRIVADO**. "Deploy/open source" significa publicar el **MSI binario** al mirror público `pharma-server-releases` (vía `release-publisher.yml` workflow_dispatch) — NUNCA hacer público el source. Open-sourcing del source rompería el license enforcement (`license::require` vive en el código) + diferido a Fase 13+ ([NO en esta sesión]). Antes de cualquier consideración futura de source-public: secret-scan del history completo (esp. que la clave privada del licenser nunca tocó este repo — vive solo en `pharma-license-server`).
 
 ## Modo de trabajo por defecto — "continue working with team of agents ultrathink"
 
-Directiva permanente del fundador (2026-05-23). Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar como **pipeline paralelo saturado de ~5 agentes** trabajando autónomamente sobre el BACKLOG, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
+Directiva permanente del fundador (2026-05-23, reforzada 2026-05-27). **Stack default no negociable de esta sesión y todas las futuras**:
+
+- **Modelo**: Claude Opus 4.7 (`claude-opus-4-7`). No degradar a Sonnet/Haiku para tareas de este repo salvo orden explícita del usuario.
+- **Effort**: `/effort max` (máxima capacidad + razonamiento más profundo).
+- **Razonamiento**: ultrathink siempre activo en planning, debugging, decisiones arquitecturales y dispatch de agentes.
+- **Concurrencia**: pipeline paralelo saturado de **~5 agentes asincrónicos** (worktrees aislados, scope disjunto) trabajando autónomamente sobre el BACKLOG.
+
+Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar bajo el stack default arriba, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
 
 - **Saturación 5 slots**: mantener ~5 agentes/builds activos. Slot libre → despachar siguiente tarea de la cola sin idle. Pensar profundo (ultrathink) qué es lo más importante a continuación.
 - **Worktrees aislados, scope disjunto**: 1 agente = 1 worktree, paths sin solape (cero contención de merge). Cascada de branches dependientes off su base correcta.
