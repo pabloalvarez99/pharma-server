@@ -1,0 +1,70 @@
+# =============================================================================
+# pharma-server — PLANTILLA de configuración de PRODUCCIÓN
+# =============================================================================
+#
+# Copia este archivo a `config/local.toml` (que NO se commitea) y ajústalo,
+# o — preferido en producción — deja los SECRETOS fuera del archivo e inyéctalos
+# por variable de entorno. Loader (orden de precedencia, gana el último):
+#
+#     config/default.toml  →  config/local.toml  →  env PHARMA__*
+#
+# Las env usan el separador `__`. Ejemplos:
+#     PHARMA__JWT__SECRET     -> [jwt].secret
+#     PHARMA__METRICS__TOKEN  -> [metrics].token
+#     PHARMA__BIND            -> bind
+#
+# NUNCA commitees secretos reales. Este .example sólo contiene PLACEHOLDERS.
+# Ver `docs/ops/production-checklist.md` antes del go-live.
+# -----------------------------------------------------------------------------
+
+# Dirección de escucha. LAN-only por diseño (offline-first, sin cloud).
+# 127.0.0.1 = sólo el propio equipo. Para servir a otras cajas/PCs de la LAN,
+# usa la IP LAN fija del servidor (ej. "192.168.1.10:8080") Y abre TCP 8080
+# SÓLO al rango LAN en el firewall de Windows (el MSI ya crea la regla; ver
+# checklist). NUNCA expongas 8080 a internet directo: si necesitas acceso
+# remoto, ponlo detrás de un reverse-proxy con TLS (caddy/nginx/IIS ARR) en una
+# VPN o red de confianza, no NAT abierto.
+bind = "127.0.0.1:8080"
+
+[db]
+# Directorio SurrealKv embebido. En el MSI se ancla a
+# %ProgramData%\PharmaServer\data\surreal automáticamente (el servicio corre
+# como LocalSystem). Opcional: mover a un disco NO de sistema (ej. "D:\...")
+# para aislar datos del SO — ver checklist punto (e).
+# El servicio y la CLI NO pueden tocar este dir a la vez (file lock SurrealKv).
+path = "./data/surreal"
+namespace = "pharma"
+database = "main"
+
+[jwt]
+# SECRETO — NO escribir el valor real aquí. Inyectar por entorno:
+#     setx PHARMA__JWT__SECRET "<hex de 32+ bytes>" /M     (PowerShell admin)
+# Generar uno fuerte:  openssl rand -hex 32
+#   o en PowerShell: -join ((1..32) | % { '{0:x2}' -f (Get-Random -Max 256) })
+# Rotar el secreto invalida todos los tokens emitidos (los usuarios re-login).
+secret = "REEMPLAZAR_VIA_PHARMA__JWT__SECRET"
+issuer = "pharma-server"
+ttl_seconds = 3600
+
+[otlp]
+# Telemetría / trazas OTLP. OPT-IN, default APAGADO (Ley 19.628, sin PII).
+# endpoint VACÍO = exporter deshabilitado (no sale tráfico del equipo).
+# Sólo poblar si el operador habilita explícitamente un colector propio.
+endpoint = ""
+service_name = "pharma-api"
+
+[metrics]
+# Token bearer para GET /metrics (Prometheus). VACÍO = /metrics devuelve 401.
+# SECRETO — inyectar por entorno en producción:
+#     setx PHARMA__METRICS__TOKEN "<hex de 32 bytes>" /M
+# Generar:  openssl rand -hex 32
+token = "REEMPLAZAR_VIA_PHARMA__METRICS__TOKEN"
+
+[backup]
+# Backup automático del data dir (SurrealKv + agent.key) a
+# <data_dir>/backups/pharma-backup-<timestamp>.tar.gz.
+# Cron de 6 campos UTC: "seg min hora día mes díaSemana". VACÍO = desactivado.
+# 03:00 UTC diario (ajustar a hora valle local; CL = UTC-3/-4 → ~00:00 local).
+schedule = "0 0 3 * * *"
+# Días de retención. Backups más viejos se podan tras cada corrida. 0 = infinito.
+retention_days = 30

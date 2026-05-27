@@ -63,3 +63,13 @@ hmac.workspace = true
 sha2 = "0.10"
 hex.workspace = true
 metrics-util = { version = "0.17", features = ["debugging"] }
+# Bench-only extras. `surrealdb` here re-declares with `kv-mem` so benches can
+# spin up an in-memory store (the prod build keeps `kv-surrealkv` only).
+# Cargo merges features across the two declarations for the test/bench build,
+# but the bin still ships kv-surrealkv only.
+surrealdb = { workspace = true, features = ["kv-mem"] }
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+
+[[bench]]
+name = "pos_sale"
+harness = false
