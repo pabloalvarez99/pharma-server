@@ -457,6 +457,14 @@ pub struct AppliedRefund {
 /// never written outside the audit trail — same invariant as the sale path).
 /// When `order` is set, the order is moved to `status='refunded'` in the same
 /// tx so a crash can't leave a refunded order still marked paid.
+///
+/// `restock_plans[i]` aligns with `req.items[i]`: `Some(allocs)` restores the
+/// returned units to those specific `product_batch` lots (so the
+/// `product.stock == Σ product_batch.stock` invariant holds for batch-tracked
+/// SKUs — BUG-007); `None` = no batch attribution (line not restocked, or the
+/// originating product is not batch-tracked) → `product.stock` bump only,
+/// legacy behavior. The batch increments are grouped at the tail so the
+/// per-item result indices stay fixed.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_refund(
     db: &Db,
@@ -464,6 +472,7 @@ pub async fn apply_refund(
     processed_by: Option<&Thing>,
     order: Option<&Thing>,
     req: &NewDevolucion,
+    restock_plans: &[Option<Vec<FefoAllocation>>],
     total: Decimal,
 ) -> DomainResult<AppliedRefund> {
     let did = uuid::Uuid::new_v4().simple().to_string();
@@ -511,6 +520,19 @@ pub async fn apply_refund(
     if order_marked {
         q.push_str("UPDATE order SET status='refunded' WHERE id=$ord AND tenant=$t; ");
     }
+    // Batch restocks grouped at the tail (no RETURN, results not read) so the
+    // per-item statement indices above stay fixed regardless of allocation
+    // count — same layout discipline as the sale path's FEFO decrements.
+    let mut ralloc_idx = 0usize;
+    for allocs in restock_plans.iter().flatten() {
+        for _ in allocs {
+            q.push_str(&format!(
+                "UPDATE product_batch SET stock = stock + $rba{ralloc_idx} \
+                 WHERE id = $rbid{ralloc_idx} AND tenant = $t; ",
+            ));
+            ralloc_idx += 1;
+        }
+    }
     q.push_str("COMMIT;");
 
     let mut qb = db
@@ -539,6 +561,18 @@ pub async fn apply_refund(
             .bind((format!("qty{i}"), it.quantity))
             .bind((format!("up{i}"), dec_val(it.unit_price)))
             .bind((format!("rs{i}"), it.restock));
+    }
+    // Bind the tail batch-restock params in the same order they were emitted.
+    let mut ralloc_idx = 0usize;
+    for allocs in restock_plans.iter().flatten() {
+        for a in allocs {
+            let bid = surrealdb::sql::thing(&a.batch)
+                .map_err(|_| DomainError::Invalid(format!("batch id inválido: {}", a.batch)))?;
+            qb = qb
+                .bind((format!("rba{ralloc_idx}"), a.qty))
+                .bind((format!("rbid{ralloc_idx}"), bid));
+            ralloc_idx += 1;
+        }
     }
     let mut r = qb.await?.check()?;
 
@@ -583,6 +617,47 @@ pub async fn apply_refund(
         movement_ids: movements_out,
         order_marked_refunded: order_marked,
     })
+}
+
+/// Sum already-refunded quantity per product across ALL prior `devolucion`s
+/// linked to `order` (tenant-scoped). Used by [`super::service::create_refund`]
+/// to enforce the cumulative over-refund guard: a new refund plus everything
+/// previously refunded for a product may not exceed what the order sold.
+/// Keyed by the product record-id string (matches `OrderItemDto.product`).
+pub async fn sum_prior_refunds_by_product(
+    db: &Db,
+    tenant: &Thing,
+    order: &Thing,
+) -> DomainResult<std::collections::HashMap<String, i64>> {
+    #[derive(Debug, Deserialize)]
+    struct Row {
+        product: Option<Thing>,
+        qty: i64,
+    }
+    // `devolucion_item` carries no `order` field; resolve the order's
+    // devoluciones via a subquery on `devolucion.order`, then group the item
+    // quantities by product. Lines with no product (unidentified) are ignored
+    // — they never restock and can't be over-refunded against a product.
+    let mut r = db
+        .query(
+            "SELECT product, math::sum(quantity) AS qty FROM devolucion_item \
+             WHERE tenant = $t \
+               AND devolucion IN (SELECT VALUE id FROM devolucion \
+                                  WHERE tenant = $t AND order = $o) \
+             GROUP BY product",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("o", order.clone()))
+        .await?
+        .check()?;
+    let rows: Vec<Row> = r.take(0)?;
+    let mut out = std::collections::HashMap::new();
+    for row in rows {
+        if let Some(p) = row.product {
+            out.insert(p.to_string(), row.qty);
+        }
+    }
+    Ok(out)
 }
 
 pub async fn list_devoluciones(
@@ -787,6 +862,32 @@ pub async fn upsert_setting(
 struct IdempotencyRow {
     response_json: String,
     status_code: i64,
+    #[serde(default)]
+    body_fingerprint: Option<String>,
+}
+
+/// Build the canonical body fingerprint persisted with an `Idempotency-Key`
+/// row. Same struct shape → same bytes (serde_json emits fields in source
+/// order for structs); a different request body → different bytes → BUG-002
+/// reuse-conflict on cache lookup. Bodies are small (POS carts ~1-2KB), so
+/// storing the canonical bytes verbatim avoids pulling a SHA dep AND removes
+/// digest-collision risk.
+pub fn body_fingerprint(req: &PosSaleRequest) -> DomainResult<String> {
+    serde_json::to_string(req)
+        .map_err(|e| DomainError::Other(anyhow::anyhow!("body fingerprint serialize: {e}")))
+}
+
+/// Outcome of an `Idempotency-Key` lookup against a freshly-computed body
+/// fingerprint.
+pub enum IdempotencyHit {
+    /// Same key + same body → replay the cached response verbatim.
+    Replay { response_json: String, status_code: u16 },
+    /// Same key + DIFFERENT body → caller MUST NOT replay; surface a 409
+    /// reuse-conflict instead (canonical "Idempotency-Key" semantics —
+    /// RFC draft + Stripe).
+    Conflict,
+    /// No row for `(tenant, key)` within the TTL → process the request as new.
+    None,
 }
 
 /// Delete `idempotency_key` rows whose `expires_at` has passed. Tenant-wide
@@ -815,22 +916,48 @@ pub async fn purge_expired_idempotency(db: &Db) -> DomainResult<u64> {
     Ok(n)
 }
 
-/// Returns cached response if `key` already resolved for `tenant` within TTL.
+/// Resolve an `Idempotency-Key` lookup against `body_fp` (the canonical
+/// fingerprint of the *current* request body).
+///
+/// * No row in TTL → [`IdempotencyHit::None`] (process as new).
+/// * Row present AND `body_fingerprint` matches `body_fp` (or row predates
+///   migration 0017 → NULL fingerprint, treat as legacy match) →
+///   [`IdempotencyHit::Replay`].
+/// * Row present AND `body_fingerprint` differs from `body_fp` →
+///   [`IdempotencyHit::Conflict`] (BUG-002: key reused with a different body).
 pub async fn lookup_idempotency(
     db: &Db,
     tenant: &Thing,
     key: &str,
-) -> DomainResult<Option<(String, u16)>> {
+    body_fp: &str,
+) -> DomainResult<IdempotencyHit> {
     let mut r = db
         .query(
-            "SELECT response_json, status_code FROM idempotency_key \
+            "SELECT response_json, status_code, body_fingerprint \
+             FROM idempotency_key \
              WHERE tenant = $t AND key = $k AND expires_at > time::now() LIMIT 1",
         )
         .bind(("t", tenant.clone()))
         .bind(("k", key.to_string()))
         .await?;
     let row: Option<IdempotencyRow> = r.take(0)?;
-    Ok(row.map(|r| (r.response_json, r.status_code as u16)))
+    Ok(match row {
+        None => IdempotencyHit::None,
+        Some(r) => match r.body_fingerprint.as_deref() {
+            // Legacy row (pre-migration 0017) carries no fingerprint —
+            // grandfather as match so in-flight rows stay valid until their
+            // 24h TTL expires.
+            None => IdempotencyHit::Replay {
+                response_json: r.response_json,
+                status_code: r.status_code as u16,
+            },
+            Some(stored) if stored == body_fp => IdempotencyHit::Replay {
+                response_json: r.response_json,
+                status_code: r.status_code as u16,
+            },
+            Some(_) => IdempotencyHit::Conflict,
+        },
+    })
 }
 
 // --- loyalty ---------------------------------------------------------------
@@ -868,19 +995,21 @@ pub async fn store_idempotency(
     db: &Db,
     tenant: &Thing,
     key: &str,
+    body_fp: &str,
     response_json: &str,
     status_code: u16,
 ) -> DomainResult<()> {
     let expires = Utc::now() + Duration::hours(IDEMPOTENCY_TTL_HOURS);
     db.query(
         "CREATE idempotency_key SET tenant=$t, key=$k, response_json=$r, \
-             status_code=$s, expires_at=$exp",
+             status_code=$s, expires_at=$exp, body_fingerprint=$bf",
     )
     .bind(("t", tenant.clone()))
     .bind(("k", key.to_string()))
     .bind(("r", response_json.to_string()))
     .bind(("s", status_code as i64))
     .bind(("exp", dt_val(expires)))
+    .bind(("bf", body_fp.to_string()))
     .await?
     .check()?;
     Ok(())

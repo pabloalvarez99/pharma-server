@@ -152,7 +152,7 @@ pub struct OrderFilters {
 
 // --- POST /pos/sale request -----------------------------------------------
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosSaleRequest {
     pub items: Vec<PosSaleItem>,
     pub payment_method: String,
@@ -175,7 +175,7 @@ pub struct PosSaleRequest {
     pub prescriptions: Vec<PosPrescriptionInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosSaleItem {
     /// Product record id (`product:xxx`). Required — POS does not allow free items.
     pub product: String,
@@ -186,7 +186,7 @@ pub struct PosSaleItem {
     pub unit_price: Decimal,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosPrescriptionInput {
     pub product: Option<String>,
     pub patient_name: String,
