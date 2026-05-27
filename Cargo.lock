@@ -232,6 +232,7 @@ dependencies = [
  "license",
  "nonzero_ext",
  "pharma-core",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
