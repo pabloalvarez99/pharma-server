@@ -16,7 +16,9 @@ NO acá.
 > Sobrescribir este bloque entero cada sesión. Es la verdad presente del proyecto.
 
 - **Versión**: `0.1.24` (workspace `Cargo.toml`).
-- **Branch**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
+- **Branch activa**: `feat/dte-9-1-abc-xml-ted-caf` cascading off `feat/dte-fase-9-1` (subtasks 9.1.a XML boleta 39 + 9.1.b TED RSA-SHA1 + 9.1.c CAF parser+folio atómico, 17 tests verdes).
+- **Stack mergeable bloqueado**: PRs #51 (license-server scaffold), #52 (CLI license activate), #53 (MSI UX launcher) OPEN — CI billing-gated (jobs no arrancan, 2-3s failures). License-server PR #1 OPEN MERGEABLE (companion repo).
+- **Branch base release**: `feature/erp-parity` (al día, v0.1.23 publicado en GH).
 - **MSI release**: https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
@@ -85,6 +87,7 @@ NO acá.
 ### Inmediato post-pivote (Fases 9-11)
 
 1. **Fase 9 — MSI vendible v1.0.0**: firma Authenticode con cert + smoke install/uninstall en VM Windows limpia. **BLOQUEADO por cert** (sin firma → SmartScreen warning).
+1.5. **Fase 9.1 — DTEs SII completos (EN CURSO 2026-05-21)**: provider Native Rust ([ADR-0011](./docs/adr/0011-dte-provider-native-rust.md)). Subtasks 9.1.a-m (XML xsd 1.0, TED RSA-SHA1, CAF folio assignment atómico, envío sandbox/prod, polling, libro mensual, X/Z, cert encrypt-at-rest, gating tier, CLI, tests integration). Skeleton + migración 0017 + ADR committeados; subtasks a-c próximas (XML+TED+CAF).
 2. **~~Fase 10 — License layer MVP local~~** ✅ (PR #47, 2026-05-20):
    - ~~10a~~ ✅ `crates/license` (Ed25519 offline, 10 tests).
    - ~~10b~~ ✅ `ApiError::payment_required` + `AppState.license` cargado al boot + `From<GateError>`.
@@ -122,6 +125,63 @@ NO acá.
 - **~~Prescription desde POS~~** ✅.
 - **~~Fase 5-full~~** ✅ (PO local + WAC + cuentas por pagar + cancel draft PO PR #45).
 - **~~Fase 6 reportes~~** ✅ (sales-daily, margins, top+ABC, near-expiry, stock-rotation).
+
+---
+
+## 2026-05-21 — Fase 9.1 arranque: ADR-0011 + migración 0017 + skeleton `crates/dte`
+
+- **Qué**:
+  - **ADR-0011** ([`docs/adr/0011-dte-provider-native-rust.md`](./docs/adr/0011-dte-provider-native-rust.md)) lockea provider DTE = **Native Rust**. Rechaza SimpleAPI (rompe vendor-agnostic + costo cero) y LibreDTE (rompe "sin runtime extra"). Native respeta los 3 pillars no-negociables; trade-off es 4-6 sem dev vs 1-2 con managed.
+  - **Migración `0017_dte.surql`** (3 tablas tenant-scoped):
+    - `dte` (tipo 39/33/56/61/52, folio, estado draft|signed|sent|accepted|rejected|cancelled, xml_firmado, timbre, track_id, link opcional a `order`),
+    - `caf` (rango folios SII, next_folio, UNIQUE(tenant,tipo,folio_desde)),
+    - `cert_digital` (PFX cifrado at-rest, vigencia, RUT propietario).
+    - Smoke `cargo test -p db --test embedded_migrations` verde.
+  - **Crate `crates/dte`** (scaffold + tipos públicos):
+    - Módulos: `types`, `error`, `xml/{mod,boleta,factura,nota_credito,nota_debito,guia,libro}`, `timbre`, `sign`, `sii`, `caf`, `cert`. Funciones de stub devuelven `DteError` "pendiente subtask 9.1.X" para que callers vean qué falta.
+    - Tipos públicos: `DteTipo` (enum con `code()`/`from_code()` round-trip), `DteEstado`, `Dte`, `DteItem`, `Caf` (con `has_folios()`), `CertDigital` (con `is_valid_at()`), `SiiEnv` (con `upload_endpoint()` sandbox=maullin/prod=palena).
+    - 6 tests smoke pasan (`cargo test -p dte`).
+  - Workspace registra `crates/dte` en members. `cargo clippy --workspace --all-targets -- -D warnings` verde.
+- **Por qué**:
+  - DTE es bloqueador comercial: sin boleta electrónica SII la farmacia no puede facturar (obligatorio desde 2022).
+  - Native Rust mantiene los pillars del producto y diferencia vs SICO/GOLAN/iFarmacias (todos dependen de provider externo).
+  - Scaffold con stubs marca explícitamente las subtasks pendientes — el siguiente PR (a-c: XML+TED+CAF) reemplaza stubs por implementación real.
+- **Archivos**: `Cargo.toml` (+ member), `crates/dte/{Cargo.toml,src/*}`, `crates/dte/tests/types_smoke.rs`, `migrations/0017_dte.surql`, `docs/adr/{0011-dte-provider-native-rust.md,README.md}`.
+- **No-en-este-PR (subtasks pendientes)**:
+  - 9.1.a — render XML schema SII xsd 1.0 por tipo DTE (boleta/factura/nc/nd/guia).
+  - 9.1.b — TimbreElectrónico (TED) hash SHA1 + firma RSA-SHA1 + firma XML completo con cert empresa.
+  - 9.1.c — parser CAF XML + folio assignment atómico transacción SurrealDB.
+  - 9.1.d-e — envío SII multipart + polling `track_id`.
+  - 9.1.f-h — cancel/resend + libro ventas mensual + X/Z reportes.
+  - 9.1.i — cert encrypt-at-rest (AES-GCM con clave derivada argon2id).
+  - 9.1.j — gating tier (Free local-only, Pro envío auto, Business multi-tipo).
+  - 9.1.k — CLI `pharma dte|caf|cert`.
+  - 9.1.l-m — tests integration vs sandbox SII + docs cliente.
+- **Bloqueado por (no impacta este PR)**: CI billing GH Actions (PRs #51/#52/#53 esperando). PR feat/dte-fase-9-1 va en `--draft` para no bloquear cola.
+
+---
+
+## 2026-05-21 — Fase 9.1 subtasks a+b+c: XML boleta 39 + TED RSA-SHA1 + CAF folio atómico
+
+- **Qué** (branch `feat/dte-9-1-abc-xml-ted-caf` cascading off `feat/dte-fase-9-1`):
+  - **9.1.a XML render boleta 39** (`crates/dte/src/xml/`): `schema.rs` con structs serde DTO (DteXml/Documento/Encabezado/IdDoc/Emisor/Receptor/Totales/Detalle), `writer.rs` con declaración UTF-8 y serializer canonical (sin pretty-print), `boleta.rs` convierte `Dte`+`EmisorConfig` y emite XML xsd 1.0 con orden correcto IdDoc→Emisor→Receptor→Totales→Detalle→TmstFirma. Helper `clp_int` trunca decimales a entero (SII), `decimal_str` normaliza cantidad/precio. `render_unsigned` despacha por `DteTipo` (boleta implementada; factura/nc/nd/guía retornan stub explícito apuntando a 9.1.f).
+  - **9.1.b TED RSA-SHA1** (`crates/dte/src/timbre.rs`): `generate(dte,caf)` valida tipo+rango, extrae subtree `<CAF>` y `<RSASK>` del XML AUTORIZACION, arma `<DD>` manual (orden xsd estricto, sin whitespace, CAF inline literal con FRMA SII intacto), firma con `rsa::Pkcs1v15Sign::new::<Sha1>()` + base64, envuelve en `<TED version="1.0">`. `verify(dte,caf,ted)` re-arma DD esperado, compara bytes, decodifica firma y verifica con RSAPUBK. SHA1 documentado: spec SII obligatoria (no decisión nuestra).
+  - **9.1.c CAF parser + folio atómico** (`crates/dte/src/caf.rs`): `parse_xml` extrae RE/TD/RNG/FA via quick-xml::de, valida rango>0 y desde<=hasta, conserva XML entero en `caf.xml`. `assign_next(db,tenant,tipo)` async-genérico sobre `Surreal<C: Connection>`, serializa con `ASSIGN_LOCK: OnceLock<tokio::Mutex>` global + SELECT activo (ORDER BY folio_desde LIMIT 1) + UPDATE `SET next_folio = next_folio + 1 WHERE next_folio <= folio_hasta RETURN BEFORE`. Retry con backoff lineal corto si MVCC conflict (`is_mvcc_conflict` string match). FolioExhausted si no hay CAF activo.
+  - **Nuevo tipo público**: `EmisorConfig` (rut, razon_social, giro, dirección, comuna, ciudad?, acteco?). Caller pasa al renderer; no se infiere del Dte porque cambia por tenant, no por documento.
+  - **Tests** (17 total verdes, +11 vs sesión anterior):
+    - `xml_boleta_minimal_render.rs` (3): campos clave + orden xsd canonical + tipo distinto rechazado.
+    - `caf_parse.rs` (4): extrae campos, XML inválido rechazado, rango invertido rechazado, tipo DTE no soportado.
+    - `caf_folio_atomic.rs` (3): 20 tasks concurrentes asignan folios únicos contiguos 1..=20 (kv-mem, multi_thread tokio test), CAF agotado → FolioExhausted, sin CAF activo → FolioExhausted.
+    - `timbre_roundtrip.rs` (4): roundtrip sign+verify, tamper en `<RR>` post-firma invalida, folio fuera de rango rechazado, tipo mismatch rechazado.
+    - Helper `tests/common/mod.rs` genera CAF synthetic con RSA-1024 (testing only) — fixtures sin commit de claves reales.
+  - **Workspace deps nuevas**: `quick-xml = "0.36"` (feature serialize), `rsa = "0.9"`, `sha1 = "0.10"` (feature `oid` para PKCS#1 v1.5 DigestInfo). dte add deps: surrealdb, tokio, tracing, async-trait; dev: surrealdb kv-mem, rand, rsa pem.
+- **Por qué**:
+  - El siguiente bloqueante del DTE es despachar a SII; ese paso requiere TED (firma SII no acepta xml sin él) y CAF (sin folio asignado el XML es inválido). 9.1.a establece el cuerpo XML, 9.1.b el timbre, 9.1.c el folio — son las 3 piezas sin las cuales nada del resto compila.
+  - XML DSig completo (firma del XML entero con cert empresa) se defiere a 9.1.b.2: requiere C14N + Reference/SignedInfo + manejo de cert PFX, son ~400 líneas adicionales que harían el PR irrevisable.
+  - Lock global en folio assignment vs optimistic: SurrealKV en kv-mem dejó pasar write-write races sobre el mismo record en pruebas concurrentes; el lock global cubre POS holgado (10k folios/s en debug) y se puede granularizar después si la contención mide en hot path.
+- **Archivos**: `Cargo.toml` (+ quick-xml/rsa/sha1), `crates/dte/Cargo.toml` (+ deps), `crates/dte/src/{lib.rs,types.rs,xml/{schema.rs,writer.rs,boleta.rs,mod.rs},caf.rs,timbre.rs}`, `crates/dte/tests/{common/mod.rs,xml_boleta_minimal_render.rs,caf_parse.rs,caf_folio_atomic.rs,timbre_roundtrip.rs}`.
+- **No-en-este-PR**: 9.1.b.2 XML DSig completo, 9.1.d/e envío SII + polling, 9.1.f-h cancel/resend/libro/X-Z, 9.1.i cert encrypt-at-rest, 9.1.j tier gating, 9.1.k CLI, 9.1.l-m integration sandbox SII + docs cliente.
+- **Estado**: `cargo fmt + clippy --workspace --all-targets -- -D warnings + cargo test --workspace` verde. PR draft cascading base `feat/dte-fase-9-1`.
 
 ---
 

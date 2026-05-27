@@ -1,0 +1,27 @@
+[package]
+name = "dte"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+quick-xml.workspace = true
+rsa.workspace = true
+sha1.workspace = true
+base64.workspace = true
+surrealdb.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+surrealdb = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rand.workspace = true
+rsa = { workspace = true, features = ["pem"] }

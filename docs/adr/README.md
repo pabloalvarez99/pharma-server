@@ -83,3 +83,4 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0005](./0005-core-gratis-no-locked-in.md) | Invariantes del core gratis (sin paywall a export, sin kill-switch) | Accepted | producto, compliance |
 | [0006](./0006-revocation-strategy-signed-crl.md) | Revocación vía CRL firmado distribuido por CDN | Accepted | licencia, seguridad, infra |
 | [0007](./0007-key-rotation-licenser.md) | Rotación de claves del licenser con key-id en license | Accepted | licencia, seguridad |
+| [0011](./0011-dte-provider-native-rust.md) | DTE (boleta/factura SII) implementado nativo en Rust | Accepted | producto, compliance, integraciones |
