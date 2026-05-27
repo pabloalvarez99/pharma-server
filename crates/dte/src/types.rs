@@ -104,6 +104,14 @@ pub struct Dte {
     pub track_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sii_glosa: Option<String>,
+    /// Metadata in-memory para eventos del ciclo de vida (cancelación,
+    /// reenvío). Append-only conceptualmente: cada transición registra
+    /// `cancelled_at`/`cancelled_reason`/`resent_at` aquí. NO persistido en
+    /// la migración 0017 todavía — extender schema en migración futura si
+    /// se quiere durable. Por ahora la información viaja en memoria durante
+    /// la operación admin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// CAF (Código de Autorización de Folios) — XML que SII entrega al contribuyente

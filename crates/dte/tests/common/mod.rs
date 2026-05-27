@@ -92,6 +92,7 @@ pub fn dte_boleta_minimal(folio: i64) -> Dte {
         timbre: None,
         track_id: None,
         sii_glosa: None,
+        metadata: None,
     }
 }
 

@@ -39,6 +39,12 @@ pub enum DteError {
         target: crate::types::DteEstado,
     },
 
+    #[error("transición de estado DTE inválida: {from:?} → {to:?}")]
+    InvalidStateTransition {
+        from: crate::types::DteEstado,
+        to: crate::types::DteEstado,
+    },
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
