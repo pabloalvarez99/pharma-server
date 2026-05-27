@@ -105,7 +105,8 @@ async fn full_po_lifecycle_received_accepted_fulfilled() {
             "lines": [{ "barcode": "7800000000017", "qty": 10, "unit_price": 1490 }],
             "buyer_note": "pedido de prueba",
         }),
-    );
+    )
+    .expect("po.create envelope");
     let (st, body) = post_inbox(&app, create.to_json().unwrap()).await;
     assert_eq!(st, StatusCode::OK, "po.create must be 200: {body}");
     let ack = agent::Envelope::from_json(&body).unwrap();
@@ -145,7 +146,8 @@ async fn full_po_lifecycle_received_accepted_fulfilled() {
         "po-rt-2",
         "po.status",
         serde_json::json!({ "order_id": order_id }),
-    );
+    )
+    .expect("po.status q1 envelope");
     let (st, body) = post_inbox(&app, q1.to_json().unwrap()).await;
     assert_eq!(st, StatusCode::OK, "{body}");
     let r = agent::Envelope::from_json(&body).unwrap();
@@ -195,7 +197,8 @@ async fn full_po_lifecycle_received_accepted_fulfilled() {
         "po-rt-3",
         "po.status",
         serde_json::json!({ "order_id": order_id }),
-    );
+    )
+    .expect("po.status q2 envelope");
     let (st, body) = post_inbox(&app, q2.to_json().unwrap()).await;
     assert_eq!(st, StatusCode::OK, "{body}");
     let r = agent::Envelope::from_json(&body).unwrap();
@@ -220,7 +223,8 @@ async fn po_create_for_non_federated_tenant_is_forbidden() {
             "tenant": "privada-b",
             "lines": [{ "barcode": "7800000000017", "qty": 1, "unit_price": 1 }],
         }),
-    );
+    )
+    .expect("po.create privada-b envelope");
     let (st, body) = post_inbox(&app, env.to_json().unwrap()).await;
     assert_eq!(
         st,
@@ -239,7 +243,8 @@ async fn tampered_envelope_is_rejected_401() {
         "po-evil",
         "po.create",
         serde_json::json!({ "tenant": "drogueria-b", "lines": [] }),
-    );
+    )
+    .expect("po-evil envelope");
     // Mutate the body after signing → signature no longer matches.
     env.body =
         serde_json::json!({ "tenant": "drogueria-b", "lines": [{ "barcode": "x", "qty": 99 }] });

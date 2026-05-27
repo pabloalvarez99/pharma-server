@@ -20,26 +20,10 @@
 pub mod canonical;
 pub mod card;
 pub mod envelope;
+pub mod error;
 pub mod identity;
 
 pub use card::{AgentCard, AgentKind};
 pub use envelope::Envelope;
+pub use error::{AgentError, Result};
 pub use identity::Identity;
-
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum AgentError {
-    #[error("clave inválida: {0}")]
-    Key(String),
-    #[error("firma inválida")]
-    BadSignature,
-    #[error("DID inválido: {0}")]
-    BadDid(String),
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("serialización: {0}")]
-    Serde(#[from] serde_json::Error),
-}
-
-pub type Result<T> = std::result::Result<T, AgentError>;

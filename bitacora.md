@@ -130,7 +130,7 @@ NO acá.
 
 ---
 
-## 2026-05-27 — Plan zero-cost a primer cobro: ADR-0008/0009 + scripts sign/smoke + license-server blueprint
+## 2026-05-27 — Plan zero-cost a primer cobro: ADR-0008/0009 + scripts sign/smoke + estado real license-server
 
 - **Qué** (docs-only, sin tocar código Rust):
   - **[ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md)** (Accepted): firma MSI pilot con
@@ -140,10 +140,13 @@ NO acá.
     clientes) → EV $400-600/año (mainstream). Respeta regla #10 (descarta SignPath OSS
     que exige repo público).
   - **[ADR-0009](./docs/adr/0009-pilot-payment-provider.md)** (Accepted, amends ADR-0003
-    *priority order* en pilot): **Mercado Pago Chile + Stripe** antes de Webpay. Razón:
-    Webpay requiere RUT empresa + onboarding 2-4 sem; MP/Stripe $0 setup + RUT persona
-    natural OK. Webpay sigue siendo target de escala (se reactiva al constituir SpA).
-    `PaymentProvider` trait garantiza que agregar Webpay después no exige refactor.
+    *go-live order* en pilot): **Mercado Pago = primer rail LIVE** para cobrar dinero real
+    sin SpA (RUT persona natural, $0, <24h). NOTA tras verificar estado real: **Webpay YA
+    está code-complete en sandbox** en el license-server — el blocker NO es código sino
+    que Webpay-producción exige RUT empresa + cert Transbank (2-4 sem). Por eso MP va
+    primero LIVE (~1 día código nuevo); Webpay se activa al constituir SpA (cero
+    reescritura, sólo `WEBPAY_INTEGRATION_TYPE=PRODUCTION`); Stripe 3º (schema ya tiene
+    `Order.stripeSessionId`, blocker = banca US).
   - **[`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md)**
     (lockeado v1): documento operativo single-source-of-truth. 3 bloqueos (cert, smoke,
     cobro) → workaround $0 cada uno → camino crítico día-a-día → handoff para agentes
@@ -289,6 +292,46 @@ NO acá.
 - **Tests**: `e2e_idempotency.rs` (3 cases) verde.
 - **Severidad**: P0 financial — same key + different body devolvía respuesta vieja, rompía atomicidad POS.
 - **Rama**: `feat/fix-sales-concurrency` mergeada a `integration/0.1.25` 2026-05-27.
+
+---
+
+## 2026-05-22 — crates/agent unwrap audit fix (Result chain + AgentError)
+
+- **Qué**: auditoría `unwrap()`/`expect()` en `crates/agent/src/`. Los 18 panics
+  potenciales del hot path de federación (11 `unwrap` + 7 `expect`: canonical 3,
+  card 4, envelope 3, identity 8) convertidos a propagación `?` sobre un nuevo
+  enum `AgentError` (`crates/agent/src/error.rs`). Conteo final en
+  `crates/agent/src/`: **0 unwrap, 0 expect**.
+- **Por qué**: input malformado de la red (DID basura, firma corta, hex/base64
+  inválido, JSON mal formado) hacía `panic!` en vez de devolver error tipado.
+  Un peer hostil podía tumbar el thread del handler `POST /agent/inbox`. Ahora
+  toda operación pública falible devuelve `Result<T, AgentError>` y el caller
+  HTTP responde 400/401 en vez de abortar.
+- **AgentError** (thiserror): `Key(String)`, `SignatureInvalid`, `BadDid(String)`,
+  `Canonical(String)`, `Envelope(String)`, `Base64(String)`, `Io(#[from] io::Error)`,
+  `Serde(#[from] serde_json::Error)`. Re-exportado desde `lib.rs` junto con
+  `Result<T>` alias. (`BadDid`/`Serde` son superset del spec mínimo — usados por
+  el parse de DID y card (de)serialization.)
+- **Identity NO deriva Debug** a propósito (envuelve material de clave secreta).
+  Por eso el test usa `Identity::from_hex_seed(..).err().expect(..)` —
+  `Option::expect` sólo exige `AgentError: Debug`, no `Identity: Debug`. El
+  `cargo build --workspace` plano no compila tests de integración, así que este
+  break sólo lo cazó `cargo clippy --all-targets` (E0277). Lección registrada.
+- **Tests nuevos**: `crates/agent/tests/error_paths.rs` (4 tests) — `bad_key_bytes
+  →Key`, `bad_signature→SignatureInvalid`, `bad_base64→Base64`,
+  `bad_envelope_json→Envelope`. Agent crate: 12 unit + 4 error_paths verde.
+- **Callers (fix mínimo, sólo `?`/`.map_err`)**: `crates/license/src/verify.rs`
+  (verify_with_did + canonical_bytes ahora Result), `crates/cli/src/main.rs`
+  (`agent card`/`verify`), `crates/api/src/v1/agent.rs` (Envelope::create/verify
+  en inbox), `crates/api/tests/agent_inbox.rs` (`.expect()` test-side sobre
+  Envelope::create ahora Result). `crates/api/src/v1/agent_orders.rs` NO tocado
+  (no usa la API cripto).
+- **GATE**: `cargo fmt --all -- --check` ✅, `cargo clippy --workspace
+  --all-targets -- -D warnings` ✅, `cargo test --workspace` ✅ (incluye license
+  10 tests + agent_inbox 11, todos verdes).
+- **Archivos**: `crates/agent/src/{error.rs(new),lib.rs,identity.rs,card.rs,canonical.rs,envelope.rs}`,
+  `crates/agent/tests/error_paths.rs (new)`, `crates/{license/src/verify.rs,cli/src/main.rs,api/src/v1/agent.rs,api/tests/agent_inbox.rs}`.
+- **Commit**: `refactor(agent): replace unwrap/expect with Result chain + AgentError enum`.
 
 ---
 

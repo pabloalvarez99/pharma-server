@@ -72,7 +72,8 @@ pub fn parse_and_verify_with_keys(
         .as_object_mut()
         .ok_or_else(|| LicenseError::InvalidFormat("root no es objeto".into()))?
         .remove("signature");
-    let bytes = canonical_bytes(&unsigned);
+    let bytes = canonical_bytes(&unsigned)
+        .map_err(|e| LicenseError::InvalidFormat(format!("canonical: {e}")))?;
 
     let sig_bytes = B64
         .decode(&license.signature)
@@ -96,5 +97,5 @@ pub fn canonical_unsigned_bytes(value: &Value) -> Result<Vec<u8>, LicenseError> 
     v.as_object_mut()
         .ok_or_else(|| LicenseError::InvalidFormat("root no es objeto".into()))?
         .remove("signature");
-    Ok(canonical_bytes(&v))
+    canonical_bytes(&v).map_err(|e| LicenseError::InvalidFormat(format!("canonical: {e}")))
 }

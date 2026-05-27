@@ -112,7 +112,8 @@ pub fn verifying_key_from_did(did: &str) -> Result<VerifyingKey> {
 /// Verify `sig` over `msg` against the public key embedded in `did`.
 pub fn verify_with_did(did: &str, msg: &[u8], sig: &Signature) -> Result<()> {
     let vk = verifying_key_from_did(did)?;
-    vk.verify(msg, sig).map_err(|_| AgentError::BadSignature)
+    vk.verify(msg, sig)
+        .map_err(|_| AgentError::SignatureInvalid)
 }
 
 #[cfg(test)]
@@ -120,40 +121,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn did_roundtrips_through_parse() {
+    fn did_roundtrips_through_parse() -> Result<()> {
         let id = Identity::generate();
         let did = id.did();
         assert!(did.starts_with(DID_PREFIX));
-        let vk = verifying_key_from_did(&did).unwrap();
+        let vk = verifying_key_from_did(&did)?;
         assert_eq!(vk.to_bytes(), id.verifying_key().to_bytes());
+        Ok(())
     }
 
     #[test]
-    fn sign_then_verify_with_did() {
+    fn sign_then_verify_with_did() -> Result<()> {
         let id = Identity::generate();
         let msg = b"quote.request payload";
         let sig = id.sign(msg);
-        verify_with_did(&id.did(), msg, &sig).expect("valid sig");
+        verify_with_did(&id.did(), msg, &sig)?;
         // Tampered message fails.
         assert!(verify_with_did(&id.did(), b"tampered", &sig).is_err());
+        Ok(())
     }
 
     #[test]
-    fn save_load_roundtrip() {
-        let dir = tempfile::tempdir().unwrap();
+    fn save_load_roundtrip() -> Result<()> {
+        let dir = tempfile::tempdir()?;
         let p = dir.path().join("agent.key");
         let id = Identity::generate();
-        id.save(&p).unwrap();
-        let loaded = Identity::load(&p).unwrap();
+        id.save(&p)?;
+        let loaded = Identity::load(&p)?;
         assert_eq!(loaded.did(), id.did());
+        Ok(())
     }
 
     #[test]
-    fn load_or_init_is_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
+    fn load_or_init_is_idempotent() -> Result<()> {
+        let dir = tempfile::tempdir()?;
         let p = dir.path().join("agent.key");
-        let a = Identity::load_or_init(&p).unwrap();
-        let b = Identity::load_or_init(&p).unwrap();
+        let a = Identity::load_or_init(&p)?;
+        let b = Identity::load_or_init(&p)?;
         assert_eq!(a.did(), b.did());
+        Ok(())
     }
 }
