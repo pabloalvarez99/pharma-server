@@ -111,6 +111,7 @@ mod tests {
             )),
             license_path: None,
             rate_limit: None,
+            docs_enabled: true,
         }
     }
 

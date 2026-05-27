@@ -43,6 +43,10 @@ pub struct AppState {
     /// Per-tenant + per-IP rate-limit state. `None` disables both limiters
     /// (most unit tests). Production wires it from `AppConfig.rate_limit`.
     pub rate_limit: Option<Arc<rate_limit::RateLimitState>>,
+    /// Serve interactive API docs (Swagger UI + OpenAPI JSON). Mirrors
+    /// `AppConfig.docs.enabled`. Default `true`; flip off on hardened boxes to
+    /// keep the API surface off the wire.
+    pub docs_enabled: bool,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -50,7 +54,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/app", get(app_index))
         .merge(health::router())
-        .merge(openapi::router())
+        .merge(openapi::router(&state))
         .merge(routes::router())
         .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
@@ -174,6 +178,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         rate_limit: Some(Arc::new(rate_limit::RateLimitState::new(
             cfg.rate_limit.clone(),
         ))),
+        docs_enabled: cfg.docs.enabled,
     };
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
@@ -362,6 +367,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
         rate_limit: pharma_core::config::RateLimitConfig::default(),
+        docs: pharma_core::config::DocsConfig::default(),
     }
 }
 
@@ -442,6 +448,7 @@ mod tests {
             )),
             license_path: None,
             rate_limit: None,
+            docs_enabled: true,
         }
     }
 

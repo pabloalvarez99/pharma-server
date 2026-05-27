@@ -12,6 +12,14 @@ pub struct AppConfig {
     pub backup: BackupConfig,
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+    /// Serve interactive API docs (Swagger UI at `/swagger-ui` + the OpenAPI
+    /// JSON at `/api-docs/openapi.json`). Default `true` so dev/LAN boxes get
+    /// docs out of the box; a hardened prod deployment can set
+    /// `PHARMA__DOCS__ENABLED=false` to keep the full API surface off the wire.
+    /// `#[serde(default = ...)]` keeps existing configs (and env without the
+    /// key) deserializing to the default-on behavior.
+    #[serde(default = "default_docs_enabled")]
+    pub docs: DocsConfig,
 }
 
 /// Per-tenant + per-IP rate-limit settings. Token-bucket (governor crate).
@@ -61,6 +69,27 @@ impl Default for RateLimitConfig {
             ip_burst: default_ip_burst(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocsConfig {
+    /// Mount Swagger UI + OpenAPI JSON. Default `true`.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for DocsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_docs_enabled() -> DocsConfig {
+    DocsConfig::default()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
