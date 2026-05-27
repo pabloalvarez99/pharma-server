@@ -207,6 +207,62 @@ pub async fn update_customer(
     row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
+/// Outcome of [`upsert_customer_by_email`]: whether the row was inserted
+/// (CREATE) or merged onto an existing one (UPDATE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Created,
+    Updated,
+}
+
+/// Find an active or inactive customer matching `(tenant, email)`. Returns
+/// the surreal `id` only — full row reads happen elsewhere if needed.
+pub async fn find_by_email(db: &Db, tenant: &Thing, email: &str) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query("SELECT id FROM customer WHERE tenant = $t AND email = $email LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .bind(("email", email.to_string()))
+        .await?;
+    let id: Option<Thing> = r.take((0, "id"))?;
+    Ok(id)
+}
+
+/// Upsert a customer by `(tenant, email)`. Existing rows are updated with
+/// non-`None` fields from `input` (name always overwrites since it's
+/// required); missing rows are created via [`create_customer`].
+pub async fn upsert_customer_by_email(
+    db: &Db,
+    tenant: &Thing,
+    input: &NewCustomer,
+) -> DomainResult<UpsertOutcome> {
+    let email = input
+        .email
+        .as_deref()
+        .ok_or_else(|| DomainError::Invalid("email requerido".into()))?;
+    match find_by_email(db, tenant, email).await? {
+        Some(id) => {
+            let mut m = Map::new();
+            m.insert("name".into(), Value::String(input.name.clone()));
+            if let Some(v) = &input.phone {
+                m.insert("phone".into(), Value::String(v.clone()));
+            }
+            if let Some(v) = &input.rut {
+                m.insert("rut".into(), Value::String(v.clone()));
+            }
+            db.query("UPDATE customer MERGE $p WHERE id = $id AND tenant = $t")
+                .bind(("p", Value::Object(m)))
+                .bind(("id", id))
+                .bind(("t", tenant.clone()))
+                .await?;
+            Ok(UpsertOutcome::Updated)
+        }
+        None => {
+            create_customer(db, tenant, input).await?;
+            Ok(UpsertOutcome::Created)
+        }
+    }
+}
+
 pub async fn soft_delete_customer(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<bool> {
     let mut r = db
         .query("UPDATE customer SET active = false WHERE id = $id AND tenant = $t RETURN AFTER")

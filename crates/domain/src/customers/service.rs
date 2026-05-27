@@ -150,6 +150,82 @@ pub async fn loyalty_stats(db: &Db, tenant: &Thing) -> DomainResult<LoyaltyStats
     repo::loyalty_stats(db, tenant).await
 }
 
+// --- bulk import (Supabase migration) -------------------------------------
+
+/// Minimum viable email check — non-empty, contains `@`, has chars on both
+/// sides. We don't run a full RFC 5322 regex (overkill for a bulk import
+/// from a curated source like Supabase) but we do reject the obvious junk
+/// so a single bad row in the CSV doesn't pollute the customer table.
+fn is_email_shaped(s: &str) -> bool {
+    let s = s.trim();
+    let Some(at) = s.find('@') else {
+        return false;
+    };
+    let (local, rest) = s.split_at(at);
+    let domain = &rest[1..];
+    !local.is_empty() && !domain.is_empty() && domain.contains('.')
+}
+
+/// Idempotent bulk upsert. One row's failure (invalid email, conflicting
+/// RUT, transient DB error) only aborts that row — others continue and the
+/// caller gets a per-index error list. Capped by
+/// [`IMPORT_CUSTOMERS_MAX_BATCH`] at the API layer.
+pub async fn import_customers(
+    db: &Db,
+    tenant: &Thing,
+    req: ImportCustomersRequest,
+) -> DomainResult<ImportCustomersResponse> {
+    let mut created = 0u32;
+    let mut updated = 0u32;
+    let mut errors: Vec<ImportError> = Vec::new();
+
+    for (idx, row) in req.customers.into_iter().enumerate() {
+        let email = row.email.trim();
+        if email.is_empty() {
+            errors.push(ImportError {
+                idx,
+                message: "email requerido".into(),
+            });
+            continue;
+        }
+        if !is_email_shaped(email) {
+            errors.push(ImportError {
+                idx,
+                message: format!("email inválido: {email}"),
+            });
+            continue;
+        }
+        let name = row.name.trim();
+        if name.is_empty() {
+            errors.push(ImportError {
+                idx,
+                message: "nombre requerido".into(),
+            });
+            continue;
+        }
+        let input = NewCustomer {
+            name: name.to_string(),
+            rut: clean_optional(row.rut).map(|r| normalize_rut(&r)),
+            phone: clean_optional(row.phone),
+            email: Some(email.to_lowercase()),
+        };
+        match repo::upsert_customer_by_email(db, tenant, &input).await {
+            Ok(repo::UpsertOutcome::Created) => created += 1,
+            Ok(repo::UpsertOutcome::Updated) => updated += 1,
+            Err(e) => errors.push(ImportError {
+                idx,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    Ok(ImportCustomersResponse {
+        created,
+        updated,
+        errors,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +234,16 @@ mod tests {
     fn rut_normalizes() {
         assert_eq!(normalize_rut(" 12.345.678-9 "), "123456789");
         assert_eq!(normalize_rut("11111111k"), "11111111K");
+    }
+
+    #[test]
+    fn email_shape_check_filters_obvious_junk() {
+        assert!(is_email_shaped("a@b.cl"));
+        assert!(is_email_shaped("  user@host.com  "));
+        assert!(!is_email_shaped(""));
+        assert!(!is_email_shaped("plainstring"));
+        assert!(!is_email_shaped("@host.com"));
+        assert!(!is_email_shaped("user@"));
+        assert!(!is_email_shaped("user@host")); // no TLD dot
     }
 }
