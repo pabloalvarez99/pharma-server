@@ -14,6 +14,7 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 
 | Documento | Propósito | Status |
 |---|---|---|
+| [`latam-master-plan.md`](./latam-master-plan.md) | **North Star 2035**: tesis unificadora LATAM (visión, moat, flywheel, AI-native, multi-país, distribución, integraciones-as-platform). Sintetiza + enlaza el resto. | Tesis v1 — 2026-05-26 |
 | [`freemium-master-plan.md`](./freemium-master-plan.md) | Modelo de negocio freemium MSI: tiers, microtx, invariantes. | Lockeado v1 — 2026-05-20 |
 | [`license-architecture.md`](./license-architecture.md) | Arquitectura técnica del licenciamiento: schema, firma, gating, revocation. | Lockeado v1 — 2026-05-20 |
 | [`payments-cl.md`](./payments-cl.md) | Comparativa rails de pago CL + recomendación staged. Research only. | Lockeado v1 — 2026-05-20 |
@@ -32,12 +33,15 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 
 ```mermaid
 flowchart TD
+  LMP[latam-master-plan.md\nNorth Star 2035]
   FMP[freemium-master-plan.md] --> LA[license-architecture.md]
   FMP --> PAY[payments-cl.md]
   LA --> SCA[scaling-architecture.md]
   PAY --> SCA
   ER[ecosystem-roadmap.md] --> B2B[b2b-marketplace.md]
   FMP -.alimenta Fase 13.-> B2B
+  LMP -.resume + enlaza.-> FMP & LA & PAY & SCA & ER & B2B
 ```
 
-Lectura recomendada en ese orden para primer onboarding.
+Para primer onboarding: leer latam-master-plan.md (tesis general) y desde ahí seguir los links
+a los docs lockeados para el detalle de ejecución.

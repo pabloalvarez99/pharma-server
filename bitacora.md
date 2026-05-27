@@ -1209,3 +1209,17 @@ NO acá.
 - **Sin bump de versión** (lo manejan sesiones paralelas; este commit queda en el pool). PR #45 mergeado a `feature/erp-parity`.
 - **Estado vs goal**: ✅ Fase 5-full **cerrada con lifecycle completo** (4 slices: create + receive + AP + cancel). ⏳ Fase 9 firma cert Authenticode + smoke VM (v1.0.0 vendible), Fase 10 sync ERP online opt-in, Fase 12 marketplace (locked estrategia-only), BACKLOG #6 relay offline-peer.
 - **Pendiente**: ver `## BACKLOG` al tope.
+
+---
+
+## 2026-05-26 — ULTRA PLAN: tesis maestra LATAM 2026-2035 (north star unificador)
+
+- **Qué/por qué**: nuevo `docs/strategy/latam-master-plan.md` (Tesis v1). El corpus estratégico existente (freemium, license, scaling, payments, ecosystem-roadmap, b2b-marketplace + 7 ADRs) estaba maduro pero **fragmentado y region-first**. Faltaba la capa de visión unificadora a 10 años que conecta todo en un solo flywheel/moat y desarrolla a fondo lo poco cubierto: **AI-native, LATAM multi-país, distribución masiva, integraciones-as-platform**. El usuario lo pidió como documento único, extremadamente profundo y accionable (nivel tesis de plataforma).
+- **Decisiones de diseño** (confirmadas con el fundador):
+  - Artefacto = **un solo documento maestro** (no hub+spokes). Resume + enlaza los docs lockeados; **no los duplica ni los supersede** — es additive, igual que b2b-marketplace.md es "estratégico, no scaffolding". No requirió ADR para crearse.
+  - Capas nuevas de monetización (marketplace take-rate como core, embedded payments/fintech, insurance, API-as-product, cloud AI, marketplace third-party) marcadas como **`ADR candidate`** — consistentes con invariantes pero sin ADR stub (la disciplina del repo reserva ADRs para decisiones aceptadas). Tabla consolidada de candidates en §11.5.
+  - Reafirma los 8 invariantes heredados (core gratis offline, offline-first, telemetría opt-in, sin lock-in de datos, sin dark patterns/kill-switch, PII nunca sale sin opt-in, no custodiar fondos, monolito sin microservicios/CRDTs). Ninguna apuesta los viola.
+- **Estructura**: 11 secciones obligatorias (visión/moat/flywheel, modelo LoL, arquitectura 10 años, marketplace B2B, distribución masiva, integraciones, AI-native edge-first, LATAM multi-país CL→PE→CO→MX→AR→BR, roadmap 2026-2035, riesgos existenciales, cierre). 3 diagramas Mermaid (flywheel §1, timeline de arquitectura §3, sin diagrama en §8 — tabla por país). Densidad nueva en §5/§6/§7/§8; resumen+link en §2/§3/§4.
+- **Archivos**: `docs/strategy/latam-master-plan.md` (nuevo) + `docs/strategy/README.md` (fila + nodo en diagrama de dependencias) + `CLAUDE.md` (puntero en línea "Visión extendida") + este append. **Cero cambios de código** (`git diff` solo docs/*.md + CLAUDE.md + bitacora.md).
+- **Origen/entorno**: doc generado en sesión remota `/ultraplan` (Linux, sin vault Obsidian); traído a local y commiteado en branch `docs/latam-master-plan` vía **git worktree aislado** (`integration/0.1.25` tenía un merge DTE en curso sin resolver — no se tocó). Espejo dual al vault (`work/active/pharma-server/bitacora.md` + `decisions-log-index.md`) = follow-up local (regla CLAUDE.md §7).
+- **Pendiente**: ver `## BACKLOG` al tope.
