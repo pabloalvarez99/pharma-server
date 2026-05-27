@@ -91,6 +91,7 @@ fn state_with_db(db: Arc<db::Db>) -> api::AppState {
             license::License::free_default(uuid::Uuid::nil()),
         )),
         license_path: None,
+        rate_limit: None,
     }
 }
 

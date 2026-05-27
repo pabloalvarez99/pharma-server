@@ -39,6 +39,8 @@ hex.workspace = true
 tar.workspace = true
 flate2.workspace = true
 tokio-cron-scheduler.workspace = true
+governor.workspace = true
+nonzero_ext.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true }

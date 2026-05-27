@@ -56,6 +56,7 @@ fn state_with(lic: License, license_path: Option<std::path::PathBuf>) -> api::Ap
         data_dir: None,
         license: Arc::new(ArcSwap::from_pointee(lic)),
         license_path,
+        rate_limit: None,
     }
 }
 

@@ -35,6 +35,7 @@ fn state_with_license(lic: License) -> api::AppState {
         data_dir: None,
         license: Arc::new(arc_swap::ArcSwap::from_pointee(lic)),
         license_path: None,
+        rate_limit: None,
     }
 }
 
