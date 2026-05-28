@@ -1,4 +1,4 @@
----
+curs---
 title: Architecture Decision Records (ADRs)
 status: Activo
 owners: pabloalvarez99

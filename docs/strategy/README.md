@@ -14,6 +14,7 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 
 | Documento | Propósito | Status |
 |---|---|---|
+| [`market-thesis.md`](./market-thesis.md) | **Punto de entrada.** Posicionamiento/moat: por qué existe (infra competitiva para el independiente vs oligopolio), no "otro ERP". | Lockeado v1 — 2026-05-27 |
 | [`freemium-master-plan.md`](./freemium-master-plan.md) | Modelo de negocio freemium MSI: tiers, microtx, invariantes. | Lockeado v1 — 2026-05-20 |
 | [`license-architecture.md`](./license-architecture.md) | Arquitectura técnica del licenciamiento: schema, firma, gating, revocation. | Lockeado v1 — 2026-05-20 |
 | [`payments-cl.md`](./payments-cl.md) | Comparativa rails de pago CL + recomendación staged. Research only. | Lockeado v1 — 2026-05-20 |
@@ -39,6 +40,8 @@ flowchart TD
   PAY --> SCA
   ER[ecosystem-roadmap.md] --> B2B[b2b-marketplace.md]
   FMP -.alimenta Fase 13.-> B2B
+  MT[market-thesis.md] -.posiciona.-> FMP
+  MT -.posiciona.-> ER
 ```
 
-Lectura recomendada en ese orden para primer onboarding.
+Lectura recomendada: **`market-thesis.md` primero** (el porqué/moat), luego el orden del grafo.

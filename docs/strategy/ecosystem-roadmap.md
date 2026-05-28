@@ -3,6 +3,8 @@
 > **Visión expandida (2026-05-16)**: pharma-server deja de ser solo un ERP on-prem vendible. Pasa a ser **nodo de un ecosistema federado de agentes ERP**, donde cada instalación es un participante soberano (farmacia, proveedor, droguería, laboratorio). Humanos reales operan cada nodo. Transacciones inter-nodo (cotización, OC, despacho, pago) usan protocolo común.
 >
 > **Fase 0 (hoy)**: ERP single-nodo vendible. **Fase ∞**: malla de agentes humanos comerciando vía pharma-server. Mismo binario, capas opt-in.
+>
+> **Posicionamiento / por qué (reframe 2026-05-27)** → ver [`market-thesis.md`](./market-thesis.md): no es "otro ERP", es **infraestructura competitiva para el independiente** frente al oligopolio (Ahumada/Cruz Verde/Salcobrand ~90%). Este roadmap es el *cómo* federado; market-thesis es el *por qué* y el moat (4 capas, POS = caballo de Troya).
 
 ---
 

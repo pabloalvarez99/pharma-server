@@ -133,6 +133,14 @@ NO acá.
 
 ---
 
+## 2026-05-27 — Tesis de mercado: "infraestructura competitiva para el independiente" (reframe posicionamiento)
+
+- **Qué** (docs-only, cero código Rust): nuevo [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md) (Lockeado v1) — captura el insight fundador que reordena producto/UX/pricing/GTM/narrativa/moat: pharma-server **no es "otro ERP"**, es **"un mecanismo para reducir la desventaja estructural del independiente frente al oligopolio"** (Ahumada/Cruz Verde/Salcobrand ~90%).
+- **Tesis**: el mercado NO está saturado sino **subdigitalizado** (Excel/POS viejo/pirata/papel); los SaaS farmacia LATAM fallan por genéricos + caros + licencia per-caja + pensados para cadenas. **Moat en 4 capas (POS = caballo de Troya)**: (1) software gratis → adopción, (2) datos agregados, (3) **poder de compra colectivo** → destruye la ventaja de volumen de las cadenas (*aquí explota el modelo*), (4) red operacional (despacho, marketplace, e-recetas, telemed, IA reposición, scoring, factoring). **Riesgo principal = distribución + confianza, no técnico** → onboarding absurdamente simple, migración asistida, soporte humano. **GTM 3 fases**: share gratis → infra → red nacional independiente.
+- **Por qué Chile**: mercado chico + alta digitalización + SII avanzado + fintech madura + resentimiento vs cadenas + independientes que necesitan sobrevivir → disposición a adoptar. CL = beachhead.
+- **Aditivo** (no supersede docs lockeados): capa de *por qué*/moat sobre [`ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md) (cómo), [`b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md) (Fase 13), [`freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) (pricing), `latam-master-plan.md` (PR #77, 10y). Valida ADR-0005 (core gratis no lock-in) + ADR-0008 (self-sign pilot, baja fricción onboarding).
+- **Archivos**: `docs/strategy/market-thesis.md` (nuevo) + `docs/strategy/README.md` (tabla + mermaid, market-thesis como punto de entrada) + `ecosystem-roadmap.md` (pointer top) + `CLAUDE.md` (pointer Visión extendida). Bitácora dual + memoria `[[independent-pharmacy-thesis]]` + vault `brain/pharma-server-north-star.md` (§ Tesis de mercado).
+
 ## 2026-05-27 — Plan zero-cost a primer cobro: ADR-0008/0009 + scripts sign/smoke + estado real license-server
 
 - **Qué** (docs-only, sin tocar código Rust):
