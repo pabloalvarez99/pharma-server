@@ -15,6 +15,7 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 | Documento | Propósito | Status |
 |---|---|---|
 | [`market-thesis.md`](./market-thesis.md) | **Punto de entrada.** Posicionamiento/moat: por qué existe (infra competitiva para el independiente vs oligopolio), no "otro ERP". | Lockeado v1 — 2026-05-27 |
+| [`latam-master-plan.md`](./latam-master-plan.md) | **North Star 2035**: tesis unificadora LATAM (visión, moat, flywheel, AI-native, multi-país, distribución, integraciones-as-platform). Sintetiza + enlaza el resto. | Tesis v1 — 2026-05-26 |
 | [`freemium-master-plan.md`](./freemium-master-plan.md) | Modelo de negocio freemium MSI: tiers, microtx, invariantes. | Lockeado v1 — 2026-05-20 |
 | [`license-architecture.md`](./license-architecture.md) | Arquitectura técnica del licenciamiento: schema, firma, gating, revocation. | Lockeado v1 — 2026-05-20 |
 | [`payments-cl.md`](./payments-cl.md) | Comparativa rails de pago CL + recomendación staged. Research only. | Lockeado v1 — 2026-05-20 |
@@ -34,6 +35,7 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 
 ```mermaid
 flowchart TD
+  LMP[latam-master-plan.md\nNorth Star 2035]
   FMP[freemium-master-plan.md] --> LA[license-architecture.md]
   FMP --> PAY[payments-cl.md]
   LA --> SCA[scaling-architecture.md]
@@ -42,6 +44,7 @@ flowchart TD
   FMP -.alimenta Fase 13.-> B2B
   MT[market-thesis.md] -.posiciona.-> FMP
   MT -.posiciona.-> ER
+  LMP -.resume + enlaza.-> FMP & LA & PAY & SCA & ER & B2B
 ```
 
-Lectura recomendada: **`market-thesis.md` primero** (el porqué/moat), luego el orden del grafo.
+Lectura recomendada: **`market-thesis.md` primero** (el porqué/moat), luego `latam-master-plan.md` (tesis general 2035), y desde ahí el orden del grafo a los docs lockeados.
