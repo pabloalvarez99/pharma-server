@@ -473,6 +473,10 @@ struct PurchaseOrderItemRow {
     product: Option<Thing>,
     product_name: String,
     quantity: i64,
+    // Defaulted so rows created before migration 0017 (no `qty_received`
+    // column persisted) still deserialize as "nothing received yet".
+    #[serde(default)]
+    qty_received: i64,
     unit_cost: Decimal,
     subtotal: Decimal,
 }
@@ -484,6 +488,7 @@ impl From<PurchaseOrderItemRow> for PurchaseOrderItemDto {
             product: r.product.map(|p| p.to_string()),
             product_name: r.product_name,
             quantity: r.quantity,
+            qty_received: r.qty_received,
             unit_cost: r.unit_cost,
             subtotal: r.subtotal,
         }
@@ -711,6 +716,144 @@ pub async fn receive_purchase_order(
             .bind((format!("p{i}"), e.product.clone()))
             .bind((format!("q{i}"), e.add_qty))
             .bind((format!("c{i}"), dec_val(e.new_cost)));
+    }
+    qb.await?.check()?;
+
+    get_purchase_order(db, tenant, po).await
+}
+
+// --- line-level receiving (recepción de mercadería) ------------------------
+
+/// Per-product effect of a *line-level* receipt: aggregate `add_qty` across
+/// the lines touching this product in one receipt + the recomputed weighted
+/// average `new_cost`.
+pub struct ReceiveLineProductEffect {
+    pub product: Thing,
+    pub add_qty: i64,
+    pub new_cost: Decimal,
+}
+
+/// Per-line effect: bump `purchase_order_item.qty_received` by `add_qty`.
+pub struct ReceiveLineQtyEffect {
+    pub line: Thing,
+    pub add_qty: i64,
+}
+
+/// Per-lot effect. `batch = Some` tops up an existing `product_batch.stock`;
+/// `batch = None` creates a new lot. `cost` seeds the batch `cost` on create.
+pub struct ReceiveBatchEffect {
+    pub batch: Option<Thing>,
+    pub product: Thing,
+    pub batch_code: String,
+    pub expiry_date: DateTime<Utc>,
+    pub add_qty: i64,
+    pub cost: Decimal,
+}
+
+/// Find an active `product_batch` for `(tenant, product, batch_code)` so a
+/// repeat receipt of the same lot tops up the existing row instead of
+/// creating a duplicate.
+pub async fn find_batch(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    batch_code: &str,
+) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query(
+            "SELECT id FROM product_batch \
+             WHERE tenant = $t AND product = $p AND batch_code = $code LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .bind(("code", batch_code.to_string()))
+        .await?;
+    let row: Option<Thing> = r.take((0, "id"))?;
+    Ok(row)
+}
+
+/// Atomically post a line-level purchase-order receipt: for every catalogued
+/// product bump `product.stock` + set the new WAC `cost_price` + append an
+/// audit `stock_movement(reason='purchase_receive')`; bump each line's
+/// `qty_received`; create/top-up each supplied `product_batch`; then set the
+/// PO to `final_status` (`received` | `partially_received`). One
+/// `BEGIN/COMMIT` so a crash can't move stock without the movement, leave a
+/// line's `qty_received` out of sync, or half-flip the PO status (mirrors
+/// `sales::repo::apply_sale` / `agent_orders` fulfill — keeps
+/// `product.stock = SUM(stock_movement.delta)`).
+#[allow(clippy::too_many_arguments)] // atomic receive: each effect-vec is a distinct concern; struct would obscure intent.
+pub async fn receive_purchase_order_lines(
+    db: &Db,
+    tenant: &Thing,
+    po: &Thing,
+    admin: Option<Thing>,
+    final_status: &str,
+    product_effects: &[ReceiveLineProductEffect],
+    line_effects: &[ReceiveLineQtyEffect],
+    batch_effects: &[ReceiveBatchEffect],
+) -> DomainResult<Option<PurchaseOrderDto>> {
+    let mut q = String::from("BEGIN; ");
+    for i in 0..product_effects.len() {
+        q.push_str(&format!(
+            "UPDATE product SET stock = stock + $q{i}, cost_price = $c{i} \
+                WHERE id = $p{i} AND tenant = $t; \
+             CREATE stock_movement SET tenant=$t, product=$p{i}, delta=$q{i}, \
+                reason='purchase_receive', admin=$adm, ref=$ref; ",
+        ));
+    }
+    for i in 0..line_effects.len() {
+        q.push_str(&format!(
+            "UPDATE purchase_order_item SET qty_received = qty_received + $lq{i} \
+                WHERE id = $lid{i} AND tenant = $t; ",
+        ));
+    }
+    for (i, eff) in batch_effects.iter().enumerate() {
+        if eff.batch.is_some() {
+            q.push_str(&format!(
+                "UPDATE product_batch SET stock = stock + $bq{i}, active = true \
+                    WHERE id = $bid{i} AND tenant = $t; ",
+            ));
+        } else {
+            q.push_str(&format!(
+                "CREATE product_batch SET tenant=$t, product=$bp{i}, \
+                    batch_code=$bc{i}, expiry_date=$be{i}, stock=$bq{i}, cost=$bcost{i}; ",
+            ));
+        }
+    }
+    q.push_str("UPDATE purchase_order SET status=$st WHERE id=$po AND tenant=$t; ");
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("po", po.clone()))
+        .bind(("adm", admin))
+        .bind(("ref", po.to_string()))
+        .bind(("st", final_status.to_string()));
+    for (i, e) in product_effects.iter().enumerate() {
+        qb = qb
+            .bind((format!("p{i}"), e.product.clone()))
+            .bind((format!("q{i}"), e.add_qty))
+            .bind((format!("c{i}"), dec_val(e.new_cost)));
+    }
+    for (i, e) in line_effects.iter().enumerate() {
+        qb = qb
+            .bind((format!("lid{i}"), e.line.clone()))
+            .bind((format!("lq{i}"), e.add_qty));
+    }
+    for (i, e) in batch_effects.iter().enumerate() {
+        qb = qb
+            .bind((format!("bq{i}"), e.add_qty))
+            .bind((format!("bp{i}"), e.product.clone()))
+            .bind((format!("bc{i}"), e.batch_code.clone()))
+            .bind((
+                format!("be{i}"),
+                surrealdb::sql::Datetime::from(e.expiry_date),
+            ))
+            .bind((format!("bcost{i}"), dec_val(e.cost)));
+        if let Some(bid) = &e.batch {
+            qb = qb.bind((format!("bid{i}"), bid.clone()));
+        }
     }
     qb.await?.check()?;
 

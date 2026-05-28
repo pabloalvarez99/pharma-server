@@ -93,15 +93,38 @@ pub async fn post_sale(
         }
     }
 
-    // Idempotency replay: short-circuit if cached.
-    if let Some(key) = idempotency_key {
-        if let Some((cached, _status)) = repo::lookup_idempotency(db, tenant, key).await? {
-            // The api crate decodes `cached` JSON back into PosSaleResponse
-            // and returns it verbatim. We surface via a sentinel error so
-            // the handler controls the response status.
-            return Err(DomainError::Conflict(format!(
-                "IDEMPOTENCY_CACHED:{cached}"
-            )));
+    // Idempotency replay: short-circuit on (tenant, key) match. The body
+    // fingerprint guards against BUG-002 — same key with a *different* body is
+    // a 409 reuse-conflict, NOT a silent replay. Computed once here and reused
+    // on `store_idempotency` below so the persisted row matches the request
+    // bit-for-bit.
+    let body_fp = if idempotency_key.is_some() {
+        Some(repo::body_fingerprint(&req)?)
+    } else {
+        None
+    };
+    if let (Some(key), Some(fp)) = (idempotency_key, body_fp.as_deref()) {
+        match repo::lookup_idempotency(db, tenant, key, fp).await? {
+            repo::IdempotencyHit::Replay { response_json, .. } => {
+                // The api crate decodes `response_json` back into PosSaleResponse
+                // and returns it verbatim. We surface via a sentinel error so
+                // the handler controls the response status.
+                return Err(DomainError::Conflict(format!(
+                    "IDEMPOTENCY_CACHED:{response_json}"
+                )));
+            }
+            repo::IdempotencyHit::Conflict => {
+                // BUG-002: caller reused the same key with a different body —
+                // canonical "Idempotency-Key" semantics (RFC draft + Stripe).
+                // The api crate maps `DomainError::Conflict` → 409 + code
+                // `CONFLICT`.
+                return Err(DomainError::Conflict(
+                    "IDEMPOTENCY_KEY_REUSE_CONFLICT: la misma Idempotency-Key \
+                     se reutilizó con un body distinto"
+                        .to_string(),
+                ));
+            }
+            repo::IdempotencyHit::None => {}
         }
     }
 
@@ -241,10 +264,12 @@ pub async fn post_sale(
         low_stock_alerts: Vec::new(),
     };
 
-    // Cache idempotent response.
-    if let Some(key) = idempotency_key {
+    // Cache idempotent response. `body_fp` was computed above (same struct =
+    // same bytes) so the persisted row matches the request bit-for-bit, which
+    // is what `lookup_idempotency` compares on replay.
+    if let (Some(key), Some(fp)) = (idempotency_key, body_fp.as_deref()) {
         let json = serde_json::to_string(&resp).map_err(|e| DomainError::Other(e.into()))?;
-        repo::store_idempotency(db, tenant, key, &json, 200).await?;
+        repo::store_idempotency(db, tenant, key, fp, &json, 200).await?;
     }
 
     Ok(resp)
@@ -343,6 +368,67 @@ pub async fn get_order(
         .ok_or(DomainError::NotFound)
 }
 
+/// Build the printable receipt/boleta for an order. Read-only: composes the
+/// order + its items + the tenant name + the loyalty points awarded into a
+/// self-contained [`ReceiptDto`]. 404 (`DomainError::NotFound`) if the order
+/// is missing or belongs to another tenant.
+///
+/// `change` = `cash_amount - total` for cash sales (`pos_cash`), else `None`.
+/// `line_total` = `qty * unit_price` per line.
+pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ReceiptDto> {
+    let order_thing = parse_tenant_thing(id, "order")?;
+    let (order, items) = repo::get_order(db, tenant, &order_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+
+    let tenant_name = repo::tenant_name(db, tenant).await?.unwrap_or_default();
+    let loyalty_points_awarded = repo::loyalty_awarded_for_order(db, tenant, &order_thing).await?;
+
+    let receipt_items: Vec<ReceiptItem> = items
+        .iter()
+        .map(|it| ReceiptItem {
+            name: it.product_name.clone(),
+            qty: it.quantity,
+            unit_price: it.unit_price,
+            line_total: it.unit_price * Decimal::from(it.quantity),
+        })
+        .collect();
+
+    // Cash change is only meaningful for a pure-cash counter sale. Mixed/card
+    // sales have no "vuelto" to print.
+    let change = if order.payment_method == "pos_cash" {
+        order.cash_amount.map(|cash| cash - order.total)
+    } else {
+        None
+    };
+
+    // Prefer the SII folio when the boleta was issued; otherwise the local
+    // record-id key is the human-facing ticket number.
+    let folio_or_number = order
+        .external_ref
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| order_thing.id.to_raw());
+
+    Ok(ReceiptDto {
+        order_id: order.id,
+        folio_or_number,
+        datetime: order.created_at,
+        tenant_name,
+        items: receipt_items,
+        subtotal: order.subtotal,
+        discount: order.discount,
+        total: order.total,
+        payment_method: order.payment_method,
+        cash_amount: order.cash_amount,
+        card_amount: order.card_amount,
+        change,
+        loyalty_points_awarded,
+        cashier: order.sold_by_name,
+        footer_note: RECEIPT_FOOTER_NOTE.to_string(),
+    })
+}
+
 /// Validate + persist a refund/return atomically.
 ///
 /// Rules enforced before the tx:
@@ -390,19 +476,59 @@ pub async fn create_refund(
         .map(|s| parse_tenant_thing(s, "order"))
         .transpose()?;
 
+    // Per-line batch-restock plan, aligned with `req.items`. Filled below from
+    // the originating order's consumed FEFO allocations so restock keeps
+    // `product.stock == Σ product_batch.stock` (BUG-007). `None` = no batch
+    // attribution (no order, line not restocked, or product not batch-tracked)
+    // → `product.stock` bump only.
+    let mut restock_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
+        vec![None; req.items.len()];
+
     if let Some(ord) = order_thing.as_ref() {
         let (_order, sold_items) = repo::get_order(db, tenant, ord)
             .await?
             .ok_or(DomainError::NotFound)?;
         let mut sold: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        // Consumed FEFO lots per product (earliest-expiry first, as recorded by
+        // the sale), used to plan where returned units go back.
+        let mut consumed: std::collections::HashMap<String, Vec<(String, i64)>> =
+            std::collections::HashMap::new();
         for si in &sold_items {
             if let Some(p) = &si.product {
                 *sold.entry(p.clone()).or_default() += si.quantity;
+                if let Some(allocs) = &si.batches {
+                    let lots = consumed.entry(p.clone()).or_default();
+                    for a in allocs {
+                        lots.push((a.batch.clone(), a.qty));
+                    }
+                }
             }
         }
-        let mut refunding: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        for it in &req.items {
+        // Cumulative over-refund guard: count what was ALREADY refunded for
+        // this order in prior `devolucion`s, not just the lines in this
+        // request. Otherwise N sequential partial refunds can each pass the
+        // within-request check yet sum past the sold qty (refund-fraud vector,
+        // BUG-005). The running tally seeds from prior refunds and adds the
+        // current request line-by-line.
+        let prior = repo::sum_prior_refunds_by_product(db, tenant, ord).await?;
+        // Reserve the lot capacity already consumed by prior refunds (FEFO
+        // order) so the current restock fills only what is still outstanding —
+        // keeps the batch sum exact across multiple sequential refunds.
+        let mut lot_used: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for (p, mut already) in prior.clone() {
+            if let Some(lots) = consumed.get(&p) {
+                for (batch, cap) in lots {
+                    if already == 0 {
+                        break;
+                    }
+                    let take = already.min(*cap);
+                    *lot_used.entry(batch.clone()).or_default() += take;
+                    already -= take;
+                }
+            }
+        }
+        let mut refunding: std::collections::HashMap<String, i64> = prior;
+        for (i, it) in req.items.iter().enumerate() {
             if let Some(p) = &it.product {
                 let acc = refunding.entry(p.clone()).or_default();
                 *acc += it.quantity;
@@ -417,6 +543,34 @@ pub async fn create_refund(
                         "devolución de {p} excede lo vendido ({acc} > {sold_qty})"
                     )));
                 }
+                // Plan the restock into the consumed lots with remaining
+                // capacity (FEFO order). Only batch-tracked, restocked lines
+                // get a plan; the rest stay `None` (product.stock-only).
+                if it.restock {
+                    if let Some(lots) = consumed.get(p) {
+                        let mut remaining = it.quantity;
+                        let mut plan = Vec::new();
+                        for (batch, cap) in lots {
+                            if remaining == 0 {
+                                break;
+                            }
+                            let used = lot_used.entry(batch.clone()).or_default();
+                            let free = (*cap - *used).max(0);
+                            let take = remaining.min(free);
+                            if take > 0 {
+                                plan.push(crate::inventory::model::FefoAllocation {
+                                    batch: batch.clone(),
+                                    qty: take,
+                                });
+                                *used += take;
+                                remaining -= take;
+                            }
+                        }
+                        if !plan.is_empty() {
+                            restock_plans[i] = Some(plan);
+                        }
+                    }
+                }
             }
         }
     }
@@ -427,8 +581,16 @@ pub async fn create_refund(
         .map(|i| i.unit_price * Decimal::from(i.quantity))
         .sum();
 
-    let applied =
-        repo::apply_refund(db, tenant, processed_by, order_thing.as_ref(), &req, total).await?;
+    let applied = repo::apply_refund(
+        db,
+        tenant,
+        processed_by,
+        order_thing.as_ref(),
+        &req,
+        &restock_plans,
+        total,
+    )
+    .await?;
 
     Ok(RefundResponse {
         devolucion: applied.devolucion,

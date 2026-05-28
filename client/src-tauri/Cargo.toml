@@ -1,0 +1,47 @@
+# Pharma Client — Tauri 2 desktop launcher (LoL-style: login → ERP shell).
+#
+# STANDALONE workspace on purpose: the root pharma-server `[workspace]` excludes
+# `client/src-tauri`, and declaring an empty `[workspace]` here stops cargo from
+# walking up and re-attaching this crate to the server workspace. This keeps
+# `cargo build --workspace` (server) free of Tauri/WebView2 deps, and lets the
+# client pin its own dependency versions independently.
+[workspace]
+
+[package]
+name = "pharma-client"
+version = "0.1.0"
+description = "Pharma Client — desktop launcher for pharma-server (login + license + ERP shell)"
+authors = ["Pablo Alvarez <pablobfa1999@gmail.com>"]
+edition = "2021"
+rust-version = "1.85"
+license = "Proprietary"
+
+# The Tauri build script + the bundled binary share one crate. The lib is what
+# `tauri::Builder` lives in; the bin is a thin launcher (Windows/Linux/macOS).
+[lib]
+name = "pharma_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "pharma-client"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# rustls-tls: no OpenSSL / no system C toolchain dependency on Windows. Matches
+# the project's "no libclang/OpenSSL on Windows" stance (see CLAUDE.md stack).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["sync"] }
+# v4 random UUID for per-request Idempotency-Key on POS sales (generated
+# server-side in the Tauri command so each "Cobrar" click is a distinct sale).
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+# Default feature set; custom protocols toggled by Tauri tooling when needed.
+custom-protocol = ["tauri/custom-protocol"]

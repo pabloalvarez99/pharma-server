@@ -30,15 +30,24 @@ utoipa.workspace = true
 utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true
 axum-prometheus.workspace = true
+# Same `metrics` facade version axum-prometheus 0.7 records through, so custom
+# counters land in the global recorder rendered at /metrics.
+metrics = "0.23"
 chrono.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 surrealdb.workspace = true
 uuid.workspace = true
 csv.workspace = true
 sha2 = "0.10"
+hmac.workspace = true
 hex.workspace = true
+subtle.workspace = true
+reqwest.workspace = true
 tar.workspace = true
 flate2.workspace = true
 tokio-cron-scheduler.workspace = true
+governor.workspace = true
+nonzero_ext.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true }
@@ -49,3 +58,18 @@ flate2.workspace = true
 tar.workspace = true
 serde_json.workspace = true
 filetime = "0.2"
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+hmac.workspace = true
+sha2 = "0.10"
+hex.workspace = true
+metrics-util = { version = "0.17", features = ["debugging"] }
+# Bench-only extras. `surrealdb` here re-declares with `kv-mem` so benches can
+# spin up an in-memory store (the prod build keeps `kv-surrealkv` only).
+# Cargo merges features across the two declarations for the test/bench build,
+# but the bin still ships kv-surrealkv only.
+surrealdb = { workspace = true, features = ["kv-mem"] }
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+
+[[bench]]
+name = "pos_sale"
+harness = false

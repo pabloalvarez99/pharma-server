@@ -134,6 +134,22 @@ impl ApiError {
         }))
     }
 
+    /// 429 — request throttled by the rate-limit middleware.
+    /// `scope` is `"tenant"` or `"ip"`. `retry_after_secs` is the recommended
+    /// back-off (also surfaced as `Retry-After` response header by the
+    /// middleware). Body code: `RATE_LIMITED`.
+    pub fn rate_limited(scope: &'static str, retry_after_secs: u64) -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMITED",
+            "Demasiadas solicitudes. Intenta nuevamente en unos segundos.",
+        )
+        .with_details(serde_json::json!({
+            "scope": scope,
+            "retry_after_secs": retry_after_secs,
+        }))
+    }
+
     pub fn not_implemented() -> Self {
         Self::new(
             StatusCode::NOT_IMPLEMENTED,

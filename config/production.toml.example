@@ -1,0 +1,184 @@
+# ============================================================================
+# pharma-server — production.toml.example
+# ----------------------------------------------------------------------------
+# Copy to `config/local.toml` (NEVER commit) and edit. Loader precedence:
+#   config/default.toml  ->  config/local.toml  ->  env PHARMA__*  (separator __)
+#
+# Source of truth: crates/core/src/config.rs on branch feature/erp-parity
+# (v0.1.24). Fields tagged `[post-0.1.25]` come from second-wave PRs not yet
+# merged here (feat/api-public-orders-web, feat/api-stock-webhook); they are
+# IGNORED by the current binary — uncomment only after the PR is merged.
+#
+# Secrets (jwt.secret, public_orders.hmac_secret, stock_webhook.hmac_secret,
+# metrics.token) MUST be injected via env in production. Never paste a real
+# value into this file.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# [root] — top-level AppConfig
+# ----------------------------------------------------------------------------
+# String. REQUIRED. Socket the axum HTTP server binds to.
+# Override: PHARMA__BIND
+bind = "0.0.0.0:8080"
+
+
+# ----------------------------------------------------------------------------
+# [db] — DbConfig (REQUIRED section)
+# ----------------------------------------------------------------------------
+[db]
+# String. REQUIRED. Filesystem path to the SurrealKv store. In Windows
+# service mode the working dir is `%ProgramData%\PharmaServer` so a relative
+# `./data/surreal` resolves there. Use an absolute path if running ad-hoc.
+# Override: PHARMA__DB__PATH
+path = "./data/surreal"
+
+# String. REQUIRED. SurrealDB namespace.
+# Override: PHARMA__DB__NAMESPACE
+namespace = "pharma"
+
+# String. REQUIRED. SurrealDB database name.
+# Override: PHARMA__DB__DATABASE
+database = "main"
+
+
+# ----------------------------------------------------------------------------
+# [jwt] — JwtConfig (REQUIRED section)
+# ----------------------------------------------------------------------------
+[jwt]
+# String. REQUIRED — SECRET. HS256 signing key for access tokens.
+# DO NOT commit a real value. Generate fresh:
+#   openssl rand -hex 32
+# Override (production): PHARMA__JWT__SECRET
+secret = "REPLACE_VIA_ENV_PHARMA__JWT__SECRET"
+
+# String. REQUIRED. `iss` claim emitted and validated on every token.
+# Override: PHARMA__JWT__ISSUER
+issuer = "pharma-server"
+
+# u64. REQUIRED. Access-token lifetime in seconds. Default convention: 3600.
+# Override: PHARMA__JWT__TTL_SECONDS
+ttl_seconds = 3600
+
+
+# ----------------------------------------------------------------------------
+# [otlp] — OtlpConfig (REQUIRED section; endpoint optional)
+# ----------------------------------------------------------------------------
+[otlp]
+# Option<String>. Empty string or omit = OTLP exporter disabled.
+# Set to an OTLP/gRPC collector URL to enable distributed tracing.
+# Override: PHARMA__OTLP__ENDPOINT
+endpoint = ""
+
+# String. REQUIRED. `service.name` resource attribute.
+# Override: PHARMA__OTLP__SERVICE_NAME
+service_name = "pharma-api"
+
+
+# ----------------------------------------------------------------------------
+# [metrics] — MetricsConfig (optional; #[serde(default)])
+# ----------------------------------------------------------------------------
+[metrics]
+# Option<String>. Empty/None = `/metrics` returns 401. In production set a
+# random bearer token via env so Prometheus can scrape.
+# Generate: openssl rand -hex 24
+# Override (production): PHARMA__METRICS__TOKEN
+token = ""
+
+
+# ----------------------------------------------------------------------------
+# [backup] — BackupConfig (optional; #[serde(default)])
+# ----------------------------------------------------------------------------
+[backup]
+# Option<String>. 6-field cron `sec min hour day month weekday` UTC.
+# Empty/None disables scheduler. Recommended: every day 03:00 UTC.
+# Override: PHARMA__BACKUP__SCHEDULE
+schedule = "0 0 3 * * *"
+
+# u32. Days to keep snapshots. 0 = keep forever. Default 0.
+# Override: PHARMA__BACKUP__RETENTION_DAYS
+retention_days = 30
+
+
+# ============================================================================
+# Second-wave PRs (NOT YET on feature/erp-parity) — keep commented until merge
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# [rate_limit] — RateLimitConfig
+# [post-0.1.25 — feat/api-public-orders-web]
+# Token-bucket per-tenant + per-IP (governor crate).
+# ----------------------------------------------------------------------------
+# [rate_limit]
+# # bool, default true. Master switch.
+# # Override: PHARMA__RATE_LIMIT__ENABLED
+# enabled = true
+# # u32, default 120. Per-tenant sustained req/min.
+# # Override: PHARMA__RATE_LIMIT__TENANT_PER_MIN
+# tenant_per_min = 120
+# # u32, default 30. Per-tenant burst capacity.
+# # Override: PHARMA__RATE_LIMIT__TENANT_BURST
+# tenant_burst = 30
+# # u32, default 60. Per-IP sustained req/min.
+# # Override: PHARMA__RATE_LIMIT__IP_PER_MIN
+# ip_per_min = 60
+# # u32, default 20. Per-IP burst capacity.
+# # Override: PHARMA__RATE_LIMIT__IP_BURST
+# ip_burst = 20
+
+
+# ----------------------------------------------------------------------------
+# [public_catalog] — PublicCatalogConfig
+# [post-0.1.25 — feat/api-public-orders-web]
+# Opt-in public read-only catalog (ADR-0005). enabled=false => 404.
+# ----------------------------------------------------------------------------
+# [public_catalog]
+# # bool, default false. Opt-in only.
+# # Override: PHARMA__PUBLIC_CATALOG__ENABLED
+# enabled = false
+# # Vec<String>, default ["https://tu-farmacia.cl"]. Strict CORS allow-list.
+# # Override: PHARMA__PUBLIC_CATALOG__CORS_ORIGINS  (comma-sep via env tricky;
+# # prefer setting in TOML)
+# cors_origins = ["https://tu-farmacia.cl"]
+
+
+# ----------------------------------------------------------------------------
+# [public_orders] — PublicOrdersConfig
+# [post-0.1.25 — feat/api-public-orders-web]
+# HMAC-signed POST /api/v1/public/orders/web (ADR-0012 pattern 2).
+# Disabled OR empty hmac_secret => 404.
+# ----------------------------------------------------------------------------
+# [public_orders]
+# # bool, default false. Opt-in.
+# # Override: PHARMA__PUBLIC_ORDERS__ENABLED
+# enabled = false
+# # String, default "". SECRET — HMAC-SHA256 shared with Tu Farmacia web.
+# # Generate fresh: openssl rand -hex 32
+# # Override (production): PHARMA__PUBLIC_ORDERS__HMAC_SECRET
+# hmac_secret = "REPLACE_VIA_ENV_PHARMA__PUBLIC_ORDERS__HMAC_SECRET"
+
+
+# ----------------------------------------------------------------------------
+# [stock_webhook] — StockWebhookConfig
+# [post-0.1.25 — feat/api-stock-webhook]
+# ERP→web stock-change push (ADR-0013 patrón B). enabled=false OR empty
+# target_url OR empty hmac_secret => no-op.
+# ----------------------------------------------------------------------------
+# [stock_webhook]
+# # bool, default false. Opt-in.
+# # Override: PHARMA__STOCK_WEBHOOK__ENABLED
+# enabled = false
+# # String, default "". Absolute https URL of receiver.
+# # Override: PHARMA__STOCK_WEBHOOK__TARGET_URL
+# target_url = "https://tu-farmacia.cl/api/webhooks/pharma-stock"
+# # String, default "". SECRET — HMAC-SHA256.
+# # Generate fresh: openssl rand -hex 32
+# # Override (production): PHARMA__STOCK_WEBHOOK__HMAC_SECRET
+# hmac_secret = "REPLACE_VIA_ENV_PHARMA__STOCK_WEBHOOK__HMAC_SECRET"
+#
+# [stock_webhook.retry]
+# # u32, default 3. Retries after the first attempt.
+# # Override: PHARMA__STOCK_WEBHOOK__RETRY__TRIES
+# tries = 3
+# # Vec<u64> seconds, default [1, 5, 30]. Backoff per retry.
+# # Override (TOML preferred): PHARMA__STOCK_WEBHOOK__RETRY__BACKOFF_SECS
+# backoff_secs = [1, 5, 30]

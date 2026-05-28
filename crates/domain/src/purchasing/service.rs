@@ -378,6 +378,189 @@ pub async fn receive_purchase_order(
         .ok_or(DomainError::NotFound)
 }
 
+/// Line-level goods receipt (recepción de mercadería). Receiving is only
+/// legal from `sent`/`approved` (a `draft` hasn't been issued to the supplier
+/// yet; `received`/`cancelled` are terminal) — any other status is
+/// `Conflict`. Partial receipts are allowed and additive: each line carries a
+/// cumulative `qty_received` that a receipt bumps, capped at the ordered
+/// `quantity` (over-receipt is `Conflict`).
+///
+/// For each received line on a catalogued product the receipt — in one
+/// `BEGIN/COMMIT` (`repo::receive_purchase_order_lines`) — bumps
+/// `product.stock`, recomputes the weighted-average `cost_price`
+/// `(old_stock·old_cost + Σqty·unit_cost) / (old_stock + Σqty)`, appends an
+/// audit `stock_movement(reason='purchase_receive')`, bumps the line
+/// `qty_received`, and (when a `lot`+`expiry_date` is given) creates or tops
+/// up a `product_batch`. Free-text lines (no `product`) move no stock — they
+/// only advance their `qty_received` so the PO can still reach `received`.
+///
+/// Final status: `received` when every line is fully received after this
+/// receipt, else `partially_received`. WAC base mirrors the one-shot path: a
+/// first receipt (no prior `cost`) seeds `cost_price` with the line average
+/// rather than diluting against a phantom zero.
+pub async fn receive_purchase_order_lines(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+    input: ReceivePurchaseOrder,
+    admin: Option<&str>,
+) -> DomainResult<PurchaseOrderDto> {
+    let po = parse_typed(id, "purchase_order")?;
+    let current = repo::get_purchase_order(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    // Multi-receipt path: `partially_received` must accept further receipts
+    // until the PO completes to `received`.
+    if !matches!(
+        current.status.as_str(),
+        "sent" | "approved" | "partially_received"
+    ) {
+        return Err(DomainError::Conflict(format!(
+            "orden en estado '{}' no puede recibir mercadería (solo desde 'sent', 'approved' o 'partially_received')",
+            current.status
+        )));
+    }
+    if input.lines.is_empty() {
+        return Err(DomainError::Invalid(
+            "la recepción requiere al menos una línea".into(),
+        ));
+    }
+
+    use std::collections::BTreeMap;
+    // Index the PO's lines by id for O(1) lookup + over-receipt checks.
+    let mut by_id: BTreeMap<&str, &PurchaseOrderItemDto> = BTreeMap::new();
+    for it in &current.items {
+        by_id.insert(it.id.as_str(), it);
+    }
+    // Track running received-qty per line across the receipt body so two
+    // receive-lines targeting the same po_line_id can't jointly over-receive.
+    let mut received_in_req: BTreeMap<String, i64> = BTreeMap::new();
+    // Per-product aggregation for the WAC recompute: (Thing, Σqty, Σ(qty·cost)).
+    let mut prod_buckets: BTreeMap<String, (Thing, i64, Decimal)> = BTreeMap::new();
+    let mut line_effects: Vec<repo::ReceiveLineQtyEffect> = Vec::new();
+    let mut batch_effects: Vec<repo::ReceiveBatchEffect> = Vec::new();
+
+    for rl in &input.lines {
+        if rl.qty_received <= 0 {
+            return Err(DomainError::Invalid(
+                "qty_received debe ser mayor a 0".into(),
+            ));
+        }
+        let line_thing = parse_typed(&rl.po_line_id, "purchase_order_item")?;
+        let item = by_id.get(rl.po_line_id.as_str()).copied().ok_or_else(|| {
+            DomainError::Invalid(format!(
+                "la línea {} no pertenece a esta orden de compra",
+                rl.po_line_id
+            ))
+        })?;
+        let prior = item.qty_received + received_in_req.get(&rl.po_line_id).copied().unwrap_or(0);
+        if prior + rl.qty_received > item.quantity {
+            return Err(DomainError::Conflict(format!(
+                "recepción excede lo pedido en la línea {}: pedido={}, ya recibido={}, intento={}",
+                rl.po_line_id, item.quantity, prior, rl.qty_received
+            )));
+        }
+        *received_in_req.entry(rl.po_line_id.clone()).or_insert(0) += rl.qty_received;
+
+        line_effects.push(repo::ReceiveLineQtyEffect {
+            line: line_thing,
+            add_qty: rl.qty_received,
+        });
+
+        // Free-text lines carry no product → no stock/WAC/batch effect.
+        let Some(pid_str) = item.product.as_deref() else {
+            if rl.lot.is_some() {
+                return Err(DomainError::Invalid(format!(
+                    "la línea {} no tiene producto catalogado; no admite lote",
+                    rl.po_line_id
+                )));
+            }
+            continue;
+        };
+        let pid = parse_typed(pid_str, "product")?;
+        let entry = prod_buckets
+            .entry(pid_str.to_string())
+            .or_insert_with(|| (pid.clone(), 0i64, Decimal::ZERO));
+        entry.1 += rl.qty_received;
+        entry.2 += item.unit_cost * Decimal::from(rl.qty_received);
+
+        if let Some(lot) = rl.lot.as_deref() {
+            let lot = lot.trim();
+            if lot.is_empty() {
+                return Err(DomainError::Invalid("lot no puede ser vacío".into()));
+            }
+            let expiry = rl.expiry_date.ok_or_else(|| {
+                DomainError::Invalid(format!(
+                    "la línea {} indica lote sin expiry_date",
+                    rl.po_line_id
+                ))
+            })?;
+            let existing = repo::find_batch(db, tenant, &pid, lot).await?;
+            batch_effects.push(repo::ReceiveBatchEffect {
+                batch: existing,
+                product: pid.clone(),
+                batch_code: lot.to_string(),
+                expiry_date: expiry,
+                add_qty: rl.qty_received,
+                cost: item.unit_cost,
+            });
+        }
+    }
+
+    // WAC per product (same base rule as the one-shot receive path).
+    let mut product_effects = Vec::with_capacity(prod_buckets.len());
+    for (_k, (pid, add_qty, cost_sum)) in prod_buckets {
+        let (old_stock, old_cost_opt) = repo::product_stock_cost(db, tenant, &pid)
+            .await?
+            .ok_or_else(|| {
+                DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
+            })?;
+        let line_avg_cost = cost_sum / Decimal::from(add_qty);
+        let new_cost = match old_cost_opt {
+            None => line_avg_cost,
+            Some(_) if old_stock <= 0 => line_avg_cost,
+            Some(old_cost) => {
+                let total_qty = Decimal::from(old_stock + add_qty);
+                (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
+            }
+        };
+        product_effects.push(repo::ReceiveLineProductEffect {
+            product: pid,
+            add_qty,
+            new_cost,
+        });
+    }
+
+    // Final status: fully received iff every line's cumulative qty_received
+    // (prior + this receipt) equals its ordered quantity.
+    let fully_received = current.items.iter().all(|it| {
+        let added = received_in_req.get(&it.id).copied().unwrap_or(0);
+        it.qty_received + added >= it.quantity
+    });
+    let final_status = if fully_received {
+        "received"
+    } else {
+        "partially_received"
+    };
+
+    let admin_thing = match admin {
+        Some(a) if !a.is_empty() => Some(parse_thing(a)?),
+        _ => None,
+    };
+    repo::receive_purchase_order_lines(
+        db,
+        tenant,
+        &po,
+        admin_thing,
+        final_status,
+        &product_effects,
+        &line_effects,
+        &batch_effects,
+    )
+    .await?
+    .ok_or(DomainError::NotFound)
+}
+
 // --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
 
 const ALLOWED_PAYMENT_METHODS: &[&str] = &["cash", "bank", "card", "transfer"];

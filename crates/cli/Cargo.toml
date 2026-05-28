@@ -14,9 +14,11 @@ db = { path = "../db" }
 auth = { path = "../auth" }
 agent = { path = "../agent" }
 license = { path = "../license" }
+dte = { path = "../dte" }
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 chrono.workspace = true
 uuid.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest.workspace = true
 clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
@@ -26,3 +28,7 @@ serde_json.workspace = true
 serde.workspace = true
 rpassword.workspace = true
 surrealdb.workspace = true
+
+[dev-dependencies]
+httpmock = "0.7"
+tempfile = "3"

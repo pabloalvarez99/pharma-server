@@ -24,9 +24,11 @@
 //! * SII boleta electrónica DTE emission — Fase 9 stub (501 until cert flow).
 
 pub mod controlled;
+pub mod historic;
 pub mod interactions;
 pub mod model;
 pub mod repo;
 pub mod service;
+pub mod web_order;
 
 pub use model::*;

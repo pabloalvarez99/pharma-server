@@ -1,0 +1,5 @@
+# Workspace-local target dir keeps the integration branch's build artifacts
+# isolated from worktree-shared caches. Override with CARGO_TARGET_DIR when
+# building from a worktree.
+[build]
+target-dir = "target"

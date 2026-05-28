@@ -163,6 +163,10 @@ pub struct PurchaseOrderItemDto {
     pub product: Option<String>,
     pub product_name: String,
     pub quantity: i64,
+    /// Cumulative quantity already received against this line (0 until a
+    /// receipt posts; ≤ `quantity`). Drives partial-receipt math.
+    #[serde(default)]
+    pub qty_received: i64,
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub unit_cost: Decimal,
@@ -216,6 +220,29 @@ pub struct PurchaseOrderFilters {
     pub status: Option<String>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+// --- receiving (recepción de mercadería) -----------------------------------
+
+/// One line of a goods receipt against a sent/approved purchase order.
+/// `po_line_id` targets the `purchase_order_item`; `qty_received` is the
+/// quantity that physically arrived in *this* receipt (additive across
+/// partial receipts, capped at the line's remaining-to-receive).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ReceivePurchaseOrderLine {
+    /// `purchase_order_item:xxx` — the line being received.
+    pub po_line_id: String,
+    pub qty_received: i64,
+    /// Optional lot/batch code. When present (with `expiry_date`) a
+    /// `product_batch` row is created/topped-up for traceability.
+    pub lot: Option<String>,
+    pub expiry_date: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ReceivePurchaseOrder {
+    pub lines: Vec<ReceivePurchaseOrderLine>,
+    pub notes: Option<String>,
 }
 
 // --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------

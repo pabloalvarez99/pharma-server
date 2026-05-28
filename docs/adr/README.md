@@ -1,4 +1,4 @@
----
+curs---
 title: Architecture Decision Records (ADRs)
 status: Activo
 owners: pabloalvarez99
@@ -83,3 +83,8 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0005](./0005-core-gratis-no-locked-in.md) | Invariantes del core gratis (sin paywall a export, sin kill-switch) | Accepted | producto, compliance |
 | [0006](./0006-revocation-strategy-signed-crl.md) | Revocación vía CRL firmado distribuido por CDN | Accepted | licencia, seguridad, infra |
 | [0007](./0007-key-rotation-licenser.md) | Rotación de claves del licenser con key-id en license | Accepted | licencia, seguridad |
+| [0008](./0008-self-sign-pilot-msi.md) | Self-sign pilot MSI antes de cert pago (camino $0) | Accepted | distribución, msi, presupuesto |
+| [0009](./0009-pilot-payment-provider.md) | Mercado Pago primer rail LIVE pilot (Webpay ya en sandbox) | Accepted | pagos, presupuesto |
+| [0010](./0010-roadmap-fase-9-parity.md) | Roadmap Fase 9.x — paridad mínima vendible vs competencia CL | Accepted | producto, roadmap |
+| [0011](./0011-dte-provider-native-rust.md) | DTE (boleta/factura SII) implementado nativo en Rust | Accepted | producto, compliance, integraciones |
+| [0012](./0012-web-onprem-interop.md) | Interop web ↔ pharma-server vía HTTP only (3 patrones) | Accepted | producto, infra, protocolo, interop |

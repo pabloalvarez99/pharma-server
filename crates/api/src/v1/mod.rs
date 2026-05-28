@@ -4,15 +4,19 @@
 
 pub mod agent;
 pub mod agent_orders;
+pub mod audit;
 pub mod backup;
 pub use backup::{backup_now, prune_backups};
 pub mod cash_register;
 pub mod catalog;
 pub mod customers;
+pub mod dashboard;
 pub mod expenses;
 pub mod inventory;
 pub mod license;
 pub mod prescriptions;
+pub mod public_catalog;
+pub mod public_orders;
 pub mod purchasing;
 pub mod sales;
 
@@ -30,7 +34,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(agent_orders::router(state.clone()))
         .merge(cash_register::router(state.clone()))
         .merge(expenses::router(state.clone()))
+        .merge(dashboard::router(state.clone()))
         .merge(backup::router(state.clone()))
         .merge(license::router(state.clone()))
+        .merge(audit::router(state.clone()))
+        .merge(public_catalog::router(state.clone()))
+        .merge(public_orders::router(state.clone()))
         .merge(agent::router(state))
 }

@@ -42,7 +42,7 @@ impl AgentCard {
         kind: AgentKind,
         region: impl Into<String>,
         endpoint: impl Into<String>,
-    ) -> Self {
+    ) -> Result<Self> {
         let mut card = Self {
             did: id.did(),
             name: name.into(),
@@ -52,9 +52,9 @@ impl AgentCard {
             created_at: chrono::Utc::now().to_rfc3339(),
             sig: String::new(),
         };
-        let bytes = canonical_bytes(&card.unsigned_value());
+        let bytes = canonical_bytes(&card.unsigned_value())?;
         card.sig = hex::encode(id.sign(&bytes).to_bytes());
-        card
+        Ok(card)
     }
 
     fn unsigned_value(&self) -> serde_json::Value {
@@ -71,13 +71,14 @@ impl AgentCard {
     /// Verify the card's self-signature against the key embedded in its DID.
     pub fn verify(&self) -> Result<()> {
         let sig_bytes = hex::decode(&self.sig)
-            .map_err(|e| AgentError::Key(format!("sig hex inválido: {e}")))?;
+            .map_err(|e| AgentError::Base64(format!("sig hex inválido: {e}")))?;
         let arr: [u8; 64] = sig_bytes
             .as_slice()
             .try_into()
-            .map_err(|_| AgentError::BadSignature)?;
+            .map_err(|_| AgentError::SignatureInvalid)?;
         let sig = ed25519_dalek::Signature::from_bytes(&arr);
-        verify_with_did(&self.did, &canonical_bytes(&self.unsigned_value()), &sig)
+        let canonical = canonical_bytes(&self.unsigned_value())?;
+        verify_with_did(&self.did, &canonical, &sig)
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -85,7 +86,7 @@ impl AgentCard {
     }
 
     pub fn from_json(s: &str) -> Result<Self> {
-        Ok(serde_json::from_str(s)?)
+        serde_json::from_str(s).map_err(|e| AgentError::Envelope(format!("card json: {e}")))
     }
 }
 
@@ -94,7 +95,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn card_self_signature_verifies() {
+    fn card_self_signature_verifies() -> Result<()> {
         let id = Identity::generate();
         let card = AgentCard::new(
             &id,
@@ -102,12 +103,12 @@ mod tests {
             AgentKind::Pharmacy,
             "CL-CO",
             "http://192.168.1.10:8080",
-        );
-        card.verify().expect("valid self-sig");
+        )?;
+        card.verify()
     }
 
     #[test]
-    fn tampered_endpoint_fails_verification() {
+    fn tampered_endpoint_fails_verification() -> Result<()> {
         let id = Identity::generate();
         let mut card = AgentCard::new(
             &id,
@@ -115,17 +116,18 @@ mod tests {
             AgentKind::Pharmacy,
             "CL-CO",
             "http://192.168.1.10:8080",
-        );
+        )?;
         card.endpoint = "http://evil.example".into();
         assert!(card.verify().is_err());
+        Ok(())
     }
 
     #[test]
-    fn json_roundtrip_preserves_signature() {
+    fn json_roundtrip_preserves_signature() -> Result<()> {
         let id = Identity::generate();
-        let card = AgentCard::new(&id, "Lab X", AgentKind::Lab, "CL-RM", "");
-        let j = card.to_json().unwrap();
-        let back = AgentCard::from_json(&j).unwrap();
-        back.verify().expect("sig survives roundtrip");
+        let card = AgentCard::new(&id, "Lab X", AgentKind::Lab, "CL-RM", "")?;
+        let j = card.to_json()?;
+        let back = AgentCard::from_json(&j)?;
+        back.verify()
     }
 }

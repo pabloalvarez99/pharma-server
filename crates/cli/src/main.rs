@@ -1,3 +1,5 @@
+mod dte_cmd;
+
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
@@ -67,6 +69,21 @@ enum Cmd {
     License {
         #[command(subcommand)]
         cmd: LicenseCmd,
+    },
+    /// DTE (Documentos Tributarios Electrónicos SII) — listar, ver, exportar, anular, stats.
+    Dte {
+        #[command(subcommand)]
+        cmd: dte_cmd::DteCmd,
+    },
+    /// CAF (Códigos de Autorización de Folios SII) — import, list, peek next folio.
+    Caf {
+        #[command(subcommand)]
+        cmd: dte_cmd::CafCmd,
+    },
+    /// Cert digital (.pfx) — import encrypt-at-rest, list, info.
+    Cert {
+        #[command(subcommand)]
+        cmd: dte_cmd::CertCmd,
     },
 }
 
@@ -145,6 +162,23 @@ enum LicenseCmd {
         /// `PHARMA_ADMIN_TOKEN` if omitted.
         #[arg(long)]
         token: Option<String>,
+    },
+    /// Fetch a license by id from a remote pharma-license-server, verify
+    /// Ed25519 offline, persist it locally, and optionally hot-reload the
+    /// running server in one shot.
+    Activate {
+        /// License id (`lic_*` ULID) emitted by the license-server.
+        license_id: String,
+        /// Base URL of the license-server.
+        #[arg(long, default_value = "https://pharma-license-server.vercel.app")]
+        server: String,
+        /// If set, POST `/api/v1/admin/license/reload` on the local server
+        /// after persisting. Requires --reload-token (or PHARMA_ADMIN_TOKEN).
+        #[arg(long)]
+        reload_url: Option<String>,
+        /// Bearer token for the reload endpoint.
+        #[arg(long)]
+        reload_token: Option<String>,
     },
 }
 
@@ -371,7 +405,7 @@ async fn main() -> anyhow::Result<()> {
                     "lab" => agent::AgentKind::Lab,
                     other => return Err(anyhow!("kind inválido: {other}")),
                 };
-                let card = agent::AgentCard::new(&id, name, kind, region, endpoint);
+                let card = agent::AgentCard::new(&id, name, kind, region, endpoint)?;
                 println!("{}", card.to_json()?);
             }
             AgentCmd::Verify { file } => {
@@ -540,7 +574,92 @@ async fn main() -> anyhow::Result<()> {
                     println!("no license to remove at {}", path.display());
                 }
             }
+            LicenseCmd::Activate {
+                license_id,
+                server,
+                reload_url,
+                reload_token,
+            } => {
+                let base = server.trim_end_matches('/');
+                let url = format!("{base}/api/licenses/{license_id}");
+                let client = reqwest::Client::new();
+                let resp = client
+                    .get(&url)
+                    .send()
+                    .await
+                    .with_context(|| format!("GET {url}"))?;
+                let status = resp.status();
+                let bytes = resp
+                    .bytes()
+                    .await
+                    .with_context(|| format!("read body from {url}"))?;
+                if !status.is_success() {
+                    let body = String::from_utf8_lossy(&bytes);
+                    return Err(anyhow!(
+                        "license fetch failed: HTTP {} body={}",
+                        status,
+                        body
+                    ));
+                }
+                let lic = license::parse_and_verify(&bytes)
+                    .context("license signature verification failed (downloaded bytes)")?;
+                if lic.license_id != license_id {
+                    return Err(anyhow!(
+                        "id mismatch: requested={} but server returned={}",
+                        license_id,
+                        lic.license_id
+                    ));
+                }
+                let dest = license_path()?;
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                license::save_to_disk(&lic, &dest)?;
+                println!(
+                    "license activated: tier={} id={} expires={:?} features={} → {}",
+                    lic.tier.as_str(),
+                    lic.license_id,
+                    lic.expires_at,
+                    lic.features.len(),
+                    dest.display()
+                );
+
+                if let Some(reload_url) = reload_url {
+                    let token = reload_token
+                        .or_else(|| std::env::var("PHARMA_ADMIN_TOKEN").ok())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "no reload token: pasa --reload-token <T> o exporta PHARMA_ADMIN_TOKEN"
+                            )
+                        })?;
+                    let endpoint = format!(
+                        "{}/api/v1/admin/license/reload",
+                        reload_url.trim_end_matches('/')
+                    );
+                    let resp = client
+                        .post(&endpoint)
+                        .bearer_auth(&token)
+                        .send()
+                        .await
+                        .with_context(|| format!("POST {endpoint}"))?;
+                    let status = resp.status();
+                    let body: serde_json::Value =
+                        resp.json().await.unwrap_or(serde_json::Value::Null);
+                    if !status.is_success() {
+                        return Err(anyhow!("reload failed: HTTP {} body={}", status, body));
+                    }
+                    println!(
+                        "server reloaded: tier={} status={} features={}",
+                        body["tier"].as_str().unwrap_or("?"),
+                        body["status"].as_str().unwrap_or("?"),
+                        body["features"].as_array().map(|a| a.len()).unwrap_or(0),
+                    );
+                }
+            }
         },
+        Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
+        Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
+        Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,
     }
     Ok(())
 }

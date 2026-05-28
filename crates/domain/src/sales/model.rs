@@ -83,6 +83,62 @@ pub struct OrderItemBatchAllocation {
     pub qty: i64,
 }
 
+// --- receipt / boleta (read-only POS ticket data) --------------------------
+
+/// Static footer printed on every ticket (Spanish, user-facing).
+pub const RECEIPT_FOOTER_NOTE: &str = "Gracias por su compra · Tu Farmacia";
+
+/// One printable line on a [`ReceiptDto`]. `line_total = qty * unit_price`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReceiptItem {
+    pub name: String,
+    pub qty: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub unit_price: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub line_total: Decimal,
+}
+
+/// Self-contained data a POS needs to render/print a sale ticket. Read-only
+/// projection of an `order` + its `order_item`s + the tenant name + the
+/// `loyalty_transaction` awarded for the sale. Money serializes as strings.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ReceiptDto {
+    pub order_id: String,
+    /// SII boleta folio (`order.external_ref`) when issued, else the order
+    /// record-id key (the local sequential-ish number).
+    pub folio_or_number: String,
+    pub datetime: DateTime<Utc>,
+    pub tenant_name: String,
+    pub items: Vec<ReceiptItem>,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub subtotal: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub discount: Decimal,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub total: Decimal,
+    pub payment_method: String,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = String)]
+    pub cash_amount: Option<Decimal>,
+    #[serde(with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = String)]
+    pub card_amount: Option<Decimal>,
+    /// `cash_amount - total` for cash sales (`pos_cash`); `null` otherwise.
+    #[serde(with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = String)]
+    pub change: Option<Decimal>,
+    pub loyalty_points_awarded: i64,
+    /// Cashier display name (`order.sold_by_name`).
+    pub cashier: Option<String>,
+    pub footer_note: String,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct OrderFilters {
     pub status: Option<String>,
@@ -96,7 +152,7 @@ pub struct OrderFilters {
 
 // --- POST /pos/sale request -----------------------------------------------
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosSaleRequest {
     pub items: Vec<PosSaleItem>,
     pub payment_method: String,
@@ -119,7 +175,7 @@ pub struct PosSaleRequest {
     pub prescriptions: Vec<PosPrescriptionInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosSaleItem {
     /// Product record id (`product:xxx`). Required — POS does not allow free items.
     pub product: String,
@@ -130,7 +186,7 @@ pub struct PosSaleItem {
     pub unit_price: Decimal,
 }
 
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PosPrescriptionInput {
     pub product: Option<String>,
     pub patient_name: String,

@@ -1,4 +1,4 @@
-//! Role-gating middleware.
+﻿//! Role-gating middleware.
 //!
 //! Usage on a router/route:
 //! ```ignore
@@ -26,21 +26,30 @@ use crate::{error::ApiError, AppState};
 pub struct AllowedRoles(pub &'static [&'static str]);
 
 /// Build the stacked layer: inject `AllowedRoles`, then run the gate.
+///
+/// Argument order for `Stack::new(inner, outer)` is **load-bearing**:
+/// `Layer::layer` resolves to `outer.layer(inner.layer(svc))`, so the OUTER
+/// layer runs first on the request path. The gate must run after the
+/// `Extension` is attached, therefore:
+///   - `inner` = `from_fn_with_state(role_gate)` (closer to the handler).
+///   - `outer` = `Extension(AllowedRoles)` (attaches the extension first).
+///
+/// Swapping these reintroduces the 500 "Missing request extension" bug.
 #[allow(clippy::type_complexity)]
 pub fn layer(
     state: AppState,
     allowed: &'static [&'static str],
 ) -> Stack<
-    Extension<AllowedRoles>,
     axum::middleware::FromFnLayer<
         fn(State<AppState>, Extension<AllowedRoles>, Request, Next) -> RoleGateFuture,
         AppState,
         (State<AppState>, Extension<AllowedRoles>, Request),
     >,
+    Extension<AllowedRoles>,
 > {
     Stack::new(
-        Extension(AllowedRoles(allowed)),
         from_fn_with_state(state, role_gate as fn(_, _, _, _) -> RoleGateFuture),
+        Extension(AllowedRoles(allowed)),
     )
 }
 
@@ -101,6 +110,11 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            rate_limit: None,
+            docs_enabled: true,
+            public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+            public_orders: pharma_core::config::PublicOrdersConfig::default(),
+            stock_webhook: std::sync::Arc::new(pharma_core::config::StockWebhookConfig::default()),
         }
     }
 

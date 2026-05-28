@@ -15,9 +15,10 @@ mod health;
 mod middleware;
 mod openapi;
 mod routes;
+pub mod stock_webhook;
 mod v1;
 
-pub use middleware::{audit, role};
+pub use middleware::{audit, rate_limit, role};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -40,6 +41,22 @@ pub struct AppState {
     /// On-disk path that `POST /api/v1/admin/license/reload` re-reads. `None`
     /// only in unit tests with kv-mem.
     pub license_path: Option<std::path::PathBuf>,
+    /// Per-tenant + per-IP rate-limit state. `None` disables both limiters
+    /// (most unit tests). Production wires it from `AppConfig.rate_limit`.
+    pub rate_limit: Option<Arc<rate_limit::RateLimitState>>,
+    /// Serve interactive API docs (Swagger UI + OpenAPI JSON). Mirrors
+    /// `AppConfig.docs.enabled`. Default `true`; flip off on hardened boxes to
+    /// keep the API surface off the wire.
+    pub docs_enabled: bool,
+    /// Public read-only catalog endpoint config. Default `enabled = false` so
+    /// the route returns 404 (ADR-0005 opt-in).
+    pub public_catalog: pharma_core::config::PublicCatalogConfig,
+    /// Public web-push orders endpoint config (ADR-0012 pattern 2). Default
+    /// `enabled = false` + empty secret so the route returns 404.
+    pub public_orders: pharma_core::config::PublicOrdersConfig,
+    /// ERP→web stock-change webhook config (ADR-0013). Always present; a
+    /// disabled/empty config makes the dispatcher a no-op (the common case).
+    pub stock_webhook: Arc<stock_webhook::StockWebhookConfig>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -47,7 +64,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/app", get(app_index))
         .merge(health::router())
-        .merge(openapi::router())
+        .merge(openapi::router(&state))
         .merge(routes::router())
         .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
@@ -82,7 +99,29 @@ fn resolve_data_path(p: &str) -> String {
     install_data_base().join(rel).to_string_lossy().into_owned()
 }
 
+/// Placeholder JWT secret shipped in `config/default.toml`. Booting production
+/// with this value means every issued token is forgeable by anyone who reads
+/// the public default config → full auth bypass + cross-tenant access.
+const PLACEHOLDER_JWT_SECRET: &str = "change-me-in-production";
+
+/// SECURITY (preprod review F3): reject the placeholder JWT secret unless the
+/// caller explicitly opts into insecure local dev. `allow_insecure` is normally
+/// `env PHARMA_ALLOW_INSECURE_JWT == "1"`. Returns `Err` when boot must refuse.
+fn check_jwt_secret(secret: &str, allow_insecure: bool) -> anyhow::Result<()> {
+    if secret == PLACEHOLDER_JWT_SECRET && !allow_insecure {
+        anyhow::bail!(
+            "JWT secret es el placeholder por defecto ('{PLACEHOLDER_JWT_SECRET}'). \
+             Inyecta un secreto fuerte vía PHARMA__JWT__SECRET (ej: `openssl rand -hex 32`) \
+             antes de iniciar en producción. Para desarrollo local: PHARMA_ALLOW_INSECURE_JWT=1."
+        );
+    }
+    Ok(())
+}
+
 pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    let allow_insecure = std::env::var("PHARMA_ALLOW_INSECURE_JWT").as_deref() == Ok("1");
+    check_jwt_secret(&cfg.jwt.secret, allow_insecure)?;
+
     let resolved = resolve_data_path(&cfg.db.path);
     if resolved != cfg.db.path {
         tracing::info!(from = %cfg.db.path, to = %resolved, "db path anchored to install data dir");
@@ -168,7 +207,20 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         data_dir: Some(std::path::PathBuf::from(&cfg.db.path)),
         license,
         license_path,
+        rate_limit: Some(Arc::new(rate_limit::RateLimitState::new(
+            cfg.rate_limit.clone(),
+        ))),
+        docs_enabled: cfg.docs.enabled,
+        public_catalog: cfg.public_catalog.clone(),
+        public_orders: cfg.public_orders.clone(),
+        stock_webhook: Arc::new(cfg.stock_webhook.clone()),
     };
+    if state.stock_webhook.enabled && !state.stock_webhook.target_url.is_empty() {
+        tracing::info!(
+            target = %state.stock_webhook.target_url,
+            "stock webhook enabled (ERP→web push, ADR-0013)"
+        );
+    }
 
     let (prom_layer, prom_handle) = PrometheusMetricLayerBuilder::new()
         .with_prefix("pharma")
@@ -355,6 +407,11 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         },
         metrics: pharma_core::config::MetricsConfig { token: None },
         backup: pharma_core::config::BackupConfig::default(),
+        rate_limit: pharma_core::config::RateLimitConfig::default(),
+        docs: pharma_core::config::DocsConfig::default(),
+        public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+        public_orders: pharma_core::config::PublicOrdersConfig::default(),
+        stock_webhook: pharma_core::config::StockWebhookConfig::default(),
     }
 }
 
@@ -418,6 +475,22 @@ mod tests {
     use super::*;
     use axum::http::HeaderMap;
 
+    #[test]
+    fn jwt_guard_rejects_placeholder_without_optin() {
+        let err = check_jwt_secret(PLACEHOLDER_JWT_SECRET, false).unwrap_err();
+        assert!(err.to_string().contains("PHARMA__JWT__SECRET"));
+    }
+
+    #[test]
+    fn jwt_guard_allows_placeholder_with_dev_optin() {
+        assert!(check_jwt_secret(PLACEHOLDER_JWT_SECRET, true).is_ok());
+    }
+
+    #[test]
+    fn jwt_guard_allows_real_secret() {
+        assert!(check_jwt_secret("a-strong-injected-secret-xyz", false).is_ok());
+    }
+
     fn state_with(token: Option<&str>) -> AppState {
         AppState {
             started_at: chrono::Utc::now(),
@@ -434,6 +507,11 @@ mod tests {
                 license::License::free_default(uuid::Uuid::nil()),
             )),
             license_path: None,
+            rate_limit: None,
+            docs_enabled: true,
+            public_catalog: pharma_core::config::PublicCatalogConfig::default(),
+            public_orders: pharma_core::config::PublicOrdersConfig::default(),
+            stock_webhook: Arc::new(stock_webhook::StockWebhookConfig::default()),
         }
     }
 

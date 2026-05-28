@@ -21,7 +21,7 @@ use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
 use crate::AppState;
 
-use domain::sales::{model::*, service};
+use domain::sales::{historic, model::*, service};
 
 const WRITE_ROLES: &[&str] = &["admin", "owner"];
 const POS_ROLES: &[&str] = &["admin", "owner", "cashier"];
@@ -48,6 +48,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
         .route("/api/v1/orders", get(list_orders))
         .route("/api/v1/orders/{id}", get(get_order))
+        .route("/api/v1/orders/{id}/receipt", get(get_receipt))
         .route("/api/v1/returns", get(list_refunds))
         .route("/api/v1/interactions/check", post(check_interactions))
         .route("/api/v1/settings/{key}", get(get_setting));
@@ -59,6 +60,10 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     let writes = Router::new()
         .route("/api/v1/settings/{key}", axum::routing::put(set_setting))
+        .route(
+            "/api/v1/admin/import-historic-orders",
+            post(import_historic_orders),
+        )
         .route_layer(crate::role::layer(state, WRITE_ROLES));
 
     reads.merge(pos).merge(writes)
@@ -78,6 +83,14 @@ async fn post_sale(
     let key = idempotency_key(&headers);
     let sold_by_name = Some(claims.sub.as_str());
 
+    // Capture sold lines (product id + qty) before `body` is moved, so the
+    // stock-webhook dispatcher can report post-sale stock without re-parsing.
+    let sold_lines: Vec<(String, i64)> = body
+        .items
+        .iter()
+        .map(|i| (i.product.clone(), i.quantity))
+        .collect();
+
     match service::post_sale(
         db.as_ref(),
         &tenant,
@@ -88,7 +101,12 @@ async fn post_sale(
     )
     .await
     {
-        Ok(resp) => Ok((StatusCode::CREATED, Json(resp)).into_response()),
+        Ok(resp) => {
+            // ERP→web stock push (ADR-0013): fire-and-forget, never blocks the
+            // POS hot path. No-op when disabled/unconfigured.
+            crate::stock_webhook::notify_sale(&state, tenant.clone(), sold_lines);
+            Ok((StatusCode::CREATED, Json(resp)).into_response())
+        }
         Err(domain::DomainError::Conflict(msg)) if msg.starts_with("IDEMPOTENCY_CACHED:") => {
             // Replay cached payload verbatim with 200 OK.
             let json = msg.trim_start_matches("IDEMPOTENCY_CACHED:");
@@ -128,6 +146,19 @@ async fn get_order(
     let tenant = tenant_of(&claims)?;
     let (order, items) = service::get_order(db.as_ref(), &tenant, &id).await?;
     Ok(Json(OrderDetail { order, items }))
+}
+
+/// `GET /api/v1/orders/{id}/receipt` — printable boleta data for a sale.
+/// Read-only, tenant-scoped. 404 if the order is not in this tenant.
+async fn get_receipt(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<ReceiptDto>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let receipt = service::get_receipt(db.as_ref(), &tenant, &id).await?;
+    Ok(Json(receipt))
 }
 
 // --- returns / devoluciones ------------------------------------------------
@@ -230,4 +261,29 @@ async fn set_setting(
     let tenant = tenant_of(&claims)?;
     let out = service::set_setting(db.as_ref(), &tenant, &key, &body.value).await?;
     Ok(Json(out))
+}
+
+// --- POST /admin/import-historic-orders ------------------------------------
+
+/// Bulk-load PAST sales (data migration tool). Tenant-scoped via JWT, gated
+/// to admin/owner roles by the router layer.
+///
+/// Differs from `/pos/sale` in three deliberate ways: `created_at` is taken
+/// from the input, `product.stock` stays untouched (current stock is already
+/// correct), and per-order failures don't abort the batch — they surface in
+/// `errors` with the offending index. 200 OK even on partial failure; clients
+/// reconcile via the `created` count + `errors` list.
+async fn import_historic_orders(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(body): Json<historic::HistoricImportRequest>,
+) -> Result<Json<historic::ImportReport>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let user = user_of(&claims).ok();
+    let sold_by_name = Some(claims.sub.as_str());
+    let report =
+        historic::import_historic_orders(db.as_ref(), &tenant, user.as_ref(), sold_by_name, body)
+            .await?;
+    Ok(Json(report))
 }

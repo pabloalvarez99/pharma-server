@@ -2,6 +2,7 @@
 //! tenant-scoped: callers pass the tenant `Thing` extracted from the JWT.
 
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use surrealdb::sql::Thing;
@@ -11,6 +12,11 @@ use crate::errors::{DomainError, DomainResult};
 use super::model::*;
 
 type Db = surrealdb::Surreal<surrealdb::engine::local::Db>;
+
+/// Order statuses that count as a realized purchase for history + aggregates.
+/// Excludes `pending`/`cancelled`/`refunded` so totals reflect money actually
+/// taken. Mirrors the sales context's notion of a completed sale.
+const PURCHASE_STATUSES: &[&str] = &["paid", "completed"];
 
 // --- DB rows ---------------------------------------------------------------
 
@@ -201,6 +207,62 @@ pub async fn update_customer(
     row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
+/// Outcome of [`upsert_customer_by_email`]: whether the row was inserted
+/// (CREATE) or merged onto an existing one (UPDATE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Created,
+    Updated,
+}
+
+/// Find an active or inactive customer matching `(tenant, email)`. Returns
+/// the surreal `id` only — full row reads happen elsewhere if needed.
+pub async fn find_by_email(db: &Db, tenant: &Thing, email: &str) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query("SELECT id FROM customer WHERE tenant = $t AND email = $email LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .bind(("email", email.to_string()))
+        .await?;
+    let id: Option<Thing> = r.take((0, "id"))?;
+    Ok(id)
+}
+
+/// Upsert a customer by `(tenant, email)`. Existing rows are updated with
+/// non-`None` fields from `input` (name always overwrites since it's
+/// required); missing rows are created via [`create_customer`].
+pub async fn upsert_customer_by_email(
+    db: &Db,
+    tenant: &Thing,
+    input: &NewCustomer,
+) -> DomainResult<UpsertOutcome> {
+    let email = input
+        .email
+        .as_deref()
+        .ok_or_else(|| DomainError::Invalid("email requerido".into()))?;
+    match find_by_email(db, tenant, email).await? {
+        Some(id) => {
+            let mut m = Map::new();
+            m.insert("name".into(), Value::String(input.name.clone()));
+            if let Some(v) = &input.phone {
+                m.insert("phone".into(), Value::String(v.clone()));
+            }
+            if let Some(v) = &input.rut {
+                m.insert("rut".into(), Value::String(v.clone()));
+            }
+            db.query("UPDATE customer MERGE $p WHERE id = $id AND tenant = $t")
+                .bind(("p", Value::Object(m)))
+                .bind(("id", id))
+                .bind(("t", tenant.clone()))
+                .await?;
+            Ok(UpsertOutcome::Updated)
+        }
+        None => {
+            create_customer(db, tenant, input).await?;
+            Ok(UpsertOutcome::Created)
+        }
+    }
+}
+
 pub async fn soft_delete_customer(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<bool> {
     let mut r = db
         .query("UPDATE customer SET active = false WHERE id = $id AND tenant = $t RETURN AFTER")
@@ -209,6 +271,162 @@ pub async fn soft_delete_customer(db: &Db, tenant: &Thing, id: &Thing) -> Domain
         .await?;
     let row: Option<Thing> = r.take((0, "id"))?;
     Ok(row.is_some())
+}
+
+/// Customer detail + lifetime purchase aggregates. Reads the `customer` row
+/// and, separately, aggregates the `order` table (sum of `total`, count) for
+/// realized purchases. Read-only over the sales-owned `order` table — never
+/// touches its write paths. Returns `None` if the customer doesn't exist for
+/// this tenant (so the API maps it to 404).
+pub async fn get_customer_detail(
+    db: &Db,
+    tenant: &Thing,
+    id: &Thing,
+) -> DomainResult<Option<CustomerDetailDto>> {
+    let Some(base) = get_customer(db, tenant, id).await? else {
+        return Ok(None);
+    };
+
+    #[derive(Debug, Deserialize)]
+    struct Agg {
+        total_spent: Option<Decimal>,
+        visit_count: i64,
+    }
+    let mut r = db
+        .query(
+            "SELECT math::sum(total) AS total_spent, count() AS visit_count \
+             FROM order WHERE tenant = $t AND customer = $c AND status IN $statuses \
+             GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("c", id.clone()))
+        .bind(("statuses", str_vec(PURCHASE_STATUSES)))
+        .await?
+        .check()?;
+    let agg: Option<Agg> = r.take(0)?;
+    let (total_spent, visit_count) = agg
+        .map(|a| (a.total_spent.unwrap_or(Decimal::ZERO), a.visit_count))
+        .unwrap_or((Decimal::ZERO, 0));
+
+    Ok(Some(CustomerDetailDto {
+        id: base.id,
+        name: base.name,
+        rut: base.rut,
+        phone: base.phone,
+        email: base.email,
+        loyalty_points: base.loyalty_points,
+        total_spent,
+        visit_count,
+        active: base.active,
+        created_at: base.created_at,
+        updated_at: base.updated_at,
+    }))
+}
+
+/// A customer's purchase history (realized orders), newest first. Read-only
+/// over the sales-owned `order` / `order_item` tables. `limit` is clamped
+/// 1..=200. Per-order line counts come from a single grouped `order_item`
+/// query (no N+1).
+pub async fn customer_history(
+    db: &Db,
+    tenant: &Thing,
+    customer: &Thing,
+    limit: u32,
+) -> DomainResult<Vec<CustomerOrderDto>> {
+    #[derive(Debug, Deserialize)]
+    struct HistRow {
+        id: Thing,
+        status: String,
+        payment_method: String,
+        total: Decimal,
+        created_at: DateTime<Utc>,
+    }
+    let limit = limit.clamp(1, 200);
+    let mut r = db
+        .query(format!(
+            "SELECT id, status, payment_method, total, created_at \
+             FROM order WHERE tenant = $t AND customer = $c AND status IN $statuses \
+             ORDER BY created_at DESC LIMIT {limit}"
+        ))
+        .bind(("t", tenant.clone()))
+        .bind(("c", customer.clone()))
+        .bind(("statuses", str_vec(PURCHASE_STATUSES)))
+        .await?
+        .check()?;
+    let rows: Vec<HistRow> = r.take(0)?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Item counts for just these orders, grouped server-side.
+    #[derive(Debug, Deserialize)]
+    struct CountRow {
+        order: Thing,
+        c: i64,
+    }
+    let ids: Vec<Thing> = rows.iter().map(|r| r.id.clone()).collect();
+    let mut cr = db
+        .query(
+            "SELECT order, count() AS c FROM order_item \
+             WHERE tenant = $t AND order IN $ids GROUP BY order",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", ids))
+        .await?
+        .check()?;
+    let counts: Vec<CountRow> = cr.take(0)?;
+    let count_of = |oid: &Thing| -> i64 {
+        counts
+            .iter()
+            .find(|c| &c.order == oid)
+            .map(|c| c.c)
+            .unwrap_or(0)
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|r| CustomerOrderDto {
+            items_count: count_of(&r.id),
+            id: r.id.to_string(),
+            status: r.status,
+            payment_method: r.payment_method,
+            total: r.total,
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// Fuzzy customer search by name / rut / phone (`string::contains`,
+/// case-insensitive on name; rut is normalized; phone matches substring).
+/// Tenant-scoped, active only, capped at 20. Empty `q` returns empty.
+pub async fn search_customers(db: &Db, tenant: &Thing, q: &str) -> DomainResult<Vec<CustomerDto>> {
+    let q = q.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let name_q = q.to_lowercase();
+    let rut_q = q.replace([' ', '.', '-'], "").to_uppercase();
+    let mut r = db
+        .query(
+            "SELECT * FROM customer \
+             WHERE tenant = $t AND active = true AND ( \
+                string::contains(string::lowercase(name), $nq) \
+                OR (rut != NONE AND string::contains(rut, $rq)) \
+                OR (phone != NONE AND string::contains(phone, $pq)) \
+             ) ORDER BY name LIMIT 20",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("nq", name_q))
+        .bind(("rq", rut_q))
+        .bind(("pq", q.to_string()))
+        .await?
+        .check()?;
+    let rows: Vec<CustomerRow> = r.take(0)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+fn str_vec(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
 }
 
 // --- loyalty (read-only here; sales Fase 4 writes) -------------------------

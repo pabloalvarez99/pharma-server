@@ -238,7 +238,13 @@ async fn update_prices() -> ApiError {
 
 #[derive(Serialize)]
 struct ImportSummary {
+    /// Rows that resulted in a new `product` row.
     created: usize,
+    /// Rows that matched an existing product by tenant + external_id and were
+    /// updated in place (price/stock/ingredient/laboratory refreshed). Lets the
+    /// bulk catalog migration be idempotent — re-running never duplicates.
+    updated: usize,
+    /// Rows that could not be created or updated. See `errors` for detail.
     failed: usize,
     errors: Vec<ImportError>,
 }
@@ -276,9 +282,12 @@ async fn import_products(
         .map_err(|e| ApiError::invalid(format!("CSV sin cabecera válida: {e}")))?
         .clone();
     let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
-    let (Some(i_name), Some(i_price)) = (col("name"), col("price")) else {
+    // Accept either `price` or `sale_price` for the price column to match the
+    // catalogo CSV format emitted by `scripts/extract_tufarmacia_full.py`.
+    let i_price = col("price").or_else(|| col("sale_price"));
+    let (Some(i_name), Some(i_price)) = (col("name"), i_price) else {
         return Err(ApiError::invalid(
-            "CSV debe incluir al menos columnas `name` y `price`",
+            "CSV debe incluir al menos columnas `name` y `price` (o `sale_price`)",
         ));
     };
     let get = |rec: &csv::StringRecord, idx: Option<usize>| {
@@ -290,6 +299,7 @@ async fn import_products(
 
     let mut summary = ImportSummary {
         created: 0,
+        updated: 0,
         failed: 0,
         errors: Vec::new(),
     };
@@ -318,24 +328,84 @@ async fn import_products(
                 continue;
             }
         };
+        let external_id = get(&rec, col("external_id"));
+        let cost_price = get(&rec, col("cost_price")).and_then(|v| v.parse().ok());
+        let stock: i64 = get(&rec, col("stock"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let laboratory = get(&rec, col("laboratory"));
+        let therapeutic_action = get(&rec, col("therapeutic_action"));
+        let active_ingredient = get(&rec, col("active_ingredient"));
+        let prescription_type = get(&rec, col("prescription_type"));
+        let presentation = get(&rec, col("presentation"));
+        let discount_percent: Option<i64> =
+            get(&rec, col("discount_percent")).and_then(|v| v.parse().ok());
+        let category = get(&rec, col("category"));
+        let image_url = get(&rec, col("image_url"));
+        let description = get(&rec, col("description"));
+        let slug = get(&rec, col("slug"));
+
+        // Upsert-by-external_id: re-running the same CSV updates existing
+        // rows instead of duplicating them with `-2` slug suffixes.
+        if let Some(xid) = external_id.as_deref() {
+            match domain::catalog::repo::find_id_by_external_id(&db, &t, xid).await {
+                Ok(Some(existing)) => {
+                    let patch = domain::catalog::model::UpdateProduct {
+                        name: Some(name.clone()),
+                        description: description.clone(),
+                        price: Some(price),
+                        cost_price,
+                        category: category.clone(),
+                        image_url: image_url.clone(),
+                        active: None,
+                        external_id: Some(xid.to_string()),
+                        laboratory: laboratory.clone(),
+                        therapeutic_action: therapeutic_action.clone(),
+                        active_ingredient: active_ingredient.clone(),
+                        prescription_type: prescription_type.clone(),
+                        presentation: presentation.clone(),
+                        discount_percent,
+                    };
+                    match service::update_product(&db, &t, &existing.to_string(), patch).await {
+                        Ok(_) => summary.updated += 1,
+                        Err(e) => {
+                            summary.failed += 1;
+                            summary.errors.push(ImportError {
+                                line,
+                                message: e.to_string(),
+                            });
+                        }
+                    }
+                    continue;
+                }
+                Ok(None) => {} // fall through to create
+                Err(e) => {
+                    summary.failed += 1;
+                    summary.errors.push(ImportError {
+                        line,
+                        message: e.to_string(),
+                    });
+                    continue;
+                }
+            }
+        }
+
         let input = NewProduct {
             name,
-            slug: get(&rec, col("slug")),
-            description: get(&rec, col("description")),
+            slug,
+            description,
             price,
-            cost_price: get(&rec, col("cost_price")).and_then(|v| v.parse().ok()),
-            stock: get(&rec, col("stock"))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
-            category: get(&rec, col("category")),
-            image_url: get(&rec, col("image_url")),
-            external_id: get(&rec, col("external_id")),
-            laboratory: get(&rec, col("laboratory")),
-            therapeutic_action: get(&rec, col("therapeutic_action")),
-            active_ingredient: get(&rec, col("active_ingredient")),
-            prescription_type: get(&rec, col("prescription_type")),
-            presentation: get(&rec, col("presentation")),
-            discount_percent: get(&rec, col("discount_percent")).and_then(|v| v.parse().ok()),
+            cost_price,
+            stock,
+            category,
+            image_url,
+            external_id,
+            laboratory,
+            therapeutic_action,
+            active_ingredient,
+            prescription_type,
+            presentation,
+            discount_percent,
         };
         match service::create_product(&db, &t, input).await {
             Ok(_) => summary.created += 1,

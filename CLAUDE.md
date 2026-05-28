@@ -3,7 +3,7 @@
 Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
 
-**Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md). **Tesis unificadora 2026-2035** (visión, moat, flywheel, AI-native, LATAM multi-país, distribución, integraciones-as-platform) → ver [`docs/strategy/latam-master-plan.md`](./docs/strategy/latam-master-plan.md).
+**Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md). **Posicionamiento de mercado (reframe 2026-05-27)**: el producto es *infraestructura competitiva para el independiente* frente al oligopolio (~90% Ahumada/Cruz Verde/Salcobrand), no "otro ERP" — mercado subdigitalizado (no saturado), moat de 4 capas (POS = caballo de Troya → datos agregados → poder de compra colectivo → red operacional), riesgo = distribución+confianza no técnico → ver [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md). **Tesis unificadora 2026-2035** (visión, moat, flywheel, AI-native, LATAM multi-país, distribución, integraciones-as-platform) → ver [`docs/strategy/latam-master-plan.md`](./docs/strategy/latam-master-plan.md).
 
 ## Producto / Visión comercial
 
@@ -68,25 +68,29 @@ Decidido 2026-05-20. **Pivote** de licencia única → **MSI Windows freemium es
 - License-server vive en **repo separado** `pharma-license-server` ([ADR-0004](./docs/adr/0004-license-server-separado.md)).
 
 **Pagos** ([`docs/strategy/payments-cl.md`](./docs/strategy/payments-cl.md), [ADR-0003](./docs/adr/0003-payments-webpay-first.md)):
-- Webpay primario (Pro/Business sub + microtx CL).
+- Webpay primario (Pro/Business sub + microtx CL) — **target de escala**.
 - Stripe secundario (microtx con tarjeta internacional, Fase 11.1).
 - Khipu para Enterprise (Fase 11.2).
 - Mercado Pago para LATAM multi-país (Fase 11.3+).
+- **Orden pilot DIFERIDO** ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)): en pilot phase **Mercado Pago + Stripe van primero** (Webpay requiere RUT empresa + onboarding 2-4 sem). Webpay se reactiva al constituir SpA.
+
+**Camino $0 a primer cobro** ([`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md), 2026-05-27): plan operativo para desbloquear Fase 9+11 con **0 USD gastados** hasta el primer cobro. Self-sign MSI ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md), scripts `installer/sign/`) + smoke Hyper-V (scripts `installer/smoke/`) + MP/Stripe pilot ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)) + license-server free-tier ([`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md)). **Si el fundador dice "continúa con el plan zero-cost" → ejecutar siguiente paso pendiente del §5 día-a-día.**
 
 ## Roadmap (fases)
 
 Renumerado 2026-05-20 post-pivote. Estado en `bitacora.md` ## BACKLOG.
 
-- **Fase 9** — MSI vendible v1.0.0 (firma Authenticode + smoke VM Windows limpia). **BLOQUEADO por cert**.
+- **Fase 9** — MSI vendible v1.0.0 (firma Authenticode + smoke VM Windows limpia). **Workaround $0** ([`zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md)): self-sign cert pilot ([ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md)) + Hyper-V smoke desbloquean sin gastar; cert pago/MSIX cuando entre revenue.
 - **Fase 10** — License/entitlement layer:
   - 10a `crates/license` crate nuevo (Ed25519 verify + parser, reusa `crates/agent`).
   - 10b Feature gate API (`entitled`/`require`) + `ApiError::payment_required` 402.
   - 10c CLI `pharma license import|status|features`.
   - 10d 1 feature gated POC (sugerencia: `reports.margins_daily`).
-- **Fase 11** — Payment rails + license-server integration (repo separado, online activation):
-  - 11a `pharma-license-server` skeleton (Next.js + Postgres).
-  - 11b Webpay integration (Pro/Business sub).
-  - 11c Stripe Checkout (microtx).
+- **Fase 11** — Payment rails + license-server integration. **El repo `pharma-license-server` YA EXISTE** (privado, Fase 11b code-complete con Webpay sandbox). Estado real + gaps: [`license-server-skeleton.md`](./docs/strategy/license-server-skeleton.md).
+  - 11a ✅ Scaffold Next.js 14 + Prisma + `@noble/ed25519`, canonical JSON cross-repo verificado.
+  - 11b ✅ (code-complete, deploy pendiente) Webpay sandbox + admin issuance + checkout UI.
+  - 11b-gap **embeber prod key `lk-prod-2026-01` en `crates/license/src/keys.rs`** (hoy placeholder `lk-dev-2026`) + deploy Vercel+Neon free.
+  - 11c **Mercado Pago** como primer rail LIVE para cobro real sin SpA ([ADR-0009](./docs/adr/0009-pilot-payment-provider.md)); Webpay LIVE cuando SpA; Stripe (schema listo) para internacional.
 - **Fase 12** — Sync online opt-in entre nodos (paid tier).
 - **Fase 13** — Marketplace federado B2B ([`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md)). Capa de confianza/reputación.
 - **Fase 14** — Cloud companion (web admin + mobile dashboard, opt-in).
@@ -158,6 +162,40 @@ Crates (`Cargo.toml` raíz):
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
 
+9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático. **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
+   - cert Authenticode válido cargado (sin esto el MSI sale con SmartScreen warning — bloqueante técnico, no de policy);
+   - smoke-test instalación limpia en VM Windows verde;
+   - no hay bugs P0 abiertos en triage.
+   Si los 3 prerequisitos están verdes → deploy auto sin pedir confirmación. Si falta alguno → push+PR sí, deploy queda parked con razón anotada en `bitacora.md`. **Excepciones que siguen requiriendo confirmación explícita**: force-push, public-source de este repo (regla #10), acciones destructivas/irreversibles fuera del flujo normal release. NUNCA auto-deployar trabajo no verificado, mid-flight, o con GATE roto — debilitar el GATE para forzar verde está prohibido (bug real → `#[ignore]` con nota + reportar).
+
+   **Definición de DONE (DoD) — NO NEGOCIABLE (directiva fundador 2026-05-28, raíz del pileup)**: un trabajo NO está terminado hasta que está (a) **merged a su base correcta** (no sólo PR abierto), (b) **pushed a origin**, y (c) **deployed** (MSI al mirror público) **O** explícitamente *blocked* con **razón + acción-dueño concreta + fecha** anotada en `## ESTADO ACTUAL` de `bitacora.md`. **"GATE verde + PR abierto" NO es done — es work-in-progress.** PR abierto = incompleto. Branch sin merge = incompleto. Worktree huérfano = incompleto. El loop se cierra con merge+deploy, no con "lo dejé andando".
+
+   **Límite WIP (anti-pileup)**: PROHIBIDO abrir trabajo nuevo (spawn de agentes, nuevas branches/worktrees) mientras haya **>3 PRs finished-but-unmerged** o **worktrees huérfanos sin PR**. Primero **consolidar** (merge/close PRs + prune worktrees) hasta bajar el pile; *después* fan-out. Cerrar el loop tiene prioridad sobre empezar lo siguiente.
+
+   **Parked con forcing function**: deploy parked DEBE ir al TOPE de `## ESTADO ACTUAL` con (acción exacta + quién la ejecuta + qué desbloquea). Parked sin acción-dueño concreta está PROHIBIDO — es la causa raíz histórica del pileup. Cada sesión que abre parked lo ataca primero.
+
+10. **Distribución = binario, NO source (decidido 2026-05-23)**: el repo source `pabloalvarez99/pharma-server` se mantiene **PRIVADO**. "Deploy/open source" significa publicar el **MSI binario** al mirror público `pharma-server-releases` (vía `release-publisher.yml` workflow_dispatch) — NUNCA hacer público el source. Open-sourcing del source rompería el license enforcement (`license::require` vive en el código) + diferido a Fase 13+ ([NO en esta sesión]). Antes de cualquier consideración futura de source-public: secret-scan del history completo (esp. que la clave privada del licenser nunca tocó este repo — vive solo en `pharma-license-server`).
+
+## Modo de trabajo por defecto — "continue working with team of agents ultrathink"
+
+Directiva permanente del fundador (2026-05-23, reforzada 2026-05-27). **Stack default no negociable de esta sesión y todas las futuras**:
+
+- **Modelo**: Claude Opus 4.7 (`claude-opus-4-7`). No degradar a Sonnet/Haiku para tareas de este repo salvo orden explícita del usuario.
+- **Effort**: `/effort max` (máxima capacidad + razonamiento más profundo).
+- **Razonamiento**: ultrathink siempre activo en planning, debugging, decisiones arquitecturales y dispatch de agentes.
+- **Concurrencia**: pipeline paralelo saturado de **~5 agentes asincrónicos** (worktrees aislados, scope disjunto) trabajando autónomamente sobre el BACKLOG.
+
+Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar bajo el stack default arriba, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
+
+- **Finish-before-fanout (precondición, regla #9 DoD + WIP)**: ANTES de saturar slots, consolidar el pile existente (merge PRs done, close ancestros, prune worktrees huérfanos). NO fan-out con >3 PRs finished-but-unmerged. **Cerrar el loop (merge+deploy) primero, fan-out después.**
+- **Saturación 5 slots** (sólo si el pile está bajo control): mantener ~5 agentes/builds activos. Slot libre → despachar siguiente tarea sin idle. Pero **cada tarea lleva su propio cierre de loop**: el entregable del agente es merge-ready y se mergea+deploya en cuanto pase review/GATE — NO termina en "PR abierto". Pensar profundo (ultrathink) qué es lo más importante a continuación.
+- **Worktrees aislados, scope disjunto**: 1 agente = 1 worktree, paths sin solape (cero contención de merge). Cascada de branches dependientes off su base correcta.
+- **GATE obligatorio antes de PR**: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`. Verde → commit + push + PR contra base correcta (regla #9). NUNCA debilitar asserts para forzar verde; bug real → `#[ignore]` con nota + reportar.
+- **Quota wall**: "session limit · resets <hora>" mata spawns nuevos. Cuando esté walled, NO quemar despachos — rescatar trabajo uncommitted de worktrees vía **cargo local en main thread** (los builds locales NO dependen del quota de agentes), y re-saturar a 5 al reset. Agentes que mueren dejan trabajo **uncommitted** (HEAD intacto) — verificar estado real (`git -C <wt> status/log`) antes de confiar en cualquier wrap-up.
+- **Verificar antes de confiar**: notificaciones de background pueden reportar exit 0 con output truncado — re-grep sin truncar antes de declarar verde.
+- **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
+- Ver memoria `[[parallel-agent-pipeline]]` para el detalle operativo.
+
 ## Vault Obsidian — leer bajo demanda
 
 Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
@@ -168,7 +206,8 @@ Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
 | Tocar `crates/api/` (rutas axum, middleware, handlers) | `reference/pharma-server-api.md` |
 | Tocar `crates/cli/` | `reference/pharma-server-cli.md` |
 | Tocar `crates/service/` | `reference/pharma-server-msi.md` + `brain/pharma-server-gotchas.md` |
-| Tocar `installer/` o `*.wxs` | `reference/pharma-server-msi.md` |
+| Tocar `installer/wix/` o `*.wxs` | `reference/pharma-server-msi.md` |
+| Tocar `installer/sign/` o `installer/smoke/` | repo `docs/strategy/zero-cost-launch-plan.md` §2-3 + [ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md) |
 | Tocar `.github/workflows/` | `reference/pharma-server-ci.md` |
 | Tocar `config/`, `rust-toolchain.toml` o env | `reference/pharma-server-env.md` |
 | Histórico / decisiones pasadas | `work/active/pharma-server/decisions-log-index.md` → `bitacora.md` |
@@ -178,6 +217,7 @@ Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
 | Arquitectura general (crates, flujo, multi-tenant) | `reference/pharma-server-architecture.md` |
 | Decisiones técnicas (por qué X) | `brain/pharma-server-decisions.md` + repo `docs/adr/` |
 | **Modelo de negocio / freemium / licencia / pagos** | repo `docs/strategy/` + `docs/adr/` |
+| **Plan $0 a primer cobro / cómo desbloquear venta sin gastar** | repo `docs/strategy/zero-cost-launch-plan.md` (single source of truth) |
 
 SessionStart hook (`.claude/hooks/vault-hint.sh`) sugiere refs según archivos cambiados — leer hints, NO duplicar lectura.
 
