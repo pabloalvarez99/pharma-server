@@ -1,8 +1,8 @@
 name: bench
 
 on:
-  pull_request:
-    types: [labeled, opened, synchronize, reopened]
+  # Manual only — GitHub Actions billing is locked on this repo, so no auto-triggers.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,8 +10,6 @@ env:
 jobs:
   bench:
     name: cargo bench (windows)
-    # Only run when PR carries the `bench` label — avoid burning CI minutes on every push.
-    if: contains(github.event.pull_request.labels.*.name, 'bench')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

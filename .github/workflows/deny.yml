@@ -1,9 +1,8 @@
 name: deny
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Manual only — GitHub Actions billing is locked on this repo, so no auto-triggers.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always

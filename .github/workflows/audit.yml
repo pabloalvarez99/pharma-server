@@ -1,12 +1,8 @@
 name: audit
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-  schedule:
-    # Weekly Monday 09:00 UTC — surface new advisories without waiting for a push.
-    - cron: '0 9 * * 1'
+  # Manual only — GitHub Actions billing is locked on this repo, so no auto-triggers.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
