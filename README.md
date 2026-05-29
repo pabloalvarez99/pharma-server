@@ -1,5 +1,9 @@
 # pharma-server
 
+[![ci](https://github.com/pabloalvarez99/pharma-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pabloalvarez99/pharma-server/actions/workflows/ci.yml)
+[![audit](https://github.com/pabloalvarez99/pharma-server/actions/workflows/audit.yml/badge.svg?branch=main)](https://github.com/pabloalvarez99/pharma-server/actions/workflows/audit.yml)
+[![license: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](./Cargo.toml)
+
 On-prem Rust server for pharmacy ERP. SurrealDB embedded (RocksDB), axum HTTP API, Windows service deployment via MSI.
 
 ## Status
