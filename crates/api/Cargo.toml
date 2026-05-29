@@ -16,7 +16,7 @@ domain = { path = "../domain" }
 agent = { path = "../agent" }
 license = { path = "../license" }
 arc-swap.workspace = true
-telemetry = { path = "../telemetry" }
+pharma-telemetry = { package = "pharma-telemetry", path = "../telemetry" }
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

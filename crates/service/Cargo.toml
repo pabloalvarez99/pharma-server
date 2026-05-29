@@ -15,7 +15,7 @@ windows-service.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
-telemetry = { path = "../telemetry" }
+pharma-telemetry = { package = "pharma-telemetry", path = "../telemetry" }
 api = { path = "../api" }
 pharma-core = { path = "../core" }
 

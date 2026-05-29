@@ -23,7 +23,7 @@ clap.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-telemetry = { path = "../telemetry" }
+pharma-telemetry = { package = "pharma-telemetry", path = "../telemetry" }
 serde_json.workspace = true
 serde.workspace = true
 rpassword.workspace = true

@@ -45,7 +45,7 @@ mod win {
 
     fn run_service() -> windows_service::Result<()> {
         let cfg = api::load_or_default();
-        let _ = telemetry::init_with_otlp("pharma-service", &cfg.otlp);
+        let _ = pharma_telemetry::init_with_otlp("pharma-service", &cfg.otlp);
 
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
@@ -88,7 +88,7 @@ mod win {
             api_handle.abort();
         });
 
-        telemetry::shutdown();
+        pharma_telemetry::shutdown();
 
         status_handle.set_service_status(ServiceStatus {
             service_type: SERVICE_TYPE,
