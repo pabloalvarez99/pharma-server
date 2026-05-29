@@ -6,18 +6,17 @@ use serde::{Deserialize, Serialize};
 pub struct Claims {
     pub sub: String,
     pub tenant_id: String,
-    /// Backward-compat: legacy JWTs minted before granular roles existed have
-    /// no `roles` claim. Treat them as `["admin"]` so existing sessions keep
-    /// working without forcing a re-login.
-    #[serde(default = "default_roles_legacy")]
+    /// Fail-closed: a JWT missing the `roles` claim (legacy tokens minted
+    /// before granular RBAC) deserializes to an empty role set, which the role
+    /// layer treats as "no access". Such tokens are rejected on every gated
+    /// route, forcing a re-login that mints a token with explicit roles. We do
+    /// NOT default to a privileged role — a missing claim must never grant
+    /// authority (see security review: fail-open authorization default).
+    #[serde(default)]
     pub roles: Vec<String>,
     pub iss: String,
     pub iat: i64,
     pub exp: i64,
-}
-
-fn default_roles_legacy() -> Vec<String> {
-    vec!["admin".to_string()]
 }
 
 pub fn issue(

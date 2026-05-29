@@ -2,8 +2,8 @@
 //!
 //! These probe the `role::layer` gate via the public router. Mutating
 //! endpoints intercepted by the gate return 403 before touching the DB,
-//! so `db: None` is fine for matrix coverage. The legacy fallback (no
-//! `roles` claim → assume admin) is also covered.
+//! so `db: None` is fine for matrix coverage. The fail-closed legacy path
+//! (no `roles` claim → empty role set → denied) is also covered.
 
 use std::sync::Arc;
 
@@ -172,17 +172,17 @@ async fn owner_passes_all_gates() {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy JWT (no `roles`) → default ["admin"] via serde fallback.
+// Legacy JWT (no `roles`) → fail-closed: empty role set → denied everywhere.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn legacy_jwt_without_roles_defaults_to_admin() {
+async fn legacy_jwt_without_roles_is_forbidden() {
     let tok = token_legacy_no_roles();
     let st = hit("POST", "/api/v1/products", &tok, "{}").await;
-    assert_ne!(
+    assert_eq!(
         st,
         StatusCode::FORBIDDEN,
-        "legacy claim must fall back to admin"
+        "a token missing the roles claim must be denied (fail-closed), not elevated"
     );
 }
 
