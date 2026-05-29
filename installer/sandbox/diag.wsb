@@ -3,8 +3,8 @@
   <Networking>Default</Networking>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>C:\Users\Administrator\Documents\GitHub\pharma-server\target\wix</HostFolder>
-      <SandboxFolder>C:\msi</SandboxFolder>
+      <HostFolder>C:\Users\Administrator\Documents\GitHub\pharma-server\target\release</HostFolder>
+      <SandboxFolder>C:\bin</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
@@ -19,6 +19,6 @@
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\scripts\smoke-inside.ps1</Command>
+    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\scripts\diag-inside.ps1</Command>
   </LogonCommand>
 </Configuration>
