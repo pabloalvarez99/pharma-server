@@ -225,6 +225,22 @@ pub struct CustomerOrder {
     pub created_at: String,
 }
 
+/// Header-only projection of `domain::purchasing::model::PurchaseOrderDto`.
+/// `total` is a STRING (`rust_decimal::serde::str`). `items` is omitted — the
+/// list endpoint returns an empty vec anyway; detail fetches them separately.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseOrder {
+    pub id: String,
+    pub supplier: String,
+    pub status: String,
+    pub currency: String,
+    pub total: String,
+    pub notes: Option<String>,
+    pub external_ref: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -798,6 +814,39 @@ async fn customer_history(
         .map_err(|e| format!("Respuesta de historial inválida del servidor: {e}"))
 }
 
+// --- purchasing commands ---------------------------------------------------
+
+/// GET `/api/v1/purchase-orders` (Bearer, cashier+). `status` / `limit` are
+/// optional query params forwarded to the server. Returns header-only rows
+/// (no line items). Requires cashier+ role — identical to cash-sessions access.
+#[tauri::command]
+async fn list_purchase_orders(
+    state: State<'_, SessionState>,
+    server_url: String,
+    status: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<PurchaseOrder>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/purchase-orders"))
+        .bearer_auth(token);
+    if let Some(s) = status.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("status", s)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de órdenes de compra inválida del servidor: {e}"))
+}
+
 /// GET `/health/ready`. Public (no token). 200 → healthy; 503 → degraded but
 /// still "reachable" (server is up). Connection errors → `Err`.
 #[tauri::command]
@@ -875,7 +924,8 @@ pub fn run() {
             close_cash_session,
             customer_search,
             customer_detail,
-            customer_history
+            customer_history,
+            list_purchase_orders
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
