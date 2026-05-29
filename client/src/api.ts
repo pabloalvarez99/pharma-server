@@ -305,6 +305,31 @@ export function customerDetail(
   return invoke<CustomerDetail>("customer_detail", { serverUrl, id });
 }
 
+// --- purchase orders (compras) --------------------------------------------
+
+/** Header-only projection of a purchase order (`PurchaseOrderDto`). `total`
+ *  is a STRING (Decimal). `items` is omitted — list returns headers only. */
+export interface PurchaseOrder {
+  id: string;
+  supplier: string;
+  status: string; // "draft" | "sent" | "received" | "partial" | "cancelled"
+  currency: string;
+  total: string;
+  notes: string | null;
+  external_ref: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /api/v1/purchase-orders (Bearer, cashier+). `status` / `limit` optional. */
+export function listPurchaseOrders(
+  serverUrl: string,
+  status?: string,
+  limit?: number,
+): Promise<PurchaseOrder[]> {
+  return invoke<PurchaseOrder[]>("list_purchase_orders", { serverUrl, status, limit });
+}
+
 /** GET /api/v1/customers/{id}/history?limit=N (Bearer). Rejects with
  *  {@link CUSTOMERS_MODULE_MISSING} when not deployed (404). */
 export function customerHistory(
