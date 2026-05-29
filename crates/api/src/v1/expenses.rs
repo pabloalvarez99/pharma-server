@@ -1,4 +1,11 @@
-//! Expenses + daily-sales report.
+//! Expenses + reports (sales-daily, margins-daily, top-products,
+//! stock-rotation, near-expiry).
+//!
+//! Roles:
+//! * Expenses list/create — `cashier+` (counter staff records petty cash).
+//! * Reports — JWT only (no extra role). Some are license-gated:
+//!   - `margins-daily` requires `reports.margins_daily` feature (402 if not
+//!     entitled; Pro+ or microtx). Free tier sees `sales-daily` only.
 
 use std::sync::Arc;
 
@@ -6,7 +13,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use surrealdb::sql::Thing;
@@ -17,7 +24,7 @@ use crate::AppState;
 
 use domain::expenses::{model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::cashier_plus;
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -32,22 +39,37 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
-    let reads = Router::new()
-        .route("/api/v1/expenses", get(list_expenses))
+    // Reports = JWT only (no extra role); `margins-daily` adds a license gate.
+    let reports = Router::new()
         .route("/api/v1/reports/sales-daily", get(sales_daily))
         .route("/api/v1/reports/margins-daily", get(margins_daily))
         .route("/api/v1/reports/top-products", get(top_products))
         .route("/api/v1/reports/stock-rotation", get(stock_rotation))
         .route("/api/v1/reports/near-expiry", get(near_expiry));
 
-    let writes = Router::new()
-        .route("/api/v1/expenses", post(create_expense))
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+    // Expenses list + create both require cashier+ (counter staff records
+    // petty cash; nobody outside ladder should read/write it).
+    let expenses = Router::new()
+        .route("/api/v1/expenses", get(list_expenses).post(create_expense))
+        .route_layer(crate::role::layer(state, cashier_plus()));
 
-    reads.merge(writes)
+    reports.merge(expenses)
 }
 
-async fn create_expense(
+// --- expenses --------------------------------------------------------------
+
+/// Crea un gasto (egreso de caja, no relacionado a una venta). Requiere cashier+.
+#[utoipa::path(post, path = "/api/v1/expenses", tag = "Expenses",
+    request_body = serde_json::Value,
+    responses(
+        (status = 201, description = "Gasto creado", body = serde_json::Value),
+        (status = 400, description = "Datos inválidos", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere cashier+)", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn create_expense(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(body): Json<NewExpense>,
@@ -59,7 +81,15 @@ async fn create_expense(
     Ok((StatusCode::CREATED, Json(e)).into_response())
 }
 
-async fn list_expenses(
+/// Lista gastos del tenant. Filtrable por rango de fecha + categoría.
+#[utoipa::path(get, path = "/api/v1/expenses", tag = "Expenses",
+    responses(
+        (status = 200, description = "Lista de gastos", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn list_expenses(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<ExpenseFilters>,
@@ -71,7 +101,17 @@ async fn list_expenses(
     ))
 }
 
-async fn sales_daily(
+// --- reports ---------------------------------------------------------------
+
+/// Reporte de ventas diarias (Free tier OK). Filtrable por rango de fecha.
+#[utoipa::path(get, path = "/api/v1/reports/sales-daily", tag = "Expenses",
+    responses(
+        (status = 200, description = "Ventas agrupadas por día", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn sales_daily(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SalesReportFilters>,
@@ -83,7 +123,17 @@ async fn sales_daily(
     ))
 }
 
-async fn margins_daily(
+/// Reporte de márgenes diarios. **Requiere Pro+** o microtx
+/// `reports.margins_daily` — Free retorna 402 `FEATURE_REQUIRES_UPGRADE`.
+#[utoipa::path(get, path = "/api/v1/reports/margins-daily", tag = "Expenses",
+    responses(
+        (status = 200, description = "Márgenes agrupados por día", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 402, description = "Tier license insuficiente (FEATURE_REQUIRES_UPGRADE)", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn margins_daily(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SalesReportFilters>,
@@ -99,7 +149,15 @@ async fn margins_daily(
     ))
 }
 
-async fn top_products(
+/// Top productos por ventas (qty/revenue).
+#[utoipa::path(get, path = "/api/v1/reports/top-products", tag = "Expenses",
+    responses(
+        (status = 200, description = "Lista de productos top por ventas", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn top_products(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<TopProductsFilters>,
@@ -111,7 +169,15 @@ async fn top_products(
     ))
 }
 
-async fn stock_rotation(
+/// Reporte de rotación de stock (ventas / inventario promedio).
+#[utoipa::path(get, path = "/api/v1/reports/stock-rotation", tag = "Expenses",
+    responses(
+        (status = 200, description = "Rotación de stock por producto", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn stock_rotation(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SalesReportFilters>,
@@ -123,7 +189,15 @@ async fn stock_rotation(
     ))
 }
 
-async fn near_expiry(
+/// Lotes próximos a vencer (ventana configurable en días).
+#[utoipa::path(get, path = "/api/v1/reports/near-expiry", tag = "Expenses",
+    responses(
+        (status = 200, description = "Lotes próximos a vencer", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn near_expiry(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<NearExpiryFilters>,

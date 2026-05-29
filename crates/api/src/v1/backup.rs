@@ -83,7 +83,20 @@ pub fn prune_backups(db_path: &Path, retention_days: u32) -> std::io::Result<usi
     Ok(removed)
 }
 
-async fn create_backup(
+/// Genera un backup on-demand del data dir (SurrealKv + `agent.key`) bajo
+/// `<data_dir>/backups/pharma-backup-<ts>.tar.gz`. Requiere admin+.
+#[utoipa::path(
+    post, path = "/api/v1/admin/backup", tag = "Backup",
+    responses(
+        (status = 201, description = "Backup creado", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+        (status = 500, description = "Error generando backup", body = crate::error::ErrorEnvelope),
+        (status = 503, description = "Data dir no configurado", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn create_backup(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<axum::response::Response, ApiError> {

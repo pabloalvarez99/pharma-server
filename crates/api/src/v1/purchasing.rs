@@ -1,5 +1,10 @@
-//! Purchasing HTTP handlers (Fase 5-subset). Reads require a valid bearer
-//! token; mutations additionally require role `admin`/`owner`.
+//! Purchasing HTTP handlers (Fase 5).
+//!
+//! Roles:
+//! * list / get suppliers, prices, POs, payments — `cashier+` (counter staff
+//!   needs to see who supplies what at what price for procurement context).
+//! * create / update / delete suppliers, mappings, prices, POs, receive, cancel,
+//!   payments, compare, import — `admin+` (purchasing decisions).
 
 use std::sync::Arc;
 
@@ -17,7 +22,7 @@ use crate::AppState;
 
 use domain::purchasing::{model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::{admin_plus, cashier_plus};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -37,7 +42,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/api/v1/purchase-orders/{id}/payments",
             get(get_po_payments),
-        );
+        )
+        .route_layer(crate::role::layer(state.clone(), cashier_plus()));
 
     let writes = Router::new()
         .route("/api/v1/suppliers", post(create_supplier))
@@ -62,14 +68,23 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/supplier-prices", post(create_price))
         .route("/api/v1/supplier-prices/compare", post(compare_prices))
         .route("/api/v1/supplier-prices/import", post(import_prices))
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
     reads.merge(writes)
 }
 
 // --- suppliers: reads ------------------------------------------------------
 
-async fn list_suppliers(
+/// Lista proveedores del tenant. Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/suppliers", tag = "Purchasing",
+    responses(
+        (status = 200, description = "Lista de proveedores", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere cashier+)", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn list_suppliers(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SupplierFilters>,
@@ -79,7 +94,17 @@ async fn list_suppliers(
     Ok(Json(service::list_suppliers(&db, &t, filters).await?))
 }
 
-async fn get_supplier(
+/// Detalle de un proveedor. Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/suppliers/{id}", tag = "Purchasing",
+    params(("id" = String, Path, description = "supplier:xxx")),
+    responses(
+        (status = 200, description = "Proveedor", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn get_supplier(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -91,7 +116,18 @@ async fn get_supplier(
 
 // --- suppliers: writes -----------------------------------------------------
 
-async fn create_supplier(
+/// Crea un proveedor. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/suppliers", tag = "Purchasing",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Proveedor creado", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn create_supplier(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewSupplier>,
@@ -101,7 +137,18 @@ async fn create_supplier(
     Ok(Json(service::create_supplier(&db, &t, input).await?))
 }
 
-async fn update_supplier(
+/// Actualiza un proveedor (patch). Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/suppliers/{id}", tag = "Purchasing",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Proveedor actualizado", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn update_supplier(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -112,7 +159,17 @@ async fn update_supplier(
     Ok(Json(service::update_supplier(&db, &t, &id, patch).await?))
 }
 
-async fn delete_supplier(
+/// Elimina (soft) un proveedor. Requiere admin+.
+#[utoipa::path(delete, path = "/api/v1/suppliers/{id}", tag = "Purchasing",
+    params(("id" = String, Path)),
+    responses(
+        (status = 200, description = "Proveedor eliminado", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_supplier(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -123,7 +180,19 @@ async fn delete_supplier(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-async fn map_product(
+/// Mapea un código externo del proveedor a un producto del catálogo. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/suppliers/{id}/map-product", tag = "Purchasing",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Mapeo creado/actualizado", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn map_product(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -136,7 +205,15 @@ async fn map_product(
 
 // --- prices ----------------------------------------------------------------
 
-async fn list_prices(
+/// Lista precios de proveedor (supplier_price rows). Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/supplier-prices", tag = "Purchasing",
+    responses(
+        (status = 200, description = "Lista de precios", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn list_prices(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<SupplierPriceFilters>,
@@ -146,7 +223,17 @@ async fn list_prices(
     Ok(Json(service::list_prices(&db, &t, filters).await?))
 }
 
-async fn create_price(
+/// Crea/actualiza un precio de proveedor. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/supplier-prices", tag = "Purchasing",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Precio creado", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn create_price(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewSupplierPrice>,
@@ -156,7 +243,18 @@ async fn create_price(
     Ok(Json(service::create_price(&db, &t, input).await?))
 }
 
-async fn compare_prices(
+/// Compara cotizaciones de múltiples proveedores para un set de productos.
+/// Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/supplier-prices/compare", tag = "Purchasing",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Comparativa de precios por proveedor", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn compare_prices(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(req): Json<CompareRequest>,
@@ -168,7 +266,15 @@ async fn compare_prices(
 
 // --- purchase orders -------------------------------------------------------
 
-async fn list_purchase_orders(
+/// Lista órdenes de compra del tenant. Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/purchase-orders", tag = "Purchasing",
+    responses(
+        (status = 200, description = "Lista de OC", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn list_purchase_orders(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<PurchaseOrderFilters>,
@@ -178,7 +284,17 @@ async fn list_purchase_orders(
     Ok(Json(service::list_purchase_orders(&db, &t, filters).await?))
 }
 
-async fn get_purchase_order(
+/// Detalle de una orden de compra. Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/purchase-orders/{id}", tag = "Purchasing",
+    params(("id" = String, Path, description = "purchase_order:xxx")),
+    responses(
+        (status = 200, description = "OC", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn get_purchase_order(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -188,7 +304,17 @@ async fn get_purchase_order(
     Ok(Json(service::get_purchase_order(&db, &t, &id).await?))
 }
 
-async fn create_purchase_order(
+/// Crea una orden de compra (draft). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/purchase-orders", tag = "Purchasing",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "OC creada", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn create_purchase_order(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewPurchaseOrder>,
@@ -198,7 +324,19 @@ async fn create_purchase_order(
     Ok(Json(service::create_purchase_order(&db, &t, input).await?))
 }
 
-async fn receive_purchase_order(
+/// Recibe una orden de compra (status → received) + crea stock_movement +
+/// recalcula WAC. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/purchase-orders/{id}/receive", tag = "Purchasing",
+    params(("id" = String, Path)),
+    responses(
+        (status = 200, description = "OC recibida", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Transición de estado inválida", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn receive_purchase_order(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -211,7 +349,17 @@ async fn receive_purchase_order(
     ))
 }
 
-async fn get_po_payments(
+/// Resumen de pagos de una OC (total, pagado, saldo). Requiere cashier+.
+#[utoipa::path(get, path = "/api/v1/purchase-orders/{id}/payments", tag = "Purchasing",
+    params(("id" = String, Path)),
+    responses(
+        (status = 200, description = "Resumen de pagos", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn get_po_payments(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -223,7 +371,19 @@ async fn get_po_payments(
     ))
 }
 
-async fn create_po_payment(
+/// Registra un pago contra una OC. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/purchase-orders/{id}/payments", tag = "Purchasing",
+    params(("id" = String, Path)),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "Pago registrado", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn create_po_payment(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -236,7 +396,18 @@ async fn create_po_payment(
     ))
 }
 
-async fn cancel_purchase_order(
+/// Cancela una OC en draft (status → cancelled). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/purchase-orders/{id}/cancel", tag = "Purchasing",
+    params(("id" = String, Path)),
+    responses(
+        (status = 200, description = "OC cancelada", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Sólo OC en draft se pueden cancelar", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn cancel_purchase_order(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -249,13 +420,13 @@ async fn cancel_purchase_order(
 // --- CSV import ------------------------------------------------------------
 
 #[derive(Deserialize)]
-struct ImportQuery {
+pub struct ImportQuery {
     /// Default supplier for rows that omit `supplier`. `supplier:xxx`.
     supplier: Option<String>,
 }
 
 #[derive(Serialize)]
-struct ImportSummary {
+pub struct ImportSummary {
     created: usize,
     failed: usize,
     errors: Vec<ImportError>,
@@ -270,7 +441,18 @@ struct ImportError {
 /// CSV columns (header-based, case-insensitive):
 /// `supplier` (optional if `?supplier=...`), `supplier_code`, `product`,
 /// `description`, `unit_cost` (required), `currency`, `valid_from`.
-async fn import_prices(
+/// Import masivo CSV de precios de proveedor (multipart). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/supplier-prices/import", tag = "Purchasing",
+    request_body(content = String, content_type = "multipart/form-data",
+                 description = "CSV con columnas supplier,supplier_code,product,description,unit_cost,currency,valid_from"),
+    responses(
+        (status = 200, description = "Resumen del import (created/failed/errors)", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn import_prices(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(qs): Query<ImportQuery>,

@@ -114,7 +114,20 @@ fn summarize(lic: &license::License) -> LicenseSummary {
     }
 }
 
-async fn reload_license(
+/// Re-lee `<data_dir>/license.json`, verifica offline y swappea la licencia
+/// activa (lock-free vía `ArcSwap`). Requiere admin+. Errores de parse/verify
+/// caen a `License::free_default` (ADR-0005).
+#[utoipa::path(
+    post, path = "/api/v1/admin/license/reload", tag = "License",
+    responses(
+        (status = 200, description = "Licencia recargada (puede ser fallback Free)", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+        (status = 503, description = "license_path no configurado", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn reload_license(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<LicenseSummary>, ApiError> {
@@ -160,7 +173,18 @@ async fn reload_license(
     Ok(Json(summary))
 }
 
-async fn license_status(
+/// Devuelve el resumen de la licencia activa sin tocar disco. Requiere admin+.
+/// (`tier`, `status`, `license_id`, `features`, `expires_at`, `key_id`, `seat_count`).
+#[utoipa::path(
+    get, path = "/api/v1/admin/license/status", tag = "License",
+    responses(
+        (status = 200, description = "Resumen de licencia activa", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn license_status(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<LicenseSummary>, ApiError> {
