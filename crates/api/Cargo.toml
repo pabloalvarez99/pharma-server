@@ -40,6 +40,7 @@ uuid.workspace = true
 csv.workspace = true
 sha2 = "0.10"
 hmac.workspace = true
+bitflags = "2"
 hex.workspace = true
 subtle.workspace = true
 reqwest.workspace = true
@@ -62,6 +63,7 @@ rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 hmac.workspace = true
 sha2 = "0.10"
 hex.workspace = true
+jsonwebtoken.workspace = true
 metrics-util = { version = "0.17", features = ["debugging"] }
 # Bench-only extras. `surrealdb` here re-declares with `kv-mem` so benches can
 # spin up an in-memory store (the prod build keeps `kv-surrealkv` only).

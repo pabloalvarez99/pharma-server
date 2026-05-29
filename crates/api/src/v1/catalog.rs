@@ -19,7 +19,7 @@ use crate::AppState;
 
 use domain::catalog::{model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::admin_plus;
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -54,14 +54,18 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/api/v1/categories/{id}",
             axum::routing::patch(update_category).delete(delete_category),
         )
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
     reads.merge(writes)
 }
 
 // --- products: reads -------------------------------------------------------
 
-async fn list_products(
+/// Lista productos del tenant.
+#[utoipa::path(get, path = "/api/v1/products", tag = "Catalog",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_products(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<ProductFilters>,
@@ -71,7 +75,13 @@ async fn list_products(
     Ok(Json(service::list_products(&db, &t, filters).await?))
 }
 
-async fn get_product(
+/// Detalle de un producto.
+#[utoipa::path(get, path = "/api/v1/products/{id}", tag = "Catalog",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_product(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -81,7 +91,11 @@ async fn get_product(
     Ok(Json(service::get_product(&db, &t, &id).await?))
 }
 
-async fn product_stats(
+/// Estadísticas de catálogo (totales, sin stock, etc.).
+#[utoipa::path(get, path = "/api/v1/products/stats", tag = "Catalog",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn product_stats(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<ProductStats>, ApiError> {
@@ -91,12 +105,17 @@ async fn product_stats(
 }
 
 #[derive(Deserialize)]
-struct EtiquetaQuery {
+pub(crate) struct EtiquetaQuery {
     #[serde(default)]
     q: String,
 }
 
-async fn etiquetas(
+/// Autocomplete de etiquetas (laboratorio, ingrediente, acción).
+#[utoipa::path(get, path = "/api/v1/etiquetas/search", tag = "Catalog",
+    params(("q" = String, Query, description = "Substring de búsqueda")),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn etiquetas(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(q): Query<EtiquetaQuery>,
@@ -106,7 +125,14 @@ async fn etiquetas(
     Ok(Json(service::etiquetas(&db, &t, &q.q).await?))
 }
 
-async fn export_products(
+/// Exporta catálogo como CSV.
+#[utoipa::path(get, path = "/api/v1/products/export", tag = "Catalog",
+    responses(
+        (status = 200, description = "CSV de productos", content_type = "text/csv"),
+        (status = 401, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn export_products(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Response, ApiError> {
@@ -172,7 +198,13 @@ async fn export_products(
 
 // --- products: writes ------------------------------------------------------
 
-async fn create_product(
+/// Crea un producto. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/products", tag = "Catalog",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_product(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewProduct>,
@@ -182,7 +214,13 @@ async fn create_product(
     Ok(Json(service::create_product(&db, &t, input).await?))
 }
 
-async fn update_product(
+/// Actualiza un producto (patch). Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/products/{id}", tag = "Catalog",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_product(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -193,7 +231,13 @@ async fn update_product(
     Ok(Json(service::update_product(&db, &t, &id, patch).await?))
 }
 
-async fn delete_product(
+/// Elimina (soft) un producto. Requiere admin+.
+#[utoipa::path(delete, path = "/api/v1/products/{id}", tag = "Catalog",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_product(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -204,7 +248,13 @@ async fn delete_product(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
-async fn adjust_stock(
+/// Ajuste rápido de stock por producto (atajo de stock-movements). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/products/{id}/stock", tag = "Catalog",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn adjust_stock(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -217,7 +267,13 @@ async fn adjust_stock(
     ))
 }
 
-async fn bulk_price(
+/// Bulk update de precios por % o monto. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/products/bulk-price", tag = "Catalog",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn bulk_price(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(req): Json<BulkPrice>,
@@ -230,14 +286,21 @@ async fn bulk_price(
 
 /// Reprice from `supplier_price_list`. That table arrives in Fase 5
 /// (purchasing); endpoint shape is reserved now, returns 501.
-async fn update_prices() -> ApiError {
+#[utoipa::path(post, path = "/api/v1/products/update-prices", tag = "Catalog",
+    responses(
+        (status = 501, description = "No implementado todavía", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn update_prices() -> ApiError {
     ApiError::not_implemented().with_details(serde_json::json!({
         "reason": "supplier_price_list llega en Fase 5 (compras)"
     }))
 }
 
 #[derive(Serialize)]
-struct ImportSummary {
+pub(crate) struct ImportSummary {
     /// Rows that resulted in a new `product` row.
     created: usize,
     /// Rows that matched an existing product by tenant + external_id and were
@@ -250,12 +313,18 @@ struct ImportSummary {
 }
 
 #[derive(Serialize)]
-struct ImportError {
+pub(crate) struct ImportError {
     line: usize,
     message: String,
 }
 
-async fn import_products(
+/// Import CSV de productos (multipart). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/products/import", tag = "Catalog",
+    request_body(content = String, content_type = "multipart/form-data"),
+    responses((status = 200, body = serde_json::Value), (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope), (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn import_products(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     mut mp: Multipart,
@@ -423,7 +492,11 @@ async fn import_products(
 
 // --- categories ------------------------------------------------------------
 
-async fn list_categories(
+/// Lista categorías del catálogo.
+#[utoipa::path(get, path = "/api/v1/categories", tag = "Catalog",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_categories(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<Vec<CategoryDto>>, ApiError> {
@@ -432,7 +505,13 @@ async fn list_categories(
     Ok(Json(domain::catalog::repo::list_categories(&db, &t).await?))
 }
 
-async fn get_category(
+/// Detalle de una categoría.
+#[utoipa::path(get, path = "/api/v1/categories/{id}", tag = "Catalog",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_category(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -442,7 +521,13 @@ async fn get_category(
     Ok(Json(service::get_category(&db, &t, &id).await?))
 }
 
-async fn create_category(
+/// Crea categoría. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/categories", tag = "Catalog",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_category(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewCategory>,
@@ -452,7 +537,13 @@ async fn create_category(
     Ok(Json(service::create_category(&db, &t, input).await?))
 }
 
-async fn update_category(
+/// Actualiza categoría. Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/categories/{id}", tag = "Catalog",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_category(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -463,7 +554,13 @@ async fn update_category(
     Ok(Json(service::update_category(&db, &t, &id, patch).await?))
 }
 
-async fn delete_category(
+/// Elimina (soft) categoría. Requiere admin+.
+#[utoipa::path(delete, path = "/api/v1/categories/{id}", tag = "Catalog",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_category(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,

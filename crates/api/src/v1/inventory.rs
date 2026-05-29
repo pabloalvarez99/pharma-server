@@ -20,7 +20,7 @@ use crate::AppState;
 
 use domain::inventory::{model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
+use crate::role::admin_plus;
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -54,7 +54,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/api/v1/faltas", post(create_falta_h))
         .route("/api/v1/faltas/{id}", patch(update_falta_h))
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
     reads.merge(writes)
 }
@@ -62,12 +62,16 @@ pub fn router(state: AppState) -> Router<AppState> {
 // --- stock movements -------------------------------------------------------
 
 #[derive(Serialize)]
-struct MovementResponse {
+pub(crate) struct MovementResponse {
     movement: StockMovementDto,
     product: domain::catalog::model::ProductDto,
 }
 
-async fn list_movements(
+/// Lista movimientos de stock del tenant.
+#[utoipa::path(get, path = "/api/v1/stock-movements", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_movements(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<MovementFilters>,
@@ -77,7 +81,13 @@ async fn list_movements(
     Ok(Json(service::list_movements(&db, &t, filters).await?))
 }
 
-async fn create_movement(
+/// Crea un movimiento de stock (entrada/salida/ajuste). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/stock-movements", tag = "Inventory",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 422, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_movement(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewMovement>,
@@ -97,7 +107,13 @@ async fn create_movement(
     Ok(Json(MovementResponse { movement, product }))
 }
 
-async fn adjust_movement(
+/// Ajuste manual de stock con auditoría. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/stock-movements/adjust", tag = "Inventory",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn adjust_movement(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(adj): Json<AdjustMovement>,
@@ -109,21 +125,27 @@ async fn adjust_movement(
 }
 
 #[derive(Serialize)]
-struct ImportSummary {
+pub(crate) struct ImportSummary {
     created: usize,
     failed: usize,
     errors: Vec<ImportError>,
 }
 
 #[derive(Serialize)]
-struct ImportError {
+pub(crate) struct ImportError {
     line: usize,
     message: String,
 }
 
 /// CSV columns (case-insensitive): `product` (id), `delta`, `reason`,
 /// optional `ref`. Each row is its own movement (and tx).
-async fn import_movements(
+/// Import CSV de movimientos de stock (multipart). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/stock-movements/import", tag = "Inventory",
+    request_body(content = String, content_type = "multipart/form-data"),
+    responses((status = 200, body = serde_json::Value), (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope), (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn import_movements(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     mut mp: Multipart,
@@ -215,7 +237,7 @@ async fn import_movements(
 // --- batches ---------------------------------------------------------------
 
 #[derive(Deserialize, Default)]
-struct BatchQuery {
+pub(crate) struct BatchQuery {
     #[serde(default)]
     product: Option<String>,
     #[serde(default)]
@@ -240,7 +262,11 @@ impl From<BatchQuery> for BatchFilters {
     }
 }
 
-async fn list_batches(
+/// Lista lotes (batches).
+#[utoipa::path(get, path = "/api/v1/batches", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_batches(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(q): Query<BatchQuery>,
@@ -250,7 +276,13 @@ async fn list_batches(
     Ok(Json(service::list_batches(&db, &t, q.into()).await?))
 }
 
-async fn get_batch(
+/// Detalle de un lote.
+#[utoipa::path(get, path = "/api/v1/batches/{id}", tag = "Inventory",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_batch(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -260,7 +292,13 @@ async fn get_batch(
     Ok(Json(service::get_batch(&db, &t, &id).await?))
 }
 
-async fn create_batch(
+/// Crea un lote. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/batches", tag = "Inventory",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_batch(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewBatch>,
@@ -272,7 +310,13 @@ async fn create_batch(
     ))
 }
 
-async fn update_batch_h(
+/// Actualiza un lote (patch). Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/batches/{id}", tag = "Inventory",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_batch_h(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -283,7 +327,13 @@ async fn update_batch_h(
     Ok(Json(service::update_batch(&db, &t, &id, patch).await?))
 }
 
-async fn delete_batch_h(
+/// Elimina (soft) un lote. Requiere admin+.
+#[utoipa::path(delete, path = "/api/v1/batches/{id}", tag = "Inventory",
+    params(("id" = String, Path)),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_batch_h(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -297,7 +347,7 @@ async fn delete_batch_h(
 // --- faltas ----------------------------------------------------------------
 
 #[derive(Deserialize, Default)]
-struct FaltaQuery {
+pub(crate) struct FaltaQuery {
     #[serde(default)]
     resolved: Option<bool>,
     #[serde(default)]
@@ -319,7 +369,11 @@ impl From<FaltaQuery> for FaltaFilters {
     }
 }
 
-async fn list_faltas(
+/// Lista faltas (out-of-stock requests).
+#[utoipa::path(get, path = "/api/v1/faltas", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_faltas(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(q): Query<FaltaQuery>,
@@ -329,7 +383,13 @@ async fn list_faltas(
     Ok(Json(service::list_faltas(&db, &t, q.into()).await?))
 }
 
-async fn create_falta_h(
+/// Crea una falta. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/faltas", tag = "Inventory",
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_falta_h(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(input): Json<NewFalta>,
@@ -339,7 +399,13 @@ async fn create_falta_h(
     Ok(Json(service::create_falta(&db, &t, input).await?))
 }
 
-async fn update_falta_h(
+/// Actualiza una falta. Requiere admin+.
+#[utoipa::path(patch, path = "/api/v1/faltas/{id}", tag = "Inventory",
+    params(("id" = String, Path)), request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn update_falta_h(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -352,7 +418,11 @@ async fn update_falta_h(
 
 // --- summary / abc / reorder ----------------------------------------------
 
-async fn summary(
+/// Resumen de inventario (totales, valor, etc.).
+#[utoipa::path(get, path = "/api/v1/inventory", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn summary(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<InventorySummary>, ApiError> {
@@ -361,7 +431,11 @@ async fn summary(
     Ok(Json(service::summary(&db, &t).await?))
 }
 
-async fn abc(
+/// Reporte ABC (clasificación rotación).
+#[utoipa::path(get, path = "/api/v1/inventory/abc", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn abc(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<AbcReport>, ApiError> {
@@ -370,7 +444,11 @@ async fn abc(
     Ok(Json(service::abc(&db, &t).await?))
 }
 
-async fn reorder_suggestions(
+/// Sugerencias de reorden (stock < mínimo).
+#[utoipa::path(get, path = "/api/v1/inventory/reorder-suggestions", tag = "Inventory",
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn reorder_suggestions(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
 ) -> Result<Json<ReorderReport>, ApiError> {

@@ -23,8 +23,7 @@ use crate::AppState;
 
 use domain::sales::{historic, model::*, service};
 
-const WRITE_ROLES: &[&str] = &["admin", "owner"];
-const POS_ROLES: &[&str] = &["admin", "owner", "cashier"];
+use crate::role::{admin_plus, cashier_plus};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -56,22 +55,42 @@ pub fn router(state: AppState) -> Router<AppState> {
     let pos = Router::new()
         .route("/api/v1/pos/sale", post(post_sale))
         .route("/api/v1/pos/returns", post(create_refund))
-        .route_layer(crate::role::layer(state.clone(), POS_ROLES));
+        .route_layer(crate::role::layer(state.clone(), cashier_plus()));
 
+    // admin_plus() == &["admin","owner"] (the old WRITE_ROLES). Settings
+    // mutation and historic-order bulk import are back-office only.
     let writes = Router::new()
         .route("/api/v1/settings/{key}", axum::routing::put(set_setting))
         .route(
             "/api/v1/admin/import-historic-orders",
             post(import_historic_orders),
         )
-        .route_layer(crate::role::layer(state, WRITE_ROLES));
+        .route_layer(crate::role::layer(state, admin_plus()));
 
     reads.merge(pos).merge(writes)
 }
 
 // --- POST /pos/sale --------------------------------------------------------
 
-async fn post_sale(
+/// Vender en POS. Crea pedido + movimientos + descuento de stock + asiento
+/// de caja en una sola tx. Honra `Idempotency-Key`.
+#[utoipa::path(
+    post,
+    path = "/api/v1/pos/sale",
+    tag = "Sales",
+    request_body = serde_json::Value,
+    responses(
+        (status = 201, description = "Venta creada", body = serde_json::Value),
+        (status = 200, description = "Idempotency-Key replay; payload cacheado", body = serde_json::Value),
+        (status = 400, description = "Datos inválidos", body = crate::error::ErrorEnvelope),
+        (status = 401, description = "Sin token o inválido", body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere cashier+)", body = crate::error::ErrorEnvelope),
+        (status = 422, description = "Stock insuficiente", body = crate::error::ErrorEnvelope),
+        (status = 500, description = "Error interno", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn post_sale(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     headers: HeaderMap,
@@ -120,7 +139,19 @@ async fn post_sale(
 
 // --- GET /orders -----------------------------------------------------------
 
-async fn list_orders(
+/// Lista de pedidos (orders) del tenant. Filtros por fecha, cliente, etc.
+#[utoipa::path(
+    get,
+    path = "/api/v1/orders",
+    tag = "Sales",
+    responses(
+        (status = 200, description = "Lista de pedidos", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn list_orders(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<OrderFilters>,
@@ -132,12 +163,25 @@ async fn list_orders(
 }
 
 #[derive(serde::Serialize)]
-struct OrderDetail {
+pub(crate) struct OrderDetail {
     order: OrderDto,
     items: Vec<OrderItemDto>,
 }
 
-async fn get_order(
+/// Detalle de un pedido (cabecera + items).
+#[utoipa::path(
+    get,
+    path = "/api/v1/orders/{id}",
+    tag = "Sales",
+    params(("id" = String, Path, description = "Order record id (order:xxx)")),
+    responses(
+        (status = 200, description = "Pedido + items", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn get_order(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<String>,
@@ -163,7 +207,22 @@ async fn get_receipt(
 
 // --- returns / devoluciones ------------------------------------------------
 
-async fn create_refund(
+/// Crear devolución (refund) parcial o total de un pedido.
+#[utoipa::path(
+    post,
+    path = "/api/v1/pos/returns",
+    tag = "Sales",
+    request_body = serde_json::Value,
+    responses(
+        (status = 201, description = "Devolución creada", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere cashier+)", body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn create_refund(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(body): Json<NewDevolucion>,
@@ -175,7 +234,16 @@ async fn create_refund(
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 
-async fn list_refunds(
+/// Lista de devoluciones del tenant.
+#[utoipa::path(
+    get, path = "/api/v1/returns", tag = "Sales",
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn list_refunds(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Query(filters): Query<DevolucionFilters>,
@@ -189,7 +257,7 @@ async fn list_refunds(
 // --- interactions pre-check ------------------------------------------------
 
 #[derive(serde::Deserialize)]
-struct CheckRequest {
+pub(crate) struct CheckRequest {
     /// Product record ids (`product:xxx`). Tenant-scoped lookup; missing
     /// or other-tenant ids are silently dropped.
     #[serde(default)]
@@ -201,13 +269,23 @@ struct CheckRequest {
 }
 
 #[derive(serde::Serialize)]
-struct CheckResponse {
+pub(crate) struct CheckResponse {
     interaction_warnings: Vec<domain::sales::interactions::InteractionDetail>,
 }
 
 /// Preview interactions without committing a sale. The POS calls this when
 /// the cart changes to surface warnings live (badge in UI, etc.).
-async fn check_interactions(
+/// Pre-check de interacciones farmacológicas sin commit.
+#[utoipa::path(
+    post, path = "/api/v1/interactions/check", tag = "Sales",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn check_interactions(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Json(body): Json<CheckRequest>,
@@ -233,7 +311,18 @@ async fn check_interactions(
 
 // --- admin_setting CRUD ---------------------------------------------------
 
-async fn get_setting(
+/// Lee un admin_setting por key.
+#[utoipa::path(
+    get, path = "/api/v1/settings/{key}", tag = "Sales",
+    params(("key" = String, Path, description = "Setting key")),
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn get_setting(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(key): Path<String>,
@@ -247,11 +336,23 @@ async fn get_setting(
 }
 
 #[derive(serde::Deserialize)]
-struct SettingValue {
+pub(crate) struct SettingValue {
     value: String,
 }
 
-async fn set_setting(
+/// Crea o actualiza un admin_setting. Requiere admin+.
+#[utoipa::path(
+    put, path = "/api/v1/settings/{key}", tag = "Sales",
+    params(("key" = String, Path)),
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn set_setting(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(key): Path<String>,

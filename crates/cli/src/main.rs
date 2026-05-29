@@ -36,8 +36,9 @@ enum Cmd {
         tenant: String,
         #[arg(long)]
         email: String,
-        /// Comma-separated roles (e.g. admin,pharmacist).
-        #[arg(long, default_value = "")]
+        /// Comma-separated roles. Valid: cashier|pharmacist|admin|owner.
+        /// Default `cashier` (least privilege).
+        #[arg(long, default_value = "cashier")]
         roles: String,
         /// Password (read from PHARMA_PASSWORD env or interactive prompt if omitted).
         #[arg(long)]
@@ -273,6 +274,19 @@ async fn main() -> anyhow::Result<()> {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
+            const VALID_ROLES: &[&str] = &["cashier", "pharmacist", "admin", "owner"];
+            if roles_vec.is_empty() {
+                return Err(anyhow!(
+                    "--roles no puede estar vacío; valores válidos: {VALID_ROLES:?}"
+                ));
+            }
+            for r in &roles_vec {
+                if !VALID_ROLES.contains(&r.as_str()) {
+                    return Err(anyhow!(
+                        "rol inválido '{r}'; valores válidos: {VALID_ROLES:?}"
+                    ));
+                }
+            }
             let hash = auth::password::hash(&password)?;
 
             let cfg = pharma_core::config::AppConfig::load()?;

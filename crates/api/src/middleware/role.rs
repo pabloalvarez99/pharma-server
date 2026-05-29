@@ -20,6 +20,78 @@ use tower::layer::util::Stack;
 
 use crate::{error::ApiError, AppState};
 
+// ---------------------------------------------------------------------------
+// Granular role model — cashier / pharmacist / admin / owner.
+// ---------------------------------------------------------------------------
+//
+// Real pharmacy roles (vs. binary admin/owner of v0.1.x):
+// * `cashier`    — POS, returns, caja, customers basic CRUD.
+// * `pharmacist` — everything cashier + prescriptions (Ley 20.000 controlled).
+// * `admin`      — everything pharmacist + catalog/inventory mutations.
+// * `owner`      — superset; cannot be locked out (license, settings).
+//
+// Helpers below return `&'static [&'static str]` so they slot into the
+// existing `role::layer(state, &[..])` API without churn.
+
+bitflags::bitflags! {
+    /// Bit-encoded role set. Parsed from JWT `roles: Vec<String>` claim via
+    /// [`RoleSet::from_claim`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RoleSet: u32 {
+        const CASHIER    = 1 << 0;
+        const PHARMACIST = 1 << 1;
+        const ADMIN      = 1 << 2;
+        const OWNER      = 1 << 3;
+    }
+}
+
+impl RoleSet {
+    /// Parse the JWT `roles` claim. Unknown strings are silently dropped (so
+    /// future role additions on the client don't trip 500s on older servers).
+    pub fn from_claim(roles: &[String]) -> Self {
+        let mut s = RoleSet::empty();
+        for r in roles {
+            match r.as_str() {
+                "cashier" => s |= RoleSet::CASHIER,
+                "pharmacist" => s |= RoleSet::PHARMACIST,
+                "admin" => s |= RoleSet::ADMIN,
+                "owner" => s |= RoleSet::OWNER,
+                _ => {}
+            }
+        }
+        s
+    }
+
+    /// Does any required flag intersect with this set.
+    pub fn contains_any(self, required: RoleSet) -> bool {
+        self.intersects(required)
+    }
+}
+
+// --- Semantic helpers ------------------------------------------------------
+//
+// Tier ladders: each higher role implies all lower ones.
+
+/// `CASHIER | PHARMACIST | ADMIN | OWNER` — counter staff and above.
+pub fn cashier_plus() -> &'static [&'static str] {
+    &["cashier", "pharmacist", "admin", "owner"]
+}
+
+/// `PHARMACIST | ADMIN | OWNER` — Ley 20.000 controlled scripts gate.
+pub fn pharmacist_plus() -> &'static [&'static str] {
+    &["pharmacist", "admin", "owner"]
+}
+
+/// `ADMIN | OWNER` — catalog/inventory mutations, pricing.
+pub fn admin_plus() -> &'static [&'static str] {
+    &["admin", "owner"]
+}
+
+/// `OWNER` only — license install, tenant ownership transfer.
+pub fn owner_only() -> &'static [&'static str] {
+    &["owner"]
+}
+
 /// Allowed-role list, injected as a request extension so the shared async
 /// middleware fn can read it without monomorphizing per call site.
 #[derive(Clone, Copy)]
@@ -47,6 +119,9 @@ pub fn layer(
     >,
     Extension<AllowedRoles>,
 > {
+    // tower `Stack::new(inner, outer)` applies inner *first* (closer to the
+    // service), so Extension goes inner and the from_fn wrap goes outer —
+    // the gate runs *after* the extension is injected.
     Stack::new(
         from_fn_with_state(state, role_gate as fn(_, _, _, _) -> RoleGateFuture),
         Extension(AllowedRoles(allowed)),

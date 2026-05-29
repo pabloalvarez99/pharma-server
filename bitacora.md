@@ -24,6 +24,7 @@ NO acá.
 - **MSI release**: **v0.1.27 PUBLICADO 2026-05-28** → https://github.com/pabloalvarez99/pharma-server-releases/releases/tag/v0.1.27 (signed MSI 16.67 MB sha256 `10dd7bba…cae5c9` + `pilot.cer` adjunto). **Bug raíz resuelto**: servicio fallaba `Error 1920`/rollback `1603` en Windows limpio porque `pharma-service.exe` linkeaba `VCRUNTIME140.dll` dinámicamente (ausente sin VC++ redist) → fix `+crt-static` en `.cargo/config.toml` (commit `c76b062`, PR #79 merged a `feature/erp-parity`). Smoke GREEN en Windows Sandbox limpio (install→servicio RUNNING→`/health/ready` 200 db:ok→uninstall limpio). Cert pilot self-signed regenerado (password perdido prev sesión; persistido ahora en `installer/sign/.cert-password.txt` gitignored + User env `PHARMA_CERT_PASSWORD`). SmartScreen warning conocido (self-signed; pilots importan `pilot.cer`). Mecanismo: `gh release create` directo al mirror (el workflow `release-publisher.yml` requiere `msi_url` público anon-curl, no aplica con build local + CI billing-locked). Plan $0: [`docs/strategy/zero-cost-launch-plan.md`](./docs/strategy/zero-cost-launch-plan.md) + [ADR-0008](./docs/adr/0008-self-sign-pilot-msi.md). Ver memoria `[[crt-static-msi-gotcha]]`.
 - **MSI mirror público** (Fase 9): https://github.com/pabloalvarez99/pharma-server-releases (descarga sin login). Workflow `release-publisher.yml` recibe artifacts vía `workflow_dispatch`.
 - **`cargo audit` baseline 2026-05-27**: 6 vulns, 5 unmaintained. Crítico RUSTSEC-2021-0046 "telemetry" es **FALSO POSITIVO** — nombre colisiona con crate abandonado de crates.io; nuestro `crates/telemetry` es local + sólo depende de tracing/otel. TODO: renombrar `package.name = "pharma-telemetry"` en `crates/telemetry/Cargo.toml` (low-risk, no toca worktrees). Resto upstream-driven: rsa Marvin 5.9 med (surrealdb transitive), rustls-webpki 4× (0.102→0.103 fix; surrealdb/reqwest pin), unmaintained atomic-polyfill/bincode/paste/rustls-pemfile/lru. Documentado como known-known.
+- **OpenAPI + RBAC granular (rebase 2026-05-29)**: `feat/api-openapi-swagger-roles` rebaseada sobre erp-parity — Swagger UI en `/docs` (gated por `docs.enabled`) + handlers anotados con OpenAPI (sales/inventory/catalog/cash_register/customers/prescriptions) + roles granular cashier/pharmacist/admin/owner via bitflags + helpers `cashier_plus`/`pharmacist_plus`/`admin_plus`/`owner_only` + migración renombrada `0017_user_roles` → **`0021_user_roles`** (colisión con `0017_dte` ya aplicada) + CLI `--roles` validado. Admin-import endpoints (`/admin/import-customers`, `/admin/import-historic-orders`) mantienen gate admin/owner (no se relajan a cashier).
 - **Modelo de negocio**: **freemium MSI Windows** (pivote 2026-05-20). Core gratis + tiers Pro/Business/Enterprise + microtransacciones one-time. Docs lockeados en [`docs/strategy/`](./docs/strategy/) + [`docs/adr/`](./docs/adr/).
 - **Fase 10 MVP local CIERRA** (2026-05-20, PR #47 + hot-reload PR): `crates/license` (Ed25519 offline) + `AppState.license: Arc<ArcSwap<License>>` (cargado al boot, missing/invalid → `free_default`, lock-free swap) + `ApiError::payment_required` 402 + 1 endpoint gated POC (`reports.margins_daily`) + CLI `pharma license import|status|features|verify|export|clear --force` + **admin endpoints** `POST /api/v1/admin/license/reload` y `GET /api/v1/admin/license/status` (hot-reload sin restart). Falta: CRL refresh, license-server real (Fase 11). Key embebida es placeholder hasta Fase 11a.
 - **Fase 11b en progreso** (2026-05-20): CLI `pharma license activate <LICENSE_ID> [--server URL] [--reload-url URL] [--reload-token T]` — fetch GET `/api/licenses/{id}`, parse_and_verify Ed25519 offline, persist `data/license.json`, opcional hot-reload del server local. Companion repo: Webpay sandbox + NextAuth + admin issuance + checkout UI listos. Pendiente: Vercel deploy + smoke E2E con tarjeta test.
@@ -476,6 +477,32 @@ NO acá.
 - **Falta esta sesión**: Vercel deploy preview, Neon DB provisioning, admin
   auth (Clerk vs NextAuth decisión pendiente). Próxima sesión Fase 11b:
   Webpay sandbox + webhook idempotente + `POST /api/licenses/issue`.
+
+---
+
+## 2026-05-22 — OpenAPI + Swagger UI + roles granular (cashier/pharmacist/admin/owner)
+
+- **Branch**: `feat/api-openapi-swagger-roles` desde `feature/erp-parity`.
+- **Qué**:
+  1. **Swagger UI live**: `crates/api/src/openapi.rs` ahora monta `SwaggerUi` en `/docs` + JSON en `/docs/openapi.json`. Spec generada por `utoipa` con info/servers/tags/securityScheme `bearer_jwt` (HTTP Bearer JWT) + `ErrorEnvelope` registrado como schema.
+  2. **Handlers anotados** (Fase 1 — 6 módulos núcleo POS):
+     - `sales.rs` 8 endpoints, `inventory.rs` 15, `catalog.rs` 17, `cash_register.rs` 7, `customers.rs` 7, `prescriptions.rs` 8 → **62 handlers** con `#[utoipa::path]` (paths, methods, tags, request/response bodies, security, error codes).
+     - Schema strategy: request/response bodies como `serde_json::Value` (object opaco) porque los DTOs viven en `crates/domain` y este slice no toca esa crate. PR futuro: agregar `ToSchema` derives en domain.
+  3. **Roles granular**:
+     - Bitflags `RoleSet { CASHIER, PHARMACIST, ADMIN, OWNER }` + helpers semánticos `cashier_plus / pharmacist_plus / admin_plus / owner_only` que devuelven `&'static [&'static str]` (slot-in compat con `role::layer`).
+     - Aplicados en los 6 módulos según matriz: Sales/Cash = cashier+, Prescriptions = pharmacist+, Catalog/Inventory mutate = admin+, Customers mutate = cashier+, Settings PUT = admin+.
+     - `auth::Claims.roles` ahora con `#[serde(default = "default_roles_legacy")]` → JWTs legacy sin `roles` se interpretan como `["admin"]` (backward-compat, no rompe sesiones).
+  4. **Fix bug latente en `role::layer`**: `Stack::new(inner, outer)` se construía con Extension como inner y from_fn como outer; tower aplica `outer.layer(inner.layer(svc))`, así que la Extension se inyectaba *después* de que el gate intentaba extraerla → 500 `Missing extension`. Swap inner↔outer. Tests existentes (`auth.rs`) no lo detectaron porque sólo testean `check()` directo, no el layered path. Ahora cubierto por `tests/roles_granular.rs`.
+  5. **Migración `0021_user_roles.surql`** (renombrada de `0017` en rebase 2026-05-29 por colisión con `0017_dte` ya aplicada): backfill `roles = ["admin","owner"]` para usuarios existentes; la columna ya existía en 0001_init.
+  6. **CLI**: `pharma user-create --roles` default cambiado de `""` a `"cashier"` + validación contra whitelist `{cashier, pharmacist, admin, owner}` con mensaje de error explícito.
+  7. **Tests nuevos**:
+     - `crates/api/tests/openapi_spec.rs` — 9 tests, valida que la spec se genera y contiene los paths esperados.
+     - `crates/api/tests/roles_granular.rs` — 8 tests (cashier/pharmacist/admin/owner × endpoints, legacy fallback, RoleSet bitflags).
+  8. **Doc**: `docs/api/README.md` con tabla endpoint × método × roles × tier para los 6 módulos.
+- **Dep**: `utoipa-swagger-ui` bumped 8 → 9 en workspace (v8 sólo soporta axum 0.7; aquí usamos 0.8). `bitflags = "2"` añadido a `crates/api/Cargo.toml`. `jsonwebtoken` añadido a dev-deps de api para los tests.
+- **Por qué**: prerequisito para vender (Swagger es lo primero que pide cualquier integrador); roles binarios admin/owner no escalan a farmacia real (cajero no debe poder cambiar precios, químico debe poder firmar receta). Modelado en torno a la ladder real cashier < pharmacist < admin < owner.
+- **Restricciones cumplidas**: NO se tocó `crates/domain/`, `crates/dte/`, `crates/license/`, `crates/agent/`, `crates/service/`. Sólo cambio minimal en `crates/auth/` (serde default para `roles`). Migración 0017 append-only.
+- **No incluído / TODO PR siguiente**: anotar 40 handlers restantes (`agent.rs`, `agent_orders.rs`, `backup.rs`, `expenses.rs`, `license.rs`, `purchasing.rs`); agregar `ToSchema` derives en `crates/domain` para schemas tipados; OpenAPI tags por tier license; `update_prices` (501) tipear properly.
 
 ---
 

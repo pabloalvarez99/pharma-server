@@ -13,7 +13,7 @@ use serde::Serialize;
 pub mod error;
 mod health;
 mod middleware;
-mod openapi;
+pub mod openapi;
 mod routes;
 pub mod stock_webhook;
 mod v1;
