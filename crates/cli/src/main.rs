@@ -223,7 +223,7 @@ struct UserRow {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _ = telemetry::init_cli("pharma-cli");
+    let _ = pharma_telemetry::init_cli("pharma-cli");
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Migrate { dir } => {

@@ -244,6 +244,7 @@ dependencies = [
  "metrics-util",
  "nonzero_ext",
  "pharma-core",
+ "pharma-telemetry",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -252,7 +253,6 @@ dependencies = [
  "subtle",
  "surrealdb",
  "tar",
- "telemetry",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1316,13 +1316,13 @@ dependencies = [
  "httpmock",
  "license",
  "pharma-core",
+ "pharma-telemetry",
  "reqwest",
  "rpassword",
  "rust_decimal",
  "serde",
  "serde_json",
  "surrealdb",
- "telemetry",
  "tempfile",
  "tokio",
  "tracing",
@@ -4016,6 +4016,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pharma-telemetry"
+version = "0.1.27"
+dependencies = [
+ "anyhow",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "pharma-core",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "pharos"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5389,7 +5403,7 @@ dependencies = [
  "anyhow",
  "api",
  "pharma-core",
- "telemetry",
+ "pharma-telemetry",
  "tokio",
  "tracing",
  "windows-service",
@@ -5912,20 +5926,6 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
-]
-
-[[package]]
-name = "telemetry"
-version = "0.1.27"
-dependencies = [
- "anyhow",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "pharma-core",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
 ]
 
 [[package]]
