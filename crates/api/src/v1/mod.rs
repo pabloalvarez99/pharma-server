@@ -19,6 +19,7 @@ pub mod public_catalog;
 pub mod public_orders;
 pub mod purchasing;
 pub mod sales;
+pub mod stock_movements;
 
 use axum::Router;
 
@@ -27,6 +28,7 @@ use crate::AppState;
 pub fn router(state: AppState) -> Router<AppState> {
     catalog::router(state.clone())
         .merge(inventory::router(state.clone()))
+        .merge(stock_movements::router(state.clone()))
         .merge(customers::router(state.clone()))
         .merge(prescriptions::router(state.clone()))
         .merge(purchasing::router(state.clone()))

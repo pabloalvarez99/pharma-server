@@ -103,7 +103,7 @@ impl Modify for SecurityAddon {
         crate::v1::sales::get_setting,
         crate::v1::sales::set_setting,
         // Inventory
-        crate::v1::inventory::list_movements,
+        crate::v1::stock_movements::list_movements_paginated,
         crate::v1::inventory::create_movement,
         crate::v1::inventory::adjust_movement,
         crate::v1::inventory::import_movements,
