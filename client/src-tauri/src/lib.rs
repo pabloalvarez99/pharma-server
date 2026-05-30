@@ -329,6 +329,37 @@ pub struct NearExpiryRow {
     pub expired: bool,
 }
 
+// --- reports expansion (margins / rotation / dashboard) --------------------
+
+/// Mirrors `domain::expenses::model::DailyMarginRow`. Money fields
+/// (`revenue`/`cost`/`margin`/`margin_pct`) are STRINGS. `items_without_cost`
+/// counts line items excluded from `cost` (product unset or `cost_price` null)
+/// so the margin reads honestly. The endpoint is Pro-gated — Free tier gets a
+/// 402 surfaced as the `FEATURE_REQUIRES_UPGRADE` coded error.
+#[derive(Serialize, Deserialize)]
+pub struct DailyMarginRow {
+    pub date: String,
+    pub revenue: String,
+    pub cost: String,
+    pub margin: String,
+    pub margin_pct: String,
+    pub items_without_cost: i64,
+}
+
+/// Mirrors `domain::expenses::model::StockRotationRow`. `turnover` =
+/// `qty_sold / current_stock`; both `turnover` and `days_of_inventory` are
+/// STRINGS or null — null when current stock ≤ 0 (can't divide), and
+/// `days_of_inventory` is also null unless a date window was supplied.
+#[derive(Serialize, Deserialize)]
+pub struct StockRotationRow {
+    pub product_id: String,
+    pub product_name: String,
+    pub qty_sold: i64,
+    pub current_stock: i64,
+    pub turnover: Option<String>,
+    pub days_of_inventory: Option<String>,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -858,6 +889,100 @@ async fn top_products(
         .map_err(|e| format!("Respuesta de ranking inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/reports/margins-daily` (Bearer). **Pro-gated**: Free tier gets a
+/// 402 `FEATURE_REQUIRES_UPGRADE`. Rejects with the `"CODE|message"` shape (see
+/// [`coded_error`]) so the Reportes view can branch on `FEATURE_REQUIRES_UPGRADE`
+/// and render an upgrade note instead of a hard error. `from`/`to` are optional
+/// RFC3339 date-range filters forwarded as query params.
+#[tauri::command]
+async fn margins_daily(
+    state: State<'_, SessionState>,
+    server_url: String,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<Vec<DailyMarginRow>, String> {
+    let token = token_of(&state).map_err(|e| format!("|{e}"))?;
+    let http = client().map_err(|e| format!("|{e}"))?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/margins-daily"))
+        .bearer_auth(token);
+    if let Some(f) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", f)]);
+    }
+    if let Some(t) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", t)]);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
+    // Non-2xx (incl. 402 FEATURE_REQUIRES_UPGRADE) → coded "CODE|message".
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de márgenes inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/stock-rotation` (Bearer). Inventory turnover per product
+/// over the window (`qty_sold / current_stock`). `from`/`to` optional RFC3339.
+#[tauri::command]
+async fn stock_rotation(
+    state: State<'_, SessionState>,
+    server_url: String,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<Vec<StockRotationRow>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/stock-rotation"))
+        .bearer_auth(token);
+    if let Some(f) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", f)]);
+    }
+    if let Some(t) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", t)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de rotación inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/dashboard` (Bearer, admin/owner/quimico). One aggregate
+/// exec summary (ventas hoy/mes, inventario, top productos, por_vencer, margen
+/// hoy). `margen_hoy` is `null` on the Free tier (the server degrades that one
+/// field instead of 402-ing the whole overview). Returns the raw JSON object —
+/// the webview reads the typed `DashboardSummary` shape from it.
+#[tauri::command]
+async fn dashboard_report(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<serde_json::Value, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/reports/dashboard"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta del panel inválida del servidor: {e}"))
+}
+
 // --- POS sale --------------------------------------------------------------
 
 /// POST `/api/v1/pos/sale` (Bearer + a FRESH `Idempotency-Key` minted here so
@@ -1292,7 +1417,10 @@ pub fn run() {
             adjust_product_stock,
             list_batches,
             create_batch,
-            near_expiry
+            near_expiry,
+            margins_daily,
+            stock_rotation,
+            dashboard_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
