@@ -404,3 +404,150 @@ export function customerHistory(
 ): Promise<CustomerOrder[]> {
   return invoke<CustomerOrder[]>("customer_history", { serverUrl, id, limit });
 }
+
+// --- inventario writes + lotes / vencimientos ------------------------------
+
+/** Full product detail (`ProductDto`). Money (`price`/`cost_price`) are STRINGS. */
+export interface ProductDetail {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  price: string;
+  cost_price: string | null;
+  stock: number;
+  category: string | null;
+  active: boolean;
+  laboratory: string | null;
+  therapeutic_action: string | null;
+  active_ingredient: string | null;
+  prescription_type: string;
+  presentation: string | null;
+  discount_percent: number | null;
+}
+
+/** One product batch / lote (`BatchDto`). `expiry_date` RFC3339; `cost` STRING|null. */
+export interface Batch {
+  id: string;
+  product: string;
+  batch_code: string;
+  expiry_date: string;
+  stock: number;
+  cost: string | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A soon-to-expire / expired batch row (`NearExpiryRow`).
+ *  `days_to_expiry` < 0 ⇒ already expired (also `expired === true`). */
+export interface NearExpiryRow {
+  product_id: string;
+  product_name: string;
+  batch_id: string;
+  batch_code: string;
+  expiry_date: string;
+  stock: number;
+  days_to_expiry: number;
+  expired: boolean;
+}
+
+/** Fields the "Nuevo producto" form collects. `price`/`costPrice` are STRINGS. */
+export interface NewProductInput {
+  name: string;
+  price: string;
+  costPrice?: string;
+  stock?: number;
+  laboratory?: string;
+  activeIngredient?: string;
+  presentation?: string;
+}
+
+/** POST /api/v1/products (Bearer, admin+). Rejects with a Spanish string
+ *  ("Permiso denegado…" on a non-admin 403). */
+export function createProduct(
+  serverUrl: string,
+  input: NewProductInput,
+): Promise<ProductDetail> {
+  return invoke<ProductDetail>("create_product", {
+    serverUrl,
+    name: input.name,
+    price: input.price,
+    costPrice: input.costPrice,
+    stock: input.stock,
+    laboratory: input.laboratory,
+    activeIngredient: input.activeIngredient,
+    presentation: input.presentation,
+  });
+}
+
+/** GET /api/v1/products/{id} (Bearer) — full detail for the drawer. */
+export function productDetail(
+  serverUrl: string,
+  id: string,
+): Promise<ProductDetail> {
+  return invoke<ProductDetail>("product_detail", { serverUrl, id });
+}
+
+/** POST /api/v1/products/{id}/stock (Bearer, admin+). Pass `set` (absolute) or
+ *  `delta` (signed) + optional `reason`. Returns the updated product. */
+export function adjustProductStock(
+  serverUrl: string,
+  id: string,
+  opts: { set?: number; delta?: number; reason?: string },
+): Promise<ProductDetail> {
+  return invoke<ProductDetail>("adjust_product_stock", {
+    serverUrl,
+    id,
+    set: opts.set,
+    delta: opts.delta,
+    reason: opts.reason,
+  });
+}
+
+/** GET /api/v1/batches (Bearer). Optional `product` + `expiringWithinDays`
+ *  + `onlyAvailable` filters. */
+export function listBatches(
+  serverUrl: string,
+  product?: string,
+  expiringWithinDays?: number,
+  onlyAvailable?: boolean,
+  limit?: number,
+): Promise<Batch[]> {
+  return invoke<Batch[]>("list_batches", {
+    serverUrl,
+    product,
+    expiringWithinDays,
+    onlyAvailable,
+    limit,
+  });
+}
+
+/** POST /api/v1/batches (Bearer, admin+). `expiryDate` must be RFC3339
+ *  (`YYYY-MM-DDT00:00:00Z`). `cost` is a STRING when present. */
+export function createBatch(
+  serverUrl: string,
+  product: string,
+  batchCode: string,
+  expiryDate: string,
+  opts: { stock?: number; cost?: string; notes?: string } = {},
+): Promise<Batch> {
+  return invoke<Batch>("create_batch", {
+    serverUrl,
+    product,
+    batchCode,
+    expiryDate,
+    stock: opts.stock,
+    cost: opts.cost,
+    notes: opts.notes,
+  });
+}
+
+/** GET /api/v1/reports/near-expiry?days=N (Bearer). Core/free, not gated. */
+export function nearExpiry(
+  serverUrl: string,
+  days?: number,
+): Promise<NearExpiryRow[]> {
+  return invoke<NearExpiryRow[]>("near_expiry", { serverUrl, days });
+}
