@@ -1603,6 +1603,28 @@ button {
   color: var(--muted-strong);
 }
 
+/* ---- devoluciones (refund) modal ---- */
+.dev-order-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.dev-order-row input {
+  flex: 1;
+}
+.dev-order-row .btn-ghost {
+  white-space: nowrap;
+}
+.dev-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.dev-restock-note {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* ---- arqueo preview (close modal) ---- */
 .arqueo-preview {
   display: flex;

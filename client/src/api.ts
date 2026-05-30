@@ -910,3 +910,75 @@ export function libroRecetas(
 export function exportLibroRecetas(serverUrl: string, patientRut?: string): Promise<string> {
   return invoke<string>("export_libro_recetas", { serverUrl, patientRut });
 }
+
+// --- devoluciones / returns ------------------------------------------------
+
+/** A refund/devolución header (`DevolucionDto`). `total_devuelto` is a STRING
+ *  (Decimal). `order` is the linked sale (null for a standalone refund). */
+export interface Devolucion {
+  id: string;
+  order: string | null;
+  tipo: string;
+  motivo: string;
+  notas: string | null;
+  total_devuelto: string;
+  metodo_reembolso: string | null;
+  procesado_por: string | null;
+  created_at: string;
+}
+
+/** One refund line for {@link createRefund}. snake_case (serde deserializes the
+ *  array elements directly — no camelCase rename, same as `PosItem`).
+ *  `unit_price` STRING; `restock` returns the unit to stock — the server REQUIRES
+ *  `product` to be set when `restock` is true, so receipt-driven lines (which
+ *  carry no product id) must send `restock: false`. */
+export interface RefundItem {
+  product?: string;
+  product_name: string;
+  quantity: number;
+  unit_price: string;
+  restock: boolean;
+}
+
+/** Narrowed result of a successful refund: the devolución header + whether the
+ *  linked order was flipped to `refunded`. */
+export interface RefundResult {
+  devolucion: Devolucion;
+  orderMarkedRefunded: boolean;
+}
+
+/** POST /api/v1/pos/returns (Bearer, cashier+) — create a refund. `tipo` defaults
+ *  to `parcial`. Rejects with a Spanish string (e.g. over-refund / 403). */
+export async function createRefund(
+  serverUrl: string,
+  motivo: string,
+  items: RefundItem[],
+  opts: { order?: string; tipo?: string; notas?: string; metodoReembolso?: string } = {},
+): Promise<RefundResult> {
+  const res = await invoke<{ devolucion: Devolucion; order_marked_refunded?: boolean }>(
+    "create_refund",
+    {
+      serverUrl,
+      order: opts.order,
+      tipo: opts.tipo ?? "parcial",
+      motivo,
+      notas: opts.notas,
+      items,
+      metodoReembolso: opts.metodoReembolso,
+    },
+  );
+  return {
+    devolucion: res.devolucion,
+    orderMarkedRefunded: res.order_marked_refunded ?? false,
+  };
+}
+
+/** GET /api/v1/returns (Bearer). Optional `order` / `tipo` / `limit` filters. */
+export function listRefunds(
+  serverUrl: string,
+  order?: string,
+  tipo?: string,
+  limit?: number,
+): Promise<Devolucion[]> {
+  return invoke<Devolucion[]>("list_refunds", { serverUrl, order, tipo, limit });
+}

@@ -19,11 +19,13 @@ import { renderCaja } from "./caja";
 import { renderClientes } from "./clientes";
 import { renderCompras } from "./compras";
 import { renderRecetas } from "./recetas";
+import { renderDevoluciones } from "./devoluciones";
 import { renderGastos } from "./gastos";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
   { id: "pos", label: "POS", hint: "Punto de venta" },
+  { id: "devoluciones", label: "Devoluciones", hint: "Reembolsos de ventas" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
   { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "clientes", label: "Clientes", hint: "Búsqueda y fidelidad" },
@@ -79,6 +81,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "pos":
       renderPos(host, serverUrl);
+      break;
+    case "devoluciones":
+      renderDevoluciones(host, serverUrl);
       break;
     case "inventory":
       renderInventory(host, serverUrl);
