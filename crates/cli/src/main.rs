@@ -1,3 +1,4 @@
+mod backup_cmd;
 mod dte_cmd;
 
 use std::path::PathBuf;
@@ -85,6 +86,11 @@ enum Cmd {
     Cert {
         #[command(subcommand)]
         cmd: dte_cmd::CertCmd,
+    },
+    /// Backup y restauración de la base de datos local.
+    Backup {
+        #[command(subcommand)]
+        cmd: backup_cmd::BackupCmd,
     },
 }
 
@@ -671,6 +677,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Cmd::Backup { cmd } => backup_cmd::run(cmd).await?,
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
         Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,

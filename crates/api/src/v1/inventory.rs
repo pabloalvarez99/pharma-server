@@ -32,7 +32,8 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
 
 pub fn router(state: AppState) -> Router<AppState> {
     let reads = Router::new()
-        .route("/api/v1/stock-movements", get(list_movements))
+        // GET /api/v1/stock-movements (paginated, cashier_plus gate) is owned
+        // by v1::stock_movements; OpenAPI documents it there too.
         .route("/api/v1/batches", get(list_batches))
         .route("/api/v1/batches/{id}", get(get_batch))
         .route("/api/v1/faltas", get(list_faltas))
@@ -65,20 +66,6 @@ pub fn router(state: AppState) -> Router<AppState> {
 pub(crate) struct MovementResponse {
     movement: StockMovementDto,
     product: domain::catalog::model::ProductDto,
-}
-
-/// Lista movimientos de stock del tenant.
-#[utoipa::path(get, path = "/api/v1/stock-movements", tag = "Inventory",
-    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
-    security(("bearer_jwt" = [])))]
-pub async fn list_movements(
-    State(s): State<AppState>,
-    AuthUser(claims): AuthUser,
-    Query(filters): Query<MovementFilters>,
-) -> Result<Json<Vec<StockMovementDto>>, ApiError> {
-    let db = db_of(&s)?;
-    let t = tenant_of(&claims)?;
-    Ok(Json(service::list_movements(&db, &t, filters).await?))
 }
 
 /// Crea un movimiento de stock (entrada/salida/ajuste). Requiere admin+.
