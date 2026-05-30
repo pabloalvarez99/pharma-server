@@ -1696,3 +1696,277 @@ button {
   background: var(--bg-1);
   color: var(--text);
 }
+
+/* ============================================================ POS — extras
+ * Customer attach (loyalty), cash tendered + vuelto, quick-cash chips, and the
+ * printable boleta modal. Tokens reused from :root.
+ */
+.pos-customer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pos-cust-row {
+  position: relative;
+}
+
+.pos-cust-row input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pos-cust-row input::placeholder {
+  color: #5b6678;
+}
+.pos-cust-row input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.pos-cust-results {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 240px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+}
+
+.pos-cust-result {
+  border-radius: 8px;
+}
+.pos-cust-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pos-cust-note {
+  font-size: 12px;
+}
+
+.customer-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(24, 209, 168, 0.12), rgba(24, 209, 168, 0.04));
+  border: 1px solid rgba(24, 209, 168, 0.4);
+  border-radius: 10px;
+}
+.customer-chip-name {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+}
+.customer-chip-pts {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-3);
+  font-variant-numeric: tabular-nums;
+}
+.customer-chip-x {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.customer-chip-x:hover {
+  color: var(--danger);
+  border-color: rgba(255, 93, 108, 0.45);
+}
+
+/* cash tendered + vuelto */
+.pos-cash {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pos-cash-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pos-cash input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pos-cash input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.pos-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pos-quick-chip {
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.pos-quick-chip:hover {
+  color: var(--accent-3);
+  border-color: rgba(24, 209, 168, 0.45);
+}
+
+.pos-vuelto {
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+}
+.pos-vuelto strong {
+  font-variant-numeric: tabular-nums;
+}
+.pos-vuelto.ok {
+  color: var(--ok);
+  border-color: rgba(24, 209, 168, 0.4);
+  background: rgba(24, 209, 168, 0.08);
+}
+.pos-vuelto.short {
+  color: var(--warn);
+  border-color: rgba(240, 180, 41, 0.4);
+  background: rgba(240, 180, 41, 0.08);
+}
+
+.pos-error.pos-warn {
+  color: #ffe2a8;
+  background: rgba(240, 180, 41, 0.1);
+  border-color: rgba(240, 180, 41, 0.45);
+}
+
+/* ---- boleta / receipt modal ---- */
+.receipt-modal {
+  gap: 12px;
+}
+.rcpt-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+.rcpt-tenant {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.rcpt-meta {
+  font-size: 12px;
+}
+.rcpt-table {
+  margin: 4px 0;
+}
+.rcpt-table th,
+.rcpt-table td {
+  padding: 5px 8px;
+}
+.rcpt-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.rcpt-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+.rcpt-line strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.rcpt-line.total {
+  font-size: 16px;
+}
+.rcpt-line.total strong,
+.rcpt-line.accent strong {
+  color: var(--accent-3);
+}
+.rcpt-foot {
+  text-align: center;
+  font-size: 12px;
+  padding-top: 6px;
+}
+.rcpt-actions {
+  justify-content: space-between;
+}
+
+/* print: show only the boleta, in paper-friendly black-on-white */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #receipt-print,
+  #receipt-print * {
+    visibility: visible !important;
+  }
+  .modal-backdrop {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    display: block !important;
+  }
+  #receipt-print {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  #receipt-print .muted,
+  #receipt-print .rcpt-tenant,
+  #receipt-print .rcpt-line,
+  #receipt-print .rcpt-line strong,
+  #receipt-print .data-table th,
+  #receipt-print .data-table td {
+    color: #000 !important;
+  }
+  .rcpt-actions {
+    display: none !important;
+  }
+}
