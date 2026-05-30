@@ -1115,6 +1115,101 @@ async fn customer_detail(
         .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/clientes` (Bearer, cashier+) — register a new customer at the
+/// counter. Body `NewCustomer`: `name` (required) + optional `rut`/`phone`/
+/// `email`; empty optionals are omitted so the server stores `null`. A 404 means
+/// the customers module isn't deployed → [`CUSTOMERS_MISSING`] (same soft-degrade
+/// as the read commands; this Spanish write surface ships on the same branch).
+/// Returns the created [`Customer`].
+#[tauri::command]
+async fn create_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    for (k, v) in [("rut", rut), ("phone", phone), ("email", email)] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/clientes"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/clientes/{id}` (Bearer, cashier+) — edit a customer. Body
+/// `UpdateCustomer`: every field optional (`name`/`rut`/`phone`/`email`/`active`).
+/// Only fields explicitly provided are sent so omitted ones stay untouched; text
+/// fields are forwarded verbatim (an empty string clears them), and `active` is
+/// sent as a bool when present (activar/desactivar). 404 → [`CUSTOMERS_MISSING`].
+/// Returns the updated [`Customer`].
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn update_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    name: Option<String>,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    active: Option<bool>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    for (k, v) in [
+        ("name", name),
+        ("rut", rut),
+        ("phone", phone),
+        ("email", email),
+    ] {
+        if let Some(s) = v {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/clientes/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/customers/{id}/history?limit=N` (Bearer). 404 →
 /// [`CUSTOMERS_MISSING`]. Read-only projection of the customer's orders.
 #[tauri::command]
@@ -1285,6 +1380,8 @@ pub fn run() {
             customer_search,
             customer_detail,
             customer_history,
+            create_customer,
+            update_customer,
             list_purchase_orders,
             get_receipt,
             create_product,
