@@ -18,6 +18,7 @@ import { renderDashboard } from "./dashboard";
 import { renderCaja } from "./caja";
 import { renderClientes } from "./clientes";
 import { renderCompras } from "./compras";
+import { renderRecetas } from "./recetas";
 import { renderGastos } from "./gastos";
 
 const NAV = [
@@ -27,6 +28,7 @@ const NAV = [
   { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "clientes", label: "Clientes", hint: "Búsqueda y fidelidad" },
   { id: "compras", label: "Compras", hint: "Órdenes a proveedores" },
+  { id: "recetas", label: "Recetas", hint: "Controlados y libro" },
   { id: "gastos", label: "Gastos", hint: "Egresos y caja chica" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
 ] as const;
@@ -89,6 +91,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "compras":
       renderCompras(host, serverUrl);
+      break;
+    case "recetas":
+      renderRecetas(host, serverUrl);
       break;
     case "gastos":
       renderGastos(host, serverUrl);
