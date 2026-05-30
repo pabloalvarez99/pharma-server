@@ -136,19 +136,25 @@ Crates (`Cargo.toml` raíz):
 
 ## Reglas siempre activas
 
-1. **Build local antes de push**:
-   ```powershell
-   cargo build --workspace --release
-   cargo test --workspace
-   ```
-   Cargo cache vía Swatinem en CI. Local: dejar `target/` cacheado, no borrar entre branches.
+1. **Build local antes de push — GATE scope-aware (rápido por defecto, directiva fundador 2026-05-30)**: NO correr siempre el workspace completo en release. Elegir el alcance mínimo correcto:
+   - **Cambio sólo-docs / `.md` / assets binarios (iconos, imágenes)**: cero cargo. Va directo a commit+push. (Ej: el icono ERP no toca Rust → GATE cargo no aplica.)
+   - **Cambio sólo-client (TS/Tauri, `client/`)**: `cd client && npm run build` (corre `tsc --noEmit` + vite). NO corre cargo del workspace Rust.
+   - **Cambio Rust en 1 crate hoja** (no `core`/`db`/`auth`): GATE acotado, **debug no release** →
+     ```powershell
+     cargo fmt --all -- --check
+     cargo clippy -p <crate> --all-targets -- -D warnings
+     cargo test -p <crate>
+     ```
+   - **Cambio en crate compartido** (`core`/`db`/`auth`) o cross-crate: GATE workspace completo (debug) →
+     ```powershell
+     cargo fmt --all -- --check
+     cargo clippy --workspace --all-targets -- -D warnings
+     cargo test --workspace
+     ```
+   - **`--release` SÓLO para cortar MSI** (regla #6/#9), nunca para iterar.
+   - Prefijar comandos pesados con `rtk` si disponible. Dejar `target/` cacheado, no borrar entre branches. CI corre el workspace completo igual (Swatinem cachea) — el GATE local acotado es para velocidad; CI es la red de seguridad full.
 
-2. **Pre-commit obligatorio** (mismo set que CI con `-D warnings`):
-   ```powershell
-   cargo fmt --all -- --check
-   cargo clippy --workspace --all-targets -- -D warnings
-   cargo test --workspace
-   ```
+2. **Pre-commit** = el GATE de scope correcto de la regla #1 (mismo set que CI con `-D warnings`). El workspace completo no es obligatorio local para cambios acotados; CI lo corre igual.
 
 3. **Migraciones append-only**: NUNCA editar `migrations/NNNN_*.surql` ya aplicada. Naming `NNNN_descripcion.surql`. id en tracking = filename stem (e.g. `0001_init`). Para cambiar schema → nueva migración `NNNN+1_*`.
 
@@ -162,10 +168,11 @@ Crates (`Cargo.toml` raíz):
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
 
-9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE
+9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático.
 
    **SIEMPRE commit + push sin pedir aprobación (directiva fundador 2026-05-30)**: en cuanto un cambio esté listo y pase GATE → `git commit` + `git push` + PR de inmediato, autónomo, SIN esperar confirmación del usuario. NO preguntar "¿quieres que commitee/pushee?". Default = commit & push ya. Sólo siguen requiriendo confirmación las excepciones explícitas abajo (force-push, source público regla #10, MSI release deploy, acciones destructivas/irreversibles). Todo lo demás se commitea y pushea sin preguntar.
- (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático. **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
+
+   **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
    - cert Authenticode válido cargado (sin esto el MSI sale con SmartScreen warning — bloqueante técnico, no de policy);
    - smoke-test instalación limpia en VM Windows verde;
    - no hay bugs P0 abiertos en triage.
@@ -188,12 +195,24 @@ Directiva permanente del fundador (2026-05-23, reforzada 2026-05-27). **Stack de
 - **Razonamiento**: ultrathink siempre activo en planning, debugging, decisiones arquitecturales y dispatch de agentes.
 - **Concurrencia**: pipeline paralelo saturado de **~5 agentes asincrónicos** (worktrees aislados, scope disjunto) trabajando autónomamente sobre el BACKLOG.
 
+### Resume autónomo — sesión nueva + "continue" (directiva fundador 2026-05-30)
+
+Cuando el fundador abra una **sesión nueva** y escriba sólo **"continue"** / "continúa" / "sigue" / "keep working" (sin más detalle), arrancar el loop autónomo SIN preguntar nada. Protocolo exacto, en orden:
+
+1. **Cargar estado** (paralelo): leer `bitacora.md` → `## ESTADO ACTUAL` + tope de `## BACKLOG`; leer `.remember/remember.md` si existe; `gh pr list --state open` + `git worktree list`. Esto es la única fuente del próximo paso — NO preguntar al usuario qué sigue.
+2. **Atacar parked primero**: si `## ESTADO ACTUAL` tiene un deploy/tarea *parked con acción-dueño*, ejecutar esa acción antes que nada (regla #9).
+3. **Consolidar pile antes de fan-out** (regla #9 DoD/WIP): si hay >3 PRs finished-but-unmerged u worktrees huérfanos → mergear los verdes, cerrar ancestros, prune worktrees. Cerrar loops abiertos tiene prioridad sobre empezar lo nuevo.
+4. **Elegir el ítem de mayor valor desbloqueado** del BACKLOG (ultrathink la prioridad). Ejecutar de punta a punta: GATE scope-aware (regla #1) → commit → push → PR → **merge a base correcta** → deploy/parked-con-razón. Sin confirmación tarea-por-tarea.
+5. **Repetir** hasta tope WIP, quota wall, o BACKLOG vacío. Cada ítem cierra su propio loop (merge, no "PR abierto" — regla #9 DoD).
+
+**Cero fricción de aprobación**: commit, push, PR y merge son autónomos siempre. Las ÚNICAS pausas permitidas son las 4 excepciones de abajo. No preguntar "¿continúo?", "¿commiteo?", "¿mergeo?" — la respuesta ya es sí.
+
 Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar bajo el stack default arriba, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
 
 - **Finish-before-fanout (precondición, regla #9 DoD + WIP)**: ANTES de saturar slots, consolidar el pile existente (merge PRs done, close ancestros, prune worktrees huérfanos). NO fan-out con >3 PRs finished-but-unmerged. **Cerrar el loop (merge+deploy) primero, fan-out después.**
 - **Saturación 5 slots** (sólo si el pile está bajo control): mantener ~5 agentes/builds activos. Slot libre → despachar siguiente tarea sin idle. Pero **cada tarea lleva su propio cierre de loop**: el entregable del agente es merge-ready y se mergea+deploya en cuanto pase review/GATE — NO termina en "PR abierto". Pensar profundo (ultrathink) qué es lo más importante a continuación.
 - **Worktrees aislados, scope disjunto**: 1 agente = 1 worktree, paths sin solape (cero contención de merge). Cascada de branches dependientes off su base correcta.
-- **GATE obligatorio antes de PR**: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`. Verde → commit + push + PR contra base correcta (regla #9). NUNCA debilitar asserts para forzar verde; bug real → `#[ignore]` con nota + reportar.
+- **GATE obligatorio antes de PR — scope-aware (regla #1)**: correr el alcance mínimo correcto (docs/assets→cero cargo; client→`npm run build`; crate hoja→`-p <crate>` debug; crate compartido/cross→workspace). Verde → commit + push + PR + merge contra base correcta (regla #9), autónomo, sin pedir aprobación. NUNCA debilitar asserts para forzar verde; bug real → `#[ignore]` con nota + reportar.
 - **Quota wall**: "session limit · resets <hora>" mata spawns nuevos. Cuando esté walled, NO quemar despachos — rescatar trabajo uncommitted de worktrees vía **cargo local en main thread** (los builds locales NO dependen del quota de agentes), y re-saturar a 5 al reset. Agentes que mueren dejan trabajo **uncommitted** (HEAD intacto) — verificar estado real (`git -C <wt> status/log`) antes de confiar en cualquier wrap-up.
 - **Verificar antes de confiar**: notificaciones de background pueden reportar exit 0 con output truncado — re-grep sin truncar antes de declarar verde.
 - **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
