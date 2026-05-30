@@ -241,7 +241,6 @@ pub struct PurchaseOrder {
     pub updated_at: String,
 }
 
-<<<<<<< ours
 /// Mirrors `crates/domain/src/expenses/model.rs::ExpenseDto`. `amount` crosses
 /// the wire as a STRING (`rust_decimal::serde::str`); the optional links
 /// (`cash_session`/`supplier`/`note`/`created_by`) are absent when unset.
@@ -260,8 +259,6 @@ pub struct Expense {
     pub created_at: String,
 }
 
-||||||| base
-=======
 /// Mirrors `domain::purchasing::model::SupplierDto`. No money fields.
 #[derive(Serialize, Deserialize)]
 pub struct Supplier {
@@ -310,7 +307,25 @@ pub struct PurchaseOrderDetail {
     pub updated_at: String,
 }
 
->>>>>>> theirs
+/// One line sent up to `create_purchase_order` → server `NewPurchaseOrderItem`.
+/// `product` is optional (absent ⇒ free-text off-catalog line); `unit_cost` is a
+/// STRING (Decimal) forwarded verbatim.
+#[derive(Serialize, Deserialize)]
+pub struct NewPurchaseOrderItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_cost: String,
+}
+
+/// One line sent up to `receive_purchase_order` → server `ReceivePurchaseOrderLine`.
+#[derive(Serialize, Deserialize)]
+pub struct ReceiveLine {
+    pub po_line_id: String,
+    pub qty_received: i64,
+}
+
 /// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
 /// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
 #[derive(Serialize, Deserialize)]
@@ -1004,7 +1019,10 @@ async fn margins_daily(
     if let Some(t) = to.as_ref().filter(|s| !s.is_empty()) {
         req = req.query(&[("to", t)]);
     }
-    let resp = req.send().await.map_err(|e| format!("|{}", conn_error(e)))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
     // Non-2xx (incl. 402 FEATURE_REQUIRES_UPGRADE) → coded "CODE|message".
     if !resp.status().is_success() {
         return Err(coded_error(resp).await);
@@ -1486,8 +1504,6 @@ async fn list_purchase_orders(
         .map_err(|e| format!("Respuesta de órdenes de compra inválida del servidor: {e}"))
 }
 
-<<<<<<< ours
-<<<<<<< ours
 // --- expenses (gastos / caja chica) commands -------------------------------
 
 /// GET `/api/v1/expenses` (Bearer, cashier+). Optional `category` /
@@ -1573,8 +1589,6 @@ async fn create_expense(
         .map_err(|e| format!("Respuesta de gasto inválida del servidor: {e}"))
 }
 
-||||||| base
-=======
 // --- prescriptions (recetas / controlados) ---------------------------------
 //
 // Ley 20.000 immutable log. The server exposes create/get/list for all
@@ -1752,9 +1766,6 @@ async fn export_libro_recetas(
         .map_err(|e| format!("Respuesta de exportación inválida del servidor: {e}"))
 }
 
->>>>>>> theirs
-||||||| base
-=======
 /// GET `/api/v1/purchase-orders/{id}` (Bearer, cashier+) — full PO WITH line
 /// items. Unlike `list_purchase_orders` (header-only), this populates `items`
 /// so the detail drawer can show what was ordered and what's left to receive.
@@ -1944,7 +1955,6 @@ async fn receive_purchase_order(
         .map_err(|e| format!("Respuesta de recepción inválida del servidor: {e}"))
 }
 
->>>>>>> theirs
 // --- receipt / boleta ------------------------------------------------------
 
 /// GET `/api/v1/orders/{id}/receipt` (Bearer) — printable boleta for a completed
@@ -2055,8 +2065,21 @@ pub fn run() {
             create_customer,
             update_customer,
             list_purchase_orders,
+            get_purchase_order,
+            list_suppliers,
+            create_supplier,
+            create_purchase_order,
+            receive_purchase_order,
             list_expenses,
             create_expense,
+            margins_daily,
+            stock_rotation,
+            dashboard_report,
+            list_prescriptions,
+            get_prescription,
+            create_prescription,
+            libro_recetas,
+            export_libro_recetas,
             get_receipt,
             create_product,
             product_detail,
