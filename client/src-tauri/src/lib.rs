@@ -241,6 +241,24 @@ pub struct PurchaseOrder {
     pub updated_at: String,
 }
 
+/// Mirrors `crates/domain/src/expenses/model.rs::ExpenseDto`. `amount` crosses
+/// the wire as a STRING (`rust_decimal::serde::str`); the optional links
+/// (`cash_session`/`supplier`/`note`/`created_by`) are absent when unset.
+#[derive(Serialize, Deserialize)]
+pub struct Expense {
+    pub id: String,
+    pub category: String,
+    pub description: String,
+    pub amount: String,
+    pub payment_method: String,
+    pub cash_session: Option<String>,
+    pub supplier: Option<String>,
+    pub note: Option<String>,
+    pub created_by: Option<String>,
+    pub incurred_at: String,
+    pub created_at: String,
+}
+
 /// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
 /// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
 #[derive(Serialize, Deserialize)]
@@ -1178,6 +1196,91 @@ async fn list_purchase_orders(
         .map_err(|e| format!("Respuesta de órdenes de compra inválida del servidor: {e}"))
 }
 
+// --- expenses (gastos / caja chica) commands -------------------------------
+
+/// GET `/api/v1/expenses` (Bearer, cashier+). Optional `category` /
+/// `payment_method` filters + `limit`. Returns the tenant's expenses
+/// (egresos / caja chica). Requires cashier+ role — same ladder as the POS.
+#[tauri::command]
+async fn list_expenses(
+    state: State<'_, SessionState>,
+    server_url: String,
+    category: Option<String>,
+    payment_method: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Expense>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/expenses"))
+        .bearer_auth(token);
+    if let Some(c) = category.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("category", c)]);
+    }
+    if let Some(p) = payment_method.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("payment_method", p)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de gastos inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/expenses` (Bearer, cashier+). Body `NewExpense`: `category`,
+/// `description`, `amount` (STRING, forwarded verbatim), optional
+/// `payment_method` (defaults to `cash` server-side), `note`, and `incurred_at`
+/// (RFC3339). Returns the created expense.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn create_expense(
+    state: State<'_, SessionState>,
+    server_url: String,
+    category: String,
+    description: String,
+    amount: String,
+    payment_method: Option<String>,
+    note: Option<String>,
+    incurred_at: Option<String>,
+) -> Result<Expense, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "category": category,
+        "description": description,
+        "amount": amount,
+    });
+    if let Some(p) = payment_method.filter(|s| !s.is_empty()) {
+        body["payment_method"] = serde_json::Value::String(p);
+    }
+    if let Some(n) = note.filter(|s| !s.is_empty()) {
+        body["note"] = serde_json::Value::String(n);
+    }
+    if let Some(t) = incurred_at.filter(|s| !s.is_empty()) {
+        body["incurred_at"] = serde_json::Value::String(t);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/expenses"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de gasto inválida del servidor: {e}"))
+}
+
 // --- receipt / boleta ------------------------------------------------------
 
 /// GET `/api/v1/orders/{id}/receipt` (Bearer) — printable boleta for a completed
@@ -1286,6 +1389,8 @@ pub fn run() {
             customer_detail,
             customer_history,
             list_purchase_orders,
+            list_expenses,
+            create_expense,
             get_receipt,
             create_product,
             product_detail,
