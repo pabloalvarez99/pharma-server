@@ -149,22 +149,87 @@ export function parseSaleError(err: unknown): SaleError {
   return { code: raw.slice(0, i), message: raw.slice(i + 1) };
 }
 
+/** A low-stock alert the server attaches to a sale response (`LowStockAlert`). */
+export interface LowStockAlert {
+  product: string;
+  product_name: string;
+  stock: number;
+  threshold: number;
+}
+
+/** Raw shape of the `pos_sale` JSON we actually read (the server returns more). */
+interface RawSaleResponse {
+  order?: { id?: string };
+  loyalty_points_awarded?: number;
+  low_stock_alerts?: LowStockAlert[];
+}
+
+/** Narrowed result of a successful sale: the order id (for the receipt fetch),
+ *  loyalty points awarded, and any low-stock alerts to surface afterwards. */
+export interface PosSaleResult {
+  orderId: string;
+  loyaltyPointsAwarded: number;
+  lowStockAlerts: LowStockAlert[];
+}
+
 /** POST /api/v1/pos/sale (Bearer + fresh Idempotency-Key minted in Rust).
- *  Rejects with a `"CODE|message"` string — use {@link parseSaleError}. */
-export function posSale(
+ *  `customer` is an optional record id — when present the server links the sale
+ *  and awards loyalty points. Rejects with a `"CODE|message"` string — use
+ *  {@link parseSaleError}. */
+export async function posSale(
   serverUrl: string,
   items: PosItem[],
   paymentMethod: PaymentMethod,
   cashAmount?: string,
   cardAmount?: string,
-): Promise<unknown> {
-  return invoke<unknown>("pos_sale", {
+  customer?: string,
+): Promise<PosSaleResult> {
+  const res = await invoke<RawSaleResponse>("pos_sale", {
     serverUrl,
     items,
     paymentMethod,
     cashAmount,
     cardAmount,
+    customer,
   });
+  return {
+    orderId: res?.order?.id ?? "",
+    loyaltyPointsAwarded: res?.loyalty_points_awarded ?? 0,
+    lowStockAlerts: Array.isArray(res?.low_stock_alerts) ? res.low_stock_alerts : [],
+  };
+}
+
+/** One printable receipt line (`ReceiptItem`). Money fields are STRINGS. */
+export interface ReceiptItem {
+  name: string;
+  qty: number;
+  unit_price: string;
+  line_total: string;
+}
+
+/** Printable boleta for a completed sale (`ReceiptDto`). Money is STRING;
+ *  `cash_amount`/`card_amount`/`change` are null on tenders they don't apply to. */
+export interface Receipt {
+  order_id: string;
+  folio_or_number: string;
+  datetime: string;
+  tenant_name: string;
+  items: ReceiptItem[];
+  subtotal: string;
+  discount: string;
+  total: string;
+  payment_method: string;
+  cash_amount: string | null;
+  card_amount: string | null;
+  change: string | null;
+  loyalty_points_awarded: number;
+  cashier: string | null;
+  footer_note: string;
+}
+
+/** GET /api/v1/orders/{id}/receipt (Bearer) — boleta for a completed sale. */
+export function getReceipt(serverUrl: string, id: string): Promise<Receipt> {
+  return invoke<Receipt>("get_receipt", { serverUrl, id });
 }
 
 // --- caja / cash register --------------------------------------------------

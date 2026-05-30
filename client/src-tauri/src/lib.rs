@@ -241,6 +241,39 @@ pub struct PurchaseOrder {
     pub updated_at: String,
 }
 
+/// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
+/// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
+#[derive(Serialize, Deserialize)]
+pub struct ReceiptItem {
+    pub name: String,
+    pub qty: i64,
+    pub unit_price: String,
+    pub line_total: String,
+}
+
+/// Mirrors `crates/domain/src/sales/model.rs::ReceiptDto` — self-contained
+/// printable boleta for a completed sale. Money fields are STRINGS;
+/// `cash_amount`/`card_amount`/`change` are absent on tenders they don't apply
+/// to (`change` is non-null only for cash sales).
+#[derive(Serialize, Deserialize)]
+pub struct Receipt {
+    pub order_id: String,
+    pub folio_or_number: String,
+    pub datetime: String,
+    pub tenant_name: String,
+    pub items: Vec<ReceiptItem>,
+    pub subtotal: String,
+    pub discount: String,
+    pub total: String,
+    pub payment_method: String,
+    pub cash_amount: Option<String>,
+    pub card_amount: Option<String>,
+    pub change: Option<String>,
+    pub loyalty_points_awarded: i64,
+    pub cashier: Option<String>,
+    pub footer_note: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -289,7 +322,8 @@ async fn error_message(resp: reqwest::Response) -> String {
 /// Connection-level failures (server down, wrong URL) → friendly Spanish copy.
 fn conn_error(e: reqwest::Error) -> String {
     if e.is_connect() || e.is_timeout() {
-        "No se pudo conectar al servidor. Verifica la URL y que pharma-server esté corriendo.".to_string()
+        "No se pudo conectar al servidor. Verifica la URL y que pharma-server esté corriendo."
+            .to_string()
     } else {
         format!("Error de red: {e}")
     }
@@ -384,7 +418,10 @@ async fn login(
         .map_err(|e| format!("Respuesta de sesión inválida del servidor: {e}"))?;
 
     // Token in memory only.
-    *state.inner.lock().map_err(|_| "Estado de sesión corrupto.".to_string())? =
+    *state
+        .inner
+        .lock()
+        .map_err(|_| "Estado de sesión corrupto.".to_string())? =
         Some(Session { token: login.token });
 
     Ok(SessionInfo {
@@ -547,6 +584,7 @@ async fn pos_sale(
     payment_method: String,
     cash_amount: Option<String>,
     card_amount: Option<String>,
+    customer: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if items.is_empty() {
         return Err("|El carrito está vacío.".to_string());
@@ -564,6 +602,10 @@ async fn pos_sale(
     }
     if let Some(c) = card_amount.filter(|s| !s.is_empty()) {
         body["card_amount"] = serde_json::Value::String(c);
+    }
+    // Attach the customer record id so the server awards loyalty for the sale.
+    if let Some(c) = customer.filter(|s| !s.is_empty()) {
+        body["customer"] = serde_json::Value::String(c);
     }
 
     let key = uuid::Uuid::new_v4().to_string();
@@ -847,6 +889,35 @@ async fn list_purchase_orders(
         .map_err(|e| format!("Respuesta de órdenes de compra inválida del servidor: {e}"))
 }
 
+// --- receipt / boleta ------------------------------------------------------
+
+/// GET `/api/v1/orders/{id}/receipt` (Bearer) — printable boleta for a completed
+/// sale (tenant, folio, items, totals, vuelto, loyalty). Called right after a
+/// successful `pos_sale` to show/print the ticket. A failure here never blocks
+/// the sale itself (the order is already committed server-side).
+#[tauri::command]
+async fn get_receipt(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<Receipt, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/orders/{id}/receipt"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de boleta inválida del servidor: {e}"))
+}
+
 /// GET `/health/ready`. Public (no token). 200 → healthy; 503 → degraded but
 /// still "reachable" (server is up). Connection errors → `Err`.
 #[tauri::command]
@@ -925,7 +996,8 @@ pub fn run() {
             customer_search,
             customer_detail,
             customer_history,
-            list_purchase_orders
+            list_purchase_orders,
+            get_receipt
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
