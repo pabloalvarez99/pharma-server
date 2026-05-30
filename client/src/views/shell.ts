@@ -20,6 +20,7 @@ import { renderClientes } from "./clientes";
 import { renderCompras } from "./compras";
 import { renderRecetas } from "./recetas";
 import { renderDevoluciones } from "./devoluciones";
+import { renderAuditoria } from "./auditoria";
 import { renderGastos } from "./gastos";
 
 const NAV = [
@@ -33,6 +34,7 @@ const NAV = [
   { id: "recetas", label: "Recetas", hint: "Controlados y libro" },
   { id: "gastos", label: "Gastos", hint: "Egresos y caja chica" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
+  { id: "auditoria", label: "Auditoría", hint: "Registro inmutable" },
 ] as const;
 
 type NavId = (typeof NAV)[number]["id"];
@@ -105,6 +107,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "reports":
       renderReports(host, serverUrl);
+      break;
+    case "auditoria":
+      renderAuditoria(host, serverUrl);
       break;
   }
 }
