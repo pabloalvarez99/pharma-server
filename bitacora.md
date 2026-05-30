@@ -136,6 +136,19 @@ NO acá.
 
 ---
 
+## 2026-05-30 — Cliente: Inventario operable + Lotes/Vencimientos (lane INVENTARIO, PR #91)
+
+- **Qué** (client-only, cero servidor): la vista `Inventario` del cliente Tauri pasó de **solo-lectura** a **operable**, y entrega los lotes/vencimientos que el nav ("Stock y lotes") prometía y no mostraba.
+  - `client/src/api.ts`: wrappers tipados + interfaces (`ProductDetail`, `Batch`, `NearExpiryRow`, `NewProductInput`) sobre los 6 comandos Tauri. Money sigue STRING (Decimal), nunca f64.
+  - `client/src/views/inventory.ts`: dos pestañas. **Productos** — KPIs + tabla; fila → modal de detalle con form *Ajustar stock* (Fijar/Sumar + motivo → `POST /products/{id}/stock`) y sub-sección *Lotes y vencimientos* (`GET/POST /batches`, pill de vencimiento). `+ Nuevo producto` → `POST /products`. **Próximos a vencer** — ventana 30/60/90 días sobre `GET /reports/near-expiry`, caducados en rojo, ≤30d en ámbar.
+- **Por qué**: vencimientos = plata salvada + legal (caducados). El servidor ya soportaba todo; el cliente no lo exponía. Writes requieren admin+ server-side → un 403 de no-admin se muestra como "Permiso denegado…" en español, sin crash.
+- **Contrato cross-sesión preservado**: los exports `tableSkeleton`/`asMessage`/`escapeHtml` (+ `kpiCard`/`kpiSkeleton`/`errorCard`) que importan `pos.ts`/`recetas.ts`/`caja.ts` mantienen su firma. Solo funciones aditivas.
+- **Incidente (race multi-sesión)**: una sesión hermana hizo `git worktree remove --force` sobre mi worktree **vivo** a mitad de edición → se borró todo el trabajo sin commitear (lib.rs + api.ts + inventory.ts). Un PR de rescate parcial (#89) había salvado solo el `lib.rs` (6 comandos) dejándolos **huérfanos sin caller TS**. Recuperado: recreé worktree, reapliqué la capa TS desde contexto, resolví conflicto de merge con la lane Clientes (ambas append-eaban tras `customer_history` → quedaron ambos bloques), GATE verde, merge. Lección reforzada en memoria `[[parallel-session-checkout-race]]`: commit+push tras cada chunk coherente; el worktree no es almacenamiento seguro en repo multi-sesión.
+- **GATE** (scope-aware, regla #1 client-only): `cd client && npm run build` verde (`tsc --noEmit` + vite). Sin cargo de workspace (el crate Tauri es workspace standalone; su Rust viajó en #89).
+- **Archivos**: `client/src/api.ts`, `client/src/views/inventory.ts`, `docs/client/specs/2026-05-30-inventario-lotes-design.md`. **Commit/merge**: PR #91 → `feature/erp-parity` `201ec7e` (verificado: UI→api→comando→registry en el mismo ref, no huérfano).
+
+---
+
 ## 2026-05-27 — Tesis de mercado: "infraestructura competitiva para el independiente" (reframe posicionamiento)
 
 - **Qué** (docs-only, cero código Rust): nuevo [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md) (Lockeado v1) — captura el insight fundador que reordena producto/UX/pricing/GTM/narrativa/moat: pharma-server **no es "otro ERP"**, es **"un mecanismo para reducir la desventaja estructural del independiente frente al oligopolio"** (Ahumada/Cruz Verde/Salcobrand ~90%).
