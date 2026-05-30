@@ -148,6 +148,36 @@ pub struct PosItem {
     pub unit_price: String,
 }
 
+/// Mirrors `crates/domain/src/sales/model.rs::DevolucionDto` — a refund/devolución
+/// header. `total_devuelto` crosses the wire as a STRING (Decimal); `order` is the
+/// linked sale (absent for a standalone refund). Immutable once created.
+#[derive(Serialize, Deserialize)]
+pub struct Devolucion {
+    pub id: String,
+    pub order: Option<String>,
+    pub tipo: String,
+    pub motivo: String,
+    pub notas: Option<String>,
+    pub total_devuelto: String,
+    pub metodo_reembolso: Option<String>,
+    pub procesado_por: Option<String>,
+    pub created_at: String,
+}
+
+/// One line sent up to `create_refund` → server `NewDevolucionItem`. snake_case
+/// (serde deserializes the array elements directly — no camelCase rename, same as
+/// `PosItem`). `unit_price` is a STRING; `restock` whether to return the unit to
+/// stock (server defaults true, we always send it explicit).
+#[derive(Serialize, Deserialize)]
+pub struct RefundItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_price: String,
+    pub restock: bool,
+}
+
 // --- cash register (caja) --------------------------------------------------
 
 /// Mirrors `crates/domain/src/cash_register/model.rs::CashSessionDto`. Money
@@ -1146,6 +1176,94 @@ async fn pos_sale(
         .map_err(|e| format!("|Respuesta de venta inválida del servidor: {e}"))
 }
 
+// --- returns / devoluciones commands ---------------------------------------
+
+/// POST `/api/v1/pos/returns` (Bearer, cashier+) — create a refund/devolución.
+/// `items` is forwarded verbatim (each `unit_price` a STRING, `restock` per line);
+/// `order` links the devolución to a sale so the server can mark it refunded and
+/// restock. Returns the raw `RefundResponse` JSON (`{ devolucion, items,
+/// stock_movements, order_marked_refunded }`).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn create_refund(
+    state: State<'_, SessionState>,
+    server_url: String,
+    order: Option<String>,
+    tipo: String,
+    motivo: String,
+    notas: Option<String>,
+    items: Vec<RefundItem>,
+    metodo_reembolso: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if items.is_empty() {
+        return Err("La devolución requiere al menos un ítem.".to_string());
+    }
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "tipo": tipo,
+        "motivo": motivo,
+        "items": items,
+    });
+    if let Some(v) = order.filter(|s| !s.is_empty()) {
+        body["order"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = notas.filter(|s| !s.is_empty()) {
+        body["notas"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = metodo_reembolso.filter(|s| !s.is_empty()) {
+        body["metodo_reembolso"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/pos/returns"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de devolución inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/returns` (Bearer) — devoluciones del tenant, newest first.
+/// Optional `order` / `tipo` / `limit` filters are forwarded.
+#[tauri::command]
+async fn list_refunds(
+    state: State<'_, SessionState>,
+    server_url: String,
+    order: Option<String>,
+    tipo: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Devolucion>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/returns"))
+        .bearer_auth(token);
+    if let Some(v) = order.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("order", v)]);
+    }
+    if let Some(v) = tipo.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("tipo", v)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de devoluciones inválida del servidor: {e}"))
+}
+
 // --- cash register (caja) commands -----------------------------------------
 
 /// GET `/api/v1/cash-sessions?status=open&limit=1` (Bearer). Returns the list
@@ -2055,6 +2173,8 @@ pub fn run() {
             sales_daily,
             top_products,
             pos_sale,
+            create_refund,
+            list_refunds,
             cash_sessions,
             open_cash_session,
             cash_arqueo,
