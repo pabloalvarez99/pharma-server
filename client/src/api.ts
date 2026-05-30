@@ -457,3 +457,51 @@ export function customerHistory(
 ): Promise<CustomerOrder[]> {
   return invoke<CustomerOrder[]>("customer_history", { serverUrl, id, limit });
 }
+
+/** Fields for creating / editing a customer. `name` is required on create; on
+ *  edit every field is optional (only the ones set are sent). */
+export interface CustomerInput {
+  name?: string;
+  rut?: string;
+  phone?: string;
+  email?: string;
+  active?: boolean;
+}
+
+/** POST /api/v1/clientes (Bearer, cashier+) — register a new customer. Empty
+ *  optional fields are dropped server-side (stored null). Rejects with
+ *  {@link CUSTOMERS_MODULE_MISSING} when the module is not deployed (404). */
+export function createCustomer(
+  serverUrl: string,
+  name: string,
+  rut?: string,
+  phone?: string,
+  email?: string,
+): Promise<Customer> {
+  return invoke<Customer>("create_customer", {
+    serverUrl,
+    name,
+    rut,
+    phone,
+    email,
+  });
+}
+
+/** PATCH /api/v1/clientes/{id} (Bearer, cashier+) — edit a customer. Only the
+ *  provided fields are forwarded; `active` toggles activar/desactivar. Rejects
+ *  with {@link CUSTOMERS_MODULE_MISSING} when not deployed (404). */
+export function updateCustomer(
+  serverUrl: string,
+  id: string,
+  patch: CustomerInput,
+): Promise<Customer> {
+  return invoke<Customer>("update_customer", {
+    serverUrl,
+    id,
+    name: patch.name,
+    rut: patch.rut,
+    phone: patch.phone,
+    email: patch.email,
+    active: patch.active,
+  });
+}

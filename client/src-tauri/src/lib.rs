@@ -259,6 +259,73 @@ pub struct Expense {
     pub created_at: String,
 }
 
+/// Mirrors `domain::purchasing::model::SupplierDto`. No money fields.
+#[derive(Serialize, Deserialize)]
+pub struct Supplier {
+    pub id: String,
+    pub name: String,
+    pub rut: Option<String>,
+    pub contact_name: Option<String>,
+    pub contact_email: Option<String>,
+    pub contact_phone: Option<String>,
+    pub default_invoice_format: Option<String>,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One line of a purchase order (`domain::purchasing::model::PurchaseOrderItemDto`).
+/// `unit_cost`/`subtotal` cross the wire as STRINGS (Decimal). `qty_received` is
+/// the cumulative quantity already received against this line — drives the
+/// remaining-to-receive math the receive flow sends.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseOrderItem {
+    pub id: String,
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    #[serde(default)]
+    pub qty_received: i64,
+    pub unit_cost: String,
+    pub subtotal: String,
+}
+
+/// Full purchase order WITH line items — the `GET /purchase-orders/{id}` shape.
+/// Same header as [`PurchaseOrder`] plus the populated `items` vec. Money is
+/// STRING throughout.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseOrderDetail {
+    pub id: String,
+    pub supplier: String,
+    pub status: String,
+    pub currency: String,
+    pub total: String,
+    pub notes: Option<String>,
+    pub external_ref: Option<String>,
+    pub items: Vec<PurchaseOrderItem>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One line sent up to `create_purchase_order` → server `NewPurchaseOrderItem`.
+/// `product` is optional (absent ⇒ free-text off-catalog line); `unit_cost` is a
+/// STRING (Decimal) forwarded verbatim.
+#[derive(Serialize, Deserialize)]
+pub struct NewPurchaseOrderItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_cost: String,
+}
+
+/// One line sent up to `receive_purchase_order` → server `ReceivePurchaseOrderLine`.
+#[derive(Serialize, Deserialize)]
+pub struct ReceiveLine {
+    pub po_line_id: String,
+    pub qty_received: i64,
+}
+
 /// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
 /// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
 #[derive(Serialize, Deserialize)]
@@ -290,6 +357,27 @@ pub struct Receipt {
     pub loyalty_points_awarded: i64,
     pub cashier: Option<String>,
     pub footer_note: String,
+}
+
+/// Mirrors `crates/domain/src/prescriptions/model.rs::PrescriptionDto`. A
+/// prescription row is immutable (Ley 20.000) — the server exposes only
+/// create/get/list, never update or delete. `product` / `customer` are optional
+/// record ids; `controlled = true` marks a Ley 20.000 controlled-drug entry
+/// (which the server requires `doctor_name` + `doctor_rut` for). `dispensed_at`
+/// / `created_at` are RFC3339 strings.
+#[derive(Serialize, Deserialize)]
+pub struct Prescription {
+    pub id: String,
+    pub product: Option<String>,
+    pub customer: Option<String>,
+    pub patient_name: String,
+    pub patient_rut: String,
+    pub doctor_name: Option<String>,
+    pub doctor_rut: Option<String>,
+    pub controlled: bool,
+    pub folio: Option<String>,
+    pub dispensed_at: String,
+    pub created_at: String,
 }
 
 // --- catalog detail / batches / near-expiry (Inventario lane) --------------
@@ -345,6 +433,37 @@ pub struct NearExpiryRow {
     pub stock: i64,
     pub days_to_expiry: i64,
     pub expired: bool,
+}
+
+// --- reports expansion (margins / rotation / dashboard) --------------------
+
+/// Mirrors `domain::expenses::model::DailyMarginRow`. Money fields
+/// (`revenue`/`cost`/`margin`/`margin_pct`) are STRINGS. `items_without_cost`
+/// counts line items excluded from `cost` (product unset or `cost_price` null)
+/// so the margin reads honestly. The endpoint is Pro-gated — Free tier gets a
+/// 402 surfaced as the `FEATURE_REQUIRES_UPGRADE` coded error.
+#[derive(Serialize, Deserialize)]
+pub struct DailyMarginRow {
+    pub date: String,
+    pub revenue: String,
+    pub cost: String,
+    pub margin: String,
+    pub margin_pct: String,
+    pub items_without_cost: i64,
+}
+
+/// Mirrors `domain::expenses::model::StockRotationRow`. `turnover` =
+/// `qty_sold / current_stock`; both `turnover` and `days_of_inventory` are
+/// STRINGS or null — null when current stock ≤ 0 (can't divide), and
+/// `days_of_inventory` is also null unless a date window was supplied.
+#[derive(Serialize, Deserialize)]
+pub struct StockRotationRow {
+    pub product_id: String,
+    pub product_name: String,
+    pub qty_sold: i64,
+    pub current_stock: i64,
+    pub turnover: Option<String>,
+    pub days_of_inventory: Option<String>,
 }
 
 /// Server error envelope (`crates/api/src/error.rs`):
@@ -876,6 +995,100 @@ async fn top_products(
         .map_err(|e| format!("Respuesta de ranking inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/reports/margins-daily` (Bearer). **Pro-gated**: Free tier gets a
+/// 402 `FEATURE_REQUIRES_UPGRADE`. Rejects with the `"CODE|message"` shape (see
+/// [`coded_error`]) so the Reportes view can branch on `FEATURE_REQUIRES_UPGRADE`
+/// and render an upgrade note instead of a hard error. `from`/`to` are optional
+/// RFC3339 date-range filters forwarded as query params.
+#[tauri::command]
+async fn margins_daily(
+    state: State<'_, SessionState>,
+    server_url: String,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<Vec<DailyMarginRow>, String> {
+    let token = token_of(&state).map_err(|e| format!("|{e}"))?;
+    let http = client().map_err(|e| format!("|{e}"))?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/margins-daily"))
+        .bearer_auth(token);
+    if let Some(f) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", f)]);
+    }
+    if let Some(t) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", t)]);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
+    // Non-2xx (incl. 402 FEATURE_REQUIRES_UPGRADE) → coded "CODE|message".
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de márgenes inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/stock-rotation` (Bearer). Inventory turnover per product
+/// over the window (`qty_sold / current_stock`). `from`/`to` optional RFC3339.
+#[tauri::command]
+async fn stock_rotation(
+    state: State<'_, SessionState>,
+    server_url: String,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<Vec<StockRotationRow>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/stock-rotation"))
+        .bearer_auth(token);
+    if let Some(f) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", f)]);
+    }
+    if let Some(t) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", t)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de rotación inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/dashboard` (Bearer, admin/owner/quimico). One aggregate
+/// exec summary (ventas hoy/mes, inventario, top productos, por_vencer, margen
+/// hoy). `margen_hoy` is `null` on the Free tier (the server degrades that one
+/// field instead of 402-ing the whole overview). Returns the raw JSON object —
+/// the webview reads the typed `DashboardSummary` shape from it.
+#[tauri::command]
+async fn dashboard_report(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<serde_json::Value, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/reports/dashboard"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta del panel inválida del servidor: {e}"))
+}
+
 // --- POS sale --------------------------------------------------------------
 
 /// POST `/api/v1/pos/sale` (Bearer + a FRESH `Idempotency-Key` minted here so
@@ -1133,6 +1346,101 @@ async fn customer_detail(
         .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/clientes` (Bearer, cashier+) — register a new customer at the
+/// counter. Body `NewCustomer`: `name` (required) + optional `rut`/`phone`/
+/// `email`; empty optionals are omitted so the server stores `null`. A 404 means
+/// the customers module isn't deployed → [`CUSTOMERS_MISSING`] (same soft-degrade
+/// as the read commands; this Spanish write surface ships on the same branch).
+/// Returns the created [`Customer`].
+#[tauri::command]
+async fn create_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    for (k, v) in [("rut", rut), ("phone", phone), ("email", email)] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/clientes"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/clientes/{id}` (Bearer, cashier+) — edit a customer. Body
+/// `UpdateCustomer`: every field optional (`name`/`rut`/`phone`/`email`/`active`).
+/// Only fields explicitly provided are sent so omitted ones stay untouched; text
+/// fields are forwarded verbatim (an empty string clears them), and `active` is
+/// sent as a bool when present (activar/desactivar). 404 → [`CUSTOMERS_MISSING`].
+/// Returns the updated [`Customer`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn update_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    name: Option<String>,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    active: Option<bool>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    for (k, v) in [
+        ("name", name),
+        ("rut", rut),
+        ("phone", phone),
+        ("email", email),
+    ] {
+        if let Some(s) = v {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/clientes/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/customers/{id}/history?limit=N` (Bearer). 404 →
 /// [`CUSTOMERS_MISSING`]. Read-only projection of the customer's orders.
 #[tauri::command]
@@ -1281,6 +1589,372 @@ async fn create_expense(
         .map_err(|e| format!("Respuesta de gasto inválida del servidor: {e}"))
 }
 
+// --- prescriptions (recetas / controlados) ---------------------------------
+//
+// Ley 20.000 immutable log. The server exposes create/get/list for all
+// prescriptions plus a controlled-only ledger (`/libro-recetas`) and its CSV
+// export (ISP/DEIS). Creating a prescription requires pharmacist+ on the server
+// (a 403 surfaces as Spanish copy); reads are open to any authenticated user.
+
+/// GET `/api/v1/prescriptions` (Bearer). Optional filters: `patient_rut`,
+/// `controlled` (true → only controlled), `limit`. Newest first server-side.
+#[tauri::command]
+async fn list_prescriptions(
+    state: State<'_, SessionState>,
+    server_url: String,
+    patient_rut: Option<String>,
+    controlled: Option<bool>,
+    limit: Option<u32>,
+) -> Result<Vec<Prescription>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/prescriptions"))
+        .bearer_auth(token);
+    if let Some(r) = patient_rut.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("patient_rut", r)]);
+    }
+    if let Some(c) = controlled {
+        req = req.query(&[("controlled", c)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de recetas inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/prescriptions/{id}` (Bearer) — single prescription detail.
+#[tauri::command]
+async fn get_prescription(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<Prescription, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/prescriptions/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de receta inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/prescriptions` (Bearer, pharmacist+). Body mirrors
+/// `NewPrescription`: `patient_name` / `patient_rut` required; `doctor_name` +
+/// `doctor_rut` required by the server when `controlled = true`. `product` /
+/// `customer` are optional record ids; `dispensed_at` defaults to now server-side.
+/// Empty optional strings are dropped so the server applies its own defaults.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn create_prescription(
+    state: State<'_, SessionState>,
+    server_url: String,
+    patient_name: String,
+    patient_rut: String,
+    controlled: bool,
+    doctor_name: Option<String>,
+    doctor_rut: Option<String>,
+    product: Option<String>,
+    customer: Option<String>,
+    folio: Option<String>,
+) -> Result<Prescription, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "patient_name": patient_name,
+        "patient_rut": patient_rut,
+        "controlled": controlled,
+    });
+    for (key, val) in [
+        ("doctor_name", doctor_name),
+        ("doctor_rut", doctor_rut),
+        ("product", product),
+        ("customer", customer),
+        ("folio", folio),
+    ] {
+        if let Some(v) = val.filter(|s| !s.is_empty()) {
+            body[key] = serde_json::Value::String(v);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/prescriptions"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de receta inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/libro-recetas` (Bearer) — controlled-only ledger (Ley 20.000).
+/// Same shape as `list_prescriptions` but `controlled = true` is enforced
+/// server-side. Optional `patient_rut` / `limit` filters are forwarded.
+#[tauri::command]
+async fn libro_recetas(
+    state: State<'_, SessionState>,
+    server_url: String,
+    patient_rut: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Prescription>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/libro-recetas"))
+        .bearer_auth(token);
+    if let Some(r) = patient_rut.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("patient_rut", r)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta del libro de recetas inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/libro-recetas/export` (Bearer) — CSV of the controlled-drug
+/// ledger (ISP/DEIS). The server responds with `text/csv`; we return the raw
+/// CSV text so the webview can trigger a Blob download. Optional `patient_rut`
+/// filter is forwarded.
+#[tauri::command]
+async fn export_libro_recetas(
+    state: State<'_, SessionState>,
+    server_url: String,
+    patient_rut: Option<String>,
+) -> Result<String, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/libro-recetas/export"))
+        .bearer_auth(token);
+    if let Some(r) = patient_rut.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("patient_rut", r)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Respuesta de exportación inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/purchase-orders/{id}` (Bearer, cashier+) — full PO WITH line
+/// items. Unlike `list_purchase_orders` (header-only), this populates `items`
+/// so the detail drawer can show what was ordered and what's left to receive.
+#[tauri::command]
+async fn get_purchase_order(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<PurchaseOrderDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/purchase-orders/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de orden de compra inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/suppliers` (Bearer, cashier+). `search` filters by name on the
+/// server; `limit` caps rows. Used by the suppliers list and the "Nueva OC"
+/// supplier picker.
+#[tauri::command]
+async fn list_suppliers(
+    state: State<'_, SessionState>,
+    server_url: String,
+    search: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Supplier>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/suppliers"))
+        .bearer_auth(token);
+    if let Some(s) = search.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("search", s)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de proveedores inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/suppliers` (Bearer, admin+) — create a supplier. Body:
+/// `{ name, rut?, contact_name?, contact_email?, contact_phone? }`. Only `name`
+/// is required; empty optionals are omitted. Returns the created [`Supplier`].
+#[tauri::command]
+async fn create_supplier(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    rut: Option<String>,
+    contact_name: Option<String>,
+    contact_email: Option<String>,
+    contact_phone: Option<String>,
+) -> Result<Supplier, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    if let Some(v) = rut.filter(|s| !s.is_empty()) {
+        body["rut"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = contact_name.filter(|s| !s.is_empty()) {
+        body["contact_name"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = contact_email.filter(|s| !s.is_empty()) {
+        body["contact_email"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = contact_phone.filter(|s| !s.is_empty()) {
+        body["contact_phone"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/suppliers"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de proveedor inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/purchase-orders` (Bearer, admin+) — create a draft PO. `items`
+/// is forwarded verbatim; each line's `unit_cost` is a STRING (Decimal) and the
+/// server computes the per-line `subtotal` + header `total`. `currency` defaults
+/// to CLP server-side when omitted. Returns the created PO header.
+#[tauri::command]
+async fn create_purchase_order(
+    state: State<'_, SessionState>,
+    server_url: String,
+    supplier: String,
+    items: Vec<NewPurchaseOrderItem>,
+    currency: Option<String>,
+    notes: Option<String>,
+    external_ref: Option<String>,
+) -> Result<PurchaseOrder, String> {
+    if items.is_empty() {
+        return Err("La orden de compra requiere al menos un ítem.".to_string());
+    }
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "supplier": supplier,
+        "items": items,
+    });
+    if let Some(v) = currency.filter(|s| !s.is_empty()) {
+        body["currency"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = notes.filter(|s| !s.is_empty()) {
+        body["notes"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = external_ref.filter(|s| !s.is_empty()) {
+        body["external_ref"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/purchase-orders"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de creación de OC inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/purchase-orders/{id}/receive` (Bearer, admin+) — goods receipt.
+/// The server bumps stock, recomputes weighted-average cost, appends a
+/// `stock_movement`, advances each line's `qty_received`, and flips the PO to
+/// `received` (or `partially_received`). Body: `{ lines: [{ po_line_id,
+/// qty_received }], notes? }`. Receiving is only legal from `sent` / `approved`
+/// / `partially_received` — a `draft` PO comes back 409 (server message
+/// surfaced as-is). Returns the updated PO header.
+#[tauri::command]
+async fn receive_purchase_order(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    lines: Vec<ReceiveLine>,
+    notes: Option<String>,
+) -> Result<PurchaseOrder, String> {
+    if lines.is_empty() {
+        return Err("La recepción requiere al menos una línea.".to_string());
+    }
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "lines": lines });
+    if let Some(v) = notes.filter(|s| !s.is_empty()) {
+        body["notes"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/purchase-orders/{id}/receive"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de recepción inválida del servidor: {e}"))
+}
+
 // --- receipt / boleta ------------------------------------------------------
 
 /// GET `/api/v1/orders/{id}/receipt` (Bearer) — printable boleta for a completed
@@ -1388,9 +2062,24 @@ pub fn run() {
             customer_search,
             customer_detail,
             customer_history,
+            create_customer,
+            update_customer,
             list_purchase_orders,
+            get_purchase_order,
+            list_suppliers,
+            create_supplier,
+            create_purchase_order,
+            receive_purchase_order,
             list_expenses,
             create_expense,
+            margins_daily,
+            stock_rotation,
+            dashboard_report,
+            list_prescriptions,
+            get_prescription,
+            create_prescription,
+            libro_recetas,
+            export_libro_recetas,
             get_receipt,
             create_product,
             product_detail,
