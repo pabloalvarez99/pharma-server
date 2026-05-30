@@ -135,6 +135,48 @@ export function topProducts(
   return invoke<TopProductRow[]>("top_products", { serverUrl, limit });
 }
 
+/** One day of gross-margin data (`DailyMarginRow`). Money/percent fields are
+ *  STRINGS. Pro-gated: the command rejects with `"FEATURE_REQUIRES_UPGRADE|msg"`
+ *  on Free — split it with {@link parseSaleError}. */
+export interface DailyMarginRow {
+  date: string;
+  revenue: string;
+  cost: string;
+  margin: string;
+  margin_pct: string;
+  items_without_cost: number;
+}
+
+/** One product's rotation/turnover row (`StockRotationRow`). `turnover` /
+ *  `days_of_inventory` are nullable STRINGS (null when not computable). */
+export interface StockRotationRow {
+  product_id: string;
+  product_name: string;
+  qty_sold: number;
+  current_stock: number;
+  turnover: string | null;
+  days_of_inventory: string | null;
+}
+
+/** GET /api/v1/reports/margins-daily (Bearer, Pro-gated). Rejects with a
+ *  `"CODE|message"` string — `FEATURE_REQUIRES_UPGRADE` on Free. */
+export function marginsDaily(
+  serverUrl: string,
+  from?: string,
+  to?: string,
+): Promise<DailyMarginRow[]> {
+  return invoke<DailyMarginRow[]>("margins_daily", { serverUrl, from, to });
+}
+
+/** GET /api/v1/reports/stock-rotation (Bearer). */
+export function stockRotation(
+  serverUrl: string,
+  from?: string,
+  to?: string,
+): Promise<StockRotationRow[]> {
+  return invoke<StockRotationRow[]>("stock_rotation", { serverUrl, from, to });
+}
+
 /** A POS sale error surfaced from the Tauri layer as `"CODE|message"`. */
 export interface SaleError {
   code: string; // "" when the server sent no envelope

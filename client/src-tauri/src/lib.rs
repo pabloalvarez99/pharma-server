@@ -2086,7 +2086,10 @@ pub fn run() {
             adjust_product_stock,
             list_batches,
             create_batch,
-            near_expiry
+            near_expiry,
+            margins_daily,
+            stock_rotation,
+            dashboard_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
