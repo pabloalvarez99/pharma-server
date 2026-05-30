@@ -162,7 +162,10 @@ Crates (`Cargo.toml` raíz):
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
 
-9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático. **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
+9. **Commit + push + deploy SIEMPRE tras GATE verde** (directiva fundador 2026-05-27, override de versión previa): cualquier branch que pase GATE
+
+   **SIEMPRE commit + push sin pedir aprobación (directiva fundador 2026-05-30)**: en cuanto un cambio esté listo y pase GATE → `git commit` + `git push` + PR de inmediato, autónomo, SIN esperar confirmación del usuario. NO preguntar "¿quieres que commitee/pushee?". Default = commit & push ya. Sólo siguen requiriendo confirmación las excepciones explícitas abajo (force-push, source público regla #10, MSI release deploy, acciones destructivas/irreversibles). Todo lo demás se commitea y pushea sin preguntar.
+ (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) → commit con mensaje descriptivo + push a origin + abrir PR contra base correcta + deploy automático. **Deploy = MSI release al mirror público** (`release-publisher.yml` workflow_dispatch contra `pharma-server-releases`) **una vez que** prerequisitos técnicos estén verdes:
    - cert Authenticode válido cargado (sin esto el MSI sale con SmartScreen warning — bloqueante técnico, no de policy);
    - smoke-test instalación limpia en VM Windows verde;
    - no hay bugs P0 abiertos en triage.
