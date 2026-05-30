@@ -274,6 +274,61 @@ pub struct Receipt {
     pub footer_note: String,
 }
 
+// --- catalog detail / batches / near-expiry (Inventario lane) --------------
+
+/// Full product detail (`crates/domain/src/catalog/model.rs::ProductDto`). Extra
+/// server fields (timestamps, image_url, external_id, therapeutic_action are kept;
+/// anything we don't render serde simply ignores). Money (`price`/`cost_price`)
+/// crosses the wire as STRINGS.
+#[derive(Serialize, Deserialize)]
+pub struct ProductDetail {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub price: String,
+    pub cost_price: Option<String>,
+    pub stock: i64,
+    pub category: Option<String>,
+    pub active: bool,
+    pub laboratory: Option<String>,
+    pub therapeutic_action: Option<String>,
+    pub active_ingredient: Option<String>,
+    pub prescription_type: String,
+    pub presentation: Option<String>,
+    pub discount_percent: Option<i64>,
+}
+
+/// One product batch / lote (`domain::inventory::model::BatchDto`). `expiry_date`
+/// is RFC3339; `cost` crosses as a STRING (Decimal) or null.
+#[derive(Serialize, Deserialize)]
+pub struct Batch {
+    pub id: String,
+    pub product: String,
+    pub batch_code: String,
+    pub expiry_date: String,
+    pub stock: i64,
+    pub cost: Option<String>,
+    pub notes: Option<String>,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One soon-to-expire (or expired) batch (`domain::expenses::model::NearExpiryRow`).
+/// `days_to_expiry` < 0 ⇒ already expired (also flagged by `expired`).
+#[derive(Serialize, Deserialize)]
+pub struct NearExpiryRow {
+    pub product_id: String,
+    pub product_name: String,
+    pub batch_id: String,
+    pub batch_code: String,
+    pub expiry_date: String,
+    pub stock: i64,
+    pub days_to_expiry: i64,
+    pub expired: bool,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -515,6 +570,240 @@ async fn inventory_summary(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de inventario inválida del servidor: {e}"))
+}
+
+// --- catalog writes + batches + near-expiry (Inventario lane) --------------
+// Writes (`create_product`, `adjust_product_stock`, `create_batch`) require
+// admin/owner server-side; a 403 surfaces as the Spanish permission copy via
+// `error_message`. Empty optional fields are omitted so the server applies its
+// own defaults (e.g. `prescription_type`, `stock = 0`).
+
+/// POST `/api/v1/products` (Bearer, admin+). Money strings (`price`,
+/// `cost_price`) forwarded verbatim. Returns the created product detail.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn create_product(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    price: String,
+    cost_price: Option<String>,
+    stock: Option<i64>,
+    category: Option<String>,
+    laboratory: Option<String>,
+    active_ingredient: Option<String>,
+    prescription_type: Option<String>,
+    presentation: Option<String>,
+) -> Result<ProductDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name, "price": price });
+    if let Some(v) = cost_price.filter(|s| !s.is_empty()) {
+        body["cost_price"] = serde_json::Value::String(v);
+    }
+    if let Some(n) = stock {
+        body["stock"] = serde_json::Value::from(n);
+    }
+    for (k, v) in [
+        ("category", category),
+        ("laboratory", laboratory),
+        ("active_ingredient", active_ingredient),
+        ("prescription_type", prescription_type),
+        ("presentation", presentation),
+    ] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/products"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de producto inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/products/{id}` (Bearer) — full product detail for the drawer.
+#[tauri::command]
+async fn product_detail(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<ProductDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/products/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de producto inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/products/{id}/stock` (Bearer, admin+). Body `StockAdjust`:
+/// either `set` (absolute) or `delta` (signed) + optional `reason`. Returns the
+/// updated product.
+#[tauri::command]
+async fn adjust_product_stock(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    set: Option<i64>,
+    delta: Option<i64>,
+    reason: Option<String>,
+) -> Result<ProductDetail, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    if let Some(n) = set {
+        body["set"] = serde_json::Value::from(n);
+    }
+    if let Some(n) = delta {
+        body["delta"] = serde_json::Value::from(n);
+    }
+    if let Some(r) = reason.filter(|s| !s.is_empty()) {
+        body["reason"] = serde_json::Value::String(r);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/products/{id}/stock"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de ajuste inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/batches` (Bearer). Filters: `product` (record id),
+/// `expiring_within_days`, `only_available`, `limit`. Returns lotes.
+#[tauri::command]
+async fn list_batches(
+    state: State<'_, SessionState>,
+    server_url: String,
+    product: Option<String>,
+    expiring_within_days: Option<i64>,
+    only_available: Option<bool>,
+    limit: Option<u32>,
+) -> Result<Vec<Batch>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/batches"))
+        .bearer_auth(token);
+    if let Some(p) = product.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("product", p)]);
+    }
+    if let Some(d) = expiring_within_days {
+        req = req.query(&[("expiring_within_days", d)]);
+    }
+    if let Some(a) = only_available {
+        req = req.query(&[("only_available", a)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de lotes inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/batches` (Bearer, admin+). Body `NewBatch`: `product`,
+/// `batch_code`, `expiry_date` (RFC3339), optional `stock`/`cost`/`notes`. An
+/// initial `stock` > 0 emits a `batch_received` stock movement server-side.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn create_batch(
+    state: State<'_, SessionState>,
+    server_url: String,
+    product: String,
+    batch_code: String,
+    expiry_date: String,
+    stock: Option<i64>,
+    cost: Option<String>,
+    notes: Option<String>,
+) -> Result<Batch, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "product": product,
+        "batch_code": batch_code,
+        "expiry_date": expiry_date,
+    });
+    if let Some(n) = stock {
+        body["stock"] = serde_json::Value::from(n);
+    }
+    if let Some(c) = cost.filter(|s| !s.is_empty()) {
+        body["cost"] = serde_json::Value::String(c);
+    }
+    if let Some(t) = notes.filter(|s| !s.is_empty()) {
+        body["notes"] = serde_json::Value::String(t);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/batches"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de lote inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/reports/near-expiry?days=N` (Bearer). Batches expiring within
+/// `days` (default 30 server-side) including already-expired, urgent first.
+#[tauri::command]
+async fn near_expiry(
+    state: State<'_, SessionState>,
+    server_url: String,
+    days: Option<i64>,
+) -> Result<Vec<NearExpiryRow>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/reports/near-expiry"))
+        .bearer_auth(token);
+    if let Some(d) = days {
+        req = req.query(&[("days", d)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de vencimientos inválida del servidor: {e}"))
 }
 
 // --- reports ---------------------------------------------------------------
@@ -997,7 +1286,13 @@ pub fn run() {
             customer_detail,
             customer_history,
             list_purchase_orders,
-            get_receipt
+            get_receipt,
+            create_product,
+            product_detail,
+            adjust_product_stock,
+            list_batches,
+            create_batch,
+            near_expiry
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
