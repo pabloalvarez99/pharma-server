@@ -1,0 +1,152 @@
+name: release-publisher
+
+# Manual deploy: build the server MSI -> self-sign (ADR-0008 pilot cert) ->
+# publish to the PUBLIC mirror `pharma-server-releases` as a GitHub Release.
+# Source stays private (CLAUDE.md regla #10): only the signed MSI binary + the
+# public pilot.cer leave this repo. Signing is MANDATORY here — the job fails
+# closed if the cert secrets are absent (no unsigned MSI ever reaches clients).
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   PILOT_PFX_B64        base64 of installer/sign/pilot.pfx  (private signing key)
+#   PHARMA_CERT_PASSWORD password that protects pilot.pfx
+#   MIRROR_RELEASE_TOKEN PAT with `contents:write` on pabloalvarez99/pharma-server-releases
+#
+# Create PILOT_PFX_B64 locally with:
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes("installer/sign/pilot.pfx")) | Set-Content pfx.b64
+# then paste the contents of pfx.b64 as the secret value.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (default: read from workspace Cargo.toml)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the mirror release as a pre-release"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  MIRROR_REPO: pabloalvarez99/pharma-server-releases
+
+jobs:
+  publish:
+    name: build + sign + publish MSI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fail closed if signing secrets are missing
+        shell: pwsh
+        env:
+          PILOT_PFX_B64: ${{ secrets.PILOT_PFX_B64 }}
+          PHARMA_CERT_PASSWORD: ${{ secrets.PHARMA_CERT_PASSWORD }}
+          MIRROR_RELEASE_TOKEN: ${{ secrets.MIRROR_RELEASE_TOKEN }}
+        run: |
+          $missing = @()
+          if (-not $env:PILOT_PFX_B64)        { $missing += "PILOT_PFX_B64" }
+          if (-not $env:PHARMA_CERT_PASSWORD) { $missing += "PHARMA_CERT_PASSWORD" }
+          if (-not $env:MIRROR_RELEASE_TOKEN) { $missing += "MIRROR_RELEASE_TOKEN" }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required secrets: $($missing -join ', '). See workflow header. Refusing to publish an unsigned MSI."
+            exit 1
+          }
+          Write-Host "All signing/publish secrets present."
+
+      - name: install rust toolchain (pinned 1.95.0)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: install cargo-wix
+        run: cargo install cargo-wix --version 0.3.9 --locked
+
+      - name: ensure WiX 3.14 present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\WiX Toolset v3.14")) {
+            choco install wixtoolset --version=3.14.1 --no-progress -y
+          } else {
+            Write-Host "WiX 3.14 already present on runner."
+          }
+
+      - name: resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}"
+          if (-not $v) {
+            $toml = Get-Content Cargo.toml -Raw
+            $m = [regex]::Match($toml, '(?m)^\s*version\s*=\s*"([^"]+)"')
+            if (-not $m.Success) { Write-Error "Could not read version from Cargo.toml"; exit 1 }
+            $v = $m.Groups[1].Value
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "MSI path -> target/wix/pharma-server-$v-x86_64.msi"
+
+      - name: build MSI (cargo wix, signed in next step)
+        run: cargo wix --package service --nocapture -ext WixFirewallExtension
+
+      - name: decode pilot.pfx
+        shell: pwsh
+        env:
+          PILOT_PFX_B64: ${{ secrets.PILOT_PFX_B64 }}
+        run: |
+          [IO.File]::WriteAllBytes(
+            "installer/sign/pilot.pfx",
+            [Convert]::FromBase64String($env:PILOT_PFX_B64))
+          Write-Host "pilot.pfx restored ($((Get-Item installer/sign/pilot.pfx).Length) bytes)."
+
+      - name: sign MSI + timestamp
+        shell: pwsh
+        env:
+          PHARMA_CERT_PASSWORD: ${{ secrets.PHARMA_CERT_PASSWORD }}
+        run: |
+          $msi = "target/wix/pharma-server-${{ steps.ver.outputs.version }}-x86_64.msi"
+          if (-not (Test-Path $msi)) { Write-Error "MSI not found: $msi"; exit 1 }
+          powershell -File installer/sign/sign-msi.ps1 -MsiPath $msi
+
+      - name: scrub private key from workspace
+        if: always()
+        shell: pwsh
+        run: Remove-Item installer/sign/pilot.pfx -Force -ErrorAction SilentlyContinue
+
+      - name: publish signed MSI + pilot.cer to mirror
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_RELEASE_TOKEN }}
+        run: |
+          $v   = "${{ steps.ver.outputs.version }}"
+          $tag = "v$v"
+          $msi = "target/wix/pharma-server-$v-x86_64.msi"
+          $notes = @"
+          Pharma Server $v — signed pilot MSI (self-signed, ADR-0008).
+
+          Install: import pilot.cer to Trusted Publishers once (see
+          installer/sign/README.md), then run the MSI. Without the import,
+          SmartScreen shows a one-time "More info -> Run anyway" prompt.
+
+          Signature: SHA256 + RFC3161 timestamp. Cert valid through 2029.
+          "@
+          # create the release if it doesn't exist yet, then upload (clobber re-runs)
+          gh release view $tag --repo $env:MIRROR_REPO 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $args = @("release","create",$tag,"--repo",$env:MIRROR_REPO,"--title","Pharma Server $v","--notes",$notes)
+            if ("${{ inputs.prerelease }}" -eq "true") { $args += "--prerelease" }
+            & gh @args
+          }
+          gh release upload $tag $msi installer/sign/pilot.cer --repo $env:MIRROR_REPO --clobber
+
+      - name: summary
+        shell: pwsh
+        run: |
+          "## Published" >> $env:GITHUB_STEP_SUMMARY
+          "- Version: ${{ steps.ver.outputs.version }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Mirror: https://github.com/${{ env.MIRROR_REPO }}/releases/tag/v${{ steps.ver.outputs.version }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Signed: pilot self-signed cert + RFC3161 timestamp" >> $env:GITHUB_STEP_SUMMARY
