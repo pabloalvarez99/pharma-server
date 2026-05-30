@@ -1511,6 +1511,98 @@ button {
   padding: 11px 22px;
 }
 
+/* ---- wide modal: purchase-order create / detail / receive ---- */
+.modal-wide {
+  width: min(680px, 100%);
+}
+
+/* inline checkbox + label (recetas "solo controlados", PO controlled flag) */
+.rec-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted-strong);
+  cursor: pointer;
+  user-select: none;
+}
+.rec-toggle input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* dynamic line-item rows for "Nueva OC" */
+.po-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.po-line,
+.po-line-head {
+  display: grid;
+  grid-template-columns: 1fr 72px 120px 34px;
+  gap: 8px;
+  align-items: center;
+}
+.po-line-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted-strong);
+}
+.po-line input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.po-line input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.po-l-del {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--muted-strong);
+  cursor: pointer;
+  padding: 8px 0;
+  font-size: 14px;
+  line-height: 1;
+}
+.po-l-del:hover {
+  border-color: var(--danger, #d6584f);
+  color: var(--danger, #d6584f);
+}
+.po-line-add {
+  align-self: flex-start;
+}
+
+/* PO detail drawer header */
+.po-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: rgba(10, 13, 18, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.po-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+
 /* ---- arqueo preview (close modal) ---- */
 .arqueo-preview {
   display: flex;
