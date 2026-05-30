@@ -2089,7 +2089,9 @@ pub fn run() {
             near_expiry,
             margins_daily,
             stock_rotation,
-            dashboard_report
+            dashboard_report,
+            list_suppliers,
+            create_supplier
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

@@ -437,6 +437,49 @@ export function listPurchaseOrders(
   return invoke<PurchaseOrder[]>("list_purchase_orders", { serverUrl, status, limit });
 }
 
+/** A supplier (`domain::purchasing::model::SupplierDto`). No money fields. */
+export interface Supplier {
+  id: string;
+  name: string;
+  rut: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  default_invoice_format: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /api/v1/suppliers (Bearer, cashier+). `search`/`limit` optional. */
+export function listSuppliers(
+  serverUrl: string,
+  search?: string,
+  limit?: number,
+): Promise<Supplier[]> {
+  return invoke<Supplier[]>("list_suppliers", { serverUrl, search, limit });
+}
+
+/** POST /api/v1/suppliers (Bearer) — register a supplier. `name` required;
+ *  contact fields optional (empty dropped server-side). */
+export function createSupplier(
+  serverUrl: string,
+  name: string,
+  rut?: string,
+  contactName?: string,
+  contactEmail?: string,
+  contactPhone?: string,
+): Promise<Supplier> {
+  return invoke<Supplier>("create_supplier", {
+    serverUrl,
+    name,
+    rut,
+    contactName,
+    contactEmail,
+    contactPhone,
+  });
+}
+
 // --- expenses (gastos / caja chica) ----------------------------------------
 
 /** An expense / egreso (`ExpenseDto`). `amount` is a STRING (Decimal).
