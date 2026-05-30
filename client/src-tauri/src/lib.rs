@@ -178,6 +178,39 @@ pub struct RefundItem {
     pub restock: bool,
 }
 
+/// One row of the audit trail (`crate::v1::audit::AuditItem` server-side).
+/// `before`/`after`/`metadata`/`record_id`/`table` may be null (schema gap noted
+/// server-side — the table records method/path/status/ip today). `status` is the
+/// HTTP status of the audited request.
+#[derive(Serialize, Deserialize)]
+pub struct AuditEntry {
+    pub id: String,
+    pub created_at: String,
+    pub user: Option<String>,
+    pub user_email: Option<String>,
+    pub table: Option<String>,
+    pub record_id: Option<String>,
+    pub action: String,
+    pub method: String,
+    pub path: String,
+    pub status: Option<i64>,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+    pub payload_hash: Option<String>,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Paginated audit-log response (`crate::v1::audit::AuditResponse`).
+#[derive(Serialize, Deserialize)]
+pub struct AuditPage {
+    pub total: i64,
+    pub items: Vec<AuditEntry>,
+    pub limit: u32,
+    pub offset: u32,
+}
+
 // --- cash register (caja) --------------------------------------------------
 
 /// Mirrors `crates/domain/src/cash_register/model.rs::CashSessionDto`. Money
@@ -1264,6 +1297,61 @@ async fn list_refunds(
         .map_err(|e| format!("Respuesta de devoluciones inválida del servidor: {e}"))
 }
 
+// --- auditoría / audit-log command -----------------------------------------
+
+/// GET `/api/v1/admin/audit-log` (Bearer, admin/owner) — immutable audit trail,
+/// tenant-scoped. Optional filters: `from`/`to` (YYYY-MM-DD), `user` (record id),
+/// `table`, `action` (create|update|delete), `limit` (1..=500), `offset`. A 403
+/// (non-admin) surfaces as the server's Spanish message.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn query_audit_log(
+    state: State<'_, SessionState>,
+    server_url: String,
+    from: Option<String>,
+    to: Option<String>,
+    user: Option<String>,
+    table: Option<String>,
+    action: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<AuditPage, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/admin/audit-log"))
+        .bearer_auth(token);
+    if let Some(v) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", v)]);
+    }
+    if let Some(v) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", v)]);
+    }
+    if let Some(v) = user.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("user", v)]);
+    }
+    if let Some(v) = table.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("table", v)]);
+    }
+    if let Some(v) = action.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("action", v)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    if let Some(n) = offset {
+        req = req.query(&[("offset", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de auditoría inválida del servidor: {e}"))
+}
+
 // --- cash register (caja) commands -----------------------------------------
 
 /// GET `/api/v1/cash-sessions?status=open&limit=1` (Bearer). Returns the list
@@ -2175,6 +2263,7 @@ pub fn run() {
             pos_sale,
             create_refund,
             list_refunds,
+            query_audit_log,
             cash_sessions,
             open_cash_session,
             cash_arqueo,
