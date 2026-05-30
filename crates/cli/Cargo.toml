@@ -28,6 +28,10 @@ serde_json.workspace = true
 serde.workspace = true
 rpassword.workspace = true
 surrealdb.workspace = true
+tar.workspace = true
+flate2.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 httpmock = "0.7"
