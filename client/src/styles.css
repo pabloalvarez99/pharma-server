@@ -1657,6 +1657,23 @@ button {
   margin-top: 16px;
 }
 
+.cli-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cli-detail-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.cli-detail-name-row .cli-edit {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
 /* ================================================================ COMPRAS
  * Purchase-order list. Reuses kpi-card + data-table from the shared chrome.
  * The only unique element is the status filter select.

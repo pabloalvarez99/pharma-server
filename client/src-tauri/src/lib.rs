@@ -241,6 +241,24 @@ pub struct PurchaseOrder {
     pub updated_at: String,
 }
 
+/// Mirrors `crates/domain/src/expenses/model.rs::ExpenseDto`. `amount` crosses
+/// the wire as a STRING (`rust_decimal::serde::str`); the optional links
+/// (`cash_session`/`supplier`/`note`/`created_by`) are absent when unset.
+#[derive(Serialize, Deserialize)]
+pub struct Expense {
+    pub id: String,
+    pub category: String,
+    pub description: String,
+    pub amount: String,
+    pub payment_method: String,
+    pub cash_session: Option<String>,
+    pub supplier: Option<String>,
+    pub note: Option<String>,
+    pub created_by: Option<String>,
+    pub incurred_at: String,
+    pub created_at: String,
+}
+
 /// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
 /// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
 #[derive(Serialize, Deserialize)]
@@ -1115,6 +1133,101 @@ async fn customer_detail(
         .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/clientes` (Bearer, cashier+) — register a new customer at the
+/// counter. Body `NewCustomer`: `name` (required) + optional `rut`/`phone`/
+/// `email`; empty optionals are omitted so the server stores `null`. A 404 means
+/// the customers module isn't deployed → [`CUSTOMERS_MISSING`] (same soft-degrade
+/// as the read commands; this Spanish write surface ships on the same branch).
+/// Returns the created [`Customer`].
+#[tauri::command]
+async fn create_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    for (k, v) in [("rut", rut), ("phone", phone), ("email", email)] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/clientes"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/clientes/{id}` (Bearer, cashier+) — edit a customer. Body
+/// `UpdateCustomer`: every field optional (`name`/`rut`/`phone`/`email`/`active`).
+/// Only fields explicitly provided are sent so omitted ones stay untouched; text
+/// fields are forwarded verbatim (an empty string clears them), and `active` is
+/// sent as a bool when present (activar/desactivar). 404 → [`CUSTOMERS_MISSING`].
+/// Returns the updated [`Customer`].
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn update_customer(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    name: Option<String>,
+    rut: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    active: Option<bool>,
+) -> Result<Customer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    for (k, v) in [
+        ("name", name),
+        ("rut", rut),
+        ("phone", phone),
+        ("email", email),
+    ] {
+        if let Some(s) = v {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/clientes/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Err(CUSTOMERS_MISSING.to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cliente inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/customers/{id}/history?limit=N` (Bearer). 404 →
 /// [`CUSTOMERS_MISSING`]. Read-only projection of the customer's orders.
 #[tauri::command]
@@ -1176,6 +1289,91 @@ async fn list_purchase_orders(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de órdenes de compra inválida del servidor: {e}"))
+}
+
+// --- expenses (gastos / caja chica) commands -------------------------------
+
+/// GET `/api/v1/expenses` (Bearer, cashier+). Optional `category` /
+/// `payment_method` filters + `limit`. Returns the tenant's expenses
+/// (egresos / caja chica). Requires cashier+ role — same ladder as the POS.
+#[tauri::command]
+async fn list_expenses(
+    state: State<'_, SessionState>,
+    server_url: String,
+    category: Option<String>,
+    payment_method: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Expense>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/expenses"))
+        .bearer_auth(token);
+    if let Some(c) = category.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("category", c)]);
+    }
+    if let Some(p) = payment_method.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("payment_method", p)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de gastos inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/expenses` (Bearer, cashier+). Body `NewExpense`: `category`,
+/// `description`, `amount` (STRING, forwarded verbatim), optional
+/// `payment_method` (defaults to `cash` server-side), `note`, and `incurred_at`
+/// (RFC3339). Returns the created expense.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn create_expense(
+    state: State<'_, SessionState>,
+    server_url: String,
+    category: String,
+    description: String,
+    amount: String,
+    payment_method: Option<String>,
+    note: Option<String>,
+    incurred_at: Option<String>,
+) -> Result<Expense, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "category": category,
+        "description": description,
+        "amount": amount,
+    });
+    if let Some(p) = payment_method.filter(|s| !s.is_empty()) {
+        body["payment_method"] = serde_json::Value::String(p);
+    }
+    if let Some(n) = note.filter(|s| !s.is_empty()) {
+        body["note"] = serde_json::Value::String(n);
+    }
+    if let Some(t) = incurred_at.filter(|s| !s.is_empty()) {
+        body["incurred_at"] = serde_json::Value::String(t);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/expenses"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de gasto inválida del servidor: {e}"))
 }
 
 // --- receipt / boleta ------------------------------------------------------
@@ -1285,7 +1483,11 @@ pub fn run() {
             customer_search,
             customer_detail,
             customer_history,
+            create_customer,
+            update_customer,
             list_purchase_orders,
+            list_expenses,
+            create_expense,
             get_receipt,
             create_product,
             product_detail,
