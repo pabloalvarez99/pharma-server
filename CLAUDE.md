@@ -178,6 +178,17 @@ Crates (`Cargo.toml` raíz):
    - no hay bugs P0 abiertos en triage.
    Si los 3 prerequisitos están verdes → deploy auto sin pedir confirmación. Si falta alguno → push+PR sí, deploy queda parked con razón anotada en `bitacora.md`. **Excepciones que siguen requiriendo confirmación explícita**: force-push, public-source de este repo (regla #10), acciones destructivas/irreversibles fuera del flujo normal release. NUNCA auto-deployar trabajo no verificado, mid-flight, o con GATE roto — debilitar el GATE para forzar verde está prohibido (bug real → `#[ignore]` con nota + reportar).
 
+   **MÉTODO DE DEPLOY = BUILD LOCAL, NO CI (directiva fundador 2026-05-31 — costo $0 hasta nuevo cliente)**: el deploy del MSI se hace **siempre localmente**, NUNCA disparando GitHub Actions, mientras no haya un nuevo cliente pagador que justifique el gasto. **Razón**: GitHub Actions está billing-walled (`The job was not started because recent account payments have failed`) — cada `workflow run` cuesta y hoy no hay ingreso que lo cubra. El workflow `release-publisher.yml` queda **DORMIDO**: NO usar `gh workflow run release-publisher.yml` ni `workflow_dispatch` para release. **Pipeline local canónico** (el único permitido por ahora):
+   ```powershell
+   # en worktree limpio off feature/erp-parity, version ya bumpeada
+   cargo build --release            # o el build que requiera cargo wix
+   cargo wix --nocapture            # MSI → target/wix/pharma-server-<ver>-x86_64.msi
+   ./installer/sign/sign-msi.ps1 -MsiPath <msi>   # firma con pilot.pfx (PHARMA_CERT_PASSWORD env)
+   # smoke install limpio (Windows Sandbox/Hyper-V) → service Running + /health/ready 200
+   gh release create v<ver> -R pabloalvarez99/pharma-server-releases <msi> installer/sign/pilot.cer
+   ```
+   El build local NO depende del quota de Actions ni de agentes. **Re-activar CI deploy** (re-enable `release-publisher.yml`) SÓLO cuando: (a) entre el primer cliente pagador / revenue que cubra el billing, **o** (b) el fundador resuelva el spend-limit de GitHub y lo ordene explícito. Hasta entonces, "push deploy"/"deploy" = ejecutar el pipeline local de arriba. Ver memoria `[[deploy-method-local-build]]`.
+
    **Definición de DONE (DoD) — NO NEGOCIABLE (directiva fundador 2026-05-28, raíz del pileup)**: un trabajo NO está terminado hasta que está (a) **merged a su base correcta** (no sólo PR abierto), (b) **pushed a origin**, y (c) **deployed** (MSI al mirror público) **O** explícitamente *blocked* con **razón + acción-dueño concreta + fecha** anotada en `## ESTADO ACTUAL` de `bitacora.md`. **"GATE verde + PR abierto" NO es done — es work-in-progress.** PR abierto = incompleto. Branch sin merge = incompleto. Worktree huérfano = incompleto. El loop se cierra con merge+deploy, no con "lo dejé andando".
 
    **Límite WIP (anti-pileup)**: PROHIBIDO abrir trabajo nuevo (spawn de agentes, nuevas branches/worktrees) mientras haya **>3 PRs finished-but-unmerged** o **worktrees huérfanos sin PR**. Primero **consolidar** (merge/close PRs + prune worktrees) hasta bajar el pile; *después* fan-out. Cerrar el loop tiene prioridad sobre empezar lo siguiente.
