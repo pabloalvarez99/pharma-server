@@ -22,12 +22,15 @@ import { renderRecetas } from "./recetas";
 import { renderDevoluciones } from "./devoluciones";
 import { renderAuditoria } from "./auditoria";
 import { renderGastos } from "./gastos";
+import { renderConfiguracion } from "./configuracion";
+import { renderImportar } from "./importar";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "devoluciones", label: "Devoluciones", hint: "Reembolsos de ventas" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
+  { id: "importar", label: "Importar", hint: "Carga masiva CSV" },
   { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "clientes", label: "Clientes", hint: "Búsqueda y fidelidad" },
   { id: "compras", label: "Compras", hint: "Órdenes a proveedores" },
@@ -35,6 +38,7 @@ const NAV = [
   { id: "gastos", label: "Gastos", hint: "Egresos y caja chica" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
   { id: "auditoria", label: "Auditoría", hint: "Registro inmutable" },
+  { id: "configuracion", label: "Configuración", hint: "Parámetros del servidor" },
 ] as const;
 
 type NavId = (typeof NAV)[number]["id"];
@@ -110,6 +114,12 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "auditoria":
       renderAuditoria(host, serverUrl);
+      break;
+    case "configuracion":
+      renderConfiguracion(host, serverUrl);
+      break;
+    case "importar":
+      renderImportar(host, serverUrl);
       break;
   }
 }

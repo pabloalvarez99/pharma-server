@@ -2165,3 +2165,181 @@ button {
     display: none !important;
   }
 }
+
+/* --- Caja (multi-register) + Configuración -------------------------------- */
+.caja-count {
+  margin: 0 0 12px;
+}
+.caja-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.caja-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.caja-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.caja-card-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 14px;
+}
+.caja-card-notes {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+.caja-card .caja-close-one {
+  margin-top: 6px;
+}
+
+.cfg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cfg-row {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 18px;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.cfg-meta {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cfg-key {
+  font-size: 12px;
+  color: var(--muted);
+}
+.cfg-help {
+  margin: 4px 0 0;
+  font-size: 13px;
+  max-width: 52ch;
+}
+.cfg-stamp {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.cfg-edit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cfg-number {
+  width: 120px;
+  padding: 8px 10px;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--line);
+  background: var(--bg-0);
+  color: var(--text);
+}
+.cfg-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-strong);
+}
+.cfg-status {
+  font-size: 13px;
+}
+.cfg-status-ok {
+  color: var(--accent);
+}
+.cfg-status-err {
+  color: var(--danger);
+}
+
+/* --- Importar (carga masiva CSV) ----------------------------------------- */
+.import-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 760px) {
+  .import-grid { grid-template-columns: 1fr; }
+}
+.import-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.import-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-card);
+  background: var(--bg-1);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.import-drop:hover { border-color: var(--accent); }
+.import-drop.has-file { border-color: var(--accent); border-style: solid; }
+.import-drop-mark {
+  font-size: 28px;
+  color: var(--accent);
+  line-height: 1;
+}
+.import-drop-label { font-weight: 600; }
+.import-file-name { font-size: 13px; }
+.import-help {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 18px;
+}
+.import-help h3 { margin: 0 0 8px; }
+.import-help p { margin: 6px 0; }
+.import-help code {
+  font-size: 12px;
+  background: var(--bg-0);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.import-cols { line-height: 2; }
+.import-note { margin-top: 12px; }
+.import-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 14px;
+  margin: 24px 0 8px;
+}
+.import-stat {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.import-stat strong { font-size: 26px; }
+.import-stat span { color: var(--muted); font-size: 13px; }
+.import-stat-ok strong { color: var(--accent); }
+.import-stat-err strong { color: var(--danger); }
+.import-err-title { margin: 20px 0 8px; }
+.import-err-table { width: 100%; }
+.import-clean { margin-top: 16px; }
