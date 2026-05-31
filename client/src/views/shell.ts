@@ -30,7 +30,7 @@ const NAV = [
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "devoluciones", label: "Devoluciones", hint: "Reembolsos de ventas" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
-  { id: "importar", label: "Importar", hint: "Carga masiva CSV" },
+  { id: "importar", label: "Importar", hint: "Importar/exportar CSV" },
   { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "clientes", label: "Clientes", hint: "Búsqueda y fidelidad" },
   { id: "compras", label: "Compras", hint: "Órdenes a proveedores" },
