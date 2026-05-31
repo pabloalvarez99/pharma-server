@@ -1734,3 +1734,17 @@ NO acá.
 - **Archivos**: `docs/strategy/latam-master-plan.md` (nuevo) + `docs/strategy/README.md` (fila + nodo en diagrama de dependencias) + `CLAUDE.md` (puntero en línea "Visión extendida") + este append. **Cero cambios de código** (`git diff` solo docs/*.md + CLAUDE.md + bitacora.md).
 - **Origen/entorno**: doc generado en sesión remota `/ultraplan` (Linux, sin vault Obsidian); traído a local y commiteado en branch `docs/latam-master-plan` vía **git worktree aislado** (`integration/0.1.25` tenía un merge DTE en curso sin resolver — no se tocó). Espejo dual al vault (`work/active/pharma-server/bitacora.md` + `decisions-log-index.md`) = follow-up local (regla CLAUDE.md §7).
 - **Pendiente**: ver `## BACKLOG` al tope.
+
+## 2026-05-31 — Migración Tu Farmacia (real Coquimbo) → tenant `tufarmacia`
+
+Farmacia real (Cloud SQL `tu-farmacia-prod:southamerica-east1:tu-farmacia-db`, db/user `farmacia`) migrada a tenant pharma-server local (`:8080`, tenant `tufarmacia`, admin `admin@tufarmacia.cl`). Acceso vía Cloud SQL Auth Proxy v2; creds por `vercel env pull` (proyecto vercel `tu-farmacia`).
+
+Reconciliado (pipeline exit 0, re-verificado por API independiente):
+- products 34136/34136 · stock_movements 3752 (historia real) · stock apertura `inventario` 33991 · customers 39 (de 40 distinct guest_email) · historic orders 47 (de 53; 6 sin ítems válidos por orphan-FK). 0 failed/errors en todo.
+- Invariante verificado: Σstock pharma 8106 == Σstock origen 8106. products/stats total=34136, inventory_value 303339030.
+
+Esquema fuente EVOLUCIONÓ vs enunciado: uuid PKs; NO existen tablas `customers`/`ventas_historicas` (clientes = distinct `orders.guest_email`; ventas = `orders`+`order_items`; "ventas_historicas" es sólo un `stock_movements.reason`). external_id pharma = str(products.id). Dinero numeric→int CLP→string. payment_provider→pos_cash. Stock model: productos stock=0 → replay 3752 movimientos → `inventario` apertura por producto = stock_origen − Σdelta.
+
+GAP barcodes (34052) NO migrados: catálogo pharma sin campo barcode (0 refs en catalog model/service/repo); viven en tabla schemaless `product_barcode` que ningún código prod escribe + `products/import` ignora la col. Fix doc: catalog.rs lee col + repo `upsert_barcode` UPSERT idempotente (tenant,barcode) + migración 0051 + rebuild + re-import. Diferido (rama compartida + rebuild fuera de alcance). push_subscriptions/profiles/Firebase fuera de scope.
+
+Gotchas: `vercel env pull` mete literal `\n` en valores (user queda `farmacia\n`); pharma-api rechaza JWT placeholder (inyectar PHARMA__JWT__SECRET). Runbook + transform reproducible: `docs/runbook-tufarmacia-migration.md`.
