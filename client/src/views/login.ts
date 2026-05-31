@@ -10,7 +10,7 @@
 //  - Focus rings, real <label for>, AA contrast, full keyboard nav.
 //  - Existing Tauri command + payload shapes (server_url/tenant/email/password)
 //    and the onSuccess(session, serverUrl) callback are untouched.
-import { login, type SessionInfo } from "../api";
+import { login, serverHealth, type SessionInfo } from "../api";
 
 const FALLBACK_SERVER = "http://127.0.0.1:8080";
 const DEFAULT_TENANT = "tufarmacia";
@@ -195,6 +195,10 @@ export function renderLogin(
                   />
                   <p id="${FIELDS.server.err}" class="field-error" role="alert" hidden></p>
                   <p class="field-hint">Si el servidor corre en otro equipo de la red, escribe su IP y puerto (ej: http://192.168.1.50:8080).</p>
+                  <div class="conn-test">
+                    <button type="button" id="conn-test-btn" class="btn-ghost">Probar conexión</button>
+                    <span id="conn-test-status" class="conn-test-status" role="status" aria-live="polite"></span>
+                  </div>
                 </div>
               </div>
             </details>
@@ -265,6 +269,36 @@ export function renderLogin(
     );
     pwEye.toggleAttribute("hidden", !showing);
     pwEyeOff.toggleAttribute("hidden", showing);
+  });
+
+  // "Probar conexión" — pings the server's health endpoint so a LAN client can
+  // confirm the URL before typing credentials (no auth needed; reachability only).
+  const connBtn = root.querySelector<HTMLButtonElement>("#conn-test-btn")!;
+  const connStatus = root.querySelector<HTMLSpanElement>("#conn-test-status")!;
+  connBtn.addEventListener("click", async () => {
+    const url = getInput(FIELDS.server.input).value.trim();
+    if (!url) {
+      connStatus.className = "conn-test-status err";
+      connStatus.textContent = "Escribe una URL primero.";
+      return;
+    }
+    connBtn.disabled = true;
+    connStatus.className = "conn-test-status";
+    connStatus.textContent = "Probando…";
+    try {
+      const health = await serverHealth(url);
+      const ok = health.reachable && health.status === "ok" && health.db === "ok";
+      connStatus.className = `conn-test-status ${ok ? "ok" : "warn"}`;
+      connStatus.textContent = ok
+        ? "✓ Servidor accesible."
+        : `Servidor responde (estado: ${health.status}, db: ${health.db}).`;
+    } catch (err) {
+      connStatus.className = "conn-test-status err";
+      connStatus.textContent =
+        typeof err === "string" ? err : "No se pudo contactar al servidor.";
+    } finally {
+      connBtn.disabled = false;
+    }
   });
 
   // Strip stale field errors as the user fixes them.

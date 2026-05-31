@@ -166,6 +166,23 @@ NO acá.
 
 ---
 
+## 2026-05-30 — Cliente: pipeline de build+sign+distribución (MSI + NSIS, mirror compartido)
+
+- **Qué**: el cliente Tauri (ERP parity completa) ahora tiene build distribuible reproducible + pipeline de firma/publicación, producto SEPARADO del MSI del server (N clientes ↔ 1 server). Brainstorm previo (skill) decidió: (a) instalador **separado** del server; (b) firma **reusa `installer/sign/pilot.pfx`** (self-signed →2029, mismo signer para los dos productos); (c) canal **reusa el mirror `pharma-server-releases`** con tag `client-v<ver>` (un solo hub, prefijo separa feeds); (d) URL del server vía login form existente (persisted>`VITE_SERVER_URL`>loopback) + botón **"Probar conexión"** nuevo. Formato: **ambos MSI + NSIS** (decisión fundador). Spec en `docs/superpowers/specs/2026-05-30-client-distribution-design.md`.
+- **Archivos**:
+  - `installer/sign/sign-msi.ps1`: generalizado con param `-Description` (default "Pharma Server") — firma cualquier artifact Authenticode (.msi/.exe); el cliente lo reusa con "Pharma Client".
+  - `installer/client/build-client.ps1` (nuevo): `npm ci` → `npx tauri build` (release; MSI+NSIS), resuelve el bundle dir en runtime, `-Sign`/`-ServerUrl` opcionales.
+  - `installer/client/sign-client.ps1` (nuevo): firma MSI+NSIS vía `sign-msi.ps1 -Description "Pharma Client"`.
+  - `.github/workflows/client-release-publisher.yml` (nuevo): espejo de `release-publisher.yml` — fail-closed sin secrets → rust 1.95 + node 20 → `npm ci` + `tauri build` → sign ambos → publish al mirror tag `client-v<ver>` con MSI+NSIS+`pilot.cer`. `workflow_dispatch`, founder-gated.
+  - `client/src/views/login.ts` + `styles.css`: botón "Probar conexión" → `serverHealth(url)` (sin auth, reachability) + `.conn-test`.
+  - `client/.gitignore`: **des-ignorado `package-lock.json`** + copiado al repo → `npm ci` reproducible (local + CI). Sin esto el build fresco falla `EUSAGE: npm ci needs a lockfile`.
+  - `installer/client/README.md` (nuevo): runbook build/sign/distribute + onboarding.
+- **GATE**: `npm run build` (21 mód, tsc+vite) verde en worktree limpio off `feature/erp-parity`; build reproducible `build-client.ps1` produce MSI (~4.88 MB) + NSIS (~3.3 MB) — bundles en **root `target/release/bundle/`** (no `client/src-tauri/target/`) porque `.cargo/config.toml` raíz fija `target-dir="target"` (cargo config discovery aplica al client; también linka `+crt-static`). Scripts y workflow resuelven ambas rutas.
+- **Gotchas de sesión**: (1) **checkout race** — el working dir compartido estaba en branch `feat/dte-9-1-b2-xmldsig` con trabajo uncommitted de OTRA lane (dte + multicaja: `configuracion.ts`/`caja`/`shell`/`lib.rs`); aislé en worktree sibling off `feature/erp-parity` y re-apliqué SÓLO mis cambios (ver `[[parallel-session-checkout-race]]`). (2) `pwsh` (PS7) no está en esta máquina → correr `.ps1` con `powershell.exe -File` (5.1; scripts `#Requires -Version 5.1`). (3) **Firma local bloqueada**: `PHARMA_CERT_PASSWORD` vive en CI/fundador, no la tengo → artifact firmado lo produce el workflow (tiene el secret) o el fundador; local sólo verifica el build unsigned. Coherente con "no public release sin go".
+- **DoD**: script reproducible ✓ + pipeline de firma scaffold (fail-closed) ✓ + build unsigned verificado ✓ + distribución documentada ✓. **Release público founder-gated** — workflow NO disparado sin go. Commit en branch `feat/client-distribution` → PR vs `feature/erp-parity`.
+
+---
+
 ## 2026-05-30 — Cliente: Auditoría / visor del registro inmutable (full-stack, PR #103)
 
 - **Qué** (full-stack cliente): cableado el query del audit-log del server (`GET /api/v1/admin/audit-log`, admin/owner, tenant-scoped) — superficie sin comando Tauri ni UI previos. Materializa el pilar de producto "cada cambio queda en log inmutable".
