@@ -1,0 +1,176 @@
+name: client-release-publisher
+
+# Manual deploy of the SEPARATE Pharma Client (Tauri desktop) -> self-sign (ADR-0008
+# pilot cert, SAME pfx as the server) -> publish to the PUBLIC mirror
+# `pharma-server-releases` as a GitHub Release tagged `client-v<ver>`.
+#
+# The client is a distinct product from the server MSI: N clients (cashier PCs) talk
+# to 1 server over the LAN. We reuse the server mirror so pilots download both from
+# one place; the `client-` tag prefix keeps the two product feeds apart.
+#
+# Source stays private (CLAUDE.md regla #10): only the signed installers + the public
+# pilot.cer leave this repo. Signing is MANDATORY — the job fails closed if the cert
+# secrets are absent (no unsigned installer ever reaches clients).
+#
+# Required repo secrets (shared with release-publisher.yml):
+#   PILOT_PFX_B64        base64 of installer/sign/pilot.pfx  (private signing key)
+#   PHARMA_CERT_PASSWORD password that protects pilot.pfx
+#   MIRROR_RELEASE_TOKEN PAT with `contents:write` on pabloalvarez99/pharma-server-releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Client version (default: read from client/package.json)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the mirror release as a pre-release"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  MIRROR_REPO: pabloalvarez99/pharma-server-releases
+
+jobs:
+  publish:
+    name: build + sign + publish client installers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fail closed if signing secrets are missing
+        shell: pwsh
+        env:
+          PILOT_PFX_B64: ${{ secrets.PILOT_PFX_B64 }}
+          PHARMA_CERT_PASSWORD: ${{ secrets.PHARMA_CERT_PASSWORD }}
+          MIRROR_RELEASE_TOKEN: ${{ secrets.MIRROR_RELEASE_TOKEN }}
+        run: |
+          $missing = @()
+          if (-not $env:PILOT_PFX_B64)        { $missing += "PILOT_PFX_B64" }
+          if (-not $env:PHARMA_CERT_PASSWORD) { $missing += "PHARMA_CERT_PASSWORD" }
+          if (-not $env:MIRROR_RELEASE_TOKEN) { $missing += "MIRROR_RELEASE_TOKEN" }
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required secrets: $($missing -join ', '). See workflow header. Refusing to publish an unsigned installer."
+            exit 1
+          }
+          Write-Host "All signing/publish secrets present."
+
+      - name: install rust toolchain (pinned 1.95.0)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+
+      - name: cache cargo (client/src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client/src-tauri -> ../../target
+
+      - name: setup node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}"
+          if (-not $v) {
+            $pkg = Get-Content client/package.json -Raw | ConvertFrom-Json
+            $v = $pkg.version
+            if (-not $v) { Write-Error "Could not read version from client/package.json"; exit 1 }
+          }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Client version -> $v"
+
+      - name: build client (MSI + NSIS)
+        shell: pwsh
+        run: |
+          Push-Location client
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          npx tauri build
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
+
+      - name: locate artifacts
+        id: art
+        shell: pwsh
+        run: |
+          # Root .cargo/config.toml sets target-dir = "target", so the client bundle
+          # lands in the repo-root target/; fall back to the in-crate target dir.
+          $candidates = @("target/release/bundle", "client/src-tauri/target/release/bundle")
+          $bundle = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundle) { Write-Error "No bundle dir found ($($candidates -join '; '))"; exit 1 }
+          $msi  = Get-ChildItem "$bundle/msi"  -Filter *.msi | Select-Object -First 1
+          $nsis = Get-ChildItem "$bundle/nsis" -Filter *.exe | Select-Object -First 1
+          if (-not $msi)  { Write-Error "MSI not produced under $bundle/msi"; exit 1 }
+          if (-not $nsis) { Write-Error "NSIS .exe not produced under $bundle/nsis"; exit 1 }
+          "msi=$($msi.FullName)"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "nsis=$($nsis.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: decode pilot.pfx
+        shell: pwsh
+        env:
+          PILOT_PFX_B64: ${{ secrets.PILOT_PFX_B64 }}
+        run: |
+          [IO.File]::WriteAllBytes(
+            "installer/sign/pilot.pfx",
+            [Convert]::FromBase64String($env:PILOT_PFX_B64))
+          Write-Host "pilot.pfx restored ($((Get-Item installer/sign/pilot.pfx).Length) bytes)."
+
+      - name: sign both artifacts + timestamp
+        shell: pwsh
+        env:
+          PHARMA_CERT_PASSWORD: ${{ secrets.PHARMA_CERT_PASSWORD }}
+        run: |
+          powershell -File installer/client/sign-client.ps1 `
+            -MsiPath "${{ steps.art.outputs.msi }}" `
+            -NsisPath "${{ steps.art.outputs.nsis }}"
+
+      - name: scrub private key from workspace
+        if: always()
+        shell: pwsh
+        run: Remove-Item installer/sign/pilot.pfx -Force -ErrorAction SilentlyContinue
+
+      - name: publish signed installers + pilot.cer to mirror
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_RELEASE_TOKEN }}
+        run: |
+          $v    = "${{ steps.ver.outputs.version }}"
+          $tag  = "client-v$v"
+          $msi  = "${{ steps.art.outputs.msi }}"
+          $nsis = "${{ steps.art.outputs.nsis }}"
+          $notes = @"
+          Pharma Client $v — signed pilot installers (self-signed, ADR-0008).
+
+          Desktop client for pharma-server (POS + ERP shell). Install one per cashier PC;
+          point it at the server's LAN URL on first launch (Conexión avanzada -> Servidor,
+          "Probar conexión" to confirm).
+
+          Two formats: MSI (GPO/SCCM-deployable) and NSIS -setup.exe (per-user friendly).
+          Import pilot.cer to Trusted Publishers once (installer/sign/README.md) to skip the
+          one-time SmartScreen "More info -> Run anyway" prompt.
+
+          Signature: SHA256 + RFC3161 timestamp. Cert valid through 2029.
+          "@
+          gh release view $tag --repo $env:MIRROR_REPO 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $args = @("release","create",$tag,"--repo",$env:MIRROR_REPO,"--title","Pharma Client $v","--notes",$notes)
+            if ("${{ inputs.prerelease }}" -eq "true") { $args += "--prerelease" }
+            & gh @args
+          }
+          gh release upload $tag $msi $nsis installer/sign/pilot.cer --repo $env:MIRROR_REPO --clobber
+
+      - name: summary
+        shell: pwsh
+        run: |
+          "## Published (client)" >> $env:GITHUB_STEP_SUMMARY
+          "- Version: ${{ steps.ver.outputs.version }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Mirror: https://github.com/${{ env.MIRROR_REPO }}/releases/tag/client-v${{ steps.ver.outputs.version }}" >> $env:GITHUB_STEP_SUMMARY
+          "- Formats: MSI + NSIS, pilot self-signed + RFC3161 timestamp" >> $env:GITHUB_STEP_SUMMARY

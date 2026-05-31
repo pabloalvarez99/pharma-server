@@ -19,16 +19,22 @@
 .PARAMETER TimestampUrl
     RFC3161 timestamp server. Default DigiCert (free, no account).
 
+.PARAMETER Description
+    Signature description (signtool /d). Default "Pharma Server". The Tauri client
+    build passes "Pharma Client" so both products reuse this one signer.
+
 .NOTES
     signtool.exe ships with the Windows SDK. If not on PATH, the script probes common
     SDK locations under "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\".
+    Works on any Authenticode-signable artifact (.msi and NSIS .exe alike).
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$MsiPath,
     [string]$PfxPath = (Join-Path $PSScriptRoot "pilot.pfx"),
-    [string]$TimestampUrl = "http://timestamp.digicert.com"
+    [string]$TimestampUrl = "http://timestamp.digicert.com",
+    [string]$Description = "Pharma Server"
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,7 +83,7 @@ Write-Host "Timestamp: $TimestampUrl"
     /fd sha256 `
     /tr $TimestampUrl `
     /td sha256 `
-    /d "Pharma Server" `
+    /d $Description `
     $MsiPath
 
 if ($LASTEXITCODE -ne 0) {
