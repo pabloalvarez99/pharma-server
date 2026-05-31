@@ -138,6 +138,17 @@ NO acá.
 
 ---
 
+## 2026-05-31 — Cliente: Importar productos CSV + fix regresión P0 de #104 (PR #108)
+
+- **Qué** — lane nueva del cliente Tauri **+ reparación de regresión** que ya estaba live en `feature/erp-parity`:
+  - **Importar (admin), full-stack**: `views/importar.ts` nueva — carga masiva del catálogo desde CSV. Comando Tauri `import_products` (multipart → `POST /api/v1/products/import`, upsert idempotente por `external_id` server-side) + feature `multipart` en `reqwest`; `api.ts` `importProducts`+`ImportSummary`/`ImportRowError`; `shell.ts` nav "Importar" tras Inventario. La vista lee el texto del archivo en JS (sin round-trip de path), POSTea y muestra resumen (creados/actualizados/fallidos/total) + tabla de filas rechazadas (línea+motivo). Cabecera obligatoria `name`+`price` (o `sale_price`); opcionales (`external_id`, `cost_price`, `stock`, `laboratory`, `active_ingredient`, etc.) documentadas en la vista.
+  - **Fix regresión P0**: el commit `4982f93` (`docs(bitacora)` de PR #105, con working tree **stale** de la sesión DTE paralela) revirtió TODO el trabajo cliente de **#104** — borró `configuracion.ts`, revirtió `caja.ts` a una sola caja, quitó `get_setting`/`set_setting`+`AdminSetting`+CSS. Detectado al abrir el worktree de la lane CSV (off erp-parity) y ver `configuracion.ts` ausente pese a que #104 era ancestro. Restaurados los 6 archivos desde `ca08d6e` (#104) y reaplicada la lane CSV sobre la base correcta → la PR #108 **re-incluye Configuración + Caja multi-registro además de Importar**.
+- **GATE** (base erp-parity, worktree aislado): `npm run build` (tsc+vite, 23 mód) ✅ + `cargo check` backend Tauri (multipart pull `mime_guess`+`unicase`, Cargo.lock staged) ✅. Valores escapados con `escapeHtml`.
+- **DoD**: PR #108 **MERGED** (`62b8cb6`), commit lane `ed855d4`. Regresión verificada corregida en origin (configuracion.ts/importar.ts presentes, caja multi, get_setting). Worktree+branch pruneados.
+- **Gotcha (causa raíz del pileup, otra vez)**: una sesión paralela commiteó su working tree **sin re-sincronizar** tras el merge de #104 → arrastró reversiones de archivos ajenos a su scope dentro de un commit "docs". **Lección**: al commitear, stagear SÓLO los paths de tu lane (nunca `git add -A`/`commit -a` sobre un tree compartido sucio); el espejo de bitácora debe ir por worktree aislado off la base, no por el working dir compartido. Ver `[[parallel-session-checkout-race]]` + `[[add-A-banned-pharma-server]]`.
+
+---
+
 ## 2026-05-31 — Fase 9.1.b.2: firma XML-DSig de la boleta SII (PR #105, merged)
 
 - **Qué** (`crates/dte/src/sign.rs`, era stub `pendiente subtask 9.1.b`): firma enveloped W3C XML-DSig (RSA-SHA1) sobre el `<Documento>` del DTE con la clave del cert digital empresa — la **segunda** firma que el SII exige (la primera, TED sobre `<DD>`, ya en `timbre.rs`).
