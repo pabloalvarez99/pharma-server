@@ -243,6 +243,18 @@ pub struct CashCloseSummary {
     pub movements_out: String,
 }
 
+// --- admin settings --------------------------------------------------------
+
+/// Mirrors `crates/domain/src/sales/model.rs::AdminSettingDto`. Key/value pair
+/// (both STRINGS) with the last-write timestamp. `value` semantics depend on the
+/// key (boolean "true"/"false", a number, free text — interpreted client-side).
+#[derive(Serialize, Deserialize)]
+pub struct AdminSetting {
+    pub key: String,
+    pub value: String,
+    pub updated_at: String,
+}
+
 // --- customers -------------------------------------------------------------
 
 /// Mirrors `crates/domain/src/customers/model.rs::CustomerDto` (search results).
@@ -444,6 +456,24 @@ pub struct Prescription {
 }
 
 // --- catalog detail / batches / near-expiry (Inventario lane) --------------
+
+/// Mirrors `crates/api/src/v1/catalog.rs::ImportSummary` — outcome of a bulk CSV
+/// product import. `created`/`updated`/`failed` are row counts; `errors` carries
+/// the 1-based line + message for every rejected row so the view can list them.
+#[derive(Serialize, Deserialize)]
+pub struct ImportSummary {
+    pub created: usize,
+    pub updated: usize,
+    pub failed: usize,
+    pub errors: Vec<ImportRowError>,
+}
+
+/// One rejected CSV row (mirror of `catalog.rs::ImportError`).
+#[derive(Serialize, Deserialize)]
+pub struct ImportRowError {
+    pub line: usize,
+    pub message: String,
+}
 
 /// Full product detail (`crates/domain/src/catalog/model.rs::ProductDto`). Extra
 /// server fields (timestamps, image_url, external_id, therapeutic_action are kept;
@@ -829,6 +859,39 @@ async fn create_product(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de producto inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/products/import` (Bearer, admin+) — bulk CSV catalog load. The
+/// view reads the file text in JS and hands it over as `csv`; we wrap it in a
+/// multipart field (the server reads the first field, name-agnostic). Idempotent
+/// upsert by `external_id` server-side. Returns per-row created/updated/failed.
+#[tauri::command]
+async fn import_products(
+    state: State<'_, SessionState>,
+    server_url: String,
+    csv: String,
+) -> Result<ImportSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let part = reqwest::multipart::Part::text(csv)
+        .file_name("import.csv")
+        .mime_str("text/csv")
+        .map_err(|e| format!("No se pudo preparar el archivo CSV: {e}"))?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let resp = http
+        .post(format!("{base}/api/v1/products/import"))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de importación inválida del servidor: {e}"))
 }
 
 /// GET `/api/v1/products/{id}` (Bearer) — full product detail for the drawer.
@@ -1479,6 +1542,65 @@ async fn close_cash_session(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de cierre inválida del servidor: {e}"))
+}
+
+// --- admin settings commands -----------------------------------------------
+
+/// GET `/api/v1/settings/{key}` (Bearer). The setting is optional: an unset key
+/// returns 404 server-side, which we map to `Ok(None)` so the Configuración view
+/// renders the default/empty state instead of a hard error.
+#[tauri::command]
+async fn get_setting(
+    state: State<'_, SessionState>,
+    server_url: String,
+    key: String,
+) -> Result<Option<AdminSetting>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/settings/{key}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map(Some)
+        .map_err(|e| format!("Respuesta de configuración inválida del servidor: {e}"))
+}
+
+/// PUT `/api/v1/settings/{key}` (Bearer, admin+). Body `{ value }`. Upserts the
+/// key and returns the stored setting. 403 surfaces as the server's role error.
+#[tauri::command]
+async fn set_setting(
+    state: State<'_, SessionState>,
+    server_url: String,
+    key: String,
+    value: String,
+) -> Result<AdminSetting, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .put(format!("{base}/api/v1/settings/{key}"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "value": value }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de configuración inválida del servidor: {e}"))
 }
 
 // --- customers commands -----------------------------------------------------
@@ -2268,6 +2390,8 @@ pub fn run() {
             open_cash_session,
             cash_arqueo,
             close_cash_session,
+            get_setting,
+            set_setting,
             customer_search,
             customer_detail,
             customer_history,
@@ -2291,6 +2415,7 @@ pub fn run() {
             export_libro_recetas,
             get_receipt,
             create_product,
+            import_products,
             product_detail,
             adjust_product_stock,
             list_batches,

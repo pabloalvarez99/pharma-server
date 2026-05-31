@@ -18,7 +18,7 @@ import {
   type CashCloseSummary,
 } from "../api";
 import { clp, toNumber } from "../format";
-import { kpiCard, kpiSkeleton, asMessage, escapeHtml } from "./inventory";
+import { kpiSkeleton, asMessage, escapeHtml } from "./inventory";
 
 export function renderCaja(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -53,23 +53,33 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
     }, 2800);
   }
 
-  // Re-fetch the current open session and repaint body + actions.
+  // Re-fetch ALL open sessions and repaint. The server allows N open registers
+  // per tenant (one drawer per cashier), so the view lists every open caja and
+  // lets the operator close any of them, plus open another.
   async function refresh(): Promise<void> {
     bodyEl.className = "kpi-grid";
     bodyEl.innerHTML = kpiSkeleton(4);
     actionsEl.innerHTML = "";
     try {
-      const open = await cashSessions(serverUrl, "open", 1);
-      const session = open[0];
-      if (!session) {
+      const open = await cashSessions(serverUrl, "open", 50);
+      if (open.length === 0) {
         renderClosed();
       } else {
-        renderOpen(session);
+        renderOpenList(open);
       }
     } catch (err) {
       bodyEl.className = "";
       bodyEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     }
+  }
+
+  function openBtn(label: string): void {
+    actionsEl.innerHTML = `<button id="caja-open-btn" class="btn-primary">${label}</button>`;
+    actionsEl.querySelector<HTMLButtonElement>("#caja-open-btn")!
+      .addEventListener("click", () => openModal(modalHost, serverUrl, async () => {
+        toast("Caja abierta");
+        await refresh();
+      }));
   }
 
   function renderClosed(): void {
@@ -78,7 +88,7 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
       <div class="caja-empty">
         <div class="caja-empty-mark">●</div>
         <h3>Sin caja abierta</h3>
-        <p class="muted">Abre la caja para comenzar a registrar ventas en efectivo del turno.</p>
+        <p class="muted">Abre una caja para comenzar a registrar ventas en efectivo del turno.</p>
         <button id="caja-open-btn" class="btn-primary caja-open">
           <span class="btn-label">Abrir caja</span>
           <span class="btn-pulse"></span>
@@ -92,19 +102,52 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
       }));
   }
 
-  function renderOpen(s: CashSession): void {
-    bodyEl.className = "kpi-grid";
-    bodyEl.innerHTML = [
-      kpiCard("Caja", escapeHtml(s.register_name), `abierta ${fmtDateTime(s.opened_at)}`, "accent"),
-      kpiCard("Monto inicial", clp(s.opening_cash), "fondo de apertura"),
-      kpiCard("Estado", "Abierta", s.opening_notes ? escapeHtml(s.opening_notes) : "turno en curso"),
-    ].join("");
-    actionsEl.innerHTML = `<button id="caja-close-btn" class="btn-ghost-danger">Cerrar caja</button>`;
-    actionsEl.querySelector<HTMLButtonElement>("#caja-close-btn")!
-      .addEventListener("click", () => closeFlow(modalHost, serverUrl, s, async (summary) => {
-        toast(`Caja cerrada · ${describeDiscrepancy(summary.session)}`);
-        await refresh();
-      }));
+  // One card per open register; the close button is scoped to that session id.
+  function renderOpenList(sessions: CashSession[]): void {
+    const heading =
+      sessions.length === 1
+        ? "1 caja abierta"
+        : `${sessions.length} cajas abiertas`;
+    bodyEl.className = "";
+    bodyEl.innerHTML = `
+      <p class="muted caja-count">${heading}</p>
+      <div class="caja-list">
+        ${sessions
+          .map(
+            (s) => `
+          <div class="caja-card" data-id="${escapeHtml(s.id)}">
+            <div class="caja-card-head">
+              <strong>${escapeHtml(s.register_name)}</strong>
+              <span class="badge tier-free">Abierta</span>
+            </div>
+            <div class="caja-card-meta">
+              <span>Monto inicial</span><strong>${clp(s.opening_cash)}</strong>
+            </div>
+            <div class="caja-card-meta">
+              <span>Apertura</span><strong>${fmtDateTime(s.opened_at)}</strong>
+            </div>
+            ${
+              s.opening_notes
+                ? `<p class="muted caja-card-notes">${escapeHtml(s.opening_notes)}</p>`
+                : ""
+            }
+            <button class="btn-ghost-danger caja-close-one" data-id="${escapeHtml(s.id)}">Cerrar caja</button>
+          </div>`,
+          )
+          .join("")}
+      </div>
+    `;
+    bodyEl.querySelectorAll<HTMLButtonElement>(".caja-close-one").forEach((btn) => {
+      const id = btn.dataset.id!;
+      const session = sessions.find((s) => s.id === id)!;
+      btn.addEventListener("click", () =>
+        closeFlow(modalHost, serverUrl, session, async (summary) => {
+          toast(`Caja cerrada · ${describeDiscrepancy(summary.session)}`);
+          await refresh();
+        }),
+      );
+    });
+    openBtn("Abrir otra caja");
   }
 
   void refresh();

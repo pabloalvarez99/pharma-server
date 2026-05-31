@@ -348,6 +348,33 @@ export function closeCashSession(
   });
 }
 
+// --- admin settings (configuración) ----------------------------------------
+
+/** A key/value admin setting (`/settings/{key}`). `value` is always a STRING;
+ *  its meaning depends on the key (boolean "true"/"false", number, free text). */
+export interface AdminSetting {
+  key: string;
+  value: string;
+  updated_at: string;
+}
+
+/** GET /api/v1/settings/{key} (Bearer). Unset key → `null` (404 mapped). */
+export function getSetting(
+  serverUrl: string,
+  key: string,
+): Promise<AdminSetting | null> {
+  return invoke<AdminSetting | null>("get_setting", { serverUrl, key });
+}
+
+/** PUT /api/v1/settings/{key} (Bearer, admin+). Upserts and returns the value. */
+export function setSetting(
+  serverUrl: string,
+  key: string,
+  value: string,
+): Promise<AdminSetting> {
+  return invoke<AdminSetting>("set_setting", { serverUrl, key, value });
+}
+
 // --- clientes / customers --------------------------------------------------
 
 /** A customer search result (`CustomerDto`). */
@@ -700,6 +727,29 @@ export function createProduct(
     activeIngredient: input.activeIngredient,
     presentation: input.presentation,
   });
+}
+
+/** One rejected row from a bulk CSV import (1-based line + reason). */
+export interface ImportRowError {
+  line: number;
+  message: string;
+}
+
+/** Outcome of `POST /products/import` — row counts + per-row errors. */
+export interface ImportSummary {
+  created: number;
+  updated: number;
+  failed: number;
+  errors: ImportRowError[];
+}
+
+/** POST /api/v1/products/import (Bearer, admin+). `csv` = raw file text; the
+ *  server upserts by `external_id` (idempotent). Returns the import summary. */
+export function importProducts(
+  serverUrl: string,
+  csv: string,
+): Promise<ImportSummary> {
+  return invoke<ImportSummary>("import_products", { serverUrl, csv });
 }
 
 /** GET /api/v1/products/{id} (Bearer) — full detail for the drawer. */
