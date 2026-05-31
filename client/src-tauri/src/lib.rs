@@ -894,6 +894,31 @@ async fn import_products(
         .map_err(|e| format!("Respuesta de importación inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/products/export` (Bearer) — full catalog as CSV text so the
+/// webview can wrap it in a Blob download. Columns match the `import_products`
+/// format (export → edit → re-import round-trip). No-lock-in pillar (ADR-0005 #4).
+#[tauri::command]
+async fn export_products(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<String, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/products/export"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Respuesta de exportación inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/products/{id}` (Bearer) — full product detail for the drawer.
 #[tauri::command]
 async fn product_detail(
@@ -2416,6 +2441,7 @@ pub fn run() {
             get_receipt,
             create_product,
             import_products,
+            export_products,
             product_detail,
             adjust_product_stock,
             list_batches,

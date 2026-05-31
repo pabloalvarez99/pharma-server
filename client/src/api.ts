@@ -752,6 +752,12 @@ export function importProducts(
   return invoke<ImportSummary>("import_products", { serverUrl, csv });
 }
 
+/** GET /api/v1/products/export (Bearer) — full catalog as CSV text. The webview
+ *  wraps it in a Blob for download. Columns round-trip with {@link importProducts}. */
+export function exportProducts(serverUrl: string): Promise<string> {
+  return invoke<string>("export_products", { serverUrl });
+}
+
 /** GET /api/v1/products/{id} (Bearer) — full detail for the drawer. */
 export function productDetail(
   serverUrl: string,

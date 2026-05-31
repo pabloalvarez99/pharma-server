@@ -6,7 +6,7 @@
 // errors, which we render as a summary + a rejected-rows table. Writes are
 // admin+ server-side; a 403 surfaces as the Spanish permission copy. Spanish
 // throughout. Same skeleton/fetch/swap idiom as the other views.
-import { importProducts, type ImportSummary } from "../api";
+import { importProducts, exportProducts, type ImportSummary } from "../api";
 import { asMessage, escapeHtml } from "./inventory";
 
 // Columns the server understands (crates/api/src/v1/catalog.rs::import_products).
@@ -33,9 +33,10 @@ export function renderImportar(host: HTMLElement, serverUrl: string): void {
     <section class="view view-importar">
       <div class="view-head">
         <div>
-          <h2>Importar productos</h2>
-          <p class="muted">Carga masiva del catálogo desde un archivo CSV. Sólo administradores.</p>
+          <h2>Importar / Exportar productos</h2>
+          <p class="muted">Carga masiva del catálogo desde CSV (admin) o descarga todo el catálogo actual.</p>
         </div>
+        <button id="imp-export" class="btn-ghost">Exportar catálogo CSV</button>
       </div>
 
       <div class="import-grid">
@@ -60,6 +61,7 @@ export function renderImportar(host: HTMLElement, serverUrl: string): void {
           <p class="muted">Opcionales reconocidas:</p>
           <p class="import-cols">${OPTIONAL.map((c) => `<code>${escapeHtml(c)}</code>`).join(" ")}</p>
           <p class="muted import-note">Si incluyes <code>external_id</code>, reimportar el mismo archivo <strong>actualiza</strong> (no duplica).</p>
+          <p class="muted import-note">El CSV exportado usa estas mismas columnas: exporta → edita en Excel → reimporta.</p>
         </div>
       </div>
 
@@ -75,6 +77,7 @@ export function renderImportar(host: HTMLElement, serverUrl: string): void {
   const resultEl = host.querySelector<HTMLElement>("#imp-result")!;
   const dropEl = host.querySelector<HTMLElement>("#imp-drop")!;
   const toastEl = host.querySelector<HTMLElement>("#imp-toast")!;
+  const exportBtn = host.querySelector<HTMLButtonElement>("#imp-export")!;
 
   let picked: File | null = null;
 
@@ -115,6 +118,33 @@ export function renderImportar(host: HTMLElement, serverUrl: string): void {
     } finally {
       goBtn.disabled = false;
       goBtn.classList.remove("loading");
+    }
+  });
+
+  // Export the whole catalog as CSV → Blob download. Filename carries the date so
+  // repeated exports don't clobber each other in the downloads folder.
+  exportBtn.addEventListener("click", async () => {
+    errEl.hidden = true;
+    exportBtn.disabled = true;
+    exportBtn.classList.add("loading");
+    try {
+      const csv = await exportProducts(serverUrl);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `catalogo-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast("Catálogo exportado");
+    } catch (err) {
+      errEl.textContent = asMessage(err);
+      errEl.hidden = false;
+    } finally {
+      exportBtn.disabled = false;
+      exportBtn.classList.remove("loading");
     }
   });
 }
