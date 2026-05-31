@@ -137,6 +137,20 @@ NO acá.
 
 ---
 
+## 2026-05-31 — Cliente: Configuración admin (settings) + Caja multi-registro (PR #104)
+
+- **Qué** — dos lanes periféricas del cliente Tauri (patrón `api.ts → views/<x>.ts → shell.ts`):
+  - **Tarea A — Configuración (admin), full-stack**: nueva `client/src/views/configuracion.ts` que lee/escribe los `admin_setting` conocidos del server (`GET/PUT /api/v1/settings/{key}`). No existían comandos Tauri para settings → se agregaron `get_setting` (404 → `Ok(None)` para key sin setear) y `set_setting` (PUT `{value}`) en `lib.rs` + registro en `invoke_handler!`; wrappers tipados `getSetting`/`setSetting` + interfaz `AdminSetting` en `api.ts`. Catálogo cerrado de keys con editor por tipo: `federation_enabled` (boolean toggle), `loyalty_points_per_clp` (number). Mutación admin+ server-side (`writes` router con `admin_plus()`); 403 se muestra inline. Nav + dispatch en `shell.ts`.
+  - **Tarea B — Caja multi-registro**: la vista asumía UNA caja (`cashSessions` limit 1, `[0]`). El server permite N sesiones abiertas por tenant (una por cajero — `cash_register/service.rs::list_sessions` filtra por tenant; `open_session` rechaza 2ª del mismo user). `caja.ts` ahora lista todas las cajas abiertas (cards por registro), cierra cualquiera por `id` (flujo arqueo intacto) y ofrece "Abrir otra caja".
+- **Por qué** — materializa "parámetros del servidor editables por admin" + soporte real multi-caja que el backend ya tenía pero el cliente no exponía.
+- **Verificación** keys: grep `crates/api` + `crates/domain` → sólo `federation_enabled` (agent.rs) y `loyalty_points_per_clp` (sales/service.rs) son leídas por el server. Comandos Tauri settings: inexistentes antes (grep `lib.rs`) → lane full-stack.
+- **Archivos**: `client/src-tauri/src/lib.rs`, `client/src/api.ts`, `client/src/views/configuracion.ts` (nuevo), `client/src/views/shell.ts`, `client/src/views/caja.ts`, `client/src/styles.css`.
+- **GATE** (base `feature/erp-parity`, en worktree aislado por race de sesión paralela): `npm run build` (tsc+vite) ✅ + `cargo check --manifest-path client/src-tauri/Cargo.toml` ✅. Todo valor de server/usuario escapado con `escapeHtml`; errores vía `textContent`.
+- **DoD**: PR #104 **MERGED** a `feature/erp-parity` (merge commit), worktree+branch pruneados. Commit lane `ca08d6e`.
+- **Gotcha de sesión**: branch cambió bajo el working dir a `feat/dte-9-1-b2-xmldsig` (otra sesión) a mitad de trabajo → mis ediciones quedaron en disco pero mezcladas con archivos foráneos. Resuelto aislando en worktree off `feature/erp-parity` (sibling path fuera de `.claude/worktrees`), copiando sólo mis 6 archivos, GATE+commit ahí. Ver `[[parallel-session-checkout-race]]`.
+
+---
+
 ## 2026-05-30 — Cliente: Auditoría / visor del registro inmutable (full-stack, PR #103)
 
 - **Qué** (full-stack cliente): cableado el query del audit-log del server (`GET /api/v1/admin/audit-log`, admin/owner, tenant-scoped) — superficie sin comando Tauri ni UI previos. Materializa el pilar de producto "cada cambio queda en log inmutable".
