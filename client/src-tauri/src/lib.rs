@@ -243,6 +243,18 @@ pub struct CashCloseSummary {
     pub movements_out: String,
 }
 
+// --- admin settings --------------------------------------------------------
+
+/// Mirrors `crates/domain/src/sales/model.rs::AdminSettingDto`. Key/value pair
+/// (both STRINGS) with the last-write timestamp. `value` semantics depend on the
+/// key (boolean "true"/"false", a number, free text — interpreted client-side).
+#[derive(Serialize, Deserialize)]
+pub struct AdminSetting {
+    pub key: String,
+    pub value: String,
+    pub updated_at: String,
+}
+
 // --- customers -------------------------------------------------------------
 
 /// Mirrors `crates/domain/src/customers/model.rs::CustomerDto` (search results).
@@ -1481,6 +1493,65 @@ async fn close_cash_session(
         .map_err(|e| format!("Respuesta de cierre inválida del servidor: {e}"))
 }
 
+// --- admin settings commands -----------------------------------------------
+
+/// GET `/api/v1/settings/{key}` (Bearer). The setting is optional: an unset key
+/// returns 404 server-side, which we map to `Ok(None)` so the Configuración view
+/// renders the default/empty state instead of a hard error.
+#[tauri::command]
+async fn get_setting(
+    state: State<'_, SessionState>,
+    server_url: String,
+    key: String,
+) -> Result<Option<AdminSetting>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/settings/{key}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if resp.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map(Some)
+        .map_err(|e| format!("Respuesta de configuración inválida del servidor: {e}"))
+}
+
+/// PUT `/api/v1/settings/{key}` (Bearer, admin+). Body `{ value }`. Upserts the
+/// key and returns the stored setting. 403 surfaces as the server's role error.
+#[tauri::command]
+async fn set_setting(
+    state: State<'_, SessionState>,
+    server_url: String,
+    key: String,
+    value: String,
+) -> Result<AdminSetting, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .put(format!("{base}/api/v1/settings/{key}"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "value": value }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de configuración inválida del servidor: {e}"))
+}
+
 // --- customers commands -----------------------------------------------------
 //
 // The `/api/v1/customers/{search,{id},{id}/history}` surface lives on
@@ -2268,6 +2339,8 @@ pub fn run() {
             open_cash_session,
             cash_arqueo,
             close_cash_session,
+            get_setting,
+            set_setting,
             customer_search,
             customer_detail,
             customer_history,
