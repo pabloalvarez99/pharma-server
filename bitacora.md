@@ -138,6 +138,15 @@ NO acá.
 
 ---
 
+## 2026-05-31 — Cliente: Exportar catálogo CSV (round-trip con import, PR #109)
+
+- **Qué** — cierra el round-trip de catálogo del cliente Tauri: complementa Importar (#108) con exportar. `lib.rs` comando `export_products` (`GET /api/v1/products/export` → CSV text) + `invoke_handler!`; `api.ts` `exportProducts`; `views/importar.ts` ahora "Importar / Exportar" con botón **Exportar catálogo CSV** que descarga vía Blob (`catalogo-YYYY-MM-DD.csv`, fecha en nombre para no clobberear); `shell.ts` hint nav "Importar/exportar CSV".
+- **Por qué** — las columnas del export coinciden con el formato de import → **export → editar en Excel → reimportar** (`external_id` = upsert idempotente). Materializa el pilar **no-lock-in** ([ADR-0005](./docs/adr/0005-core-gratis-no-locked-in.md) #4: Free incluye export CSV/JSON completo de todo). El endpoint `/products/export` ya existía server-side sin cliente.
+- **GATE** (base erp-parity, worktree aislado off origin): `npm run build` (tsc+vite, 23 mód) + `cargo check` backend Tauri verde.
+- **DoD**: PR #109 **MERGED** (`6ef8fae`), commit lane `5ce00ad`. Verificado en origin (`export_products` presente). Worktree+branch pruneados. Pile limpio (0 PRs).
+
+---
+
 ## 2026-05-31 — Cliente: Importar productos CSV + fix regresión P0 de #104 (PR #108)
 
 - **Qué** — lane nueva del cliente Tauri **+ reparación de regresión** que ya estaba live en `feature/erp-parity`:
