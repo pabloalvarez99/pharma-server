@@ -108,3 +108,9 @@ if ($verifyExit -ne 0) {
 Write-Host ""
 Write-Host "DONE. The MSI is signed with the pilot cert."
 Write-Host "Pilot clients must import pilot.cer to Trusted Publishers to avoid SmartScreen."
+
+# The sign step already succeeded (checked above). `signtool verify` on a self-signed
+# cert returns non-zero on a machine without pilot.cer in Trusted Publishers — that's
+# expected, NOT a signing failure. Exit 0 so callers (sign-client.ps1, CI) don't
+# mis-read the trailing verify exit code as a failure.
+exit 0
