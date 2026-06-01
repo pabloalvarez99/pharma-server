@@ -171,6 +171,73 @@ async fn count_products(db: &db::Db, tenant: &surrealdb::sql::Thing) -> i64 {
     rows.first().map(|r| r.c).unwrap_or(0)
 }
 
+// Resolves a product id from a barcode the same way the agent/POS lookups do.
+async fn product_for_barcode(
+    db: &db::Db,
+    tenant: &surrealdb::sql::Thing,
+    barcode: &str,
+) -> Option<surrealdb::sql::Thing> {
+    let mut q = db
+        .query(
+            "SELECT VALUE product FROM product_barcode \
+             WHERE tenant = $t AND barcode = $b LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("b", barcode.to_string()))
+        .await
+        .unwrap();
+    q.take::<Option<surrealdb::sql::Thing>>(0).unwrap()
+}
+
+async fn count_barcodes(db: &db::Db, tenant: &surrealdb::sql::Thing) -> i64 {
+    #[derive(serde::Deserialize)]
+    struct Row {
+        c: i64,
+    }
+    let mut q = db
+        .query("SELECT count() AS c FROM product_barcode WHERE tenant = $t GROUP ALL")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let rows: Vec<Row> = q.take(0).unwrap();
+    rows.first().map(|r| r.c).unwrap_or(0)
+}
+
+// CSV with a `barcode` column → mapping written to `product_barcode`, pointing
+// at the created product. Re-importing the same CSV must NOT duplicate the
+// mapping (unique index `(tenant, barcode)` + UPSERT).
+#[tokio::test]
+async fn import_writes_barcode_mapping_idempotently() {
+    let s = spawn().await;
+    let csv = "name,price,stock,external_id,barcode\n\
+               Paracetamol 500mg,1990,40,SKU001,7801234567890\n";
+    let (status, json) = post_import(&s.app, &s.token, csv).await;
+    assert_eq!(status, StatusCode::OK, "body={json}");
+    assert_eq!(json["created"], 1);
+    assert!(json["errors"].as_array().unwrap().is_empty(), "body={json}");
+    assert_eq!(count_barcodes(&s.db, &s.tenant).await, 1);
+
+    let pid = product_for_barcode(&s.db, &s.tenant, "7801234567890")
+        .await
+        .expect("barcode resolves to a product");
+    assert_eq!(pid.tb, "product");
+
+    // Re-import (now an update-by-external_id path) must keep exactly one
+    // mapping row, still pointing at the same product.
+    let (status, json) = post_import(&s.app, &s.token, csv).await;
+    assert_eq!(status, StatusCode::OK, "body={json}");
+    assert_eq!(json["updated"], 1);
+    assert_eq!(
+        count_barcodes(&s.db, &s.tenant).await,
+        1,
+        "re-import must not duplicate the barcode mapping"
+    );
+    assert_eq!(
+        product_for_barcode(&s.db, &s.tenant, "7801234567890").await,
+        Some(pid)
+    );
+}
+
 // 5 valid rows → all created.
 #[tokio::test]
 async fn import_small_valid_csv_creates_all_rows() {
