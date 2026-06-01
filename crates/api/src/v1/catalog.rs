@@ -413,6 +413,7 @@ pub async fn import_products(
         let image_url = get(&rec, col("image_url"));
         let description = get(&rec, col("description"));
         let slug = get(&rec, col("slug"));
+        let barcode = get(&rec, col("barcode"));
 
         // Upsert-by-external_id: re-running the same CSV updates existing
         // rows instead of duplicating them with `-2` slug suffixes.
@@ -436,7 +437,20 @@ pub async fn import_products(
                         discount_percent,
                     };
                     match service::update_product(&db, &t, &existing.to_string(), patch).await {
-                        Ok(_) => summary.updated += 1,
+                        Ok(_) => {
+                            summary.updated += 1;
+                            if let Some(bc) = barcode.as_deref() {
+                                if let Err(e) =
+                                    domain::catalog::repo::upsert_barcode(&db, &t, &existing, bc)
+                                        .await
+                                {
+                                    summary.errors.push(ImportError {
+                                        line,
+                                        message: format!("barcode: {e}"),
+                                    });
+                                }
+                            }
+                        }
                         Err(e) => {
                             summary.failed += 1;
                             summary.errors.push(ImportError {
@@ -477,7 +491,21 @@ pub async fn import_products(
             discount_percent,
         };
         match service::create_product(&db, &t, input).await {
-            Ok(_) => summary.created += 1,
+            Ok(dto) => {
+                summary.created += 1;
+                if let Some(bc) = barcode.as_deref() {
+                    if let Ok(pid) = surrealdb::sql::thing(&dto.id) {
+                        if let Err(e) =
+                            domain::catalog::repo::upsert_barcode(&db, &t, &pid, bc).await
+                        {
+                            summary.errors.push(ImportError {
+                                line,
+                                message: format!("barcode: {e}"),
+                            });
+                        }
+                    }
+                }
+            }
             Err(e) => {
                 summary.failed += 1;
                 summary.errors.push(ImportError {

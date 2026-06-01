@@ -93,9 +93,9 @@ const TRANSFORM_ENVELOPED: &str = "http://www.w3.org/2000/09/xmldsig#enveloped-s
 const DIGEST_SHA1: &str = "http://www.w3.org/2000/09/xmldsig#sha1";
 const DSIG_NS: &str = "http://www.w3.org/2000/09/xmldsig#";
 
-/// Material de clave de firma: clave privada RSA del cert digital de la empresa
-/// + el certificado X.509 (DER) que la respalda. Se obtiene del PFX SII (ver
-/// nota PFX en el módulo).
+/// Material de clave de firma: clave privada RSA del cert digital de la
+/// empresa + el certificado X.509 (DER) que la respalda. Se obtiene del PFX
+/// SII (ver nota PFX en el módulo).
 #[derive(Clone)]
 pub struct KeyMaterial {
     priv_key: RsaPrivateKey,

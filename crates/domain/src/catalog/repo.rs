@@ -241,6 +241,30 @@ pub async fn find_id_by_external_id(
     Ok(row)
 }
 
+/// Idempotent tenant-scoped `barcode → product` mapping. Backs catalog
+/// import: the unique index `(tenant, barcode)` (migration 0003) means a
+/// plain CREATE would fail on re-import, so this UPSERTs by `(tenant,
+/// barcode)`. If the barcode already exists it is re-pointed to `product`;
+/// otherwise a new mapping row is created. The agent/POS lookups read this
+/// table via `SELECT VALUE product FROM product_barcode WHERE tenant=$t AND
+/// barcode=$b`.
+pub async fn upsert_barcode(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    barcode: &str,
+) -> DomainResult<()> {
+    db.query(
+        "UPSERT product_barcode SET tenant = $t, product = $p, barcode = $b \
+         WHERE tenant = $t AND barcode = $b",
+    )
+    .bind(("t", tenant.clone()))
+    .bind(("p", product.clone()))
+    .bind(("b", barcode.to_string()))
+    .await?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_product(
     db: &Db,
