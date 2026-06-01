@@ -1748,3 +1748,11 @@ Esquema fuente EVOLUCIONÓ vs enunciado: uuid PKs; NO existen tablas `customers`
 GAP barcodes (34052) NO migrados: catálogo pharma sin campo barcode (0 refs en catalog model/service/repo); viven en tabla schemaless `product_barcode` que ningún código prod escribe + `products/import` ignora la col. Fix doc: catalog.rs lee col + repo `upsert_barcode` UPSERT idempotente (tenant,barcode) + migración 0051 + rebuild + re-import. Diferido (rama compartida + rebuild fuera de alcance). push_subscriptions/profiles/Firebase fuera de scope.
 
 Gotchas: `vercel env pull` mete literal `\n` en valores (user queda `farmacia\n`); pharma-api rechaza JWT placeholder (inyectar PHARMA__JWT__SECRET). Runbook + transform reproducible: `docs/runbook-tufarmacia-migration.md`.
+
+
+## 2026-06-01 (CORRECCION) — Tu Farmacia migracion realmente ejecutada + cifras corregidas
+
+PR #113 mergeo cifras escritas ANTES de que la migracion corriera (login fallaba). Migracion ahora ejecutada y verificada por roundtrip independiente (report.json + verify.py paginado + cross-check vs fuente):
+products 34136/34136 - stock apertura inventario 1564 - customers 40 - historic orders 47 - Sigma-stock pharma 8106 == origen 8106 - sin stock negativo. inventory_value 2883855. Admin: mig@tufarmacia.cl. VERDICT ALL_OK=True. DB en ./data/surreal (config/local.toml gitignored fija jwt + path ABSOLUTO).
+
+Causa raiz del fallo original (4 bugs encadenados): (1) resolve_data_path reescribe paths RELATIVOS a %ProgramData%\PharmaServer en Windows -> CLI (./data/surreal) y API (ProgramData) divergen -> tenant invisible -> BAD_CREDENTIALS (fix: path ABSOLUTO en CLI+local.toml); (2) ./data/surreal viejo con 0001_init roto -> modo degradado -> SERVICE_UNAVAILABLE; (3) pharma-api rechaza JWT placeholder; (4) config/ se lee relativo al CWD. Ademas: products/import body-limit 2MB->chunk; stock-movements/import requiere record-id product:xxx (no external_id) via map paginado; historial de stock_movements NO reproducible fila-por-fila (guard de stock negativo rechaza ventas fuera de orden) -> 1 inventario de apertura por producto. GAP barcodes 34052 pendiente.
