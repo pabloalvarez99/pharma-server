@@ -257,8 +257,10 @@ pub async fn store_cert<C: Connection>(
         .bind(("rut", rut.to_string()))
         .bind(("pfx", surrealdb::sql::Bytes::from(encrypted.blob.clone())))
         .bind(("kdf", surrealdb::sql::Bytes::from(kdf_bytes)))
-        .bind(("desde", desde))
-        .bind(("hasta", hasta))
+        // Datetime explícito: bindear chrono directo serializa como string y
+        // el SCHEMAFULL `TYPE datetime` de la migración 0017 lo rechaza.
+        .bind(("desde", surrealdb::sql::Datetime::from(desde)))
+        .bind(("hasta", surrealdb::sql::Datetime::from(hasta)))
         .await
         .map_err(|e| DteError::CertEncrypt(format!("persist cert: {e}")))?;
     let mut res = res;

@@ -11,6 +11,7 @@ pub mod cash_register;
 pub mod catalog;
 pub mod customers;
 pub mod dashboard;
+pub mod dte;
 pub mod expenses;
 pub mod inventory;
 pub mod license;
@@ -37,6 +38,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(cash_register::router(state.clone()))
         .merge(expenses::router(state.clone()))
         .merge(dashboard::router(state.clone()))
+        .merge(dte::router(state.clone()))
         .merge(backup::router(state.clone()))
         .merge(license::router(state.clone()))
         .merge(audit::router(state.clone()))
