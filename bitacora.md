@@ -139,6 +139,13 @@ NO acá.
 
 ---
 
+## 2026-06-09 — Visión norte registrada: plataforma agéntica multi-rubro (Fase 15)
+
+- **Qué** — directiva fundador: el proyecto deja de ser sólo-farmacia; destino = **plataforma de operación de negocios agéntica para cualquier rubro**. Modelo operativo: `Usuario —(objetivos)→ Agente orquestador IA → Agentes coordinadores → Agentes de equipo → Tools (/api/v1 + CLI)`; principio rector `Humano → Agente IA → Software → Datos`. Farmacia = beachhead/primer vertical, no boundary.
+- **Por qué** — concreta en arquitectura la tesis AI-native de `latam-master-plan.md`; los cimientos YA existen (`crates/agent` Ed25519/Envelope, `/api/v1`+OpenAPI, audit log inmutable, multi-tenant/roles, federación `agent/inbox`, license gates) — lo nuevo de Fase 15 es sólo la capa de orquestación LLM encima.
+- **Implicaciones activas desde hoy**: core vertical-agnostic (pharma-específico → *vertical pack* futuro), API tool-first (consumidor primario futuro = agente), acciones de agente firmadas + auditadas con `agent_id`, human-in-the-loop para irreversibles, capa agéntica **opt-in** que nunca rompe offline-first (ADR-0005 #2) ni mete LLM en el hot path POS. NO bloquea Fases 9-14 — materialización post-revenue.
+- **Archivos**: `docs/strategy/agentic-business-platform.md` (nuevo, visión completa + fasing 15a-15d + riesgos), `CLAUDE.md` (párrafo "Visión norte" + Fase 15 en Roadmap), `bitacora.md`.
+
 ## 2026-05-31 — Deploy MSI v0.1.28 (prerelease, build LOCAL) + directiva deploy local-only
 
 - **Qué**: cortado el MSI `pharma-server-0.1.28-x86_64.msi` (16.85 MB) **localmente** y publicado como **PRERELEASE** al mirror público `pharma-server-releases` (tag `v0.1.28`, signed pilot cert + RFC3161 timestamp, + `pilot.cer` adjunto). sha256 `86ea862bc751a12b3bdf7463caff2ff1510ecd7dd91d709b09302a81803ffe10`.
