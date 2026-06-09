@@ -139,6 +139,14 @@ NO acá.
 
 ---
 
+## 2026-06-09 — RutAgentIA: nombre de la plataforma + tesis SaaS→Agentic Company
+
+- **Qué** — dos directivas fundador (mismo día, post-registro de la visión norte): (1) la plataforma se llama **RutAgentIA** — *un agente IA para cada chileno (persona o empresa), con su RUT como identidad*, que gestiona sus dominios de vida (finanzas, negocios, salud, …; un RUT = un agente = N dominio-packs); (2) registrar tesis de primeros principios **SaaS→Agentic Company** (seed-prompt del fundador, plan propio mejorado).
+- **RUT como identity anchor**: universal en CL, ya es la identidad transaccional del país (SII/DTE, bancos, salud), mapea 1:1 al DID Ed25519 existente de `crates/agent` (`RUT ↔ DID ↔ keypair`, esquema conceptual `did:rut:`). B2B y B2C con la misma primitiva de envelopes firmados.
+- **Tesis (`docs/strategy/saas-to-agentic-thesis.md`)**: el SaaS fue andamiaje compensatorio por falta de inteligencia (el humano era el motor de inferencia; pantallas = impedance-matching); la era agéntica mata la *interfaz* del ERP y **promueve su núcleo (ledger+audit+identidad+rails) a infraestructura** — los agentes necesitan el sistema de registro MÁS que los humanos. Etapas Tool→Worker→Team→Company; moat = confianza/responsabilidad + datos + red + rails locales (amplifica el moat 4-capas de market-thesis). Plan auto-financiado: vender ERP pharma HOY financia el substrato; primer Worker = agente de reposición/compras (rails ya existen: FEFO+PO+WAC+federación quote/PO); qué NO construir: framework genérico de agentes, más dashboards, chatbot-skin, modelo propio, B2C prematuro.
+- **Rename físico**: PENDIENTE como tarea aparte con go explícito (repo/crates/binarios/MSI son outward-facing); `pharma-server` = nodo ERP vertical farmacia dentro de RutAgentIA.
+- **Archivos**: `docs/strategy/saas-to-agentic-thesis.md` (nuevo), `docs/strategy/agentic-business-platform.md` (§1.5 RutAgentIA + naming resuelto), `CLAUDE.md` (Visión norte renombrada + links), `bitacora.md`.
+
 ## 2026-06-09 — Visión norte registrada: plataforma agéntica multi-rubro (Fase 15)
 
 - **Qué** — directiva fundador: el proyecto deja de ser sólo-farmacia; destino = **plataforma de operación de negocios agéntica para cualquier rubro**. Modelo operativo: `Usuario —(objetivos)→ Agente orquestador IA → Agentes coordinadores → Agentes de equipo → Tools (/api/v1 + CLI)`; principio rector `Humano → Agente IA → Software → Datos`. Farmacia = beachhead/primer vertical, no boundary.

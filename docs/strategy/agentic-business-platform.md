@@ -1,7 +1,9 @@
-# Agentic Business Platform — visión multi-rubro (norte 2026+)
+# RutAgentIA — Agentic Business Platform, visión multi-rubro (norte 2026+)
 
 **Estado**: visión registrada (directiva fundador 2026-06-09). No reemplaza el roadmap Fases 9-14 — lo extiende como Fase 15+.
+**Nombre del producto-plataforma**: **RutAgentIA** (directiva fundador 2026-06-09) — ver §1.5.
 **Decisión raíz futura**: cuando se materialice código, abrir ADR propio (estilo ADR-0001).
+**Tesis económico-estratégica** (por qué/cuándo de esta visión, etapas Tool→Worker→Team→Company, plan auto-financiado): [`saas-to-agentic-thesis.md`](./saas-to-agentic-thesis.md).
 
 ---
 
@@ -13,6 +15,36 @@
 pharma-server deja de ser *sólo* un ERP de farmacia. La meta de largo plazo es una **plataforma de operación de negocios agéntica, vertical-agnostic**: cualquier tipo de negocio (farmacia, almacén, ferretería, distribuidora, restaurante…) operado por un humano que declara **objetivos**, y un sistema de **agentes IA** que los ejecuta sobre el software y los datos.
 
 **Farmacia = beachhead, no boundary.** El vertical farmacia sigue siendo el primer mercado (tesis del independiente vs oligopolio, `market-thesis.md`), el que paga las cuentas y el que valida el producto. Pero el core se diseña desde hoy para que el segundo vertical sea un *pack*, no un fork.
+
+## 1.5. Nombre y modelo de identidad: RutAgentIA — un agente para cada chileno, su RUT como ID
+
+> "I want this project to be named **RutAgentIA**, which is an agent for every chilean with his RUT as ID. It manages every chilean RUT agent → finances, businesses, health, etc."
+> — fundador, 2026-06-09
+
+**RutAgentIA** es el nombre de la plataforma. Resuelve la deuda de naming de §4.6 (ya no se espera al segundo vertical) y a la vez **amplía el sujeto**: no sólo cada *negocio* tiene su agente — **cada chileno** (persona natural o jurídica) tiene su agente IA, anclado a su **RUT** (Rol Único Tributario), y ese agente le gestiona sus **dominios de vida**: finanzas, negocios, salud, etc.
+
+**Un RUT = un agente = N dominios gestionados**:
+
+```
+RUT (persona o empresa)
+  └─ Agente RutAgentIA (orquestador personal, identidad did:rut)
+       ├─ Finanzas    — gastos, presupuesto, impuestos SII, pagos
+       ├─ Negocios    — su ERP/nodo (pharma-server = primer vertical), compras, ventas
+       ├─ Salud       — medicamentos, recetas, adherencia, interacciones (la farmacia ya está en el grafo)
+       └─ …            — extensible por *dominio pack* (mismo patrón que vertical pack §4.1)
+```
+
+Por qué el RUT es el anchor de identidad correcto:
+- **Universal en Chile**: toda persona y toda empresa ya tiene uno — cero fricción de onboarding, cero registro nuevo que inventar.
+- **Ya es la identidad transaccional del país**: SII (boletas/facturas DTE — el crate `dte` ya gira en torno a RUT emisor/receptor), bancos, salud, contratos. El agente hereda el grafo transaccional existente.
+- **Mapea 1:1 al modelo DID existente**: `crates/agent` ya implementa identidad Ed25519/DID + envelopes firmados. El binding `RUT ↔ DID ↔ keypair` convierte cada RUT en un endpoint agéntico verificable — `did:rut:76123456-7` como esquema conceptual.
+- **B2B y B2C con la misma primitiva**: el agente de la farmacia (RUT empresa) y el agente del comprador (RUT persona) negocian con el mismo protocolo de envelopes firmados que hoy usa la federación `agent/inbox`. El marketplace federado B2B (Fase 13) se extiende naturalmente a B2C agente-a-agente.
+
+**Sensibilidad regulatoria (registrar desde ya)**: un agente que cruza finanzas+salud+negocios de una persona identificada por RUT es máxima sensibilidad bajo Ley 19.628 (y la salud es dato sensible explícito). Los invariantes ADR-0005 (datos del usuario en su nodo, telemetría opt-in default OFF, sin PII, export completo, sin lock-in) son la base de confianza que hace viable siquiera proponer esto — RutAgentIA sólo funciona si el agente del chileno es *suyo*, corre para él, y sus datos no salen sin su instrucción.
+
+**Alcance del rename (decidido vs pendiente)**:
+- ✅ **Decidido hoy**: RutAgentIA = nombre de la plataforma/visión. Docs de estrategia y CLAUDE.md lo registran.
+- ⏸ **Pendiente (tarea aparte, requiere go explícito)**: renombres físicos — repo GitHub, crates, binarios (`pharma-api`/`pharma-service`/`pharma`), MSI product name, mirror de releases, branding del cliente Tauri. Son outward-facing y rompen URLs/instalaciones existentes; se secuencian cuando el rebrand sea oportuno comercialmente (mínimo: post v1.0.0 pharma o al lanzar el segundo vertical/B2C). `pharma-server` sigue siendo el nombre del *nodo ERP vertical farmacia* dentro de la plataforma RutAgentIA.
 
 ## 2. Modelo operativo objetivo
 
@@ -53,7 +85,7 @@ Lo nuevo de Fase 15 es la **capa de orquestación LLM** (objetivo → plan → d
 3. **Identidad y auditoría de agentes = primera clase**: toda acción de agente se firma (reusa Ed25519 de `crates/agent`) y aterriza en el mismo audit log inmutable que las acciones humanas, con atribución `agent_id` distinguible de `user_id`. Un negocio operado por agentes debe ser MÁS auditable que uno operado a mano, no menos.
 4. **Human-in-the-loop por irreversibilidad**: acciones destructivas o de alto riesgo (anular ventas masivas, cambios de precio catálogo completo, pagos salientes, borrado) requieren confirmación humana explícita. El agente propone, el humano aprueba; lo reversible fluye autónomo.
 5. **Capa agéntica = opt-in, NUNCA prerequisito**: los agentes LLM requieren conectividad/cómputo que el core no puede asumir. El invariante offline-first (ADR-0005 #2) se mantiene intacto: el ERP opera 100% sin la capa agéntica; los agentes son un nivel de operación adicional, no una dependencia. Sin internet, el negocio sigue vendiendo.
-6. **Naming/posicionamiento**: el rename multi-rubro (pharma-server → nombre genérico) se decide cuando el segundo vertical sea real, no antes. Hoy es deuda aceptada.
+6. **Naming/posicionamiento**: ~~el rename multi-rubro se decide cuando el segundo vertical sea real~~ — **RESUELTO el mismo día**: la plataforma se llama **RutAgentIA** (§1.5). Los renombres físicos (repo/crates/binarios/MSI) siguen pendientes como tarea aparte con go explícito.
 
 ## 5. Qué NO cambia
 
