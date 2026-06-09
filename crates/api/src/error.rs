@@ -176,6 +176,53 @@ impl From<license::GateError> for ApiError {
     }
 }
 
+impl From<dte::DteError> for ApiError {
+    fn from(e: dte::DteError) -> Self {
+        use dte::DteError as E;
+        match e {
+            E::SendNotEntitled { required_tier, .. } => {
+                Self::payment_required("dte.sii_send", &required_tier)
+            }
+            E::FolioExhausted { tipo, .. } => Self::new(
+                StatusCode::CONFLICT,
+                "FOLIO_EXHAUSTED",
+                format!(
+                    "Folios agotados para tipo DTE {tipo}. Importa un CAF nuevo \
+                     (`pharma caf import <caf.xml>`)."
+                ),
+            ),
+            E::CafInvalid(m) => Self::invalid(format!("CAF inválido: {m}")),
+            E::CertExpired { until } => Self::conflict(format!(
+                "Certificado digital expirado (vigencia hasta {until})."
+            )),
+            E::CertInvalid(m) => Self::invalid(format!("Certificado digital inválido: {m}")),
+            E::CertDecrypt(_) => Self::invalid(
+                "No se pudo descifrar el certificado digital: passphrase incorrecta o \
+                 blob alterado.",
+            ),
+            E::SiiRejected { glosa } => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "SII_REJECTED",
+                format!("SII rechazó el envío: {glosa}"),
+            ),
+            E::SiiNetwork(m) => Self::new(
+                StatusCode::BAD_GATEWAY,
+                "SII_NETWORK",
+                format!("Error de red contra SII: {m}"),
+            ),
+            E::XmlInvalid(m) => Self::invalid(format!("XML DTE inválido: {m}")),
+            E::UnsupportedTipo(t) => Self::invalid(format!("Tipo DTE no soportado: {t}")),
+            E::InvalidTransition { .. } | E::InvalidStateTransition { .. } => {
+                Self::conflict(e.to_string())
+            }
+            E::CertEncrypt(_) | E::SignFailed(_) | E::Io(_) | E::Json(_) => {
+                tracing::error!(error = %e, "dte internal error");
+                Self::internal("Error interno al procesar el DTE.")
+            }
+        }
+    }
+}
+
 impl From<domain::DomainError> for ApiError {
     fn from(e: domain::DomainError) -> Self {
         use domain::DomainError as D;

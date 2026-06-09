@@ -201,6 +201,15 @@ impl Modify for SecurityAddon {
         // License admin (PR #64)
         crate::v1::license::reload_license,
         crate::v1::license::license_status,
+        // DTE boleta SII (Fase 9.1 wiring)
+        crate::v1::dte::emit_boleta,
+        crate::v1::dte::list_dtes,
+        crate::v1::dte::caf_status,
+        crate::v1::dte::get_dte,
+        crate::v1::dte::dte_xml,
+        crate::v1::dte::send_dte,
+        crate::v1::dte::poll_dte,
+        crate::v1::dte::cancel_dte,
     ),
     components(schemas(ErrorEnvelope, ErrorBody)),
     modifiers(&SecurityAddon),

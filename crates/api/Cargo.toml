@@ -15,6 +15,7 @@ auth = { path = "../auth" }
 domain = { path = "../domain" }
 agent = { path = "../agent" }
 license = { path = "../license" }
+dte = { path = "../dte" }
 arc-swap.workspace = true
 pharma-telemetry = { package = "pharma-telemetry", path = "../telemetry" }
 tokio.workspace = true
@@ -65,6 +66,9 @@ sha2 = "0.10"
 hex.workspace = true
 jsonwebtoken.workspace = true
 metrics-util = { version = "0.17", features = ["debugging"] }
+# DTE endpoint tests mint a synthetic CAF + cert PEM (mirrors crates/dte tests).
+rsa = { workspace = true, features = ["pem"] }
+rand.workspace = true
 # Bench-only extras. `surrealdb` here re-declares with `kv-mem` so benches can
 # spin up an in-memory store (the prod build keeps `kv-surrealkv` only).
 # Cargo merges features across the two declarations for the test/bench build,

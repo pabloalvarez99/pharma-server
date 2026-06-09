@@ -370,10 +370,13 @@ async fn dte_list(db: &Db, args: DteListArgs) -> anyhow::Result<()> {
         q = q.bind(("tipo", t));
     }
     if let Some(f) = &args.from {
-        q = q.bind(("from", parse_date(f, "from")?));
+        q = q.bind((
+            "from",
+            surrealdb::sql::Datetime::from(parse_date(f, "from")?),
+        ));
     }
     if let Some(t) = &args.to {
-        q = q.bind(("to", parse_date(t, "to")?));
+        q = q.bind(("to", surrealdb::sql::Datetime::from(parse_date(t, "to")?)));
     }
     q = q.bind(("limit", args.limit as i64));
 
@@ -529,8 +532,8 @@ async fn dte_stats(db: &Db, args: DteStatsArgs) -> anyhow::Result<()> {
              AND fecha_emision >= $start AND fecha_emision < $end",
         )
         .bind(("tenant", tenant.id.clone()))
-        .bind(("start", start))
-        .bind(("end", end))
+        .bind(("start", surrealdb::sql::Datetime::from(start)))
+        .bind(("end", surrealdb::sql::Datetime::from(end)))
         .await
         .context("SELECT dte stats")?;
     let rows: Vec<DteRow> = res.take(0)?;
@@ -616,7 +619,9 @@ async fn caf_import(db: &Db, args: CafImportArgs) -> anyhow::Result<()> {
         .bind(("desde", caf.folio_desde))
         .bind(("hasta", caf.folio_hasta))
         .bind(("next", caf.next_folio))
-        .bind(("fa", caf.fecha_autorizacion))
+        // Datetime explícito: chrono directo serializa string y el SCHEMAFULL
+        // `TYPE datetime` de la 0017 lo rechaza.
+        .bind(("fa", surrealdb::sql::Datetime::from(caf.fecha_autorizacion)))
         .bind(("rut", caf.rut_emisor.clone()))
         .bind(("xml", caf.xml.clone()))
         .bind(("activo", caf.activo))
