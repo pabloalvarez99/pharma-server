@@ -1039,6 +1039,113 @@ export function listRefunds(
   return invoke<Devolucion[]>("list_refunds", { serverUrl, order, tipo, limit });
 }
 
+// --- DTE / boleta electrónica SII -------------------------------------------
+
+/** A DTE row (`crates/api/src/v1/dte.rs::DteDto`). `monto_total` is a STRING
+ *  (Decimal); `tipo` is the SII code (39 = boleta). `has_xml` flags whether the
+ *  signed XML can be downloaded via {@link dteXml}. */
+export interface Dte {
+  id: string;
+  tipo: number;
+  folio: number;
+  fecha_emision: string;
+  rut_emisor: string;
+  rut_receptor: string;
+  razon_social_receptor: string;
+  monto_total: string;
+  estado: string; // "draft" | "signed" | "sent" | "accepted" | "rejected" | "cancelled"
+  track_id: number | null;
+  sii_glosa: string | null;
+  order_id: string | null;
+  has_xml: boolean;
+}
+
+/** One active CAF + remaining folios (`GET /dte/caf-status` row). */
+export interface CafInfo {
+  id: string;
+  folio_desde: number;
+  folio_hasta: number;
+  next_folio: number;
+  restantes: number;
+}
+
+/** `GET /dte/caf-status` payload — total folios left for the DTE type. */
+export interface CafStatus {
+  tipo: number;
+  folios_restantes: number;
+  cafs: CafInfo[];
+}
+
+/** Filters for {@link listDtes}. Dates are `YYYY-MM-DD`. */
+export interface DteFilters {
+  estado?: string;
+  tipo?: number;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+/** GET /api/v1/dte (Bearer) — boletas/DTEs del tenant, newest first. */
+export function listDtes(serverUrl: string, filters: DteFilters = {}): Promise<Dte[]> {
+  return invoke<Dte[]>("list_dtes", {
+    serverUrl,
+    estado: filters.estado,
+    tipo: filters.tipo,
+    from: filters.from,
+    to: filters.to,
+    limit: filters.limit,
+  });
+}
+
+/** GET /api/v1/dte/caf-status?tipo=N (Bearer) — folios restantes (default 39). */
+export function dteCafStatus(serverUrl: string, tipo?: number): Promise<CafStatus> {
+  return invoke<CafStatus>("dte_caf_status", { serverUrl, tipo });
+}
+
+/** GET /api/v1/dte/{id}/xml (Bearer) — signed XML text for a Blob download. */
+export function dteXml(serverUrl: string, id: string): Promise<string> {
+  return invoke<string>("dte_xml", { serverUrl, id });
+}
+
+/** POST /api/v1/dte/boletas (Bearer, cashier+) — emit + sign the boleta of a
+ *  paid POS order. Rejects with `"CODE|message"` — use {@link parseSaleError}. */
+export function emitBoleta(
+  serverUrl: string,
+  orderId: string,
+  certPassphrase: string,
+  receptorRut?: string,
+  razonSocialReceptor?: string,
+): Promise<Dte> {
+  return invoke<Dte>("emit_boleta", {
+    serverUrl,
+    orderId,
+    certPassphrase,
+    receptorRut,
+    razonSocialReceptor,
+  });
+}
+
+/** POST /api/v1/dte/{id}/send (Bearer, admin+) — upload to SII. Tier-gated:
+ *  rejects `"FEATURE_REQUIRES_UPGRADE|msg"` on Free — use {@link parseSaleError}. */
+export function sendDte(serverUrl: string, id: string): Promise<Dte> {
+  return invoke<Dte>("send_dte", { serverUrl, id });
+}
+
+/** Poll result: the refreshed DTE + the normalized SII verdict of this query. */
+export interface DtePollResult extends Dte {
+  sii_estado: string; // aceptado|aceptado_con_reparos|rechazado|recibido|en_proceso|error
+}
+
+/** POST /api/v1/dte/{id}/poll (Bearer, admin+) — refresh the SII verdict. */
+export function pollDte(serverUrl: string, id: string): Promise<DtePollResult> {
+  return invoke<DtePollResult>("poll_dte", { serverUrl, id });
+}
+
+/** POST /api/v1/dte/{id}/cancel (Bearer, admin+) — anular pre-envío. */
+export function cancelDte(serverUrl: string, id: string, reason: string): Promise<Dte> {
+  return invoke<Dte>("cancel_dte", { serverUrl, id, reason });
+}
+
 // --- auditoría / audit-log -------------------------------------------------
 
 /** One row of the immutable audit trail (`AuditItem`). `before`/`after`/

@@ -38,6 +38,32 @@ const SETTINGS: readonly SettingDef[] = [
   },
 ] as const;
 
+// --- DTE emisor (dte.emisor + dte.sii_env) ----------------------------------
+// The DTE wiring (crates/api/src/v1/dte.rs) reads the emitter identity from the
+// `dte.emisor` admin_setting as a JSON `EmisorConfig` (rut, razon_social, giro,
+// direccion, comuna + optional ciudad/acteco), and the SII environment from
+// `dte.sii_env` ("sandbox" | "prod"). This form edits both — it's the client
+// counterpart of the "Falta configurar el emisor DTE" 400 the emission throws.
+
+const EMISOR_KEY = "dte.emisor";
+const SII_ENV_KEY = "dte.sii_env";
+
+interface EmisorField {
+  name: string;
+  label: string;
+  placeholder: string;
+  required: boolean;
+}
+
+const EMISOR_FIELDS: readonly EmisorField[] = [
+  { name: "rut", label: "RUT empresa", placeholder: "76123456-7", required: true },
+  { name: "razon_social", label: "Razón social", placeholder: "Farmacia Ejemplo SpA", required: true },
+  { name: "giro", label: "Giro", placeholder: "Venta al por menor de productos farmacéuticos", required: true },
+  { name: "direccion", label: "Dirección", placeholder: "Av. Principal 123", required: true },
+  { name: "comuna", label: "Comuna", placeholder: "Coquimbo", required: true },
+  { name: "ciudad", label: "Ciudad (opcional)", placeholder: "Coquimbo", required: false },
+] as const;
+
 export function renderConfiguracion(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
     <section class="view view-configuracion">
@@ -49,11 +75,17 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       </div>
 
       <div id="cfg-body">${tableSkeleton(SETTINGS.length)}</div>
+
+      <h3 class="section-title">Boleta electrónica — datos del emisor</h3>
+      <p class="muted">Identidad tributaria con la que se firman las boletas (SII). Requerido antes de emitir el primer DTE.</p>
+      <div id="cfg-emisor">${tableSkeleton(3)}</div>
+
       <div id="cfg-toast" class="toast" hidden></div>
     </section>
   `;
 
   const bodyEl = host.querySelector<HTMLElement>("#cfg-body")!;
+  const emisorEl = host.querySelector<HTMLElement>("#cfg-emisor")!;
   const toastEl = host.querySelector<HTMLElement>("#cfg-toast")!;
 
   function toast(msg: string): void {
@@ -148,7 +180,106 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
+  // --- DTE emisor form -------------------------------------------------------
+
+  async function loadEmisor(): Promise<void> {
+    emisorEl.innerHTML = tableSkeleton(3);
+    try {
+      const [emisorSetting, envSetting] = await Promise.all([
+        getSetting(serverUrl, EMISOR_KEY),
+        getSetting(serverUrl, SII_ENV_KEY),
+      ]);
+      let current: Record<string, unknown> = {};
+      if (emisorSetting) {
+        try { current = JSON.parse(emisorSetting.value) as Record<string, unknown>; } catch { /* corrupt → empty form */ }
+      }
+      const env = envSetting?.value === "prod" ? "prod" : "sandbox";
+      emisorEl.innerHTML = `
+        <div class="cfg-emisor-form">
+          ${EMISOR_FIELDS.map((f) => `
+            <div class="field">
+              <label for="cfg-em-${f.name}">${escapeHtml(f.label)}</label>
+              <input id="cfg-em-${f.name}" type="text" placeholder="${escapeHtml(f.placeholder)}"
+                     value="${escapeHtml(String(current[f.name] ?? ""))}" autocomplete="off" />
+            </div>`).join("")}
+          <div class="field">
+            <label for="cfg-em-acteco">Código actividad SII (acteco, opcional)</label>
+            <input id="cfg-em-acteco" type="number" min="0" step="1" inputmode="numeric"
+                   placeholder="477301" value="${current.acteco != null ? escapeHtml(String(current.acteco)) : ""}" />
+          </div>
+          <div class="field">
+            <label for="cfg-em-env">Entorno SII</label>
+            <select id="cfg-em-env">
+              <option value="sandbox" ${env === "sandbox" ? "selected" : ""}>Certificación (sandbox)</option>
+              <option value="prod" ${env === "prod" ? "selected" : ""}>Producción</option>
+            </select>
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-em-save">Guardar emisor</button>
+            <span class="cfg-status" id="cfg-em-status" hidden></span>
+          </div>
+        </div>
+      `;
+      wireEmisor();
+    } catch (err) {
+      emisorEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  function wireEmisor(): void {
+    const saveBtn = emisorEl.querySelector<HTMLButtonElement>("#cfg-em-save")!;
+    const statusEl = emisorEl.querySelector<HTMLElement>("#cfg-em-status")!;
+
+    saveBtn.addEventListener("click", async () => {
+      statusEl.hidden = true;
+      const emisor: Record<string, unknown> = {};
+      for (const f of EMISOR_FIELDS) {
+        const v = emisorEl.querySelector<HTMLInputElement>(`#cfg-em-${f.name}`)!.value.trim();
+        if (f.required && !v) {
+          statusEl.textContent = `Completa el campo "${f.label}".`;
+          statusEl.className = "cfg-status cfg-status-err";
+          statusEl.hidden = false;
+          return;
+        }
+        if (v) emisor[f.name] = v;
+      }
+      const actecoRaw = emisorEl.querySelector<HTMLInputElement>("#cfg-em-acteco")!.value.trim();
+      if (actecoRaw) {
+        const n = Number(actecoRaw);
+        if (!Number.isInteger(n) || n < 0) {
+          statusEl.textContent = "El código acteco debe ser un número entero.";
+          statusEl.className = "cfg-status cfg-status-err";
+          statusEl.hidden = false;
+          return;
+        }
+        emisor.acteco = n;
+      }
+      const env = emisorEl.querySelector<HTMLSelectElement>("#cfg-em-env")!.value;
+      if (env === "prod" && !window.confirm(
+        "Vas a apuntar el envío de boletas al SII de PRODUCCIÓN. Cada DTE enviado tendrá validez tributaria real. ¿Continuar?",
+      )) {
+        return;
+      }
+      saveBtn.disabled = true;
+      try {
+        await setSetting(serverUrl, EMISOR_KEY, JSON.stringify(emisor));
+        await setSetting(serverUrl, SII_ENV_KEY, env);
+        statusEl.textContent = "Guardado";
+        statusEl.className = "cfg-status cfg-status-ok";
+        statusEl.hidden = false;
+        toast("Emisor DTE guardado");
+      } catch (err) {
+        statusEl.textContent = asMessage(err);
+        statusEl.className = "cfg-status cfg-status-err";
+        statusEl.hidden = false;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
   void load();
+  void loadEmisor();
 }
 
 function fmtDate(iso: string): string {
