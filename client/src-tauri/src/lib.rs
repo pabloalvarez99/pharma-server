@@ -559,6 +559,28 @@ pub struct StockRotationRow {
     pub days_of_inventory: Option<String>,
 }
 
+// --- DTE / boleta electrónica SII ------------------------------------------
+
+/// Mirrors `crates/api/src/v1/dte.rs::DteDto`. `monto_total` crosses the wire
+/// as a STRING (Decimal); `fecha_emision` is RFC3339. `has_xml` flags whether
+/// `GET /dte/{id}/xml` has a signed XML to download.
+#[derive(Serialize, Deserialize)]
+pub struct Dte {
+    pub id: String,
+    pub tipo: i32,
+    pub folio: i64,
+    pub fecha_emision: String,
+    pub rut_emisor: String,
+    pub rut_receptor: String,
+    pub razon_social_receptor: String,
+    pub monto_total: String,
+    pub estado: String,
+    pub track_id: Option<i64>,
+    pub sii_glosa: Option<String>,
+    pub order_id: Option<String>,
+    pub has_xml: bool,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -2337,6 +2359,223 @@ async fn get_receipt(
         .map_err(|e| format!("Respuesta de boleta inválida del servidor: {e}"))
 }
 
+// --- DTE / boleta electrónica SII commands ----------------------------------
+//
+// Wire to `crates/api/src/v1/dte.rs`. Emission is cashier+; send/poll/cancel
+// are admin+ server-side (403 surfaces as Spanish copy). `send_dte` and
+// `emit_boleta` reject with the coded `"CODE|message"` shape so the view can
+// branch on `FEATURE_REQUIRES_UPGRADE` (Free tier = local-only, ADR-0005).
+
+/// GET `/api/v1/dte` (Bearer). Optional `estado` / `tipo` / `from` / `to`
+/// (YYYY-MM-DD) / `limit` filters. Newest first server-side.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn list_dtes(
+    state: State<'_, SessionState>,
+    server_url: String,
+    estado: Option<String>,
+    tipo: Option<i32>,
+    from: Option<String>,
+    to: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<Dte>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http.get(format!("{base}/api/v1/dte")).bearer_auth(token);
+    if let Some(v) = estado.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("estado", v)]);
+    }
+    if let Some(t) = tipo {
+        req = req.query(&[("tipo", t)]);
+    }
+    if let Some(v) = from.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("from", v)]);
+    }
+    if let Some(v) = to.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("to", v)]);
+    }
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de boletas inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/dte/caf-status?tipo=N` (Bearer) — folios restantes por CAF
+/// activo. Returns the raw `{ tipo, folios_restantes, cafs }` JSON.
+#[tauri::command]
+async fn dte_caf_status(
+    state: State<'_, SessionState>,
+    server_url: String,
+    tipo: Option<i32>,
+) -> Result<serde_json::Value, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/dte/caf-status"))
+        .bearer_auth(token);
+    if let Some(t) = tipo {
+        req = req.query(&[("tipo", t)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de folios inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/dte/{id}/xml` (Bearer) — signed XML as raw text so the webview
+/// can wrap it in a Blob download (Free-tier export path, ADR-0005 no lock-in).
+#[tauri::command]
+async fn dte_xml(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<String, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/dte/{id}/xml"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Respuesta de XML inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/boletas` (Bearer, cashier+) — emit + sign the boleta of a
+/// paid POS order. `cert_passphrase` decrypts the stored cert (never persisted).
+/// Rejects coded (`"CODE|message"`) so the view can show config errors nicely.
+#[tauri::command]
+async fn emit_boleta(
+    state: State<'_, SessionState>,
+    server_url: String,
+    order_id: String,
+    cert_passphrase: String,
+    receptor_rut: Option<String>,
+    razon_social_receptor: Option<String>,
+) -> Result<Dte, String> {
+    let token = token_of(&state).map_err(|e| format!("|{e}"))?;
+    let http = client().map_err(|e| format!("|{e}"))?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "order_id": order_id,
+        "cert_passphrase": cert_passphrase,
+    });
+    if let Some(v) = receptor_rut.filter(|s| !s.is_empty()) {
+        body["receptor_rut"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = razon_social_receptor.filter(|s| !s.is_empty()) {
+        body["razon_social_receptor"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/dte/boletas"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de emisión inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/{id}/send` (Bearer, admin+) — upload to SII. **Tier-gated**:
+/// Free gets 402 `FEATURE_REQUIRES_UPGRADE` (coded so the view shows an upgrade
+/// note instead of a hard error).
+#[tauri::command]
+async fn send_dte(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<Dte, String> {
+    let token = token_of(&state).map_err(|e| format!("|{e}"))?;
+    let http = client().map_err(|e| format!("|{e}"))?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/{id}/send"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de envío inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/{id}/poll` (Bearer, admin+) — refresh the SII verdict.
+/// Returns the raw JSON (`DteDto` flattened + `sii_estado`).
+#[tauri::command]
+async fn poll_dte(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<serde_json::Value, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/{id}/poll"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de consulta SII inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/{id}/cancel` (Bearer, admin+) — anular pre-envío
+/// (`draft|signed → cancelled`). Body `{ reason }` (required).
+#[tauri::command]
+async fn cancel_dte(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    reason: String,
+) -> Result<Dte, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/{id}/cancel"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "reason": reason }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de anulación inválida del servidor: {e}"))
+}
+
 /// GET `/health/ready`. Public (no token). 200 → healthy; 503 → degraded but
 /// still "reachable" (server is up). Connection errors → `Err`.
 #[tauri::command]
@@ -2446,7 +2685,14 @@ pub fn run() {
             adjust_product_stock,
             list_batches,
             create_batch,
-            near_expiry
+            near_expiry,
+            list_dtes,
+            dte_caf_status,
+            dte_xml,
+            emit_boleta,
+            send_dte,
+            poll_dte,
+            cancel_dte
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");
