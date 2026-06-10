@@ -460,3 +460,102 @@ async fn dte_role_estado_and_tenant_isolation() {
     .await;
     assert_eq!(st, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn libro_ventas_monthly_xml() {
+    let tdb = spawn_db().await;
+    let app = api::build_router(state_free(tdb.db.clone()));
+    let (token, _tenant, order_id) = seed_emission_fixture(&tdb.db, "libro1").await;
+    let period = Utc::now().format("%Y-%m").to_string();
+
+    // Emitir boleta (queda signed).
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/boletas",
+        Some(&token),
+        Some(json!({ "order_id": order_id, "cert_passphrase": CERT_PASS })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "emit: {body}");
+    let dte_id = body["id"].as_str().expect("id").to_string();
+
+    // Libro del mes con el DTE sólo `signed` → libro vacío (sólo accepted).
+    let (st, body) = req_json(
+        &app,
+        "GET",
+        &format!("/api/v1/dte/libro-ventas?period={period}"),
+        Some(&token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "libro vacío: {body}");
+    let xml = body.as_str().expect("xml");
+    assert!(xml.contains("LibroCompraVenta"), "raíz libro: {xml}");
+    assert!(xml.contains(&period), "período tributario: {xml}");
+    assert!(!xml.contains("<NroDoc>"), "signed no debe entrar: {xml}");
+
+    // Marcar accepted (lo que haría el poll SII) y re-pedir el libro.
+    let thing = surrealdb::sql::thing(&dte_id).expect("dte thing");
+    tdb.db
+        .query("UPDATE $id SET estado = 'accepted'")
+        .bind(("id", thing))
+        .await
+        .expect("update accepted")
+        .check()
+        .expect("update ok");
+    let (st, body) = req_json(
+        &app,
+        "GET",
+        &format!("/api/v1/dte/libro-ventas?period={period}"),
+        Some(&token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "libro: {body}");
+    let xml = body.as_str().expect("xml");
+    assert!(xml.contains("<TpoDoc>39</TpoDoc>"), "tipo doc: {xml}");
+    assert!(xml.contains("<NroDoc>1</NroDoc>"), "folio: {xml}");
+    assert!(xml.contains("<MntTotal>2000</MntTotal>"), "total: {xml}");
+    assert!(xml.contains("<TotDoc>1</TotDoc>"), "resumen count: {xml}");
+
+    // Período inválido → 400.
+    let (st, _b) = req_json(
+        &app,
+        "GET",
+        "/api/v1/dte/libro-ventas?period=2026-13",
+        Some(&token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Mes sin movimientos → 200 libro vacío.
+    let (st, body) = req_json(
+        &app,
+        "GET",
+        "/api/v1/dte/libro-ventas?period=2020-01",
+        Some(&token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert!(!body.as_str().expect("xml").contains("<NroDoc>"));
+
+    // Sin token → 401.
+    let (st, _b) = req_json(
+        &app,
+        "GET",
+        &format!("/api/v1/dte/libro-ventas?period={period}"),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+}
