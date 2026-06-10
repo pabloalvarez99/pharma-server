@@ -730,6 +730,12 @@ async fn cert_import(db: &Db, args: CertImportArgs) -> anyhow::Result<()> {
             args.to
         );
     }
+    // Validar el material ANTES de cifrar/persistir: un PFX con passphrase
+    // equivocada (o un archivo que no es PKCS#12/PEM) fallaría recién en la
+    // primera emisión — atraparlo acá, en onboarding (9.1.b.3 parse nativo;
+    // bundle PEM legacy sigue aceptado).
+    dte::KeyMaterial::from_keystore_bytes(&pfx_bytes, &passphrase)
+        .map_err(|e| anyhow!("el certificado no es utilizable para firmar: {e}"))?;
     let encrypted = dte::cert::encrypt_pfx(&pfx_bytes, &passphrase)
         .map_err(|e| anyhow!("encrypt_pfx falló: {e}"))?;
     // El TenantId espera el `id` part (ej. "abc") del Thing `tenant:abc`.

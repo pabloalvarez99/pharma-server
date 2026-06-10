@@ -141,6 +141,90 @@ impl KeyMaterial {
     pub fn from_parts(priv_key: RsaPrivateKey, cert_der: Vec<u8>) -> Self {
         Self { priv_key, cert_der }
     }
+
+    /// Parse nativo de un PFX/PKCS#12 (subtask 9.1.b.3): extrae la clave RSA
+    /// y el certificado de entidad directamente del DER, sin `openssl` externo.
+    /// Soporta los esquemas legacy de los emisores de certs SII (PBE-SHA1 con
+    /// 3DES/RC2, lo que produce OpenSSL `-legacy`) y PBES2 AES (OpenSSL 3
+    /// default), vía `p12-keystore` (pure Rust).
+    ///
+    /// `passphrase` es la del PFX (la misma que la farmacia teclea al emitir;
+    /// el flujo encrypt-at-rest de `cert::` usa la misma passphrase, así que
+    /// el operador maneja UNA sola clave).
+    pub fn from_pkcs12(pfx_der: &[u8], passphrase: &str) -> Result<Self, DteError> {
+        use p12_keystore::{KeyStore, Pkcs12ImportPolicy};
+        let ks = KeyStore::from_pkcs12(pfx_der, passphrase, Pkcs12ImportPolicy::Strict).map_err(
+            |e| DteError::CertInvalid(format!("PKCS#12 inválido o passphrase incorrecta: {e}")),
+        )?;
+        let (_alias, chain) = ks.private_key_chain().ok_or_else(|| {
+            DteError::CertInvalid(
+                "el PKCS#12 no contiene una clave privada con su certificado".to_string(),
+            )
+        })?;
+        let priv_key = RsaPrivateKey::from_pkcs8_der(chain.key().as_der()).map_err(|e| {
+            DteError::CertInvalid(format!(
+                "la clave del PKCS#12 no es una RSA PKCS#8 válida (SII requiere RSA): {e}"
+            ))
+        })?;
+        // El primer cert de la cadena es el de entidad (convención PKCS#12 que
+        // p12-keystore garantiza en Strict); el resto son intermedios/raíz que
+        // la firma XML-DSig del SII no necesita.
+        let cert = chain.certs().first().ok_or_else(|| {
+            DteError::CertInvalid(
+                "el PKCS#12 no contiene certificado asociado a la clave".to_string(),
+            )
+        })?;
+        Ok(Self {
+            priv_key,
+            cert_der: cert.as_der().to_vec(),
+        })
+    }
+
+    /// Decodifica material de firma desde los bytes tal-como-importados por
+    /// `pharma cert import` (post `cert::decrypt_pfx`): un PFX/PKCS#12 binario
+    /// (path nativo 9.1.b.3) o, back-compat, un bundle PEM texto (clave +
+    /// cert concatenados — el workaround `openssl pkcs12 -nodes` previo).
+    ///
+    /// Detección: DER PKCS#12 siempre abre con SEQUENCE (`0x30`); un bundle
+    /// PEM es texto que parte con `-----BEGIN`.
+    pub fn from_keystore_bytes(bytes: &[u8], passphrase: &str) -> Result<Self, DteError> {
+        if bytes.first() == Some(&0x30) {
+            return Self::from_pkcs12(bytes, passphrase);
+        }
+        let text = std::str::from_utf8(bytes).map_err(|_| {
+            DteError::CertInvalid(
+                "el certificado almacenado no es PKCS#12 (DER) ni un bundle PEM UTF-8".to_string(),
+            )
+        })?;
+        let key_pem = extract_pem_block(text, "PRIVATE KEY").ok_or_else(|| {
+            DteError::CertInvalid("el bundle PEM no contiene un bloque PRIVATE KEY".to_string())
+        })?;
+        let cert_pem = extract_pem_block(text, "CERTIFICATE").ok_or_else(|| {
+            DteError::CertInvalid("el bundle PEM no contiene un bloque CERTIFICATE".to_string())
+        })?;
+        Self::from_pem(&key_pem, &cert_pem)
+    }
+}
+
+/// Extrae el primer bloque PEM completo (BEGIN..END) cuyo tag contiene
+/// `needle` — "PRIVATE KEY" matchea PKCS#8 (`PRIVATE KEY`) y PKCS#1
+/// (`RSA PRIVATE KEY`). Movido desde el wiring HTTP al crate para que CLI y
+/// API compartan el mismo parser de bundle.
+fn extract_pem_block(bundle: &str, needle: &str) -> Option<String> {
+    let mut search_from = 0usize;
+    while let Some(rel) = bundle[search_from..].find("-----BEGIN ") {
+        let start = search_from + rel;
+        let tag_start = start + "-----BEGIN ".len();
+        let tag_end = bundle[tag_start..].find("-----")? + tag_start;
+        let tag = &bundle[tag_start..tag_end];
+        let end_marker = format!("-----END {tag}-----");
+        let end = bundle[start..].find(&end_marker)? + start + end_marker.len();
+        if tag.contains(needle) {
+            return Some(bundle[start..end].to_string());
+        }
+        search_from = end;
+    }
+    None
 }
 
 /// Decodifica el cuerpo base64 de un bloque PEM `-----BEGIN <tag>-----` a DER.
