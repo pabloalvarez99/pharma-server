@@ -11,6 +11,8 @@ import {
   listDtes,
   dteCafStatus,
   dteXml,
+  dteLibroVentas,
+  dteLibroVentasSigned,
   emitBoleta,
   sendDte,
   pollDte,
@@ -73,6 +75,24 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
           <button id="bol-emit-btn" class="btn-primary">Emitir y firmar</button>
         </div>
         <div id="bol-emit-status" class="cfg-status" hidden></div>
+      </div>
+
+      <div class="panel bol-libro">
+        <h3 class="section-title">Libro de ventas mensual</h3>
+        <p class="muted">XML <code>LibroCompraVenta</code> con las boletas aceptadas del mes. Sin firma para revisión contable; con la clave del certificado se descarga firmado (EnvioLibro) listo para el portal SII.</p>
+        <div class="bol-emit-form">
+          <div class="field">
+            <label for="bol-libro-period">Período</label>
+            <input id="bol-libro-period" type="month" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="bol-libro-pass">Clave del certificado (sólo firmado)</label>
+            <input id="bol-libro-pass" type="password" placeholder="••••••••" autocomplete="off" />
+          </div>
+          <button id="bol-libro-btn" class="btn-ghost">Descargar XML</button>
+          <button id="bol-libro-signed-btn" class="btn-primary">Descargar firmado</button>
+        </div>
+        <div id="bol-libro-status" class="cfg-status" hidden></div>
       </div>
 
       <div class="view-toolbar">
@@ -274,6 +294,56 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
     emitStatus.className = "cfg-status cfg-status-err";
     emitStatus.hidden = false;
   }
+
+  // --- libro de ventas ---------------------------------------------------------
+  const libroPeriod = host.querySelector<HTMLInputElement>("#bol-libro-period")!;
+  const libroPass = host.querySelector<HTMLInputElement>("#bol-libro-pass")!;
+  const libroBtn = host.querySelector<HTMLButtonElement>("#bol-libro-btn")!;
+  const libroSignedBtn = host.querySelector<HTMLButtonElement>("#bol-libro-signed-btn")!;
+  const libroStatus = host.querySelector<HTMLElement>("#bol-libro-status")!;
+  // Default: current month (input type=month wants YYYY-MM).
+  libroPeriod.value = new Date().toISOString().slice(0, 7);
+
+  function showLibroStatus(msg: string, ok: boolean): void {
+    libroStatus.textContent = msg;
+    libroStatus.className = ok ? "cfg-status cfg-status-ok" : "cfg-status cfg-status-err";
+    libroStatus.hidden = false;
+  }
+
+  async function downloadLibro(signed: boolean): Promise<void> {
+    const period = libroPeriod.value.trim();
+    libroStatus.hidden = true;
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      showLibroStatus("Selecciona el período (mes) del libro.", false);
+      return;
+    }
+    if (signed && !libroPass.value) {
+      showLibroStatus("Ingresa la clave del certificado para firmar el libro.", false);
+      return;
+    }
+    const btn = signed ? libroSignedBtn : libroBtn;
+    btn.disabled = true;
+    try {
+      const xml = signed
+        ? await dteLibroVentasSigned(serverUrl, period, libroPass.value)
+        : await dteLibroVentas(serverUrl, period);
+      libroPass.value = "";
+      downloadXml(xml, `libro-ventas-${period}${signed ? "-firmado" : ""}.xml`);
+      showLibroStatus(
+        signed
+          ? `Libro ${period} firmado descargado.`
+          : `Libro ${period} descargado (sin firma).`,
+        true,
+      );
+    } catch (err) {
+      showLibroStatus(asMessage(err), false);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  libroBtn.addEventListener("click", () => void downloadLibro(false));
+  libroSignedBtn.addEventListener("click", () => void downloadLibro(true));
 
   estadoSel.addEventListener("change", () => void loadList());
   host.querySelector<HTMLButtonElement>("#bol-refresh")!.addEventListener("click", () => {

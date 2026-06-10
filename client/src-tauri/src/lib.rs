@@ -2458,6 +2458,63 @@ async fn dte_xml(
         .map_err(|e| format!("Respuesta de XML inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/dte/libro-ventas?period=YYYY-MM` (Bearer, admin+) — monthly
+/// sales book XML (unsigned; accountant review / manual upload).
+#[tauri::command]
+async fn dte_libro_ventas(
+    state: State<'_, SessionState>,
+    server_url: String,
+    period: String,
+) -> Result<String, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/dte/libro-ventas"))
+        .query(&[("period", period)])
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Respuesta de libro de ventas inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/libro-ventas/signed` (Bearer, admin+) — monthly sales
+/// book signed with the company cert (EnvioLibro XML-DSig), ready for the SII
+/// portal. Passphrase travels in the body, never in the query string.
+#[tauri::command]
+async fn dte_libro_ventas_signed(
+    state: State<'_, SessionState>,
+    server_url: String,
+    period: String,
+    cert_passphrase: String,
+) -> Result<String, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/libro-ventas/signed"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "period": period,
+            "cert_passphrase": cert_passphrase,
+        }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("Respuesta de libro firmado inválida del servidor: {e}"))
+}
+
 /// POST `/api/v1/dte/boletas` (Bearer, cashier+) — emit + sign the boleta of a
 /// paid POS order. `cert_passphrase` decrypts the stored cert (never persisted).
 /// Rejects coded (`"CODE|message"`) so the view can show config errors nicely.
@@ -2689,6 +2746,8 @@ pub fn run() {
             list_dtes,
             dte_caf_status,
             dte_xml,
+            dte_libro_ventas,
+            dte_libro_ventas_signed,
             emit_boleta,
             send_dte,
             poll_dte,
