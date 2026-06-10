@@ -79,6 +79,24 @@ pub struct DteItem {
     pub exento: bool,
 }
 
+/// Referencia a otro documento tributario (elemento `Referencia` del xsd SII).
+/// Obligatoria en notas de crédito/débito (56/61); opcional en factura (33) y
+/// guía de despacho (52). No aplica a boleta (39).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DteReferencia {
+    /// Código SII del documento referenciado ("39", "33", "61", "52", "801"
+    /// orden de compra, "SET" para set de pruebas, etc.).
+    pub tipo_doc_ref: String,
+    pub folio_ref: String,
+    pub fecha_ref: DateTime<Utc>,
+    /// Código de referencia (obligatorio en notas): 1 anula documento,
+    /// 2 corrige texto, 3 corrige montos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cod_ref: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub razon_ref: Option<String>,
+}
+
 /// DTE completo. Representación in-memory; `xml_firmado` y `timbre` se llenan
 /// al firmar; `track_id` cuando hay envío SII.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +108,25 @@ pub struct Dte {
     pub rut_emisor: String,
     pub rut_receptor: String,
     pub razon_social_receptor: String,
+    /// Giro/dirección/comuna del receptor — obligatorios para factura (33),
+    /// notas (56/61) y guía (52); no aplican a boleta (39). Persistidos en
+    /// migración 0023.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub giro_receptor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direccion_receptor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comuna_receptor: Option<String>,
+    /// `IndTraslado` guía de despacho (52): 1 venta, 2 venta por efectuar,
+    /// 3 consignación, 4 entrega gratuita, 5 traslado interno, 6 otros no
+    /// venta, 7 guía devolución, 8 traslado exportación, 9 venta exportación.
+    /// Obligatorio para tipo 52; ignorado en el resto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ind_traslado: Option<i32>,
+    /// Referencias a otros documentos. Notas (56/61) requieren ≥1 con
+    /// `cod_ref`; opcionales en 33/52.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub referencias: Vec<DteReferencia>,
     pub monto_neto: rust_decimal::Decimal,
     pub iva: rust_decimal::Decimal,
     pub monto_exento: rust_decimal::Decimal,

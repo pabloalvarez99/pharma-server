@@ -1,7 +1,7 @@
 //! XML serializer for SII DTE schema (xsd 1.0).
 //!
-//! Subtask 9.1.a — boleta 39 implementada. Factura/notas/guía vienen en
-//! subtask 9.1.f.
+//! Boleta 39 (subtask 9.1.a) + factura 33, notas 56/61 y guía 52
+//! (subtask 9.1.f).
 
 pub mod boleta;
 pub mod factura;
@@ -21,17 +21,9 @@ use crate::DteError;
 pub fn render_unsigned(dte: &Dte, emisor: &EmisorConfig) -> Result<String, DteError> {
     match dte.tipo {
         DteTipo::BoletaElectronica => boleta::render(dte, emisor),
-        DteTipo::FacturaElectronica => Err(DteError::XmlInvalid(
-            "xml::render_unsigned tipo 33: pendiente subtask 9.1.f".to_string(),
-        )),
-        DteTipo::NotaDebito => Err(DteError::XmlInvalid(
-            "xml::render_unsigned tipo 56: pendiente subtask 9.1.f".to_string(),
-        )),
-        DteTipo::NotaCredito => Err(DteError::XmlInvalid(
-            "xml::render_unsigned tipo 61: pendiente subtask 9.1.f".to_string(),
-        )),
-        DteTipo::GuiaDespacho => Err(DteError::XmlInvalid(
-            "xml::render_unsigned tipo 52: pendiente subtask 9.1.f".to_string(),
-        )),
+        DteTipo::FacturaElectronica => factura::render(dte, emisor),
+        DteTipo::NotaDebito => nota_debito::render(dte, emisor),
+        DteTipo::NotaCredito => nota_credito::render(dte, emisor),
+        DteTipo::GuiaDespacho => guia::render(dte, emisor),
     }
 }
