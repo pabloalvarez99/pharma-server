@@ -1107,6 +1107,59 @@ export function dteXml(serverUrl: string, id: string): Promise<string> {
   return invoke<string>("dte_xml", { serverUrl, id });
 }
 
+/** Receptor completo — obligatorio en factura/notas/guía (33/56/61/52). */
+export interface DocReceptor {
+  rut: string;
+  razon_social: string;
+  giro: string;
+  direccion: string;
+  comuna: string;
+}
+
+/** Línea de documento. Precios IVA-incluido; el server calcula neto/IVA. */
+export interface DocItem {
+  nombre: string;
+  cantidad: string;
+  precio_unitario: string;
+  exento?: boolean;
+}
+
+/** Referencia al documento original (obligatoria en notas 56/61). */
+export interface DocReferencia {
+  tipo_doc_ref: string;
+  folio_ref: string;
+  fecha_ref: string; // YYYY-MM-DD
+  cod_ref?: number; // 1 anula, 2 corrige texto, 3 corrige montos
+  razon_ref?: string;
+}
+
+/** POST /api/v1/dte/documentos (Bearer, admin+) — emit + sign factura (33),
+ *  nota débito (56), nota crédito (61) o guía (52). Rejects `"CODE|message"`
+ *  — use {@link parseSaleError}. */
+export function emitDocumento(
+  serverUrl: string,
+  args: {
+    tipo: number;
+    certPassphrase: string;
+    receptor: DocReceptor;
+    items: DocItem[];
+    referencias?: DocReferencia[];
+    indTraslado?: number;
+    orderId?: string;
+  },
+): Promise<Dte> {
+  return invoke<Dte>("emit_documento", {
+    serverUrl,
+    tipo: args.tipo,
+    certPassphrase: args.certPassphrase,
+    receptor: args.receptor,
+    items: args.items,
+    referencias: args.referencias,
+    indTraslado: args.indTraslado,
+    orderId: args.orderId,
+  });
+}
+
 /** GET /api/v1/dte/libro-ventas?period=YYYY-MM (Bearer, admin+) — monthly
  *  sales book XML (unsigned, accountant review / manual upload). */
 export function dteLibroVentas(serverUrl: string, period: string): Promise<string> {

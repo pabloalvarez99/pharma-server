@@ -2555,6 +2555,56 @@ async fn emit_boleta(
         .map_err(|e| format!("|Respuesta de emisión inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/dte/documentos` (Bearer, admin+) — emit + sign factura (33),
+/// nota de débito (56), nota de crédito (61) or guía de despacho (52).
+/// Server computes totals from the items (IVA-included prices). Rejects coded
+/// (`"CODE|message"`) like `emit_boleta` so the view can render config errors.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn emit_documento(
+    state: State<'_, SessionState>,
+    server_url: String,
+    tipo: i32,
+    cert_passphrase: String,
+    receptor: serde_json::Value,
+    items: Vec<serde_json::Value>,
+    referencias: Option<Vec<serde_json::Value>>,
+    ind_traslado: Option<i32>,
+    order_id: Option<String>,
+) -> Result<Dte, String> {
+    let token = token_of(&state).map_err(|e| format!("|{e}"))?;
+    let http = client().map_err(|e| format!("|{e}"))?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({
+        "tipo": tipo,
+        "cert_passphrase": cert_passphrase,
+        "receptor": receptor,
+        "items": items,
+    });
+    if let Some(refs) = referencias.filter(|r| !r.is_empty()) {
+        body["referencias"] = serde_json::Value::Array(refs);
+    }
+    if let Some(it) = ind_traslado {
+        body["ind_traslado"] = serde_json::Value::from(it);
+    }
+    if let Some(ord) = order_id.filter(|s| !s.is_empty()) {
+        body["order_id"] = serde_json::Value::String(ord);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/dte/documentos"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("|{}", conn_error(e)))?;
+    if !resp.status().is_success() {
+        return Err(coded_error(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("|Respuesta de emisión inválida del servidor: {e}"))
+}
+
 /// POST `/api/v1/dte/{id}/send` (Bearer, admin+) — upload to SII. **Tier-gated**:
 /// Free gets 402 `FEATURE_REQUIRES_UPGRADE` (coded so the view shows an upgrade
 /// note instead of a hard error).
@@ -2748,6 +2798,7 @@ pub fn run() {
             dte_xml,
             dte_libro_ventas,
             dte_libro_ventas_signed,
+            emit_documento,
             emit_boleta,
             send_dte,
             poll_dte,
