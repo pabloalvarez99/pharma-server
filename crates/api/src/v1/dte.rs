@@ -11,11 +11,10 @@
 //! * **Emisor** (RUT, razón social, giro, dirección, comuna) vive en el
 //!   admin_setting `dte.emisor` como JSON (`EmisorConfig`) — reusa el CRUD
 //!   `PUT /api/v1/settings/{key}` existente; cero schema nuevo.
-//! * **Cert**: el blob cifrado de `cert_digital` debe contener un bundle PEM
-//!   (clave privada + certificado concatenados). El parse nativo de
-//!   PFX/PKCS#12 es la subtask 9.1.b.3 (pendiente); hasta entonces el
-//!   onboarding importa el PEM (`openssl pkcs12 -in cert.pfx -nodes`) vía
-//!   `pharma cert import`.
+//! * **Cert**: el blob cifrado de `cert_digital` contiene el PFX/PKCS#12 tal
+//!   cual (`pharma cert import cert.pfx` — parse nativo, subtask 9.1.b.3) o,
+//!   back-compat, un bundle PEM del workaround previo (`openssl pkcs12
+//!   -nodes`). `KeyMaterial::from_keystore_bytes` detecta el formato.
 //! * **Passphrase** del cert viaja en el request de emisión; nunca se
 //!   persiste ni se loguea (encrypt-at-rest, ADR-0011 §cert).
 //! * **Entorno SII**: admin_setting `dte.sii_env` = `sandbox` (default) |
@@ -223,27 +222,10 @@ async fn sii_env_of(db: &db::Db, tenant: &Thing) -> Result<dte::SiiEnv, ApiError
     })
 }
 
-/// Extrae el primer bloque PEM cuyo tag contiene `needle` (e.g. "PRIVATE KEY"
-/// matchea PKCS#8 y PKCS#1). Devuelve el bloque completo BEGIN..END.
-fn extract_pem_block(bundle: &str, needle: &str) -> Option<String> {
-    let mut search_from = 0usize;
-    while let Some(rel) = bundle[search_from..].find("-----BEGIN ") {
-        let start = search_from + rel;
-        let tag_start = start + "-----BEGIN ".len();
-        let tag_end = bundle[tag_start..].find("-----")? + tag_start;
-        let tag = &bundle[tag_start..tag_end];
-        let end_marker = format!("-----END {tag}-----");
-        let end = bundle[start..].find(&end_marker)? + start + end_marker.len();
-        if tag.contains(needle) {
-            return Some(bundle[start..end].to_string());
-        }
-        search_from = end;
-    }
-    None
-}
-
 /// Carga el cert vigente del tenant, lo descifra con `passphrase` y arma el
-/// `KeyMaterial` de firma. El blob debe ser un bundle PEM (ver doc módulo).
+/// `KeyMaterial` de firma. El blob es el PFX/PKCS#12 tal-como-importado
+/// (parse nativo 9.1.b.3) o, back-compat, un bundle PEM del workaround
+/// `openssl pkcs12 -nodes` — `from_keystore_bytes` detecta el formato.
 async fn load_keymaterial(
     db: &db::Db,
     tenant: &Thing,
@@ -257,22 +239,11 @@ async fn load_keymaterial(
     let Some(enc) = enc else {
         return Err(ApiError::conflict(
             "No hay certificado digital vigente para el tenant. Importa uno con \
-             `pharma cert import <cert.pem>` (bundle PEM: clave privada + certificado).",
+             `pharma cert import <cert.pfx>`.",
         ));
     };
     let plain = dte::cert::decrypt_pfx(&enc, passphrase)?;
-    let bundle = std::str::from_utf8(&plain).map_err(|_| {
-        ApiError::invalid(
-            "El certificado almacenado no es un bundle PEM UTF-8. El parse nativo de \
-             PFX/PKCS#12 está pendiente (subtask 9.1.b.3); re-importa el cert como PEM \
-             (`openssl pkcs12 -in cert.pfx -nodes -out cert.pem`).",
-        )
-    })?;
-    let key_pem = extract_pem_block(bundle, "PRIVATE KEY")
-        .ok_or_else(|| ApiError::invalid("El bundle PEM no contiene un bloque PRIVATE KEY."))?;
-    let cert_pem = extract_pem_block(bundle, "CERTIFICATE")
-        .ok_or_else(|| ApiError::invalid("El bundle PEM no contiene un bloque CERTIFICATE."))?;
-    Ok(dte::KeyMaterial::from_pem(&key_pem, &cert_pem)?)
+    Ok(dte::KeyMaterial::from_keystore_bytes(&plain, passphrase)?)
 }
 
 fn caf_from_record(r: &dte::caf::CafRecord) -> Result<dte::Caf, ApiError> {
@@ -973,18 +944,6 @@ fn stub_for_transition(row: &DteRow) -> Result<dte::Dte, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_pem_block_finds_key_and_cert() {
-        let bundle = "-----BEGIN RSA PRIVATE KEY-----\nQUJD\n-----END RSA PRIVATE KEY-----\n\
-                      -----BEGIN CERTIFICATE-----\nREVG\n-----END CERTIFICATE-----\n";
-        let key = extract_pem_block(bundle, "PRIVATE KEY").unwrap();
-        assert!(key.starts_with("-----BEGIN RSA PRIVATE KEY-----"));
-        assert!(key.ends_with("-----END RSA PRIVATE KEY-----"));
-        let cert = extract_pem_block(bundle, "CERTIFICATE").unwrap();
-        assert!(cert.contains("REVG"));
-        assert!(extract_pem_block(bundle, "EC PARAMETERS").is_none());
-    }
 
     #[test]
     fn extract_ted_returns_subtree() {

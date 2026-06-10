@@ -25,6 +25,7 @@ argon2.workspace = true
 zeroize.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+p12-keystore = "0.3.0"
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
