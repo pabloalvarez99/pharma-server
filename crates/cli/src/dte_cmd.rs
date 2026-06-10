@@ -42,6 +42,10 @@ pub enum DteCmd {
     Cancel(DteCancelArgs),
     /// Snapshot estilo X (resumen mensual de DTE emitidos).
     Stats(DteStatsArgs),
+    /// Emit + sign factura (33), nota débito (56), nota crédito (61) o guía
+    /// (52) desde un spec JSON. Boleta 39 NO va por acá (se emite desde su
+    /// orden POS vía API/cliente).
+    EmitDoc(DteEmitDocArgs),
 }
 
 #[derive(Args, Debug)]
@@ -103,6 +107,25 @@ pub struct DteStatsArgs {
     /// Mes a resumir (YYYY-MM). Default: mes actual UTC.
     #[arg(long)]
     pub month: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct DteEmitDocArgs {
+    /// Path al spec JSON: {"tipo":33,"receptor":{"rut","razon_social","giro",
+    /// "direccion","comuna"},"items":[{"nombre","cantidad","precio_unitario",
+    /// "exento"?}],"referencias":[{"tipo_doc_ref","folio_ref","fecha_ref"
+    /// YYYY-MM-DD,"cod_ref"?,"razon_ref"?}]?,"ind_traslado"?}. Precios con
+    /// IVA incluido; el desglose neto/IVA lo calcula el sistema.
+    pub file: PathBuf,
+    #[arg(long)]
+    pub tenant: Option<String>,
+    /// Nombre de la env var con la passphrase del cert. Si se omite, prompt
+    /// oculto. NUNCA via flag plano (shell history).
+    #[arg(long)]
+    pub passphrase_env: Option<String>,
+    /// Escribir el XML firmado a este archivo (además de persistir).
+    #[arg(long)]
+    pub out: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -300,6 +323,7 @@ pub async fn run_dte(cmd: DteCmd) -> anyhow::Result<()> {
         DteCmd::Export(args) => dte_export(&db, args).await,
         DteCmd::Cancel(args) => dte_cancel(&db, args).await,
         DteCmd::Stats(args) => dte_stats(&db, args).await,
+        DteCmd::EmitDoc(args) => dte_emit_doc(&db, args).await,
     }
 }
 
@@ -566,6 +590,201 @@ async fn dte_stats(db: &Db, args: DteStatsArgs) -> anyhow::Result<()> {
     for (k, v) in &by_tipo {
         println!("  {:<4}          {}", k, v);
     }
+    Ok(())
+}
+
+/// Spec JSON de `dte emit-doc`. Espejo del body de
+/// `POST /api/v1/dte/documentos` — `fecha_ref` como `YYYY-MM-DD` para no
+/// exigir RFC3339 en un archivo tipeado a mano.
+#[derive(Debug, Deserialize)]
+struct EmitDocFile {
+    tipo: i32,
+    receptor: dte::emit::ReceptorSpec,
+    items: Vec<dte::emit::ItemSpec>,
+    #[serde(default)]
+    referencias: Vec<EmitDocRefRow>,
+    #[serde(default)]
+    ind_traslado: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmitDocRefRow {
+    tipo_doc_ref: String,
+    folio_ref: String,
+    /// YYYY-MM-DD.
+    fecha_ref: String,
+    #[serde(default)]
+    cod_ref: Option<i32>,
+    #[serde(default)]
+    razon_ref: Option<String>,
+}
+
+/// `<TED>...</TED>` del XML firmado (mismo extractor que la API usa para
+/// persistir el timbre por separado).
+fn extract_ted(xml: &str) -> Option<String> {
+    let start = xml.find("<TED")?;
+    let end = xml.find("</TED>")? + "</TED>".len();
+    (end > start).then(|| xml[start..end].to_string())
+}
+
+async fn dte_emit_doc(db: &Db, args: DteEmitDocArgs) -> anyhow::Result<()> {
+    let tenant = resolve_tenant(db, args.tenant.as_deref()).await?;
+
+    // 1. Spec JSON → DocumentoSpec compartido con la API (`dte::emit`).
+    let raw = std::fs::read_to_string(&args.file)
+        .with_context(|| format!("read {}", args.file.display()))?;
+    let file: EmitDocFile = serde_json::from_str(&raw)
+        .with_context(|| format!("spec JSON inválido en {}", args.file.display()))?;
+    let tipo = dte::DteTipo::from_code(file.tipo).map_err(|e| anyhow!("{e}"))?;
+    let referencias = file
+        .referencias
+        .iter()
+        .map(|r| {
+            Ok(dte::emit::ReferenciaSpec {
+                tipo_doc_ref: r.tipo_doc_ref.clone(),
+                folio_ref: r.folio_ref.clone(),
+                fecha_ref: parse_date(&r.fecha_ref, "fecha_ref")?,
+                cod_ref: r.cod_ref,
+                razon_ref: r.razon_ref.clone(),
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let spec = dte::emit::DocumentoSpec {
+        tipo,
+        receptor: file.receptor,
+        items: file.items,
+        referencias,
+        ind_traslado: file.ind_traslado,
+    };
+    // Validar lo barato antes de pedir passphrase o quemar folio.
+    dte::emit::build_documento(&spec, 1, "validacion", Utc::now()).map_err(|e| anyhow!("{e}"))?;
+
+    // 2. Emisor del tenant (admin_setting `dte.emisor`, igual que la API).
+    #[derive(Deserialize)]
+    struct SettingRow {
+        value: String,
+    }
+    let mut q = db
+        .query("SELECT value FROM admin_setting WHERE tenant = $t AND key = 'dte.emisor' LIMIT 1")
+        .bind(("t", tenant.id.clone()))
+        .await
+        .context("SELECT admin_setting dte.emisor")?;
+    let setting: Option<SettingRow> = q.take(0)?;
+    let setting = setting.ok_or_else(|| {
+        anyhow!(
+            "falta configurar el emisor DTE del tenant '{}' (admin_setting dte.emisor; \
+             se setea desde Configuración en el cliente o vía API settings)",
+            tenant.slug
+        )
+    })?;
+    let emisor: dte::EmisorConfig = serde_json::from_str(&setting.value)
+        .context("admin_setting dte.emisor no es un JSON de emisor válido")?;
+
+    // 3. Cert + passphrase (env var o prompt oculto, igual que cert import).
+    let passphrase = match &args.passphrase_env {
+        Some(var) => std::env::var(var)
+            .with_context(|| format!("env var {var} no seteada (passphrase source)"))?,
+        None => rpassword::prompt_password("Cert passphrase: ").context("read passphrase")?,
+    };
+    if passphrase.is_empty() {
+        bail!("passphrase vacía");
+    }
+    let tenant_id = pharma_core::tenant::TenantId::new(tenant.id.id.to_raw());
+    let enc = dte::cert::load_cert(db, tenant_id)
+        .await
+        .map_err(|e| anyhow!("{e}"))?
+        .ok_or_else(|| {
+            anyhow!("no hay certificado digital vigente — importa uno con `pharma cert import`")
+        })?;
+    let plain = dte::cert::decrypt_pfx(&enc, &passphrase).map_err(|e| anyhow!("{e}"))?;
+    let key =
+        dte::KeyMaterial::from_keystore_bytes(&plain, &passphrase).map_err(|e| anyhow!("{e}"))?;
+
+    // 4. Folio atómico del CAF del tipo + render + TED + firma.
+    let (caf_record, folio) = dte::caf::assign_next(db, &tenant.id, tipo)
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
+    let caf = dte::Caf {
+        id: uuid::Uuid::new_v4(),
+        tipo_dte: tipo,
+        folio_desde: caf_record.folio_desde,
+        folio_hasta: caf_record.folio_hasta,
+        next_folio: caf_record.next_folio,
+        fecha_autorizacion: caf_record.fecha_autorizacion,
+        rut_emisor: caf_record.rut_emisor.clone(),
+        xml: caf_record.xml.clone(),
+        activo: caf_record.activo,
+    };
+    let doc = dte::emit::build_documento(&spec, folio, &emisor.rut, Utc::now())
+        .map_err(|e| anyhow!("{e}"))?;
+    let signed_xml =
+        dte::build_signed_dte(&doc, &emisor, &caf, &key).map_err(|e| anyhow!("{e}"))?;
+    let ted = extract_ted(&signed_xml);
+
+    // 5. Persistir como `signed` (mismo statement que la API, campos 0023).
+    let mut q = db
+        .query(
+            "CREATE dte SET tenant = $t, tipo = $tipo, folio = $folio, \
+             fecha_emision = $fe, rut_emisor = $re, rut_receptor = $rr, \
+             razon_social_receptor = $rs, giro_receptor = $gr, \
+             direccion_receptor = $dr, comuna_receptor = $cr, \
+             ind_traslado = $it, referencias = $refs, \
+             monto_neto = $mn, iva = $iva, monto_exento = $mx, \
+             monto_total = $mt, items = $items, estado = 'signed', \
+             xml_firmado = $xml, timbre = $ted RETURN AFTER",
+        )
+        .bind(("t", tenant.id.clone()))
+        .bind(("tipo", doc.tipo.code()))
+        .bind(("folio", folio))
+        .bind(("fe", surrealdb::sql::Datetime::from(doc.fecha_emision)))
+        .bind(("re", doc.rut_emisor.clone()))
+        .bind(("rr", doc.rut_receptor.clone()))
+        .bind(("rs", doc.razon_social_receptor.clone()))
+        .bind(("gr", doc.giro_receptor.clone()))
+        .bind(("dr", doc.direccion_receptor.clone()))
+        .bind(("cr", doc.comuna_receptor.clone()))
+        .bind(("it", doc.ind_traslado))
+        .bind(("refs", serde_json::to_value(&doc.referencias)?))
+        .bind((
+            "mn",
+            surrealdb::sql::Value::from(surrealdb::sql::Number::from(doc.monto_neto)),
+        ))
+        .bind((
+            "iva",
+            surrealdb::sql::Value::from(surrealdb::sql::Number::from(doc.iva)),
+        ))
+        .bind((
+            "mx",
+            surrealdb::sql::Value::from(surrealdb::sql::Number::from(doc.monto_exento)),
+        ))
+        .bind((
+            "mt",
+            surrealdb::sql::Value::from(surrealdb::sql::Number::from(doc.monto_total)),
+        ))
+        .bind(("items", serde_json::to_value(&doc.items)?))
+        .bind(("xml", signed_xml.clone()))
+        .bind(("ted", ted))
+        .await
+        .context("CREATE dte")?;
+    let row: Option<DteRow> = q.take(0)?;
+    let row = row.ok_or_else(|| anyhow!("CREATE no retornó la fila (folio {folio} quemado)"))?;
+
+    if let Some(out) = &args.out {
+        std::fs::write(out, &signed_xml).with_context(|| format!("write {}", out.display()))?;
+    }
+    println!(
+        "DTE emitido: id={} tipo={} folio={} receptor={} total=${} estado={}{}",
+        row.id,
+        row.tipo,
+        row.folio,
+        row.rut_receptor,
+        row.monto_total,
+        row.estado,
+        args.out
+            .as_ref()
+            .map(|p| format!(" xml={}", p.display()))
+            .unwrap_or_default()
+    );
     Ok(())
 }
 

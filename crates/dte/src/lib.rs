@@ -18,6 +18,7 @@
 pub mod caf;
 pub mod cancel;
 pub mod cert;
+pub mod emit;
 pub mod error;
 pub mod gating;
 pub mod reports;
