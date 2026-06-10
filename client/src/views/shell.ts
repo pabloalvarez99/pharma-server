@@ -25,6 +25,7 @@ import { renderGastos } from "./gastos";
 import { renderConfiguracion } from "./configuracion";
 import { renderImportar } from "./importar";
 import { renderBoletas } from "./boletas";
+import { renderFacturas } from "./facturas";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
@@ -37,6 +38,7 @@ const NAV = [
   { id: "compras", label: "Compras", hint: "Órdenes a proveedores" },
   { id: "recetas", label: "Recetas", hint: "Controlados y libro" },
   { id: "boletas", label: "Boletas", hint: "DTE y envío SII" },
+  { id: "facturas", label: "Facturas", hint: "Factura, notas y guía" },
   { id: "gastos", label: "Gastos", hint: "Egresos y caja chica" },
   { id: "reports", label: "Reportes", hint: "Ventas y márgenes" },
   { id: "auditoria", label: "Auditoría", hint: "Registro inmutable" },
@@ -110,6 +112,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "boletas":
       renderBoletas(host, serverUrl);
+      break;
+    case "facturas":
+      renderFacturas(host, serverUrl);
       break;
     case "gastos":
       renderGastos(host, serverUrl);
