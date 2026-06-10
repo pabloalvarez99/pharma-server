@@ -36,7 +36,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
@@ -65,6 +65,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route_layer(crate::role::layer(state.clone(), cashier_plus()));
 
     let admin = Router::new()
+        .route("/api/v1/dte/libro-ventas", get(libro_ventas))
         .route("/api/v1/dte/{id}/send", post(send_dte))
         .route("/api/v1/dte/{id}/poll", post(poll_dte))
         .route("/api/v1/dte/{id}/cancel", post(cancel_dte))
@@ -703,6 +704,122 @@ pub async fn dte_xml(
     let xml = row.xml_firmado.ok_or_else(|| {
         ApiError::conflict(format!("DTE en estado '{}' sin XML firmado.", row.estado))
     })?;
+    Ok((
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        xml,
+    )
+        .into_response())
+}
+
+// --- GET /api/v1/dte/libro-ventas ------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct LibroVentasQuery {
+    /// Período contable `YYYY-MM`.
+    period: String,
+}
+
+/// Subset de la fila `dte` que el libro necesita (sin `items`/`xml_firmado`).
+#[derive(Debug, Deserialize)]
+struct LibroRow {
+    tipo: i32,
+    folio: i64,
+    fecha_emision: DateTime<Utc>,
+    rut_emisor: String,
+    rut_receptor: String,
+    razon_social_receptor: String,
+    monto_neto: Decimal,
+    iva: Decimal,
+    monto_exento: Decimal,
+    monto_total: Decimal,
+}
+
+/// Libro de Ventas mensual (subtask 9.1.g): XML `LibroCompraVenta` SII con
+/// todos los DTEs `accepted` del período. Sin movimientos → libro vacío
+/// (caratula + resumen vacío, SII lo acepta). El XML NO va firmado acá
+/// (firma `EnvioLibro` es subtask aparte) — sirve para revisión contable y
+/// carga manual.
+#[utoipa::path(get, path = "/api/v1/dte/libro-ventas", tag = "DTE",
+    params(("period" = String, Query, description = "Período contable YYYY-MM")),
+    responses(
+        (status = 200, description = "XML LibroCompraVenta del período", content_type = "application/xml"),
+        (status = 400, description = "Período inválido o emisor sin configurar", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Requiere admin+", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn libro_ventas(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(q): Query<LibroVentasQuery>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+
+    let periodo = chrono::NaiveDate::parse_from_str(&format!("{}-01", q.period), "%Y-%m-%d")
+        .map_err(|_| {
+            ApiError::invalid(format!(
+                "'period' inválido '{}' (esperado YYYY-MM)",
+                q.period
+            ))
+        })?;
+    let from = Utc.from_utc_datetime(&periodo.and_hms_opt(0, 0, 0).expect("00:00:00 válido"));
+    let next = if periodo.month() == 12 {
+        chrono::NaiveDate::from_ymd_opt(periodo.year() + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(periodo.year(), periodo.month() + 1, 1)
+    }
+    .expect("primer día de mes válido");
+    let to = Utc.from_utc_datetime(&next.and_hms_opt(0, 0, 0).expect("00:00:00 válido"));
+
+    let emisor = load_emisor(db.as_ref(), &tenant).await?;
+
+    // WITH NOINDEX: mismo gotcha del planner que list_dtes (rows frescas
+    // invisibles vía índice compuesto). Volumen mensual por tenant es chico.
+    let mut res = db
+        .query(
+            "SELECT tipo, folio, fecha_emision, rut_emisor, rut_receptor, \
+             razon_social_receptor, monto_neto, iva, monto_exento, monto_total \
+             FROM dte WITH NOINDEX WHERE tenant = $t AND estado = 'accepted' \
+             AND fecha_emision >= $from AND fecha_emision < $to \
+             ORDER BY folio ASC",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("from", surrealdb::sql::Datetime::from(from)))
+        .bind(("to", surrealdb::sql::Datetime::from(to)))
+        .await
+        .map_err(db_err("libro ventas"))?;
+    let rows: Vec<LibroRow> = res.take(0).map_err(db_err("decode libro ventas"))?;
+
+    let dtes: Vec<dte::Dte> = rows
+        .into_iter()
+        .map(|r| {
+            Ok(dte::Dte {
+                id: uuid::Uuid::nil(),
+                tipo: dte::DteTipo::from_code(r.tipo)?,
+                folio: r.folio,
+                fecha_emision: r.fecha_emision,
+                rut_emisor: r.rut_emisor,
+                rut_receptor: r.rut_receptor,
+                razon_social_receptor: r.razon_social_receptor,
+                monto_neto: r.monto_neto,
+                iva: r.iva,
+                monto_exento: r.monto_exento,
+                monto_total: r.monto_total,
+                items: Vec::new(),
+                estado: dte::DteEstado::Accepted,
+                xml_firmado: None,
+                timbre: None,
+                track_id: None,
+                sii_glosa: None,
+                metadata: None,
+            })
+        })
+        .collect::<Result<_, ApiError>>()?;
+
+    let tenant_id = pharma_core::tenant::TenantId::new(tenant.id.to_raw());
+    let xml = dte::xml::libro::render_libro_ventas(&emisor, tenant_id, periodo, &dtes)?;
     Ok((
         [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
         xml,
