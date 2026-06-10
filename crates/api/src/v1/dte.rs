@@ -65,6 +65,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route_layer(crate::role::layer(state.clone(), cashier_plus()));
 
     let admin = Router::new()
+        .route("/api/v1/dte/documentos", post(emit_documento))
         .route("/api/v1/dte/libro-ventas", get(libro_ventas))
         .route("/api/v1/dte/libro-ventas/signed", post(libro_ventas_signed))
         .route("/api/v1/dte/{id}/send", post(send_dte))
@@ -487,6 +488,278 @@ pub async fn emit_boleta(
     let row: Option<DteRow> = q.take(0).map_err(db_err("decode created dte"))?;
     let row = row.ok_or_else(|| {
         tracing::error!("dte: CREATE no retornó fila (folio {folio} quemado)");
+        ApiError::internal("Error interno al persistir el DTE.")
+    })?;
+
+    Ok((StatusCode::CREATED, Json(DteDto::from(row))).into_response())
+}
+
+// --- POST /api/v1/dte/documentos ----------------------------------------------
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct ReceptorReq {
+    rut: String,
+    razon_social: String,
+    giro: String,
+    direccion: String,
+    comuna: String,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct DocItemReq {
+    nombre: String,
+    #[schema(value_type = String)]
+    cantidad: Decimal,
+    #[schema(value_type = String)]
+    precio_unitario: Decimal,
+    #[serde(default)]
+    exento: bool,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct ReferenciaReq {
+    /// Código SII del doc referenciado ("33", "39", "61", "52", "801"…).
+    tipo_doc_ref: String,
+    folio_ref: String,
+    /// Fecha del documento referenciado, YYYY-MM-DD.
+    fecha_ref: String,
+    /// 1 anula, 2 corrige texto, 3 corrige montos (obligatorio en notas).
+    #[serde(default)]
+    cod_ref: Option<i32>,
+    #[serde(default)]
+    razon_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct EmitDocumentoRequest {
+    /// Tipo SII: 33 factura, 56 nota débito, 61 nota crédito, 52 guía.
+    tipo: i32,
+    cert_passphrase: String,
+    receptor: ReceptorReq,
+    items: Vec<DocItemReq>,
+    #[serde(default)]
+    referencias: Vec<ReferenciaReq>,
+    /// Motivo del traslado (guía 52): 1 venta … 9 venta exportación.
+    #[serde(default)]
+    ind_traslado: Option<i32>,
+    /// Link opcional a la orden POS de origen.
+    #[serde(default)]
+    order_id: Option<String>,
+}
+
+/// IVA CL 19%: neto = round(afecto / 1.19), IVA = afecto − neto (convención
+/// SII: el IVA absorbe el redondeo para que neto + IVA == total afecto).
+fn desglose_iva(total_afecto: Decimal) -> (Decimal, Decimal) {
+    use rust_decimal::RoundingStrategy;
+    let tasa = Decimal::new(119, 2); // 1.19
+    let neto =
+        (total_afecto / tasa).round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
+    (neto, total_afecto - neto)
+}
+
+/// Emite factura (33), nota de débito (56), nota de crédito (61) o guía de
+/// despacho (52): folio CAF atómico del tipo, render XML (subtask 9.1.f),
+/// TED + firma XML-DSig. Queda `signed` local, enviable vía `/send`
+/// (Business+ para tipos ≠ 39). Boleta 39 NO va por acá (usa
+/// `POST /api/v1/dte/boletas`). Montos se calculan server-side de los items
+/// (precios IVA-incluido, convención retail CL): neto = round(afecto/1.19).
+#[utoipa::path(post, path = "/api/v1/dte/documentos", tag = "DTE",
+    request_body = EmitDocumentoRequest,
+    responses(
+        (status = 201, description = "Documento emitido y firmado (estado signed)", body = serde_json::Value),
+        (status = 400, description = "Tipo/receptor/items/referencias inválidos o emisor sin configurar", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Requiere admin+", body = crate::error::ErrorEnvelope),
+        (status = 404, description = "Orden vinculada no encontrada", body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Folios agotados / sin cert vigente", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn emit_documento(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<EmitDocumentoRequest>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let created_by = user_of(&claims).ok();
+
+    // 1. Tipo soportado por esta ruta.
+    let tipo = dte::DteTipo::from_code(req.tipo)?;
+    if tipo == dte::DteTipo::BoletaElectronica {
+        return Err(ApiError::invalid(
+            "La boleta (39) se emite desde su orden POS: POST /api/v1/dte/boletas.",
+        ));
+    }
+
+    // 2. Items → líneas DTE + totales (CLP entero por línea).
+    if req.items.is_empty() {
+        return Err(ApiError::invalid("El documento requiere al menos un item."));
+    }
+    let mut afecto = Decimal::ZERO;
+    let mut exento = Decimal::ZERO;
+    let mut dte_items: Vec<dte::DteItem> = Vec::with_capacity(req.items.len());
+    for (i, it) in req.items.iter().enumerate() {
+        if it.nombre.trim().is_empty() {
+            return Err(ApiError::invalid(format!("Item {}: nombre vacío.", i + 1)));
+        }
+        if it.cantidad <= Decimal::ZERO {
+            return Err(ApiError::invalid(format!(
+                "Item {}: cantidad debe ser > 0.",
+                i + 1
+            )));
+        }
+        if it.precio_unitario < Decimal::ZERO {
+            return Err(ApiError::invalid(format!(
+                "Item {}: precio_unitario no puede ser negativo.",
+                i + 1
+            )));
+        }
+        let monto = (it.cantidad * it.precio_unitario).trunc();
+        if it.exento {
+            exento += monto;
+        } else {
+            afecto += monto;
+        }
+        dte_items.push(dte::DteItem {
+            nro_linea: (i + 1) as u32,
+            nombre: it.nombre.trim().to_string(),
+            cantidad: it.cantidad,
+            precio_unitario: it.precio_unitario,
+            descuento_pct: None,
+            monto_item: monto,
+            codigo_sku: None,
+            unidad_medida: None,
+            exento: it.exento,
+        });
+    }
+    let (neto, iva) = desglose_iva(afecto);
+
+    // 3. Referencias (fecha YYYY-MM-DD). Las validaciones de obligatoriedad
+    //    por tipo (notas exigen cod_ref) las hace el renderer.
+    let referencias: Vec<dte::DteReferencia> = req
+        .referencias
+        .iter()
+        .map(|r| {
+            Ok(dte::DteReferencia {
+                tipo_doc_ref: r.tipo_doc_ref.clone(),
+                folio_ref: r.folio_ref.clone(),
+                fecha_ref: parse_day(&r.fecha_ref, "fecha_ref")?,
+                cod_ref: r.cod_ref,
+                razon_ref: r.razon_ref.clone(),
+            })
+        })
+        .collect::<Result<_, ApiError>>()?;
+
+    // 4. Orden vinculada (opcional, tenant-scoped).
+    let order_thing = match &req.order_id {
+        Some(raw) => {
+            let t = surrealdb::sql::thing(raw)
+                .map_err(|_| ApiError::invalid(format!("order_id inválido: {raw}")))?;
+            let mut q = db
+                .query("SELECT status, total FROM order WHERE id = $id AND tenant = $t LIMIT 1")
+                .bind(("id", t.clone()))
+                .bind(("t", tenant.clone()))
+                .await
+                .map_err(db_err("load order doc"))?;
+            let order: Option<OrderRow> = q.take(0).map_err(db_err("decode order doc"))?;
+            if order.is_none() {
+                return Err(ApiError::not_found());
+            }
+            Some(t)
+        }
+        None => None,
+    };
+
+    // 5. Emisor + cert antes de quemar folio (validar lo barato primero).
+    let emisor = load_emisor(db.as_ref(), &tenant).await?;
+    let key = load_keymaterial(db.as_ref(), &tenant, &req.cert_passphrase).await?;
+
+    // 6. Folio atómico del CAF activo del tipo.
+    let (caf_record, folio) = dte::caf::assign_next(db.as_ref(), &tenant, tipo).await?;
+    let caf = caf_from_record(&caf_record)?;
+
+    // 7. Dte in-memory → render + TED + firma (el renderer valida receptor
+    //    completo, referencias de notas e ind_traslado de guía).
+    let doc = dte::Dte {
+        id: uuid::Uuid::new_v4(),
+        tipo,
+        folio,
+        fecha_emision: Utc::now(),
+        rut_emisor: emisor.rut.clone(),
+        rut_receptor: req.receptor.rut.trim().to_string(),
+        razon_social_receptor: req.receptor.razon_social.trim().to_string(),
+        giro_receptor: Some(req.receptor.giro.trim().to_string()),
+        direccion_receptor: Some(req.receptor.direccion.trim().to_string()),
+        comuna_receptor: Some(req.receptor.comuna.trim().to_string()),
+        ind_traslado: req.ind_traslado,
+        referencias,
+        monto_neto: neto,
+        iva,
+        monto_exento: exento,
+        monto_total: afecto + exento,
+        items: dte_items,
+        estado: dte::DteEstado::Draft,
+        xml_firmado: None,
+        timbre: None,
+        track_id: None,
+        sii_glosa: None,
+        metadata: None,
+    };
+    let signed_xml = dte::build_signed_dte(&doc, &emisor, &caf, &key)?;
+    let ted = extract_ted(&signed_xml);
+
+    // 8. Persistir como `signed` (campos receptor/referencias: migración 0023).
+    let mut q = db
+        .query(
+            "CREATE dte SET tenant = $t, tipo = $tipo, folio = $folio, \
+             fecha_emision = $fe, rut_emisor = $re, rut_receptor = $rr, \
+             razon_social_receptor = $rs, giro_receptor = $gr, \
+             direccion_receptor = $dr, comuna_receptor = $cr, \
+             ind_traslado = $it, referencias = $refs, \
+             monto_neto = $mn, iva = $iva, monto_exento = $mx, \
+             monto_total = $mt, items = $items, estado = 'signed', \
+             xml_firmado = $xml, timbre = $ted, order_id = $ord, \
+             created_by = $user RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("tipo", doc.tipo.code()))
+        .bind(("folio", folio))
+        .bind(("fe", surrealdb::sql::Datetime::from(doc.fecha_emision)))
+        .bind(("re", doc.rut_emisor.clone()))
+        .bind(("rr", doc.rut_receptor.clone()))
+        .bind(("rs", doc.razon_social_receptor.clone()))
+        .bind(("gr", doc.giro_receptor.clone()))
+        .bind(("dr", doc.direccion_receptor.clone()))
+        .bind(("cr", doc.comuna_receptor.clone()))
+        .bind(("it", doc.ind_traslado))
+        .bind((
+            "refs",
+            serde_json::to_value(&doc.referencias).map_err(|e| {
+                tracing::error!(error = %e, "dte: referencias serialize");
+                ApiError::internal("Error interno al procesar el DTE.")
+            })?,
+        ))
+        .bind(("mn", dec_val(doc.monto_neto)))
+        .bind(("iva", dec_val(doc.iva)))
+        .bind(("mx", dec_val(doc.monto_exento)))
+        .bind(("mt", dec_val(doc.monto_total)))
+        .bind((
+            "items",
+            serde_json::to_value(&doc.items).map_err(|e| {
+                tracing::error!(error = %e, "dte: items serialize");
+                ApiError::internal("Error interno al procesar el DTE.")
+            })?,
+        ))
+        .bind(("xml", signed_xml))
+        .bind(("ted", ted))
+        .bind(("ord", order_thing))
+        .bind(("user", created_by))
+        .await
+        .map_err(db_err("create dte documento"))?;
+    let row: Option<DteRow> = q.take(0).map_err(db_err("decode created documento"))?;
+    let row = row.ok_or_else(|| {
+        tracing::error!("dte: CREATE documento no retornó fila (folio {folio} quemado)");
         ApiError::internal("Error interno al persistir el DTE.")
     })?;
 

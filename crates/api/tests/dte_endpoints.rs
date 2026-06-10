@@ -38,6 +38,10 @@ async fn set_emisor(db: &db::Db, tenant: &Thing) {
 /// CAF sintético (RSA 1024 testing-only, espejo de crates/dte tests/common)
 /// parseado + persistido como lo hace `pharma caf import`.
 async fn import_caf(db: &db::Db, tenant: &Thing, desde: i64, hasta: i64) {
+    import_caf_tipo(db, tenant, 39, desde, hasta).await;
+}
+
+async fn import_caf_tipo(db: &db::Db, tenant: &Thing, tipo: i32, desde: i64, hasta: i64) {
     let mut rng = rand::thread_rng();
     let priv_key = rsa::RsaPrivateKey::new(&mut rng, 1024).expect("rsa 1024");
     let pub_key = rsa::RsaPublicKey::from(&priv_key);
@@ -54,7 +58,7 @@ async fn import_caf(db: &db::Db, tenant: &Thing, desde: i64, hasta: i64) {
 <DA>
 <RE>{EMISOR_RUT}</RE>
 <RS>FARMACIA TEST SPA</RS>
-<TD>39</TD>
+<TD>{tipo}</TD>
 <RNG><D>{desde}</D><H>{hasta}</H></RNG>
 <FA>2026-01-01</FA>
 <RSAPK><M>placeholder</M><E>Aw==</E></RSAPK>
@@ -646,5 +650,259 @@ async fn libro_ventas_signed_xml() {
         &[],
     )
     .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn emit_documento_factura_nota_guia() {
+    let tdb = spawn_db().await;
+    let app = api::build_router(state_free(tdb.db.clone()));
+    let (token, tenant, _order_id) = seed_emission_fixture(&tdb.db, "doc1").await;
+    // CAFs para los tipos nuevos (la fixture ya trae 39).
+    import_caf_tipo(tdb.db.as_ref(), &tenant, 33, 1, 10).await;
+    import_caf_tipo(tdb.db.as_ref(), &tenant, 61, 1, 10).await;
+    import_caf_tipo(tdb.db.as_ref(), &tenant, 52, 1, 10).await;
+
+    let receptor = json!({
+        "rut": "77654321-0",
+        "razon_social": "DROGUERIA CLIENTE LTDA",
+        "giro": "VENTA AL POR MAYOR DE MEDICAMENTOS",
+        "direccion": "AV SIEMPRE VIVA 742",
+        "comuna": "LA SERENA",
+    });
+
+    // --- Factura 33: afecto 11900 -> neto 10000 + IVA 1900; exento aparte. ---
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 33,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [
+                { "nombre": "Ibuprofeno 400mg caja", "cantidad": "10", "precio_unitario": "1190" },
+                { "nombre": "Libro vademecum", "cantidad": "1", "precio_unitario": "5000", "exento": true },
+            ],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "factura: {body}");
+    assert_eq!(body["tipo"], 33);
+    assert_eq!(body["folio"], 1);
+    assert_eq!(body["estado"], "signed");
+    assert_eq!(body["monto_total"], "16900");
+    assert_eq!(body["has_xml"], true);
+    let factura_id = body["id"].as_str().expect("id").to_string();
+
+    // XML: desglose + receptor completo presentes y firma verificable.
+    let (st, body) = req_json(
+        &app,
+        "GET",
+        &format!("/api/v1/dte/{factura_id}/xml"),
+        Some(&token),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let xml = body.as_str().expect("xml");
+    assert!(xml.contains("<TipoDTE>33</TipoDTE>"), "{xml}");
+    assert!(xml.contains("<MntNeto>10000</MntNeto>"), "{xml}");
+    assert!(xml.contains("<IVA>1900</IVA>"), "{xml}");
+    assert!(xml.contains("<MntExe>5000</MntExe>"), "{xml}");
+    assert!(xml.contains("<MntTotal>16900</MntTotal>"), "{xml}");
+    assert!(xml.contains("<GiroRecep>"), "{xml}");
+    assert!(xml.contains("<IndExe>1</IndExe>"), "{xml}");
+    dte::verify_signature(xml).expect("firma factura verifica");
+
+    // --- Nota de credito 61 que anula la factura (referencia obligatoria). ---
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 61,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [
+                { "nombre": "Ibuprofeno 400mg caja", "cantidad": "10", "precio_unitario": "1190" },
+            ],
+            "referencias": [{
+                "tipo_doc_ref": "33",
+                "folio_ref": "1",
+                "fecha_ref": "2026-06-01",
+                "cod_ref": 1,
+                "razon_ref": "ANULA FACTURA",
+            }],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "nc: {body}");
+    assert_eq!(body["tipo"], 61);
+    assert_eq!(body["folio"], 1);
+
+    // NC sin referencias -> 400 (validacion del renderer).
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 61,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [{ "nombre": "x", "cantidad": "1", "precio_unitario": "100" }],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "nc sin ref: {body}");
+
+    // --- Guia 52 traslado interno: totales cero permitidos. ---
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 52,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "ind_traslado": 5,
+            "items": [{ "nombre": "Caja insumos sucursal", "cantidad": "3", "precio_unitario": "0" }],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "guia: {body}");
+    assert_eq!(body["tipo"], 52);
+    assert_eq!(body["monto_total"], "0");
+
+    // Guia sin ind_traslado -> 400.
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 52,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [{ "nombre": "x", "cantidad": "1", "precio_unitario": "0" }],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Boleta 39 por esta ruta -> 400 (usa /dte/boletas).
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 39,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [{ "nombre": "x", "cantidad": "1", "precio_unitario": "100" }],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Items vacios -> 400.
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&token),
+        Some(json!({
+            "tipo": 33,
+            "cert_passphrase": CERT_PASS,
+            "receptor": receptor,
+            "items": [],
+        })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn emit_documento_roles_y_caf() {
+    let tdb = spawn_db().await;
+    let app = api::build_router(state_free(tdb.db.clone()));
+    let (_token, tenant, _order_id) = seed_emission_fixture(&tdb.db, "doc2").await;
+
+    let receptor = json!({
+        "rut": "77654321-0",
+        "razon_social": "CLIENTE LTDA",
+        "giro": "COMERCIO",
+        "direccion": "CALLE 1",
+        "comuna": "COQUIMBO",
+    });
+    let body_factura = json!({
+        "tipo": 33,
+        "cert_passphrase": CERT_PASS,
+        "receptor": receptor,
+        "items": [{ "nombre": "x", "cantidad": "1", "precio_unitario": "1190" }],
+    });
+
+    // Cashier (sin admin) -> 403: documentos es operacion admin+.
+    #[derive(serde::Deserialize)]
+    struct Row {
+        id: surrealdb::sql::Thing,
+    }
+    let mut u = tdb
+        .db
+        .query("CREATE user SET tenant=$t, email='c@doc2.cl', password='x', roles=$r RETURN AFTER")
+        .bind(("t", tenant.clone()))
+        .bind(("r", vec!["cashier".to_string()]))
+        .await
+        .expect("create cashier");
+    let cashier_id = u
+        .take::<Option<Row>>(0)
+        .expect("decode")
+        .expect("user")
+        .id
+        .to_string();
+    let cashier_token = token_for(&cashier_id, &tenant.to_string(), vec!["cashier".into()]);
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&cashier_token),
+        Some(body_factura.clone()),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::FORBIDDEN, "cashier no emite documentos");
+
+    // Sin CAF tipo 33 cargado -> 409 folios agotados (fixture solo trae 39).
+    let (tid2, uid2, roles2) = seed_tenant_admin(tdb.db.as_ref(), "doc3", "a@doc3.cl").await;
+    let admin_token = token_for(&uid2, &tid2, roles2);
+    let tenant2 = tid_thing(&tid2);
+    set_emisor(tdb.db.as_ref(), &tenant2).await;
+    import_cert_pem(tdb.db.as_ref(), &tenant2, CERT_PASS).await;
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/documentos",
+        Some(&admin_token),
+        Some(body_factura),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "sin CAF 33: {body}");
+
+    // Sin token -> 401.
+    let (st, _b) = req_json(&app, "POST", "/api/v1/dte/documentos", None, None, &[]).await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
 }
