@@ -139,6 +139,12 @@ NO acá.
 
 ---
 
+## 2026-06-10 — Cliente Tauri: descarga libro de ventas en vista Boletas (PR #124)
+
+- **Qué** — panel "Libro de ventas mensual" en la vista Boletas: `input type=month` (default mes actual) + clave cert opcional; "Descargar XML" (sin firma, GET #121) y "Descargar firmado" (EnvioLibro POST #123). Blob download `libro-ventas-YYYY-MM[-firmado].xml`, passphrase se limpia tras uso.
+- **Tauri**: comandos `dte_libro_ventas` / `dte_libro_ventas_signed` (passphrase en body JSON, nunca query). **api.ts**: `dteLibroVentas` / `dteLibroVentasSigned`.
+- **GATE**: npm run build (tsc + vite) + clippy Tauri `-D warnings`. PR #124 merged a `feature/erp-parity` (`5039879`).
+
 ## 2026-06-10 — Firma XML-DSig del libro de ventas EnvioLibro (PR #123)
 
 - **Qué** — cierra el pendiente "firma EnvioLibro": `sign.rs` generaliza la firma enveloped a `sign_enveloped(tag, close_marker)`; `sign_xml` (DTE, `<Documento>`/`</DTE>`) delega sin cambio de output; nuevo `sign_libro` firma `<EnvioLibro ID>` e inserta `<Signature>` antes de `</LibroCompraVenta>` — mismo perfil RSA-SHA1 (la `LibroCV_v10.xsd` referencia la misma `xmldsignature_v10.xsd`). `verify_libro_signature` análogo.
