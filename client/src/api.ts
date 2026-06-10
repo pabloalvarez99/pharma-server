@@ -1107,6 +1107,22 @@ export function dteXml(serverUrl: string, id: string): Promise<string> {
   return invoke<string>("dte_xml", { serverUrl, id });
 }
 
+/** GET /api/v1/dte/libro-ventas?period=YYYY-MM (Bearer, admin+) — monthly
+ *  sales book XML (unsigned, accountant review / manual upload). */
+export function dteLibroVentas(serverUrl: string, period: string): Promise<string> {
+  return invoke<string>("dte_libro_ventas", { serverUrl, period });
+}
+
+/** POST /api/v1/dte/libro-ventas/signed (Bearer, admin+) — monthly sales book
+ *  signed with the company cert (EnvioLibro), ready for the SII portal. */
+export function dteLibroVentasSigned(
+  serverUrl: string,
+  period: string,
+  certPassphrase: string,
+): Promise<string> {
+  return invoke<string>("dte_libro_ventas_signed", { serverUrl, period, certPassphrase });
+}
+
 /** POST /api/v1/dte/boletas (Bearer, cashier+) — emit + sign the boleta of a
  *  paid POS order. Rejects with `"CODE|message"` — use {@link parseSaleError}. */
 export function emitBoleta(
