@@ -559,3 +559,92 @@ async fn libro_ventas_monthly_xml() {
     .await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn libro_ventas_signed_xml() {
+    let tdb = spawn_db().await;
+    let app = api::build_router(state_free(tdb.db.clone()));
+    let (token, _tenant, order_id) = seed_emission_fixture(&tdb.db, "librosig").await;
+    let period = Utc::now().format("%Y-%m").to_string();
+
+    // Emitir + marcar accepted para que el libro tenga movimiento.
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/boletas",
+        Some(&token),
+        Some(json!({ "order_id": order_id, "cert_passphrase": CERT_PASS })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "emit: {body}");
+    let dte_id = body["id"].as_str().expect("id").to_string();
+    let thing = surrealdb::sql::thing(&dte_id).expect("dte thing");
+    tdb.db
+        .query("UPDATE $id SET estado = 'accepted'")
+        .bind(("id", thing))
+        .await
+        .expect("update accepted")
+        .check()
+        .expect("update ok");
+
+    // Libro firmado: Signature enveloped sobre EnvioLibro, verificable.
+    let (st, body) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/libro-ventas/signed",
+        Some(&token),
+        Some(json!({ "period": period, "cert_passphrase": CERT_PASS })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "libro firmado: {body}");
+    let xml = body.as_str().expect("xml");
+    assert!(xml.contains("<NroDoc>1</NroDoc>"), "movimiento: {xml}");
+    assert!(
+        xml.contains("<Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\">"),
+        "firma presente: {xml}"
+    );
+    // <Signature> tras </EnvioLibro>, antes de </LibroCompraVenta>.
+    let pos_envio = xml.find("</EnvioLibro>").expect("cierre EnvioLibro");
+    let pos_sig = xml.find("<Signature").expect("Signature");
+    let pos_root = xml.find("</LibroCompraVenta>").expect("cierre raíz");
+    assert!(pos_envio < pos_sig && pos_sig < pos_root, "posición firma");
+    dte::verify_libro_signature(xml).expect("firma libro verifica");
+
+    // Passphrase mala → error (cert no descifra), sin XML.
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/libro-ventas/signed",
+        Some(&token),
+        Some(json!({ "period": period, "cert_passphrase": "wrong-pass" })),
+        &[],
+    )
+    .await;
+    assert_ne!(st, StatusCode::OK, "passphrase mala no firma");
+
+    // Período inválido → 400.
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/libro-ventas/signed",
+        Some(&token),
+        Some(json!({ "period": "2026-99", "cert_passphrase": CERT_PASS })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    // Sin token → 401.
+    let (st, _b) = req_json(
+        &app,
+        "POST",
+        "/api/v1/dte/libro-ventas/signed",
+        None,
+        Some(json!({ "period": period, "cert_passphrase": CERT_PASS })),
+        &[],
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+}

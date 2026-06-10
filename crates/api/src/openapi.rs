@@ -211,6 +211,7 @@ impl Modify for SecurityAddon {
         crate::v1::dte::poll_dte,
         crate::v1::dte::cancel_dte,
         crate::v1::dte::libro_ventas,
+        crate::v1::dte::libro_ventas_signed,
     ),
     components(schemas(ErrorEnvelope, ErrorBody)),
     modifiers(&SecurityAddon),
