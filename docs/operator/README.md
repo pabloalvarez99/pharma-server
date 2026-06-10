@@ -46,6 +46,9 @@ servidor. Para eso existe el manual técnico (`docs/ops/`).
    — qué hacer si algo no funciona como esperás.
 8. [Respaldo de la información](./07-respaldo.md)
    — para el administrador: cómo verificar que el respaldo nocturno corrió.
+9. [Boletas electrónicas SII](./08-boletas-sii.md)
+   — certificado digital, folios (CAF), emitir y firmar boletas, libro de
+   ventas mensual para el contador.
 
 ## Cómo imprimir todo el manual
 
