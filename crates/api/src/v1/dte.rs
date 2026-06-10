@@ -66,6 +66,7 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     let admin = Router::new()
         .route("/api/v1/dte/libro-ventas", get(libro_ventas))
+        .route("/api/v1/dte/libro-ventas/signed", post(libro_ventas_signed))
         .route("/api/v1/dte/{id}/send", post(send_dte))
         .route("/api/v1/dte/{id}/poll", post(poll_dte))
         .route("/api/v1/dte/{id}/cancel", post(cancel_dte))
@@ -761,13 +762,20 @@ pub async fn libro_ventas(
 ) -> Result<axum::response::Response, ApiError> {
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
+    let xml = build_libro_xml(db.as_ref(), &tenant, &q.period).await?;
+    Ok((
+        [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
+        xml,
+    )
+        .into_response())
+}
 
-    let periodo = chrono::NaiveDate::parse_from_str(&format!("{}-01", q.period), "%Y-%m-%d")
-        .map_err(|_| {
-            ApiError::invalid(format!(
-                "'period' inválido '{}' (esperado YYYY-MM)",
-                q.period
-            ))
+/// Render compartido del `LibroCompraVenta` del período (sin firma). Usado
+/// por el GET (revisión/carga manual) y el POST firmado.
+async fn build_libro_xml(db: &db::Db, tenant: &Thing, period: &str) -> Result<String, ApiError> {
+    let periodo =
+        chrono::NaiveDate::parse_from_str(&format!("{period}-01"), "%Y-%m-%d").map_err(|_| {
+            ApiError::invalid(format!("'period' inválido '{period}' (esperado YYYY-MM)"))
         })?;
     let from = Utc.from_utc_datetime(&periodo.and_hms_opt(0, 0, 0).expect("00:00:00 válido"));
     let next = if periodo.month() == 12 {
@@ -778,7 +786,7 @@ pub async fn libro_ventas(
     .expect("primer día de mes válido");
     let to = Utc.from_utc_datetime(&next.and_hms_opt(0, 0, 0).expect("00:00:00 válido"));
 
-    let emisor = load_emisor(db.as_ref(), &tenant).await?;
+    let emisor = load_emisor(db, tenant).await?;
 
     // WITH NOINDEX: mismo gotcha del planner que list_dtes (rows frescas
     // invisibles vía índice compuesto). Volumen mensual por tenant es chico.
@@ -829,10 +837,48 @@ pub async fn libro_ventas(
         .collect::<Result<_, ApiError>>()?;
 
     let tenant_id = pharma_core::tenant::TenantId::new(tenant.id.to_raw());
-    let xml = dte::xml::libro::render_libro_ventas(&emisor, tenant_id, periodo, &dtes)?;
+    Ok(dte::xml::libro::render_libro_ventas(
+        &emisor, tenant_id, periodo, &dtes,
+    )?)
+}
+
+// --- POST /api/v1/dte/libro-ventas/signed -----------------------------------
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct LibroSignedReq {
+    /// Período contable `YYYY-MM`.
+    period: String,
+    /// Passphrase del cert digital (la misma del PFX importado).
+    cert_passphrase: String,
+}
+
+/// Libro de Ventas mensual FIRMADO (firma `EnvioLibro`): mismo XML del GET
+/// más la firma XML-DSig enveloped sobre `<EnvioLibro>` con el cert digital
+/// de la empresa — listo para carga al portal SII. POST (no GET) porque la
+/// passphrase del cert no debe viajar en query string.
+#[utoipa::path(post, path = "/api/v1/dte/libro-ventas/signed", tag = "DTE",
+    request_body = LibroSignedReq,
+    responses(
+        (status = 200, description = "XML LibroCompraVenta firmado", content_type = "application/xml"),
+        (status = 400, description = "Período inválido, emisor o cert sin configurar", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Requiere admin+", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn libro_ventas_signed(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<LibroSignedReq>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let xml = build_libro_xml(db.as_ref(), &tenant, &req.period).await?;
+    let key = load_keymaterial(db.as_ref(), &tenant, &req.cert_passphrase).await?;
+    let signed = dte::sign_libro(&xml, &key)?;
     Ok((
         [(header::CONTENT_TYPE, "application/xml; charset=utf-8")],
-        xml,
+        signed,
     )
         .into_response())
 }

@@ -257,10 +257,31 @@ fn pem_body_der(pem: &str, tag: &str) -> Result<Vec<u8>, DteError> {
 /// - `SignFailed` si no encuentra `<Documento>` / su `ID`, o si la firma RSA
 ///   falla.
 pub fn sign_xml(xml_with_ted: &str, key: &KeyMaterial) -> Result<String, DteError> {
-    let (documento, id) = extract_documento(xml_with_ted)?;
+    sign_enveloped(xml_with_ted, "Documento", "</DTE>", key)
+}
 
-    // 1. DigestValue = base64(sha1(<Documento>...</Documento>)).
-    let digest_value = B64.encode(sha1_bytes(documento.as_bytes()));
+/// Firma el Libro de Ventas (`LibroCompraVenta` de `xml::libro`): enveloped
+/// signature sobre el `<EnvioLibro ID="...">`, con el `<Signature>` insertado
+/// como hermano antes de `</LibroCompraVenta>` — mismo perfil XML-DSig
+/// RSA-SHA1 que el DTE (la xsd `LibroCV_v10.xsd` del SII referencia la misma
+/// `xmldsignature_v10.xsd`).
+pub fn sign_libro(xml_libro: &str, key: &KeyMaterial) -> Result<String, DteError> {
+    sign_enveloped(xml_libro, "EnvioLibro", "</LibroCompraVenta>", key)
+}
+
+/// Núcleo de la firma enveloped: extrae el subtree `<{tag} ID="...">`, lo
+/// digiere, firma el `SignedInfo` y agrega el `<Signature>` justo antes de
+/// `close_marker` (el cierre del elemento raíz).
+fn sign_enveloped(
+    xml: &str,
+    tag: &str,
+    close_marker: &str,
+    key: &KeyMaterial,
+) -> Result<String, DteError> {
+    let (subtree, id) = extract_subtree_with_id(xml, tag)?;
+
+    // 1. DigestValue = base64(sha1(<{tag}>...</{tag}>)).
+    let digest_value = B64.encode(sha1_bytes(subtree.as_bytes()));
 
     // 2. SignedInfo canónico (con xmlns materializado para firmar el nodo
     //    aislado, como hace C14N al heredarlo de <Signature>).
@@ -278,8 +299,8 @@ pub fn sign_xml(xml_with_ted: &str, key: &KeyMaterial) -> Result<String, DteErro
          <SignatureValue>{signature_value}</SignatureValue>{key_info}</Signature>"
     );
 
-    // 5. Insertar <Signature> tras </Documento>, antes de </DTE>.
-    inject_signature(xml_with_ted, &signature)
+    // 5. Insertar <Signature> tras el subtree firmado, antes del cierre raíz.
+    inject_signature(xml, close_marker, &signature)
 }
 
 /// Wrapper end-to-end: renderiza el DTE sin firma, inyecta el TED del CAF,
@@ -310,27 +331,28 @@ fn inject_ted(xml: &str, ted: &str) -> Result<String, DteError> {
     Ok(out)
 }
 
-/// Extrae el subtree `<Documento ...>...</Documento>` y el valor de su atributo
-/// `ID` (usado en `Reference URI="#ID"`).
-fn extract_documento(xml: &str) -> Result<(String, String), DteError> {
+/// Extrae el subtree `<{tag} ...>...</{tag}>` completo y el valor de su
+/// atributo `ID` (usado en `Reference URI="#ID"`).
+fn extract_subtree_with_id(xml: &str, tag: &str) -> Result<(String, String), DteError> {
+    let open = format!("<{tag}");
     let start = xml
-        .find("<Documento")
-        .ok_or_else(|| DteError::SignFailed("XML sin <Documento> para firmar".to_string()))?;
-    let close = "</Documento>";
+        .find(&open)
+        .ok_or_else(|| DteError::SignFailed(format!("XML sin <{tag}> para firmar")))?;
+    let close = format!("</{tag}>");
     let rel_end = xml[start..]
-        .find(close)
-        .ok_or_else(|| DteError::SignFailed("XML sin cierre </Documento>".to_string()))?;
-    let documento = xml[start..start + rel_end + close.len()].to_string();
+        .find(&close)
+        .ok_or_else(|| DteError::SignFailed(format!("XML sin cierre </{tag}>")))?;
+    let subtree = xml[start..start + rel_end + close.len()].to_string();
 
     // Atributo ID dentro del start-tag (hasta el primer '>').
-    let tag_end = documento
+    let tag_end = subtree
         .find('>')
-        .ok_or_else(|| DteError::SignFailed("start-tag <Documento> sin cierre '>'".to_string()))?;
-    let start_tag = &documento[..tag_end];
+        .ok_or_else(|| DteError::SignFailed(format!("start-tag <{tag}> sin cierre '>'")))?;
+    let start_tag = &subtree[..tag_end];
     let id = extract_attr(start_tag, "ID").ok_or_else(|| {
-        DteError::SignFailed("<Documento> sin atributo ID (requerido por Reference)".to_string())
+        DteError::SignFailed(format!("<{tag}> sin atributo ID (requerido por Reference)"))
     })?;
-    Ok((documento, id))
+    Ok((subtree, id))
 }
 
 /// Extrae `attr="valor"` de un start-tag. Acepta comillas dobles (las que
@@ -382,11 +404,11 @@ fn build_key_info(pub_key: &RsaPublicKey, cert_der: &[u8]) -> String {
     )
 }
 
-/// Inserta el `<Signature>` justo antes de `</DTE>` (hermano de `<Documento>`).
-fn inject_signature(xml: &str, signature: &str) -> Result<String, DteError> {
-    let marker = "</DTE>";
+/// Inserta el `<Signature>` justo antes de `marker` (el cierre del elemento
+/// raíz: `</DTE>` o `</LibroCompraVenta>`).
+fn inject_signature(xml: &str, marker: &str, signature: &str) -> Result<String, DteError> {
     let pos = xml.find(marker).ok_or_else(|| {
-        DteError::SignFailed("XML sin </DTE> para insertar <Signature>".to_string())
+        DteError::SignFailed(format!("XML sin {marker} para insertar <Signature>"))
     })?;
     let mut out = String::with_capacity(xml.len() + signature.len());
     out.push_str(&xml[..pos]);
@@ -416,17 +438,26 @@ fn sign_rsa_sha1(data: &[u8], key: &RsaPrivateKey) -> Result<String, DteError> {
 /// `<RSAKeyValue>`. Usado por tests de roundtrip y por consumidores que quieran
 /// validar firmas propias antes de despachar al SII.
 pub fn verify_signature(signed_xml: &str) -> Result<(), DteError> {
+    verify_enveloped(signed_xml, "Documento")
+}
+
+/// Verifica un Libro de Ventas firmado por `sign_libro` (digest sobre el
+/// `<EnvioLibro>`).
+pub fn verify_libro_signature(signed_xml: &str) -> Result<(), DteError> {
+    verify_enveloped(signed_xml, "EnvioLibro")
+}
+
+fn verify_enveloped(signed_xml: &str, tag: &str) -> Result<(), DteError> {
     use rsa::traits::SignatureScheme;
 
-    let (documento, _id) = extract_documento(signed_xml)?;
+    let (documento, _id) = extract_subtree_with_id(signed_xml, tag)?;
     let digest_calc = B64.encode(sha1_bytes(documento.as_bytes()));
     let digest_xml = extract_element(signed_xml, "DigestValue")
         .ok_or_else(|| DteError::SignFailed("firma sin <DigestValue>".to_string()))?;
     if digest_calc != digest_xml {
-        return Err(DteError::SignFailed(
-            "DigestValue no coincide con el <Documento> (documento alterado tras firmar)"
-                .to_string(),
-        ));
+        return Err(DteError::SignFailed(format!(
+            "DigestValue no coincide con el <{tag}> (documento alterado tras firmar)"
+        )));
     }
 
     let signed_info = extract_subtree(signed_xml, "SignedInfo")
@@ -525,7 +556,7 @@ mod tests {
 
     #[test]
     fn extract_documento_gets_id() {
-        let (doc, id) = extract_documento(SAMPLE_DTE).unwrap();
+        let (doc, id) = extract_subtree_with_id(SAMPLE_DTE, "Documento").unwrap();
         assert_eq!(id, "F123T39");
         assert!(doc.starts_with("<Documento ID=\"F123T39\">"));
         assert!(doc.ends_with("</Documento>"));
@@ -536,7 +567,30 @@ mod tests {
     #[test]
     fn extract_documento_no_id_fails() {
         let xml = "<DTE><Documento>x</Documento></DTE>";
-        assert!(extract_documento(xml).is_err());
+        assert!(extract_subtree_with_id(xml, "Documento").is_err());
+    }
+
+    #[test]
+    fn sign_libro_roundtrip() {
+        let key = test_key();
+        let libro = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<LibroCompraVenta><EnvioLibro ID=\"LV202605\">\
+<Caratula><RutEmisorLibro>76123456-7</RutEmisorLibro>\
+<PeriodoTributario>2026-05</PeriodoTributario></Caratula>\
+<ResumenPeriodo/><DocumentosLista/></EnvioLibro></LibroCompraVenta>";
+        let signed = sign_libro(libro, &key).expect("firmar libro");
+        assert!(signed.contains("<Reference URI=\"#LV202605\">"));
+        // <Signature> tras </EnvioLibro>, antes de </LibroCompraVenta>.
+        let pos_envio = signed.find("</EnvioLibro>").unwrap();
+        let pos_sig = signed.find("<Signature").unwrap();
+        let pos_root = signed.find("</LibroCompraVenta>").unwrap();
+        assert!(pos_envio < pos_sig && pos_sig < pos_root);
+        verify_libro_signature(&signed).expect("verify libro roundtrip");
+
+        // Tamper dentro del EnvioLibro firmado → digest mismatch.
+        let tampered = signed.replace("2026-05", "2026-06");
+        let err = verify_libro_signature(&tampered).expect_err("tamper detectado");
+        assert!(format!("{err}").contains("DigestValue no coincide"));
     }
 
     #[test]
