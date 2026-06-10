@@ -26,6 +26,7 @@ pub fn render(dte: &Dte, emisor: &EmisorConfig) -> Result<String, DteError> {
         id,
         encabezado: build_encabezado(dte, emisor),
         detalle: dte.items.iter().map(build_detalle).collect(),
+        referencia: Vec::new(),
         tmst_firma: dte.fecha_emision.format("%Y-%m-%dT%H:%M:%S").to_string(),
     };
     let root = DteXml {
@@ -44,6 +45,7 @@ fn build_encabezado(dte: &Dte, emisor: &EmisorConfig) -> Encabezado {
             tipo_dte: dte.tipo.code(),
             folio: dte.folio,
             fch_emis: dte.fecha_emision.format("%Y-%m-%d").to_string(),
+            ind_traslado: None,
             // Boleta retail farmacia: venta de bienes/servicios = 3. SII
             // recomienda omitir si MntTotal == MntExe; conservador: incluir.
             ind_servicio: Some(3),
@@ -60,6 +62,9 @@ fn build_encabezado(dte: &Dte, emisor: &EmisorConfig) -> Encabezado {
         receptor: Receptor {
             rut_recep: dte.rut_receptor.clone(),
             rzn_soc_recep: dte.razon_social_receptor.clone(),
+            giro_recep: None,
+            dir_recep: None,
+            cmna_recep: None,
         },
         totales: Totales {
             mnt_neto: (neto > 0).then_some(neto),
@@ -74,6 +79,7 @@ fn build_encabezado(dte: &Dte, emisor: &EmisorConfig) -> Encabezado {
 fn build_detalle(item: &DteItem) -> Detalle {
     Detalle {
         nro_lin_det: item.nro_linea,
+        ind_exe: item.exento.then_some(1),
         nmb_item: item.nombre.clone(),
         qty_item: decimal_str(item.cantidad),
         prc_item: decimal_str(item.precio_unitario),
@@ -83,12 +89,12 @@ fn build_detalle(item: &DteItem) -> Detalle {
 
 /// CLP siempre entero. Trunca decimales (SII redondea internamente, pero el
 /// caller debe entregar montos ya cuadrados — neto + iva == total).
-fn clp_int(d: Decimal) -> i64 {
+pub(crate) fn clp_int(d: Decimal) -> i64 {
     d.trunc().to_i64().unwrap_or(0)
 }
 
 /// Cantidades/precios admiten decimales en SII (xsd `PrcItem` xs:decimal).
 /// Formato normalizado: sin trailing zeros.
-fn decimal_str(d: Decimal) -> String {
+pub(crate) fn decimal_str(d: Decimal) -> String {
     d.normalize().to_string()
 }

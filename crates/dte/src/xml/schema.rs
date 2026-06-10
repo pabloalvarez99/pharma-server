@@ -28,8 +28,13 @@ pub struct Documento {
     pub encabezado: Encabezado,
     #[serde(rename = "Detalle")]
     pub detalle: Vec<Detalle>,
-    /// `TmstFirma` siempre se escribe; el TED se inyecta entre Detalle y
-    /// `TmstFirma` en una pasada de string-replace (subtask 9.1.b).
+    /// Referencias a otros documentos (xsd: tras Detalle, antes del TED).
+    /// Obligatorias en notas 56/61; vacío = no se serializa.
+    #[serde(rename = "Referencia", skip_serializing_if = "Vec::is_empty")]
+    pub referencia: Vec<Referencia>,
+    /// `TmstFirma` siempre se escribe; el TED se inyecta entre Referencia y
+    /// `TmstFirma` en una pasada de string-replace (subtask 9.1.b) — el xsd
+    /// pone el TED justo después de Referencia, antes de TmstFirma.
     #[serde(rename = "TmstFirma")]
     pub tmst_firma: String,
 }
@@ -54,6 +59,10 @@ pub struct IdDoc {
     pub folio: i64,
     #[serde(rename = "FchEmis")]
     pub fch_emis: String,
+    /// `IndTraslado` guía 52 (1 venta … 9 venta exportación). xsd: va antes
+    /// de `IndServicio`.
+    #[serde(rename = "IndTraslado", skip_serializing_if = "Option::is_none")]
+    pub ind_traslado: Option<i32>,
     /// `IndServicio`: 1 servicios periódicos, 2 servicios periódicos domiciliarios,
     /// 3 venta de bienes/servicios (default boleta retail farmacia).
     #[serde(rename = "IndServicio", skip_serializing_if = "Option::is_none")]
@@ -84,6 +93,14 @@ pub struct Receptor {
     pub rut_recep: String,
     #[serde(rename = "RznSocRecep")]
     pub rzn_soc_recep: String,
+    /// Giro/dirección/comuna del receptor — obligatorios en 33/56/61/52,
+    /// no aplican a boleta 39. xsd: GiroRecep → DirRecep → CmnaRecep.
+    #[serde(rename = "GiroRecep", skip_serializing_if = "Option::is_none")]
+    pub giro_recep: Option<String>,
+    #[serde(rename = "DirRecep", skip_serializing_if = "Option::is_none")]
+    pub dir_recep: Option<String>,
+    #[serde(rename = "CmnaRecep", skip_serializing_if = "Option::is_none")]
+    pub cmna_recep: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -104,6 +121,9 @@ pub struct Totales {
 pub struct Detalle {
     #[serde(rename = "NroLinDet")]
     pub nro_lin_det: u32,
+    /// `IndExe = 1`: línea exenta de IVA. xsd: entre NroLinDet y NmbItem.
+    #[serde(rename = "IndExe", skip_serializing_if = "Option::is_none")]
+    pub ind_exe: Option<i32>,
     #[serde(rename = "NmbItem")]
     pub nmb_item: String,
     #[serde(rename = "QtyItem")]
@@ -112,4 +132,22 @@ pub struct Detalle {
     pub prc_item: String,
     #[serde(rename = "MontoItem")]
     pub monto_item: i64,
+}
+
+/// Elemento `Referencia` (xsd: NroLinRef → TpoDocRef → FolioRef → FchRef →
+/// CodRef → RaznRef). Hasta 40 por documento.
+#[derive(Debug, Serialize)]
+pub struct Referencia {
+    #[serde(rename = "NroLinRef")]
+    pub nro_lin_ref: u32,
+    #[serde(rename = "TpoDocRef")]
+    pub tpo_doc_ref: String,
+    #[serde(rename = "FolioRef")]
+    pub folio_ref: String,
+    #[serde(rename = "FchRef")]
+    pub fch_ref: String,
+    #[serde(rename = "CodRef", skip_serializing_if = "Option::is_none")]
+    pub cod_ref: Option<i32>,
+    #[serde(rename = "RaznRef", skip_serializing_if = "Option::is_none")]
+    pub razn_ref: Option<String>,
 }

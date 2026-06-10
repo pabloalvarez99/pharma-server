@@ -427,6 +427,11 @@ pub async fn emit_boleta(
             .razon_social_receptor
             .clone()
             .unwrap_or_else(|| "SIN INFORMACION".to_string()),
+        giro_receptor: None,
+        direccion_receptor: None,
+        comuna_receptor: None,
+        ind_traslado: None,
+        referencias: vec![],
         // Boleta en modo monto-total (IVA incluido); neto/iva desglosado es
         // opcional en el xsd 39 y el renderer lo soporta así.
         monto_neto: Decimal::ZERO,
@@ -803,6 +808,11 @@ pub async fn libro_ventas(
                 rut_emisor: r.rut_emisor,
                 rut_receptor: r.rut_receptor,
                 razon_social_receptor: r.razon_social_receptor,
+                giro_receptor: None,
+                direccion_receptor: None,
+                comuna_receptor: None,
+                ind_traslado: None,
+                referencias: vec![],
                 monto_neto: r.monto_neto,
                 iva: r.iva,
                 monto_exento: r.monto_exento,
@@ -1044,6 +1054,11 @@ fn stub_for_transition(row: &DteRow) -> Result<dte::Dte, ApiError> {
         rut_emisor: row.rut_emisor.clone(),
         rut_receptor: row.rut_receptor.clone(),
         razon_social_receptor: row.razon_social_receptor.clone(),
+        giro_receptor: None,
+        direccion_receptor: None,
+        comuna_receptor: None,
+        ind_traslado: None,
+        referencias: vec![],
         monto_neto: Decimal::ZERO,
         iva: Decimal::ZERO,
         monto_exento: Decimal::ZERO,

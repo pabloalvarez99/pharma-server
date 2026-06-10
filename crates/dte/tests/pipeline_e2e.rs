@@ -147,9 +147,10 @@ async fn boleta_pipeline_folio_agotado() {
     );
 }
 
-/// Tipo no soportado por el renderer: el pipeline corta en el paso 2. La
-/// factura (33) tiene folio asignable pero `render_unsigned` aún no la
-/// soporta (subtask 9.1.f) y devuelve `XmlInvalid`.
+/// Input inválido para el renderer: el pipeline corta en el paso 2. La
+/// factura (33) renderiza desde 9.1.f, pero exige receptor completo
+/// (giro/dirección/comuna) — un DTE armado como boleta no los trae y
+/// `render_unsigned` devuelve `XmlInvalid`.
 #[tokio::test]
 async fn boleta_pipeline_tipo_no_soportado_en_render() {
     let (db, tenant, _caf) =

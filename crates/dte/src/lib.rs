@@ -32,4 +32,6 @@ pub use error::DteError;
 pub use gating::{min_tier_for, require_send_allowed, SendTier};
 pub use reports::{x_report, z_report, DailyReport, ReportKind, TipoBreakdown};
 pub use sign::{build_signed_dte, sign_xml, verify_signature, KeyMaterial};
-pub use types::{Caf, CertDigital, Dte, DteEstado, DteItem, DteTipo, EmisorConfig, SiiEnv};
+pub use types::{
+    Caf, CertDigital, Dte, DteEstado, DteItem, DteReferencia, DteTipo, EmisorConfig, SiiEnv,
+};
