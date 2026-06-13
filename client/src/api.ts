@@ -547,6 +547,56 @@ export function receivePurchaseOrder(
   return invoke<PurchaseOrder>("receive_purchase_order", { serverUrl, id, lines, notes });
 }
 
+/** One recorded supplier payment against a PO (`PurchasePaymentDto`). Money
+ *  (`amount`) is a STRING (Decimal); dates are RFC3339. */
+export interface PurchasePayment {
+  id: string;
+  purchase_order: string;
+  amount: string;
+  currency: string;
+  payment_method: string; // "cash" | "bank" | "card" | "transfer"
+  cash_session: string | null;
+  reference: string | null;
+  note: string | null;
+  paid_at: string;
+  created_at: string;
+}
+
+/** Accounts-payable rollup of a PO + its payments (`PurchasePaymentSummary`).
+ *  `total`/`paid`/`balance` are STRING Decimals. */
+export interface PurchasePaymentSummary {
+  purchase_order: string;
+  status: string;
+  total: string;
+  paid: string;
+  balance: string;
+  fully_paid: boolean;
+  payments: PurchasePayment[];
+}
+
+/** GET /api/v1/purchase-orders/{id}/payments (Bearer, cashier+) — AP summary. */
+export function getPoPayments(serverUrl: string, id: string): Promise<PurchasePaymentSummary> {
+  return invoke<PurchasePaymentSummary>("get_po_payments", { serverUrl, id });
+}
+
+/** POST /api/v1/purchase-orders/{id}/payments (Bearer, admin+) — record a
+ *  supplier payment. `amount` is a Decimal string; `cashSession` is required by
+ *  the server when paying `cash` with an open drawer. */
+export function createPoPayment(
+  serverUrl: string,
+  id: string,
+  args: { amount: string; paymentMethod?: string; cashSession?: string; reference?: string },
+): Promise<PurchasePayment> {
+  return invoke<PurchasePayment>("create_po_payment", {
+    serverUrl,
+    id,
+    amount: args.amount,
+    paymentMethod: args.paymentMethod,
+    cashSession: args.cashSession,
+    reference: args.reference,
+  });
+}
+
 /** A supplier (`domain::purchasing::model::SupplierDto`). No money fields. */
 export interface Supplier {
   id: string;
