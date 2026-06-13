@@ -6,7 +6,7 @@ audience: todos los operadores, primer día
 # Tu primer inicio de sesión
 
 La primera vez que abrís Tu Farmacia, vas a ver la **pantalla de inicio de
-sesión**. No te asustés, son sólo cuatro campos. Vamos uno por uno.
+sesión**. No te asustés, son sólo tres campos. Vamos uno por uno.
 
 ## Paso 1 — Abrí la aplicación
 
@@ -71,11 +71,13 @@ Si todo está bien:
 Si algo está mal:
 - Aparece un mensaje en rojo abajo del formulario o debajo del campo
   problemático.
-- Mensajes típicos en español:
-  - "Sucursal o credenciales inválidas" — revisá los tres campos.
-  - "No se pudo conectar al servidor" — avisá a tu técnico. El servidor del
+- Mensajes típicos en español (tal como los vas a ver en pantalla):
+  - "Indica tu sucursal." / "Indica tu correo." / "La contraseña es
+    obligatoria." — te faltó llenar ese campo.
+  - "No se pudo contactar al servidor." — avisá a tu técnico. El servidor del
     local podría estar apagado.
-  - "Contraseña requerida" — te olvidaste de llenar el campo.
+  - Si el correo o la contraseña no coinciden con los registrados, el sistema
+    te lo dice y no te deja entrar — revisá lo que escribiste.
 
 ## El campo "Conexión avanzada" — qué es y cuándo abrirlo
 
@@ -85,7 +87,8 @@ Debajo del campo de contraseña vas a ver un texto chiquito gris que dice
 - **Operador normal**: no lo abras nunca. El sistema ya viene configurado.
 - **Tu técnico te pide cambiar el servidor**: lo abrís, ves un campo que dice
   **Servidor** con un valor tipo `http://127.0.0.1:8080`. Cambialo SOLO si tu
-  técnico te dictó el valor exacto.
+  técnico te dictó el valor exacto. El botón **Probar conexión** te dice ahí
+  mismo si el servidor responde, sin tener que iniciar sesión.
 
 ## ¿Y si me olvidé la contraseña?
 
