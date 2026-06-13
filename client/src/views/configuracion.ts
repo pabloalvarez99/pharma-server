@@ -6,6 +6,7 @@
 // fall back to a documented default. Same skeleton → fetch → swap pattern as the
 // other views; Spanish throughout.
 import { getSetting, setSetting } from "../api";
+import { isValidRut, canonicalRut, formatRut } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 type SettingKind = "boolean" | "number";
@@ -201,6 +202,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
               <label for="cfg-em-${f.name}">${escapeHtml(f.label)}</label>
               <input id="cfg-em-${f.name}" type="text" placeholder="${escapeHtml(f.placeholder)}"
                      value="${escapeHtml(String(current[f.name] ?? ""))}" autocomplete="off" />
+              ${f.name === "rut" ? `<div id="cfg-em-rut-hint" class="field-hint" hidden></div>` : ""}
             </div>`).join("")}
           <div class="field">
             <label for="cfg-em-acteco">Código actividad SII (acteco, opcional)</label>
@@ -229,6 +231,38 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
   function wireEmisor(): void {
     const saveBtn = emisorEl.querySelector<HTMLButtonElement>("#cfg-em-save")!;
     const statusEl = emisorEl.querySelector<HTMLElement>("#cfg-em-status")!;
+    const rutEl = emisorEl.querySelector<HTMLInputElement>("#cfg-em-rut")!;
+    const rutHint = emisorEl.querySelector<HTMLElement>("#cfg-em-rut-hint")!;
+
+    // The emisor RUT identifies the pharmacy to the SII — a wrong one breaks
+    // every boleta/factura. Validate mód-11 live (same UX as the Facturas
+    // receptor) and store the canonical `NNNNNNNN-D` form on save.
+    const validateRut = (): boolean => {
+      const raw = rutEl.value.trim();
+      if (!raw) {
+        rutEl.classList.remove("invalid");
+        rutHint.hidden = true;
+        rutHint.className = "field-hint";
+        return false;
+      }
+      if (isValidRut(raw)) {
+        rutEl.classList.remove("invalid");
+        rutHint.hidden = false;
+        rutHint.className = "field-hint ok";
+        rutHint.textContent = `RUT válido — ${formatRut(raw)}`;
+        return true;
+      }
+      rutEl.classList.add("invalid");
+      rutHint.hidden = false;
+      rutHint.className = "field-hint err";
+      rutHint.textContent = "RUT inválido: revisa el dígito verificador.";
+      return false;
+    };
+    rutEl.addEventListener("input", validateRut);
+    rutEl.addEventListener("blur", () => {
+      if (isValidRut(rutEl.value)) rutEl.value = formatRut(rutEl.value);
+    });
+    validateRut();
 
     saveBtn.addEventListener("click", async () => {
       statusEl.hidden = true;
@@ -243,6 +277,13 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         }
         if (v) emisor[f.name] = v;
       }
+      if (!validateRut()) {
+        statusEl.textContent = "El RUT de la empresa no es válido (revisa el dígito verificador mód-11).";
+        statusEl.className = "cfg-status cfg-status-err";
+        statusEl.hidden = false;
+        return;
+      }
+      emisor.rut = canonicalRut(rutEl.value);
       const actecoRaw = emisorEl.querySelector<HTMLInputElement>("#cfg-em-acteco")!.value.trim();
       if (actecoRaw) {
         const n = Number(actecoRaw);
