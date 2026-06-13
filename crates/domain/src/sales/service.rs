@@ -31,9 +31,13 @@
 //!
 //! Public stable signatures so api router compiles today.
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use surrealdb::sql::{thing, Thing};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::errors::{DomainError, DomainResult};
 
@@ -51,6 +55,55 @@ fn parse_tenant_thing(s: &str, table: &str) -> DomainResult<Thing> {
         )));
     }
     Ok(t)
+}
+
+/// Per-tenant serialization of the POS sale critical section (stock pre-check
+/// + FEFO planning + [`repo::apply_sale`]).
+///
+/// SurrealKv's MVCC aborts a losing concurrent write-write transaction at
+/// COMMIT with a *retryable* conflict and — worse — leaks partial writes from
+/// the aborted multi-statement tx, corrupting the cached `product.stock`
+/// counter (BUG-003 / BUG-004: 60 parallel sales → ~59 fail with DB_ERROR and
+/// `product.stock` reads 199 after 2 commits from an initial 100). Serializing
+/// sales per tenant removes the sale-vs-sale conflict entirely — the same
+/// proven approach as `crates/dte/src/caf.rs::ASSIGN_LOCK` for folio
+/// assignment. Different tenants never share a lock, so multi-tenant
+/// throughput is unaffected; within a tenant the POS demand (a few cashiers)
+/// is orders of magnitude below the serialized ceiling.
+static SALE_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    OnceLock::new();
+
+fn tenant_sale_lock(tenant: &Thing) -> Arc<AsyncMutex<()>> {
+    let locks = SALE_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = locks.lock().expect("SALE_LOCKS mutex poisoned");
+    guard
+        .entry(tenant.to_string())
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+/// Max commit retries on a retryable MVCC conflict before surfacing the DB
+/// error. Sale-vs-sale never conflicts (serialized above), so this only ever
+/// fires against a concurrent writer on the same product (e.g. a refund); the
+/// generous cap mirrors `caf.rs` and is effectively free (µs-scale backoff).
+const MAX_SALE_COMMIT_RETRIES: usize = 256;
+
+/// A losing SurrealKv transaction aborts at COMMIT with a retryable
+/// write-write conflict. Mirrors `crates/dte/src/caf.rs::is_mvcc_conflict_str`.
+fn is_retryable_conflict(e: &DomainError) -> bool {
+    if let DomainError::Db(inner) = e {
+        let s = inner.to_string();
+        s.contains("read or write conflict") || s.contains("failed transaction")
+    } else {
+        false
+    }
+}
+
+/// Short linear backoff (max ~5ms). SurrealKv's conflict window is µs-scale;
+/// longer backoff only wastes POS latency.
+async fn conflict_backoff(attempt: usize) {
+    let micros = std::cmp::min((attempt as u64 + 1) * 50, 5_000);
+    tokio::time::sleep(std::time::Duration::from_micros(micros)).await;
 }
 
 /// Validate + persist a POS sale atomically.
@@ -128,33 +181,14 @@ pub async fn post_sale(
         }
     }
 
-    // Stock pre-check (single SELECT IN $ids).
+    // Product ids parsed once (pure). The stock pre-check itself runs inside
+    // the serialized retry loop below so the check→commit window is atomic
+    // w.r.t. concurrent sales (BUG-003/004).
     let product_things: Vec<Thing> = req
         .items
         .iter()
         .map(|i| parse_tenant_thing(&i.product, "product"))
         .collect::<DomainResult<Vec<_>>>()?;
-    let loaded = repo::load_products_for_sale(db, tenant, &product_things).await?;
-    if loaded.len() != req.items.len() {
-        return Err(DomainError::NotFound);
-    }
-    // `id IN $ids` doesn't preserve request order in SurrealKv — a naive
-    // zip would compare a line's qty against the wrong product's stock when
-    // stocks differ across the cart (latent: surfaced under load by the
-    // v0.1.22 stock_rotation test on serialized runs). Index by id and
-    // look each line up. String keys (clippy `mutable_key_type` rejects
-    // `Thing` as a HashMap key — `AtomicU8` interior mutability).
-    let by_id: std::collections::HashMap<String, i64> =
-        loaded.iter().map(|p| (p.id.to_string(), p.stock)).collect();
-    for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
-        let stock = by_id
-            .get(&pthing.to_string())
-            .copied()
-            .ok_or(DomainError::NotFound)?;
-        if stock < req_item.quantity {
-            return Err(DomainError::InsufficientStock);
-        }
-    }
 
     // Money totals
     let subtotal: Decimal = req
@@ -189,32 +223,83 @@ pub async fn post_sale(
         .map(|s| parse_tenant_thing(s, "customer"))
         .transpose()?;
 
-    // FEFO plan per line. `None` = product not batch-tracked (legacy
-    // product.stock-only path); `Some(plan)` = batch-tracked, lots consumed
-    // earliest-expiry-first inside the sale tx; `Err(InsufficientStock)` =
-    // tracked but non-expired lots can't cover the line.
-    let mut fefo_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
-        Vec::with_capacity(req.items.len());
-    for it in &req.items {
-        fefo_plans.push(
-            crate::inventory::service::plan_fefo_optional(db, tenant, &it.product, it.quantity)
-                .await?,
-        );
-    }
+    // === Serialized, retry-on-conflict critical section (BUG-003/004) ===
+    // The per-tenant lock removes the sale-vs-sale SurrealKv write-write
+    // conflict (and the partial-write corruption of `product.stock` it
+    // causes). The pre-check, FEFO planning and the apply tx all live INSIDE
+    // the loop so every attempt re-reads current stock and re-plans lots — a
+    // retry happens only on a residual conflict with another writer (e.g. a
+    // concurrent refund) on the same product, where the prior plan is stale.
+    // The lock is dropped as soon as the tx commits; loyalty / prescriptions /
+    // idempotency-store below run unlocked.
+    let applied = {
+        let sale_lock = tenant_sale_lock(tenant);
+        let _guard = sale_lock.lock().await;
+        let mut attempt = 0usize;
+        loop {
+            // Stock pre-check. `id IN $ids` doesn't preserve request order in
+            // SurrealKv, so index by id and look each line up rather than zip
+            // (clippy `mutable_key_type` rejects `Thing` as a key → string
+            // keys). Re-read each attempt: a losing retry sees fresh stock.
+            let loaded = repo::load_products_for_sale(db, tenant, &product_things).await?;
+            if loaded.len() != req.items.len() {
+                return Err(DomainError::NotFound);
+            }
+            let by_id: HashMap<String, i64> =
+                loaded.iter().map(|p| (p.id.to_string(), p.stock)).collect();
+            for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
+                let stock = by_id
+                    .get(&pthing.to_string())
+                    .copied()
+                    .ok_or(DomainError::NotFound)?;
+                if stock < req_item.quantity {
+                    return Err(DomainError::InsufficientStock);
+                }
+            }
 
-    let applied = repo::apply_sale(
-        db,
-        tenant,
-        sold_by,
-        sold_by_name,
-        customer.as_ref(),
-        &req,
-        &fefo_plans,
-        subtotal,
-        discount,
-        total,
-    )
-    .await?;
+            // FEFO plan per line. `None` = product not batch-tracked (legacy
+            // product.stock-only path); `Some(plan)` = batch-tracked, lots
+            // consumed earliest-expiry-first inside the sale tx;
+            // `Err(InsufficientStock)` = tracked but non-expired lots can't
+            // cover the line.
+            let mut fefo_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
+                Vec::with_capacity(req.items.len());
+            for it in &req.items {
+                fefo_plans.push(
+                    crate::inventory::service::plan_fefo_optional(
+                        db,
+                        tenant,
+                        &it.product,
+                        it.quantity,
+                    )
+                    .await?,
+                );
+            }
+
+            match repo::apply_sale(
+                db,
+                tenant,
+                sold_by,
+                sold_by_name,
+                customer.as_ref(),
+                &req,
+                &fefo_plans,
+                subtotal,
+                discount,
+                total,
+            )
+            .await
+            {
+                Ok(applied) => break applied,
+                Err(e) if attempt < MAX_SALE_COMMIT_RETRIES && is_retryable_conflict(&e) => {
+                    attempt += 1;
+                    conflict_backoff(attempt).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
 
     // Loyalty: if customer set, award points based on total + setting.
     let mut loyalty_awarded = 0_i64;
