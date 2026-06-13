@@ -517,47 +517,73 @@ where
 /// nunca kill-switch (ADR-0005 §6). Cache CRL ausente/corrupto ⇒ se ignora
 /// (offline-first: la revocación es best-effort, no bloqueante).
 pub fn load_license_from(path: &std::path::Path) -> license::License {
-    if path.exists() {
-        match license::load_from_disk(path) {
-            Ok(lic) => {
-                if let Some(dir) = path.parent() {
-                    let crl_path = license::default_crl_state_path(dir);
-                    match license::load_crl_state(&crl_path) {
-                        Ok(state) if state.is_revoked(&lic.license_id) => {
-                            tracing::warn!(
-                                license_id = %lic.license_id,
-                                crl_version = state.last_seen_version,
-                                "license REVOCADA según CRL local; degradando a Free \
-                                 (core gratis sigue operativo, ADR-0005)"
-                            );
-                            return license::License::free_default(uuid::Uuid::nil());
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!(error = %e, path = %crl_path.display(),
-                                "crl_state.json ilegible; se ignora (revocación best-effort)");
-                        }
-                    }
-                }
-                tracing::info!(
-                    tier = lic.tier.as_str(),
+    load_license_from_with_keys(path, license::keys::LICENSER_KEYS)
+}
+
+/// Variante de [`load_license_from`] con tabla de claves del licenser
+/// inyectable — mirrors `license::parse_and_verify_with_keys`. Producción
+/// siempre pasa las claves embebidas (`LICENSER_KEYS`); los tests E2E pasan un
+/// keypair efímero para mintar una license firmada sin la clave privada real.
+/// La consulta del CRL (`crl_state.json`) NO usa claves: es el cache local ya
+/// aplicado (estado confiable), sólo se chequea pertenencia al set revocado.
+pub fn load_license_from_with_keys(
+    path: &std::path::Path,
+    keys: &[(&str, &str)],
+) -> license::License {
+    if !path.exists() {
+        tracing::info!(path = %path.display(), "no license file; running Free tier");
+        return license::License::free_default(uuid::Uuid::nil());
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(),
+                "license file unreadable; falling back to Free");
+            return license::License::free_default(uuid::Uuid::nil());
+        }
+    };
+    match license::verify::parse_and_verify_with_keys(&bytes, keys) {
+        Ok(lic) => finalize_license_with_crl(lic, path),
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(),
+                "license file present but invalid; falling back to Free");
+            license::License::free_default(uuid::Uuid::nil())
+        }
+    }
+}
+
+/// Aplica la política de revocación (ADR-0006) a una license ya verificada:
+/// si el cache CRL local (`crl_state.json`, hermano del `license.json`) la
+/// lista, degrada a Free — nunca kill-switch (ADR-0005 §6). Cache
+/// ausente/corrupto ⇒ se ignora (offline-first: revocación best-effort).
+fn finalize_license_with_crl(lic: license::License, path: &std::path::Path) -> license::License {
+    if let Some(dir) = path.parent() {
+        let crl_path = license::default_crl_state_path(dir);
+        match license::load_crl_state(&crl_path) {
+            Ok(state) if state.is_revoked(&lic.license_id) => {
+                tracing::warn!(
                     license_id = %lic.license_id,
-                    features = lic.features.len(),
-                    path = %path.display(),
-                    "license loaded"
+                    crl_version = state.last_seen_version,
+                    "license REVOCADA según CRL local; degradando a Free \
+                     (core gratis sigue operativo, ADR-0005)"
                 );
-                lic
+                return license::License::free_default(uuid::Uuid::nil());
             }
+            Ok(_) => {}
             Err(e) => {
-                tracing::warn!(error = %e, path = %path.display(),
-                    "license file present but invalid; falling back to Free");
-                license::License::free_default(uuid::Uuid::nil())
+                tracing::warn!(error = %e, path = %crl_path.display(),
+                    "crl_state.json ilegible; se ignora (revocación best-effort)");
             }
         }
-    } else {
-        tracing::info!(path = %path.display(), "no license file; running Free tier");
-        license::License::free_default(uuid::Uuid::nil())
     }
+    tracing::info!(
+        tier = lic.tier.as_str(),
+        license_id = %lic.license_id,
+        features = lic.features.len(),
+        path = %path.display(),
+        "license loaded"
+    );
+    lic
 }
 
 pub fn default_config() -> pharma_core::config::AppConfig {
