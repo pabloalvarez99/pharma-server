@@ -1973,3 +1973,12 @@ Cierra el par de observabilidad junto a #153. Worktree `pharma-server-wt-91f`, s
 
 - **`crates/api/src/lib.rs`**: el `crl_refresh_job` ahora emite `pharma_crl_refresh_total{result}` con `result` en set cerrado `applied|noop|error` (cardinalidad baja, sin PII). Un alza de `error` en `/metrics` = alerta de "el nodo no se está enterando de revocaciones". Helper puro `crl_refresh_label(&Result)` mapea el resultado a la etiqueta (testeable sin levantar el scheduler ni HTTP).
 - **Tests**: +1 en `crl_refresh_tests` (`crl_refresh_label`: Ok(0)→noop, Ok(n)→applied, Err→error). GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **494 passed / 6 ignored** (+1). Commit en PR #154.
+
+
+## 2026-06-13 — Lane A: integration test refresh CRL sobre HTTP real (PR #155)
+
+Cierra la única brecha de cobertura que dejó #139: el unit test de `apply_crl_chain` inyectaba el `fetch`, así que el cliente reqwest, la construcción de URL `{base}/crl-v{n}.json` y la detección de 404 no se ejercían. Worktree `pharma-server-wt-91f`, scope `crates/api`.
+
+- **Refactor `crates/api/src/lib.rs`**: `refresh_crl_once` delega en `refresh_crl_once_with_keys(base, dir, keys)` (`pub`, mirrors el patrón `_with_keys` ya usado en `load_license_from_with_keys` / `parse_and_verify_with_keys`) — permite servir CRLs firmados con keypair efímero desde un server de test sin la clave privada real. Comportamiento de producción intacto (pasa `LICENSER_KEYS`).
+- **`crates/api/tests/crl_refresh_http.rs`** (nuevo, 2 tests): levanta un server axum local (`127.0.0.1:0`) que sirve `/crl/crl-v{n}.json` desde un mapa (404 para el resto), y verifica sobre **sockets reales**: (1) recorre la cadena firmada v1→v2, para en el 404 de v3, persiste el cache + idempotencia en 2ª pasada; (2) nodo fresco contra CDN sin CRLs (todo 404) ⇒ 0 aplicadas sin error, cache no escrito. Introduce el patrón server-in-test (no existía en `crates/api/tests`).
+- GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **496 passed / 6 ignored** (+2, 90 suites). Commit en PR #155.

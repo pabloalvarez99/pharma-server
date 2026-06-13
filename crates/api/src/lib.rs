@@ -464,11 +464,23 @@ fn crl_refresh_label(res: &anyhow::Result<u64>) -> &'static str {
 /// Usa las claves de producción embebidas. Devuelve cuántas versiones se
 /// aplicaron (0 = el cache ya estaba al día).
 async fn refresh_crl_once(base_url: &str, data_dir: &std::path::Path) -> anyhow::Result<u64> {
+    refresh_crl_once_with_keys(base_url, data_dir, license::keys::LICENSER_KEYS).await
+}
+
+/// Variante con tabla de claves del licenser inyectable — mirrors
+/// `license::verify::parse_and_verify_with_keys`. Producción siempre pasa las
+/// claves embebidas (vía [`refresh_crl_once`]); los tests de integración HTTP
+/// pasan un keypair efímero para servir CRLs firmados desde un server local.
+pub async fn refresh_crl_once_with_keys(
+    base_url: &str,
+    data_dir: &std::path::Path,
+    keys: &[(&str, &str)],
+) -> anyhow::Result<u64> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
     let base = base_url.trim_end_matches('/').to_string();
-    apply_crl_chain(data_dir, license::keys::LICENSER_KEYS, move |n| {
+    apply_crl_chain(data_dir, keys, move |n| {
         let client = client.clone();
         let base = base.clone();
         async move {
