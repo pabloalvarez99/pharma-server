@@ -24,7 +24,7 @@ import {
   type NearExpiryRow,
   type NewProductInput,
 } from "../api";
-import { clp, num } from "../format";
+import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
 
 const PAGE_LIMIT = 60;
 type Tab = "productos" | "vencimientos";
@@ -800,4 +800,45 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
+}
+
+/** Wire a live, **advisory** mód-11 check onto an optional RUT input + its hint
+ *  element: green echo when valid, amber warning when the verifier doesn't
+ *  match (never blocks — the field is optional registry data), and a blur that
+ *  rewrites a valid RUT to the pretty `NN.NNN.NNN-D` form. Used by the customer
+ *  and supplier forms; the DTE emisor/receptor use their own *blocking* check.
+ *  Returns a `canonical()` getter the caller uses on save to store the SII
+ *  `NNNNNNNN-D` form for valid RUTs (raw passthrough otherwise). */
+export function attachRutAdvisory(
+  input: HTMLInputElement,
+  hint: HTMLElement,
+): { canonical: () => string } {
+  const check = (): void => {
+    const raw = input.value.trim();
+    if (!raw) {
+      hint.hidden = true;
+      hint.className = "field-hint";
+      return;
+    }
+    if (isValidRut(raw)) {
+      hint.hidden = false;
+      hint.className = "field-hint ok";
+      hint.textContent = `RUT válido — ${formatRut(raw)}`;
+    } else {
+      hint.hidden = false;
+      hint.className = "field-hint err";
+      hint.textContent = "El dígito verificador no calza; revísalo (puedes guardar igual).";
+    }
+  };
+  input.addEventListener("input", check);
+  input.addEventListener("blur", () => {
+    if (isValidRut(input.value)) input.value = formatRut(input.value);
+  });
+  check();
+  return {
+    canonical: () => {
+      const raw = input.value.trim();
+      return isValidRut(raw) ? canonicalRut(raw) : raw;
+    },
+  };
 }

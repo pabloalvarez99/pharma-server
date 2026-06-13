@@ -27,7 +27,7 @@ import {
   type PurchasePayment,
 } from "../api";
 import { clp, num, toNumber } from "../format";
-import { kpiSkeleton, tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { kpiSkeleton, tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
 
 /** Statuses a PO can be received from (server allows receiving from these). */
 const RECEIVABLE = ["sent", "approved", "partial", "partially_received"];
@@ -175,6 +175,7 @@ function openSupplierModal(
         <div class="modal-field">
           <label class="modal-label" for="prov-f-rut">RUT</label>
           <input id="prov-f-rut" type="text" autocomplete="off" />
+          <div id="prov-f-rut-hint" class="field-hint" hidden></div>
         </div>
         <div class="modal-field">
           <label class="modal-label" for="prov-f-contact">Contacto</label>
@@ -207,6 +208,7 @@ function openSupplierModal(
   const emailEl = modalHost.querySelector<HTMLInputElement>("#prov-f-email")!;
   const errEl = modalHost.querySelector<HTMLElement>("#prov-f-error")!;
   const saveBtn = modalHost.querySelector<HTMLButtonElement>("#prov-f-save")!;
+  const rutAdvice = attachRutAdvisory(rutEl, modalHost.querySelector<HTMLElement>("#prov-f-rut-hint")!);
 
   modalHost.querySelector<HTMLButtonElement>("#prov-f-cancel")!.addEventListener("click", close);
   modalHost.querySelector<HTMLElement>("#prov-modal-backdrop")!.addEventListener("click", (e) => {
@@ -228,7 +230,7 @@ function openSupplierModal(
       await createSupplier(
         serverUrl,
         name,
-        rutEl.value.trim() || undefined,
+        rutAdvice.canonical() || undefined,
         contactEl.value.trim() || undefined,
         emailEl.value.trim() || undefined,
         phoneEl.value.trim() || undefined,

@@ -22,7 +22,7 @@ import {
   type CustomerOrder,
 } from "../api";
 import { clp, num } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
 
 const HISTORY_LIMIT = 20;
 
@@ -136,6 +136,7 @@ function openCustomerModal(
         <div class="modal-field">
           <label class="modal-label" for="cli-f-rut">RUT</label>
           <input id="cli-f-rut" type="text" value="${val(existing?.rut)}" autocomplete="off" />
+          <div id="cli-f-rut-hint" class="field-hint" hidden></div>
         </div>
         <div class="modal-field">
           <label class="modal-label" for="cli-f-phone">Teléfono</label>
@@ -163,6 +164,7 @@ function openCustomerModal(
   const emailEl = modalHost.querySelector<HTMLInputElement>("#cli-f-email")!;
   const errEl = modalHost.querySelector<HTMLElement>("#cli-f-error")!;
   const saveBtn = modalHost.querySelector<HTMLButtonElement>("#cli-f-save")!;
+  const rutAdvice = attachRutAdvisory(rutEl, modalHost.querySelector<HTMLElement>("#cli-f-rut-hint")!);
 
   modalHost.querySelector<HTMLButtonElement>("#cli-f-cancel")!.addEventListener("click", close);
   modalHost.querySelector<HTMLElement>("#cli-modal-backdrop")!.addEventListener("click", (e) => {
@@ -172,7 +174,7 @@ function openCustomerModal(
 
   saveBtn.addEventListener("click", async () => {
     const name = nameEl.value.trim();
-    const rut = rutEl.value.trim();
+    const rut = rutAdvice.canonical();
     const phone = phoneEl.value.trim();
     const email = emailEl.value.trim();
     if (name === "") {

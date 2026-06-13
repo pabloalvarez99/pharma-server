@@ -17,6 +17,7 @@ import {
   type Prescription,
   type NewPrescriptionInput,
 } from "../api";
+import { isValidRut, canonicalRut, formatRut } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const PAGE_LIMIT = 100;
@@ -179,6 +180,7 @@ function openPrescriptionModal(
         <div class="modal-field">
           <label class="modal-label" for="rec-f-rut">RUT del paciente</label>
           <input id="rec-f-rut" type="text" autocomplete="off" />
+          <div id="rec-f-rut-hint" class="field-hint" hidden></div>
         </div>
         <label class="rec-toggle modal-field">
           <input id="rec-f-controlled" type="checkbox" /> Medicamento controlado (Ley 20.000)
@@ -190,6 +192,7 @@ function openPrescriptionModal(
         <div class="modal-field">
           <label class="modal-label" for="rec-f-doctor-rut">RUT del médico</label>
           <input id="rec-f-doctor-rut" type="text" autocomplete="off" />
+          <div id="rec-f-doctor-rut-hint" class="field-hint" hidden></div>
         </div>
         <div class="modal-field">
           <label class="modal-label" for="rec-f-folio">Folio</label>
@@ -220,6 +223,41 @@ function openPrescriptionModal(
   modalHost.querySelector<HTMLElement>("#rec-modal-backdrop")!.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) close();
   });
+
+  // Advisory mód-11 check on both RUTs. Unlike the DTE emisor/receptor (where a
+  // bad RUT is blocked), a prescription is registry data — a patient might be a
+  // foreigner without a Chilean RUT — so we only *warn*, never block the save.
+  const rutHint = modalHost.querySelector<HTMLElement>("#rec-f-rut-hint")!;
+  const doctorRutHint = modalHost.querySelector<HTMLElement>("#rec-f-doctor-rut-hint")!;
+  const wireRutAdvice = (input: HTMLInputElement, hint: HTMLElement): void => {
+    const check = () => {
+      const raw = input.value.trim();
+      if (!raw) {
+        input.classList.remove("invalid");
+        hint.hidden = true;
+        hint.className = "field-hint";
+        return;
+      }
+      if (isValidRut(raw)) {
+        input.classList.remove("invalid");
+        hint.hidden = false;
+        hint.className = "field-hint ok";
+        hint.textContent = `RUT válido — ${formatRut(raw)}`;
+      } else {
+        input.classList.remove("invalid");
+        hint.hidden = false;
+        hint.className = "field-hint err";
+        hint.textContent = "El dígito verificador no calza; revísalo (puedes guardar igual).";
+      }
+    };
+    input.addEventListener("input", check);
+    input.addEventListener("blur", () => {
+      if (isValidRut(input.value)) input.value = formatRut(input.value);
+    });
+  };
+  wireRutAdvice(rutEl, rutHint);
+  wireRutAdvice(doctorRutEl, doctorRutHint);
+
   patientEl.focus();
 
   saveBtn.addEventListener("click", async () => {
@@ -243,12 +281,14 @@ function openPrescriptionModal(
     errEl.hidden = true;
     saveBtn.classList.add("loading");
     saveBtn.disabled = true;
+    // Store the canonical `NNNNNNNN-D` form for valid RUTs (so the ledger and
+    // patient search are consistent); keep whatever was typed otherwise.
     const input: NewPrescriptionInput = {
       patientName,
-      patientRut,
+      patientRut: isValidRut(patientRut) ? canonicalRut(patientRut) : patientRut,
       controlled,
       doctorName: doctorName || undefined,
-      doctorRut: doctorRut || undefined,
+      doctorRut: doctorRut ? (isValidRut(doctorRut) ? canonicalRut(doctorRut) : doctorRut) : undefined,
       folio: folio || undefined,
     };
     try {
