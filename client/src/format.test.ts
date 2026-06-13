@@ -8,6 +8,7 @@ import {
   isValidRut,
   canonicalRut,
   formatRut,
+  desgloseIva,
 } from "./format";
 
 // RUT verifier vectors computed by hand from the mód-11 rule (multiply the body
@@ -91,6 +92,32 @@ describe("formatRut", () => {
       const pretty = formatRut(`${body}${dv}`);
       expect(canonicalRut(pretty)).toBe(`${body}-${dv}`);
     }
+  });
+});
+
+describe("desgloseIva (client↔server tax parity)", () => {
+  // Vectors taken verbatim from crates/dte/src/emit.rs unit tests
+  // (`desglose_exacto`, `desglose_redondeo_iva_absorbe`, `build_documento_factura`)
+  // so a client/server drift in the IVA split fails here.
+  it("splits an exact total (11900 → 10000 + 1900)", () => {
+    expect(desgloseIva(11900)).toEqual({ neto: 10000, iva: 1900 });
+  });
+
+  it("makes the IVA absorb the rounding (1000 → 840 + 160)", () => {
+    expect(desgloseIva(1000)).toEqual({ neto: 840, iva: 160 });
+  });
+
+  it("keeps neto + iva == afecto for arbitrary amounts", () => {
+    for (const afecto of [0, 1, 19, 119, 990, 1190, 33991, 2883855, 16900]) {
+      const { neto, iva } = desgloseIva(afecto);
+      expect(neto + iva).toBe(afecto);
+      expect(Number.isInteger(neto)).toBe(true);
+      expect(Number.isInteger(iva)).toBe(true);
+    }
+  });
+
+  it("zero affected total yields zero split", () => {
+    expect(desgloseIva(0)).toEqual({ neto: 0, iva: 0 });
   });
 });
 
