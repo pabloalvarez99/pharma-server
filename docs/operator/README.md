@@ -57,6 +57,9 @@ servidor. Para eso existe el manual técnico (`docs/ops/`).
    cuenta por pagar.
 12. [Recetas y libro de controlados](./11-recetas-controlados.md)
    — registro de recetas y libro de controlados (Ley 20.000) con export CSV.
+13. [Devoluciones y reembolsos](./12-devoluciones.md)
+   — reembolsar una venta sobre su boleta; por qué el stock no vuelve solo y
+   cuándo usar una nota de crédito.
 
 ## Cómo imprimir todo el manual
 
