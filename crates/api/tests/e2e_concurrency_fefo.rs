@@ -49,23 +49,19 @@ use e2e_common::*;
 use surrealdb::sql::Thing;
 use tokio::task::JoinSet;
 
-/// Seed one tenant + one batch-tracked product (batch + product.stock both
-/// `batch_stock`). Returns (db, tenant_thing, product_id, TestDb guard).
+/// Seed one tenant + one batch-tracked product whose `product.stock` equals
+/// the batch stock (`batch_stock`). The product is created with stock 0 because
+/// `create_batch` below ATOMICALLY bumps `product.stock` by the batch quantity
+/// (`UPDATE product SET stock = stock + $stock`, goods-receipt semantics) — so
+/// seeding the product at `batch_stock` too would double-count to `2*N` and
+/// the per-sale invariant `product.stock == Σ product_batch.stock` would start
+/// out violated. Returns (db, tenant_thing, product_id, TestDb guard).
 async fn setup(batch_stock: i64) -> (Arc<db::Db>, Thing, String, TestDb) {
     let tdb = spawn_db().await;
     let (tid, _uid, _roles) = seed_tenant_admin(&tdb.db, "farmacia-conc", "admin@conc.cl").await;
     let tenant = tid_thing(&tid);
     let db = tdb.db.clone();
-    let pid = seed_product(
-        &db,
-        &tenant,
-        "Amoxicilina 500",
-        "2500",
-        "1500",
-        batch_stock,
-        None,
-    )
-    .await;
+    let pid = seed_product(&db, &tenant, "Amoxicilina 500", "2500", "1500", 0, None).await;
     let expiry = (chrono::Utc::now() + chrono::Duration::days(365)).to_rfc3339();
     seed_batch(
         &db,
@@ -245,7 +241,6 @@ async fn concurrent_sales_ledger_is_consistent_with_committed_sales() {
 /// transactions in kv-surrealkv, corrupting the cached counter. Correct
 /// behavior asserted here; ignored until the sale path serializes or retries.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "BUG-004: product.stock counter corrupted under concurrent sales (observed 199 after 2 commits from initial 100)"]
 async fn concurrent_sales_keep_product_stock_consistent() {
     let (db, tenant, pid, _tdb) = setup(100).await;
     let results = fire_concurrent(&db, &tenant, &pid, 60).await;
@@ -269,7 +264,6 @@ async fn concurrent_sales_keep_product_stock_consistent() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "BUG-003: concurrent sales hit SurrealKv MVCC write conflict; path does not retry/serialize, so ~59/60 fail with DB_ERROR (500) instead of all succeeding"]
 async fn sixty_parallel_sales_one_batch_no_oversell() {
     let (db, tenant, pid, _tdb) = setup(100).await;
 
@@ -319,7 +313,6 @@ async fn sixty_parallel_sales_one_batch_no_oversell() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "BUG-003: under contention SurrealKv aborts losing txns with a retryable conflict; the sale path surfaces it as DB_ERROR instead of INSUFFICIENT_STOCK"]
 async fn thirty_parallel_sales_exhaust_stock_ten() {
     let (db, tenant, pid, _tdb) = setup(10).await;
 
