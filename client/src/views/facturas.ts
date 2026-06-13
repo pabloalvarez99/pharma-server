@@ -20,7 +20,7 @@ import {
   type DocItem,
   type DocReferencia,
 } from "../api";
-import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
+import { clp, num, isValidRut, canonicalRut, formatRut, desgloseIva } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const LIST_LIMIT = 100;
@@ -233,9 +233,9 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   }
 
   /** Neto/IVA/exento/total mirroring the server's `desglose_iva`: line amounts
-   *  truncate to integer CLP, neto = round(afecto/1.19) half-away-from-zero and
-   *  the IVA absorbs the rounding. Matches `crates/dte/src/emit.rs` exactly so
-   *  the cashier sees the same totals the server will stamp. */
+   *  truncate to integer CLP, the IVA split comes from {@link desgloseIva} (same
+   *  math as `crates/dte/src/emit.rs`) so the cashier sees the totals the server
+   *  will stamp. */
   function computeTotals(): { neto: number; iva: number; exento: number; total: number } {
     let afecto = 0;
     let exento = 0;
@@ -247,8 +247,8 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
       if (it.exento) exento += monto;
       else afecto += monto;
     }
-    const neto = Math.round((afecto * 100) / 119);
-    return { neto, iva: afecto - neto, exento, total: afecto + exento };
+    const { neto, iva } = desgloseIva(afecto);
+    return { neto, iva, exento, total: afecto + exento };
   }
 
   function renderTotals(): void {
