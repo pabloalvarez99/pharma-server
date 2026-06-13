@@ -47,6 +47,7 @@ pub fn router(_state: AppState) -> Router<AppState> {
     Router::new()
         .route("/api/v1/admin/license/reload", post(reload_license))
         .route("/api/v1/admin/license/status", get(license_status))
+        .route("/api/v1/admin/license/crl/status", get(crl_status))
 }
 
 fn require_admin(claims: &auth::Claims) -> Result<(), ApiError> {
@@ -191,6 +192,83 @@ pub async fn license_status(
     require_admin(&claims)?;
     let lic = state.license.load();
     Ok(Json(summarize(&lic)))
+}
+
+/// Estado del cache local de revocación (CRL, ADR-0006). Read-only.
+#[derive(Serialize)]
+pub struct CrlStatus {
+    /// Ruta del cache (`<data_dir>/crl_state.json`).
+    pub crl_path: String,
+    /// `false` si el archivo existe pero no se pudo parsear (se reporta como
+    /// estado vacío; la revocación es best-effort y nunca bloquea el core).
+    pub readable: bool,
+    /// Última versión CRL aplicada (`0` = ninguna).
+    pub last_seen_version: u64,
+    /// Cuándo se aplicó la última versión (`null` si nunca).
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Cantidad de `license_id` revocados en el cache.
+    pub revoked_count: usize,
+    /// IDs revocados (ordenados; el set es chico por diseño — sólo licenses
+    /// canceladas/reembolsadas, no el universo de licenses).
+    pub revoked: Vec<String>,
+    /// `license_id` de la licencia activa.
+    pub active_license_id: String,
+    /// `true` si la licencia activa figura en el set revocado. Cuando es
+    /// `true`, el server ya degradó (o degradará al próximo reload/restart) a
+    /// Free — el core gratis sigue operativo (ADR-0005 §6, nunca kill-switch).
+    pub active_license_revoked: bool,
+}
+
+/// Devuelve el estado del cache de revocación (CRL) local sin tocar la red.
+/// Requiere admin+. Permite al cliente/monitoreo ver si la licencia activa
+/// quedó revocada y cuándo se sincronizó el CRL por última vez. El refresh
+/// automático lo hace el job del scheduler (config `[crl]`, ADR-0006); la
+/// importación manual, `pharma license crl-import`.
+#[utoipa::path(
+    get, path = "/api/v1/admin/license/crl/status", tag = "License",
+    responses(
+        (status = 200, description = "Estado del cache CRL local", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+        (status = 503, description = "license_path no configurado", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn crl_status(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<CrlStatus>, ApiError> {
+    require_admin(&claims)?;
+    let path = state
+        .license_path
+        .as_ref()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let crl_path = license::default_crl_state_path(dir);
+
+    // Cache ilegible ⇒ se reporta como vacío + `readable=false` (offline-first:
+    // la revocación es best-effort, nunca un error que tumbe el endpoint).
+    let (crl, readable) = match license::load_crl_state(&crl_path) {
+        Ok(s) => (s, true),
+        Err(e) => {
+            tracing::warn!(error = %e, path = %crl_path.display(),
+                "crl_state.json ilegible en status; se reporta vacío");
+            (license::CrlState::default(), false)
+        }
+    };
+
+    let active = state.license.load();
+    let active_license_revoked = crl.is_revoked(&active.license_id);
+    Ok(Json(CrlStatus {
+        crl_path: crl_path.display().to_string(),
+        readable,
+        last_seen_version: crl.last_seen_version,
+        updated_at: crl.updated_at,
+        revoked_count: crl.revoked.len(),
+        revoked: crl.revoked.iter().cloned().collect(),
+        active_license_id: active.license_id.clone(),
+        active_license_revoked,
+    }))
 }
 
 #[cfg(test)]
