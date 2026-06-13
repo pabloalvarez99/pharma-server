@@ -20,7 +20,7 @@ import {
   type DocItem,
   type DocReferencia,
 } from "../api";
-import { clp, num } from "../format";
+import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const LIST_LIMIT = 100;
@@ -99,7 +99,8 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         <h4 class="section-title">Cliente (receptor)</h4>
         <div class="bol-emit-form">
           <div class="field"><label for="fac-rut">RUT</label>
-            <input id="fac-rut" type="text" placeholder="76123456-7" autocomplete="off" /></div>
+            <input id="fac-rut" type="text" placeholder="76123456-7" autocomplete="off" inputmode="text" />
+            <div id="fac-rut-hint" class="field-hint" hidden></div></div>
           <div class="field"><label for="fac-rs">Razón social</label>
             <input id="fac-rs" type="text" placeholder="EMPRESA LTDA" autocomplete="off" /></div>
           <div class="field"><label for="fac-giro">Giro</label>
@@ -113,6 +114,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         <h4 class="section-title">Items (precios con IVA incluido)</h4>
         <div id="fac-items"></div>
         <button id="fac-add-item" class="btn-ghost">+ Agregar item</button>
+        <div id="fac-totals" class="fac-totals" hidden></div>
 
         <div id="fac-ref-block" hidden>
           <h4 class="section-title">Documento que corrige (referencia)</h4>
@@ -166,6 +168,9 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   const listTipoSel = host.querySelector<HTMLSelectElement>("#fac-list-tipo")!;
   const toastEl = host.querySelector<HTMLElement>("#fac-toast")!;
   const emitStatus = host.querySelector<HTMLElement>("#fac-emit-status")!;
+  const rutInput = host.querySelector<HTMLInputElement>("#fac-rut")!;
+  const rutHint = host.querySelector<HTMLElement>("#fac-rut-hint")!;
+  const totalsEl = host.querySelector<HTMLElement>("#fac-totals")!;
 
   const items: ItemRow[] = [{ nombre: "", cantidad: "1", precio: "", exento: false }];
 
@@ -215,6 +220,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         const f = inp.dataset.f as keyof ItemRow;
         if (f === "exento") items[i].exento = inp.checked;
         else items[i][f] = inp.value as never;
+        renderTotals();
       });
     });
     itemsHost.querySelectorAll<HTMLButtonElement>("button[data-del]").forEach((btn) => {
@@ -223,6 +229,72 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         renderItems();
       });
     });
+    renderTotals();
+  }
+
+  /** Neto/IVA/exento/total mirroring the server's `desglose_iva`: line amounts
+   *  truncate to integer CLP, neto = round(afecto/1.19) half-away-from-zero and
+   *  the IVA absorbs the rounding. Matches `crates/dte/src/emit.rs` exactly so
+   *  the cashier sees the same totals the server will stamp. */
+  function computeTotals(): { neto: number; iva: number; exento: number; total: number } {
+    let afecto = 0;
+    let exento = 0;
+    for (const it of items) {
+      const qty = Number(it.cantidad);
+      const price = Number(it.precio);
+      if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price < 0) continue;
+      const monto = Math.trunc(qty * price);
+      if (it.exento) exento += monto;
+      else afecto += monto;
+    }
+    const neto = Math.round((afecto * 100) / 119);
+    return { neto, iva: afecto - neto, exento, total: afecto + exento };
+  }
+
+  function renderTotals(): void {
+    const t = computeTotals();
+    if (t.total <= 0) {
+      totalsEl.hidden = true;
+      totalsEl.innerHTML = "";
+      return;
+    }
+    const exentoLine = t.exento > 0
+      ? `<div class="rcpt-line"><span>Exento</span><strong>${clp(t.exento)}</strong></div>`
+      : "";
+    totalsEl.hidden = false;
+    totalsEl.innerHTML = `
+      <div class="rcpt-totals">
+        <div class="rcpt-line"><span>Neto</span><strong>${clp(t.neto)}</strong></div>
+        <div class="rcpt-line"><span>IVA 19%</span><strong>${clp(t.iva)}</strong></div>
+        ${exentoLine}
+        <div class="rcpt-line total"><span>Total</span><strong>${clp(t.total)}</strong></div>
+      </div>
+      <p class="fac-totals-note">Estimación con precios IVA-incluido; el SII recibe estos montos.</p>
+    `;
+  }
+
+  /** Live mód-11 check on the receptor RUT. Returns validity; paints the input
+   *  and the hint (green echo / red warning / hidden when empty). */
+  function validateRut(): boolean {
+    const raw = rutInput.value.trim();
+    if (!raw) {
+      rutInput.classList.remove("invalid");
+      rutHint.hidden = true;
+      rutHint.className = "field-hint";
+      return false;
+    }
+    if (isValidRut(raw)) {
+      rutInput.classList.remove("invalid");
+      rutHint.hidden = false;
+      rutHint.className = "field-hint ok";
+      rutHint.textContent = `RUT válido — ${formatRut(raw)}`;
+      return true;
+    }
+    rutInput.classList.add("invalid");
+    rutHint.hidden = false;
+    rutHint.className = "field-hint err";
+    rutHint.textContent = "RUT inválido: revisa el dígito verificador.";
+    return false;
   }
 
   async function loadCaf(): Promise<void> {
@@ -368,8 +440,9 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   emitBtn.addEventListener("click", async () => {
     emitStatus.hidden = true;
     const tipo = selectedTipo();
+    const rutRaw = val("#fac-rut");
     const receptor = {
-      rut: val("#fac-rut"),
+      rut: canonicalRut(rutRaw),
       razon_social: val("#fac-rs"),
       giro: val("#fac-giro"),
       direccion: val("#fac-dir"),
@@ -377,6 +450,11 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     };
     if (Object.values(receptor).some((v) => !v)) {
       showEmitStatus("Completa todos los datos del cliente (RUT, razón social, giro, dirección, comuna).", false);
+      return;
+    }
+    if (!isValidRut(rutRaw)) {
+      validateRut();
+      showEmitStatus("El RUT del cliente no es válido (revisa el dígito verificador mód-11).", false);
       return;
     }
     const docItems: DocItem[] = [];
@@ -461,6 +539,10 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   host.querySelector<HTMLButtonElement>("#fac-refresh")!.addEventListener("click", () => {
     void loadList();
     void loadCaf();
+  });
+  rutInput.addEventListener("input", validateRut);
+  rutInput.addEventListener("blur", () => {
+    if (isValidRut(rutInput.value)) rutInput.value = formatRut(rutInput.value);
   });
 
   syncTipoUi();

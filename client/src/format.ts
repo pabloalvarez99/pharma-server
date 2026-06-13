@@ -29,3 +29,55 @@ const NUM = new Intl.NumberFormat("es-CL");
 export function num(value: number): string {
   return NUM.format(value);
 }
+
+// --- RUT chileno (módulo 11) -------------------------------------------------
+// El SII identifica al receptor por RUT con dígito verificador mód-11. Validamos
+// en el cliente para no emitir un DTE con un RUT mal tipeado (el server lo
+// almacena verbatim en <RUTRecep>). Formato canónico de envío: `NNNNNNNN-D`
+// (sin puntos, guion, K mayúscula); el eco visual usa puntos `NN.NNN.NNN-D`.
+
+/** Strip dots/dash/spaces and upper-case the verifier (`76.123.456-k` → `76123456K`). */
+export function cleanRut(raw: string): string {
+  return raw.replace(/[.\-\s]/g, "").toUpperCase();
+}
+
+/** Mód-11 verifier digit for a numeric body (`"76123456"` → `"7"`). */
+export function rutDigitVerifier(body: string): string {
+  let sum = 0;
+  let mul = 2;
+  for (let i = body.length - 1; i >= 0; i--) {
+    sum += Number(body[i]) * mul;
+    mul = mul === 7 ? 2 : mul + 1;
+  }
+  const res = 11 - (sum % 11);
+  if (res === 11) return "0";
+  if (res === 10) return "K";
+  return String(res);
+}
+
+/** True when `raw` is a structurally valid Chilean RUT with a matching DV.
+ *  Accepts a 7–8 digit body (the practical range for personas/empresas). */
+export function isValidRut(raw: string): boolean {
+  const c = cleanRut(raw);
+  if (!/^\d{7,8}[\dK]$/.test(c)) return false;
+  const body = c.slice(0, -1);
+  return rutDigitVerifier(body) === c.slice(-1);
+}
+
+/** Canonical SII form `NNNNNNNN-D` (no dots) for the wire. Returns the cleaned
+ *  input unchanged when it is not a parseable body+DV. */
+export function canonicalRut(raw: string): string {
+  const c = cleanRut(raw);
+  if (!/^\d{1,8}[\dK]$/.test(c)) return c;
+  return `${c.slice(0, -1)}-${c.slice(-1)}`;
+}
+
+/** Pretty form `NN.NNN.NNN-D` for visual echo. Returns the trimmed input when
+ *  it cannot be split into body+DV. */
+export function formatRut(raw: string): string {
+  const c = cleanRut(raw);
+  if (!/^\d{1,8}[\dK]$/.test(c)) return raw.trim();
+  const body = c.slice(0, -1);
+  const dv = c.slice(-1);
+  return `${num(Number(body))}-${dv}`;
+}
