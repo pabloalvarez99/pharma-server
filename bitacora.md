@@ -1902,3 +1902,14 @@ Cierra el "CRL refresh" pendiente de Fase 10: el nodo ahora se pone al día solo
 - **`apply_crl_chain`** factorizado HTTP-agnóstico (el `fetch` se inyecta) ⇒ unit-testeable sin socket. `apply_version` ya garantiza monotonicidad + verificación, así que un blob alterado/fuera-de-secuencia aborta la pasada sin corromper el cache en disco.
 - **Tests**: 2 nuevos (`crates/api`, fetch en memoria con keypair efímero) — walk de cadena v1→v2 + persistencia + parada en 404 + idempotencia; blob alterado aborta sin escribir cache. `base64` agregado a dev-deps. GATE workspace verde (core compartido tocado): `fmt` + `clippy -D warnings` + **475 passed / 6 ignored**.
 - Doc operativo: stanza `[crl]` comentada en `config/default.toml`. La vía manual (`pharma license crl-import`) del PR #132 sigue para bootstrap por snapshot. Commit en PR #139.
+
+
+## 2026-06-13 — Lane B: RUT emisor + manual Compras/Recetas + RUT recetas (PRs #137, #138, #140)
+
+Lane B (worktree `pharma-server-wt-client`, scope `client/`+`docs/`). Tres ítems mergeados a `feature/erp-parity`, todos cierran loop. Consolida la validación de RUT mód-11 (helpers de PR #129) en todos los formularios que lo usan + completa el manual del operador.
+
+- **PR #137 — `feat(client)` RUT emisor DTE**: `client/src/views/configuracion.ts`. El RUT del emisor (Configuración → Emisor DTE) identifica a la farmacia ante el SII — un RUT errado rompe TODAS las boletas/facturas, y el form lo aceptaba sin validar. Reusa `isValidRut`/`canonicalRut`/`formatRut`: validación mód-11 en vivo (rojo+hint / verde+eco), **bloquea** el guardado si es inválido, normaliza a `NNNNNNNN-D`. Pure TS. Commit `?` (merged 07:39Z).
+- **PR #138 — `docs(operator)` Compras + Recetas**: `docs/operator/10-compras.md` (ciclo abastecimiento: proveedores, OC, recepción→stock+costo promedio, cuenta por pagar — documenta los pagos del PR #134) + `11-recetas-controlados.md` (libro Ley 20.000, inmutabilidad, controlado exige médico+RUT, export CSV) + README ítems 11/12. Docs-only. 187 líneas. Con esto el manual cubre 00–11.
+- **PR #140 — `feat(client)` RUT recetas (advisory)**: `client/src/views/recetas.ts`. Chequeo mód-11 en el RUT del paciente y del médico, pero **advisory no bloqueante** (una receta es dato de registro; el paciente puede ser extranjero sin RUT chileno) — avisa (verde válido / ámbar si DV no calza) pero deja guardar; RUT válidos se canonicalizan a `NNNNNNNN-D` para consistencia del libro/búsqueda. Pure TS. Commit `29f3c67`.
+- **Decisión de diseño RUT**: dos políticas según el dato — **bloqueante** donde el RUT es tributario y obligatorio (emisor/receptor DTE), **advisory** donde es registro y puede faltar legítimamente (paciente/médico en recetas). Mismos helpers (`format.ts`), distinta severidad.
+- **Pipeline sano**: Lane A (crates/, CRL refresh job #139) y Lane B intercalaron merges ff sin contención; único roce bitacora.md (append-only al fondo).
