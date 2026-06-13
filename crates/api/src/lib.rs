@@ -255,8 +255,34 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     let sched_data = state.data_dir.clone();
     let backup_sched = cfg.backup.schedule.clone();
     let retention = cfg.backup.retention_days;
+    // CRL refresh (opt-in, ADR-0006). Sin `url` ⇒ `None` ⇒ el hub no agenda
+    // nada (cero red). El cache CRL vive junto al `license.json`
+    // (= `license_path.parent()`), que NO es `data_dir` (subdir surreal) — por
+    // eso derivamos el dir del `license_path`, igual que `load_license_from`.
+    let crl_refresh = cfg.crl.url.as_ref().filter(|u| !u.is_empty()).map(|url| {
+        let crl_dir = state
+            .license_path
+            .as_ref()
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            .or_else(|| state.data_dir.clone())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        CrlRefresh {
+            url: url.clone(),
+            schedule: cfg
+                .crl
+                .schedule
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "0 0 */6 * * *".to_string()),
+            data_dir: crl_dir,
+            license_path: state.license_path.clone(),
+            license: state.license.clone(),
+        }
+    });
     tokio::spawn(async move {
-        if let Err(e) = spawn_scheduler_hub(backup_sched, sched_data, retention, sched_db).await {
+        if let Err(e) =
+            spawn_scheduler_hub(backup_sched, sched_data, retention, sched_db, crl_refresh).await
+        {
             tracing::error!(error = %e, "scheduler hub failed to start");
         }
     });
@@ -278,6 +304,7 @@ async fn spawn_scheduler_hub(
     db_path: Option<std::path::PathBuf>,
     retention_days: u32,
     db: Option<Arc<db::Db>>,
+    crl_refresh: Option<CrlRefresh>,
 ) -> anyhow::Result<()> {
     let sched = tokio_cron_scheduler::JobScheduler::new().await?;
 
@@ -297,6 +324,15 @@ async fn spawn_scheduler_hub(
         let job = idempotency_purge_job(db)?;
         sched.add(job).await?;
         tracing::info!("idempotency TTL purge job started (hourly)");
+    }
+
+    // CRL refresh (opt-in, ADR-0006). Only scheduled when an endpoint is set.
+    if let Some(crl) = crl_refresh {
+        let schedule = crl.schedule.clone();
+        let url = crl.url.clone();
+        let job = crl_refresh_job(crl)?;
+        sched.add(job).await?;
+        tracing::info!(%schedule, %url, "CRL refresh job started (ADR-0006)");
     }
 
     sched.start().await?;
@@ -358,6 +394,118 @@ fn idempotency_purge_job(db: Arc<db::Db>) -> anyhow::Result<tokio_cron_scheduler
         })
     })?;
     Ok(job)
+}
+
+/// Parámetros del job de refresh CRL (ADR-0006). Sólo se construye cuando hay
+/// un endpoint configurado; ver `run`. `data_dir` es el dir que aloja
+/// `license.json` + `crl_state.json` (= `license_path.parent()`), no el subdir
+/// SurrealKv.
+struct CrlRefresh {
+    url: String,
+    schedule: String,
+    data_dir: std::path::PathBuf,
+    license_path: Option<std::path::PathBuf>,
+    license: Arc<arc_swap::ArcSwap<license::License>>,
+}
+
+/// Job periódico que recorre la cadena firmada de CRLs del CDN, la aplica al
+/// cache local y re-evalúa la license activa (degrade-to-Free lock-free vía
+/// `ArcSwap` si quedó revocada — ADR-0005 §6, nunca kill-switch). Best-effort:
+/// cualquier error de red/verify se loguea y se ignora; el core nunca se
+/// bloquea por el estado del CRL.
+fn crl_refresh_job(p: CrlRefresh) -> anyhow::Result<tokio_cron_scheduler::Job> {
+    let job = tokio_cron_scheduler::Job::new_async(p.schedule.as_str(), move |_uuid, _l| {
+        let url = p.url.clone();
+        let dir = p.data_dir.clone();
+        let lic_path = p.license_path.clone();
+        let lic = p.license.clone();
+        Box::pin(async move {
+            match refresh_crl_once(&url, &dir).await {
+                Ok(0) => {}
+                Ok(n) => {
+                    tracing::info!(applied = n, "CRL refresh: aplicadas versiones nuevas");
+                    // Re-evaluar revocación: `load_license_from` re-lee el
+                    // license.json + el crl_state.json recién escrito y degrada
+                    // a Free si la license activa quedó revocada.
+                    if let Some(path) = lic_path.as_ref() {
+                        let fresh = load_license_from(path);
+                        lic.store(std::sync::Arc::new(fresh));
+                        tracing::info!("license re-evaluada tras CRL refresh");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "CRL refresh falló (best-effort, ignorado)")
+                }
+            }
+        })
+    })?;
+    Ok(job)
+}
+
+/// Una pasada de refresh: descarga + aplica la cadena de diffs desde el CDN.
+/// Usa las claves de producción embebidas. Devuelve cuántas versiones se
+/// aplicaron (0 = el cache ya estaba al día).
+async fn refresh_crl_once(base_url: &str, data_dir: &std::path::Path) -> anyhow::Result<u64> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+    let base = base_url.trim_end_matches('/').to_string();
+    apply_crl_chain(data_dir, license::keys::LICENSER_KEYS, move |n| {
+        let client = client.clone();
+        let base = base.clone();
+        async move {
+            let url = format!("{base}/crl-v{n}.json");
+            let resp = client.get(&url).send().await?;
+            // 404 = no hay más versiones (cabeza de la cadena) → parar limpio.
+            if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+            let bytes = resp.error_for_status()?.bytes().await?;
+            Ok(Some(bytes.to_vec()))
+        }
+    })
+    .await
+}
+
+/// Núcleo HTTP-agnóstico del refresh: recorre la cadena `crl-v{N}.json` hacia
+/// adelante desde `last_seen + 1`, verificando + aplicando cada versión, hasta
+/// que `fetch` devuelve `None` (no existe esa versión todavía → cabeza de la
+/// cadena). Persiste el cache sólo si se aplicó algo. Puro de red (el `fetch`
+/// se inyecta) para poder testearlo sin socket. `apply_version` ya garantiza
+/// monotonicidad + verificación de firma, así que un blob alterado o fuera de
+/// secuencia aborta la pasada sin corromper el cache en disco.
+async fn apply_crl_chain<F, Fut>(
+    data_dir: &std::path::Path,
+    keys: &[(&str, &str)],
+    mut fetch: F,
+) -> anyhow::Result<u64>
+where
+    F: FnMut(u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Option<Vec<u8>>>>,
+{
+    let state_path = license::default_crl_state_path(data_dir);
+    let mut state = license::load_crl_state(&state_path)?;
+    let mut applied = 0u64;
+    // Cota dura por pasada: un nodo muy atrasado se pone al día en pasadas
+    // sucesivas en vez de bloquear el scheduler. (El bootstrap por snapshot es
+    // la vía rápida vía `pharma license crl-import --snapshot`.)
+    const MAX_PER_RUN: u64 = 1000;
+    for _ in 0..MAX_PER_RUN {
+        let next = state.last_seen_version + 1;
+        let Some(bytes) = fetch(next).await? else {
+            break;
+        };
+        let v = license::crl::parse_and_verify_crl_with_keys(&bytes, keys)?;
+        state.apply_version(&v)?;
+        applied += 1;
+    }
+    if applied > 0 {
+        if let Some(parent) = state_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        license::save_crl_state(&state, &state_path)?;
+    }
+    Ok(applied)
 }
 
 /// Read + verify a license from disk, falling back to `License::free_default`
@@ -436,6 +584,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: pharma_core::config::StockWebhookConfig::default(),
+        crl: pharma_core::config::CrlConfig::default(),
     }
 }
 
@@ -578,5 +727,121 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+}
+
+#[cfg(test)]
+mod crl_refresh_tests {
+    use super::*;
+    use agent::canonical::canonical_bytes;
+    use agent::identity::Identity;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    /// Firma un `crl-v{N}.json` con un keypair efímero (mismo esquema que
+    /// `crates/license` tests: canonical-JSON sin `signature` → Ed25519 → b64).
+    fn sign_crl(
+        id: &Identity,
+        key_id: &str,
+        version: u64,
+        prev: Option<u64>,
+        added: &[&str],
+    ) -> Vec<u8> {
+        let mut v = json!({
+            "schema_version": 1,
+            "crl_version": version,
+            "previous_version": prev,
+            "published_at": "2026-06-13T00:00:00Z",
+            "diff": {
+                "added": added.iter().map(|l| json!({
+                    "license_id": l,
+                    "revoked_at": "2026-06-12T00:00:00Z",
+                })).collect::<Vec<_>>(),
+                "removed": [],
+            },
+            "issuer_did": id.did(),
+            "key_id": key_id,
+            "signature": "",
+        });
+        let unsigned = {
+            let mut u = v.clone();
+            u.as_object_mut().unwrap().remove("signature");
+            canonical_bytes(&u).unwrap()
+        };
+        let sig = id.sign(&unsigned);
+        v["signature"] = Value::String(B64.encode(sig.to_bytes()));
+        serde_json::to_vec(&v).unwrap()
+    }
+
+    #[tokio::test]
+    async fn walks_chain_persists_and_stops_on_404() {
+        let id = Identity::generate();
+        let key_id = "lk-test";
+        let did = id.did();
+        let keys: &[(&str, &str)] = &[(key_id, &did)];
+
+        let mut cdn: HashMap<u64, Vec<u8>> = HashMap::new();
+        cdn.insert(1, sign_crl(&id, key_id, 1, None, &["lic_a"]));
+        cdn.insert(2, sign_crl(&id, key_id, 2, Some(1), &["lic_b"]));
+
+        let dir = std::env::temp_dir().join(format!("crl-refresh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Primera pasada: aplica v1 + v2, para en v3 (404 ⇒ None).
+        let applied = apply_crl_chain(&dir, keys, |n| {
+            let blob = cdn.get(&n).cloned();
+            async move { Ok(blob) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(applied, 2);
+
+        let state = license::load_crl_state(&license::default_crl_state_path(&dir)).unwrap();
+        assert_eq!(state.last_seen_version, 2);
+        assert!(state.is_revoked("lic_a") && state.is_revoked("lic_b"));
+
+        // Segunda pasada idempotente: v3 sigue 404 ⇒ 0 aplicadas.
+        let again = apply_crl_chain(&dir, keys, |n| {
+            let blob = cdn.get(&n).cloned();
+            async move { Ok(blob) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(again, 0);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn tampered_blob_aborts_without_writing_cache() {
+        let id = Identity::generate();
+        let key_id = "lk-test";
+        let did = id.did();
+        let keys: &[(&str, &str)] = &[(key_id, &did)];
+
+        // Firma con `lic_a`, luego altera el payload a `lic_z` ⇒ firma inválida.
+        let tampered = String::from_utf8(sign_crl(&id, key_id, 1, None, &["lic_a"]))
+            .unwrap()
+            .replace("lic_a", "lic_z")
+            .into_bytes();
+
+        let dir = std::env::temp_dir().join(format!("crl-refresh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let res = apply_crl_chain(&dir, keys, |_n| {
+            let blob = tampered.clone();
+            async move { Ok(Some(blob)) }
+        })
+        .await;
+        assert!(res.is_err(), "blob alterado debe abortar la pasada");
+
+        // Nada aplicado ⇒ el cache no se escribió (sigue en default).
+        let state = license::load_crl_state(&license::default_crl_state_path(&dir)).unwrap();
+        assert_eq!(state.last_seen_version, 0);
+        assert!(!state.is_revoked("lic_z"));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
