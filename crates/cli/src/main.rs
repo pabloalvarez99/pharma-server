@@ -170,6 +170,21 @@ enum LicenseCmd {
         #[arg(long)]
         token: Option<String>,
     },
+    /// Import a signed CRL file (diff `crl-vN.json` or full `snapshot-vN.json`,
+    /// ADR-0006). Verifies the Ed25519 signature, applies it to the local
+    /// revocation cache (`data/crl_state.json`) and reports if the active
+    /// license became revoked. Offline path: the CDN refresh job uses the
+    /// same primitives; this lets an operator apply a CRL by hand.
+    CrlImport {
+        /// Path to the CRL JSON file.
+        file: PathBuf,
+        /// Treat the file as a full snapshot (replaces local cache) instead
+        /// of an incremental diff.
+        #[arg(long)]
+        snapshot: bool,
+    },
+    /// Print the local CRL cache: last seen version + revoked license ids.
+    CrlStatus,
     /// Fetch a license by id from a remote pharma-license-server, verify
     /// Ed25519 offline, persist it locally, and optionally hot-reload the
     /// running server in one shot.
@@ -592,6 +607,66 @@ async fn main() -> anyhow::Result<()> {
                     println!("license removed: {} (tier free vigente)", path.display());
                 } else {
                     println!("no license to remove at {}", path.display());
+                }
+            }
+            LicenseCmd::CrlImport { file, snapshot } => {
+                let bytes =
+                    std::fs::read(&file).with_context(|| format!("read {}", file.display()))?;
+                let lic_path = license_path()?;
+                let dir = lic_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let state_path = license::default_crl_state_path(dir);
+                let mut state = license::load_crl_state(&state_path)
+                    .with_context(|| format!("crl cache {} ilegible", state_path.display()))?;
+                if snapshot {
+                    let s = license::parse_and_verify_snapshot(&bytes)
+                        .with_context(|| format!("verify snapshot {}", file.display()))?;
+                    state.apply_snapshot(&s)?;
+                } else {
+                    let v = license::parse_and_verify_crl(&bytes)
+                        .with_context(|| format!("verify CRL {}", file.display()))?;
+                    state.apply_version(&v)?;
+                }
+                if let Some(parent) = state_path.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                license::save_crl_state(&state, &state_path)?;
+                println!(
+                    "CRL aplicado: version={} revocadas={} → {}",
+                    state.last_seen_version,
+                    state.revoked.len(),
+                    state_path.display()
+                );
+                if lic_path.exists() {
+                    if let Ok(lic) = license::load_from_disk(&lic_path) {
+                        if state.is_revoked(&lic.license_id) {
+                            println!(
+                                "ATENCIÓN: la license activa {} está REVOCADA — el \
+                                 server degradará a Free al próximo reload/restart \
+                                 (core gratis sigue operativo).",
+                                lic.license_id
+                            );
+                        }
+                    }
+                }
+            }
+            LicenseCmd::CrlStatus => {
+                let lic_path = license_path()?;
+                let dir = lic_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let state_path = license::default_crl_state_path(dir);
+                let state = license::load_crl_state(&state_path)?;
+                println!("CRL cache:   {}", state_path.display());
+                println!("Version:     {}", state.last_seen_version);
+                match state.updated_at {
+                    Some(t) => println!("Actualizado: {t}"),
+                    None => println!("Actualizado: nunca (sin CRL aplicado)"),
+                }
+                println!("Revocadas ({}):", state.revoked.len());
+                for id in &state.revoked {
+                    println!("  - {id}");
                 }
             }
             LicenseCmd::Activate {
