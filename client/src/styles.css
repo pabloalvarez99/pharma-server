@@ -1619,6 +1619,46 @@ button {
   color: var(--muted-strong);
 }
 
+/* PO accounts-payable block (detail drawer) */
+.po-ap {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.po-ap-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.po-ap-totals {
+  max-width: 280px;
+  margin: 0 0 12px;
+  padding-top: 0;
+  border-top: none;
+}
+.po-ap-pay-form {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  background: rgba(10, 13, 18, 0.6);
+}
+.po-ap-pay-form select {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.po-ap-pay-form select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 /* ---- devoluciones (refund) modal ---- */
 .dev-order-row {
   display: flex;
