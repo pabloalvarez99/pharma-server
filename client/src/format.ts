@@ -30,6 +30,22 @@ export function num(value: number): string {
   return NUM.format(value);
 }
 
+// --- IVA CL 19% --------------------------------------------------------------
+// Mirrors the server's `crates/dte/src/emit.rs::desglose_iva` EXACTLY so the
+// cashier's live preview matches the amounts the server will stamp on the DTE:
+// from an IVA-included affected total, neto = round(afecto / 1.19) half-away-
+// from-zero and the IVA absorbs the rounding (neto + iva == afecto). Computed as
+// `afecto * 100 / 119` to dodge the float representation of 1.19; afecto is a
+// non-negative integer CLP amount so `Math.round` (ties toward +∞) equals the
+// server's half-away-from-zero. The cross-repo parity is locked by tests that
+// reuse the server's own vectors.
+
+/** Split an IVA-included affected total (integer CLP) into `{ neto, iva }`. */
+export function desgloseIva(afecto: number): { neto: number; iva: number } {
+  const neto = Math.round((afecto * 100) / 119);
+  return { neto, iva: afecto - neto };
+}
+
 // --- RUT chileno (módulo 11) -------------------------------------------------
 // El SII identifica al receptor por RUT con dígito verificador mód-11. Validamos
 // en el cliente para no emitir un DTE con un RUT mal tipeado (el server lo
