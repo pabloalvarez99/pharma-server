@@ -92,6 +92,7 @@ pub fn build_documento(
             "el documento requiere al menos un item".to_string(),
         ));
     }
+    validate_estructura(spec)?;
     let mut afecto = Decimal::ZERO;
     let mut exento = Decimal::ZERO;
     let mut items: Vec<DteItem> = Vec::with_capacity(spec.items.len());
@@ -132,6 +133,16 @@ pub fn build_documento(
             exento: it.exento,
         });
     }
+    // Factura afecta (33) exige base afecta > 0 (neto + IVA desglosados). Un
+    // documento 100% exento no va en tipo 33 — el renderer lo rechaza igual,
+    // pero acá evita quemar un folio. Notas/guía no tienen esta restricción.
+    if spec.tipo == DteTipo::FacturaElectronica && afecto <= Decimal::ZERO {
+        return Err(DteError::XmlInvalid(
+            "factura (33) afecta requiere monto neto e IVA desglosados (> 0); \
+             un documento 100% exento no corresponde a tipo 33"
+                .to_string(),
+        ));
+    }
     let (neto, iva) = desglose_iva(afecto);
 
     let referencias: Vec<DteReferencia> = spec
@@ -171,6 +182,61 @@ pub fn build_documento(
         sii_glosa: None,
         metadata: None,
     })
+}
+
+/// Valida las precondiciones estructurales por tipo que de otro modo sólo
+/// fallarían al renderizar (`xml::factura/nota_credito/guia`) — para entonces
+/// el folio CAF ya se quemó. Espejando esas reglas acá, la validación previa
+/// del handler (`build_documento` con folio dummy) las atrapa antes de
+/// `caf::assign_next`. Las validaciones de `xml::*` siguen siendo la barrera
+/// autoritativa (defensa en profundidad); esto sólo adelanta el error.
+fn validate_estructura(spec: &DocumentoSpec) -> Result<(), DteError> {
+    let vacio = |s: &str| s.trim().is_empty();
+    // Receptor completo: 33/56/61/52 lo exigen (boleta 39 ya fue rechazada).
+    if vacio(&spec.receptor.rut) {
+        return Err(DteError::XmlInvalid("receptor requiere RUT".to_string()));
+    }
+    if vacio(&spec.receptor.razon_social) {
+        return Err(DteError::XmlInvalid(
+            "receptor requiere razón social".to_string(),
+        ));
+    }
+    if vacio(&spec.receptor.giro) || vacio(&spec.receptor.direccion) || vacio(&spec.receptor.comuna)
+    {
+        return Err(DteError::XmlInvalid(format!(
+            "receptor de documento tipo {} requiere giro, dirección y comuna",
+            spec.tipo.code()
+        )));
+    }
+    match spec.tipo {
+        // Notas (56/61) referencian SIEMPRE el documento que corrigen.
+        DteTipo::NotaCredito | DteTipo::NotaDebito => {
+            if spec.referencias.is_empty() {
+                return Err(DteError::XmlInvalid(format!(
+                    "documento tipo {}: una nota requiere al menos una referencia al documento original",
+                    spec.tipo.code()
+                )));
+            }
+            for (i, r) in spec.referencias.iter().enumerate() {
+                if !matches!(r.cod_ref, Some(1..=3)) {
+                    return Err(DteError::XmlInvalid(format!(
+                        "documento tipo {}: referencia {} requiere cod_ref 1 (anula), 2 (corrige texto) o 3 (corrige montos)",
+                        spec.tipo.code(),
+                        i + 1
+                    )));
+                }
+            }
+        }
+        // Guía de despacho (52) exige el motivo del traslado (1..9).
+        DteTipo::GuiaDespacho if !matches!(spec.ind_traslado, Some(1..=9)) => {
+            return Err(DteError::XmlInvalid(format!(
+                "documento tipo {}: la guía requiere ind_traslado entre 1 y 9 (motivo del traslado)",
+                spec.tipo.code()
+            )));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -265,5 +331,112 @@ mod tests {
         assert!(build_documento(&base(vec![item("", 1, 100, false)]), 1, "r", fecha()).is_err());
         assert!(build_documento(&base(vec![item("A", 0, 100, false)]), 1, "r", fecha()).is_err());
         assert!(build_documento(&base(vec![item("A", 1, -1, false)]), 1, "r", fecha()).is_err());
+    }
+
+    fn referencia(cod: Option<i32>) -> ReferenciaSpec {
+        ReferenciaSpec {
+            tipo_doc_ref: "33".into(),
+            folio_ref: "100".into(),
+            fecha_ref: fecha(),
+            cod_ref: cod,
+            razon_ref: Some("anula".into()),
+        }
+    }
+
+    fn spec_tipo(
+        tipo: DteTipo,
+        refs: Vec<ReferenciaSpec>,
+        ind_traslado: Option<i32>,
+    ) -> DocumentoSpec {
+        DocumentoSpec {
+            tipo,
+            receptor: receptor(),
+            items: vec![item("A", 1, 1190, false)],
+            referencias: refs,
+            ind_traslado,
+        }
+    }
+
+    #[test]
+    fn nota_sin_referencia_rechazada_antes_de_folio() {
+        // Espejo del check de `xml::nota_credito::require_referencias_nota`,
+        // adelantado para no quemar folio (folio dummy = 1).
+        for tipo in [DteTipo::NotaCredito, DteTipo::NotaDebito] {
+            let err = build_documento(&spec_tipo(tipo, vec![], None), 1, "r", fecha()).unwrap_err();
+            assert!(
+                format!("{err}").contains("referencia"),
+                "tipo {}",
+                tipo.code()
+            );
+        }
+    }
+
+    #[test]
+    fn nota_con_cod_ref_invalido_rechazada() {
+        for cod in [None, Some(0), Some(4)] {
+            let spec = spec_tipo(DteTipo::NotaCredito, vec![referencia(cod)], None);
+            let err = build_documento(&spec, 1, "r", fecha()).unwrap_err();
+            assert!(format!("{err}").contains("cod_ref"), "cod {cod:?}");
+        }
+    }
+
+    #[test]
+    fn nota_con_referencia_valida_ok() {
+        let spec = spec_tipo(DteTipo::NotaCredito, vec![referencia(Some(1))], None);
+        let d = build_documento(&spec, 5, "76123456-7", fecha()).unwrap();
+        assert_eq!(d.tipo, DteTipo::NotaCredito);
+        assert_eq!(d.referencias.len(), 1);
+    }
+
+    #[test]
+    fn guia_sin_ind_traslado_rechazada() {
+        let err = build_documento(
+            &spec_tipo(DteTipo::GuiaDespacho, vec![], None),
+            1,
+            "r",
+            fecha(),
+        )
+        .unwrap_err();
+        assert!(format!("{err}").contains("ind_traslado"));
+    }
+
+    #[test]
+    fn guia_ind_traslado_fuera_de_rango_rechazada() {
+        for ind in [0, 10] {
+            let spec = spec_tipo(DteTipo::GuiaDespacho, vec![], Some(ind));
+            assert!(
+                build_documento(&spec, 1, "r", fecha()).is_err(),
+                "ind {ind}"
+            );
+        }
+    }
+
+    #[test]
+    fn guia_ind_traslado_valido_ok() {
+        let spec = spec_tipo(DteTipo::GuiaDespacho, vec![], Some(1));
+        let d = build_documento(&spec, 9, "76123456-7", fecha()).unwrap();
+        assert_eq!(d.ind_traslado, Some(1));
+    }
+
+    #[test]
+    fn receptor_incompleto_rechazado() {
+        let mut spec = spec_tipo(DteTipo::FacturaElectronica, vec![], None);
+        spec.receptor.comuna = "  ".into();
+        let err = build_documento(&spec, 1, "r", fecha()).unwrap_err();
+        assert!(format!("{err}").contains("comuna"));
+    }
+
+    #[test]
+    fn factura_totalmente_exenta_rechazada() {
+        // afecto = 0 (única línea exenta) ⇒ tipo 33 no corresponde.
+        let spec = DocumentoSpec {
+            tipo: DteTipo::FacturaElectronica,
+            receptor: receptor(),
+            items: vec![item("EXENTO", 1, 5000, true)],
+            referencias: vec![],
+            ind_traslado: None,
+        };
+        let err = build_documento(&spec, 1, "r", fecha()).unwrap_err();
+        assert!(format!("{err}").contains("exento"));
     }
 }
