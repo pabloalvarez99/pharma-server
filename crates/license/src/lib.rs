@@ -8,12 +8,17 @@
 //! Spec: `docs/strategy/license-architecture.md`. Invariants: ADR-0002,
 //! ADR-0005, ADR-0006, ADR-0007.
 
+pub mod crl;
 pub mod gate;
 pub mod keys;
 pub mod schema;
 pub mod store;
 pub mod verify;
 
+pub use crl::{
+    default_crl_state_path, load_state as load_crl_state, parse_and_verify_crl,
+    parse_and_verify_snapshot, save_state as save_crl_state, CrlSnapshot, CrlState, CrlVersion,
+};
 pub use gate::{entitled, is_expired, is_in_grace, require, GateError};
 pub use schema::{BoughtAddon, License, Metadata, Tier, SCHEMA_VERSION};
 pub use store::{default_license_path, load_from_disk, save_to_disk};

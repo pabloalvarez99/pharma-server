@@ -363,10 +363,34 @@ fn idempotency_purge_job(db: Arc<db::Db>) -> anyhow::Result<tokio_cron_scheduler
 /// Read + verify a license from disk, falling back to `License::free_default`
 /// on any error. Logs both paths. Returned by both startup and the
 /// `admin/license/reload` handler, so the policy stays in one place.
+///
+/// Revocación (ADR-0006): si existe un cache CRL (`crl_state.json`, hermano
+/// del license.json) y lista el `license_id`, la license degrada a Free —
+/// nunca kill-switch (ADR-0005 §6). Cache CRL ausente/corrupto ⇒ se ignora
+/// (offline-first: la revocación es best-effort, no bloqueante).
 pub fn load_license_from(path: &std::path::Path) -> license::License {
     if path.exists() {
         match license::load_from_disk(path) {
             Ok(lic) => {
+                if let Some(dir) = path.parent() {
+                    let crl_path = license::default_crl_state_path(dir);
+                    match license::load_crl_state(&crl_path) {
+                        Ok(state) if state.is_revoked(&lic.license_id) => {
+                            tracing::warn!(
+                                license_id = %lic.license_id,
+                                crl_version = state.last_seen_version,
+                                "license REVOCADA según CRL local; degradando a Free \
+                                 (core gratis sigue operativo, ADR-0005)"
+                            );
+                            return license::License::free_default(uuid::Uuid::nil());
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, path = %crl_path.display(),
+                                "crl_state.json ilegible; se ignora (revocación best-effort)");
+                        }
+                    }
+                }
                 tracing::info!(
                     tier = lic.tier.as_str(),
                     license_id = %lic.license_id,
