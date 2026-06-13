@@ -28,6 +28,13 @@ pub struct AppConfig {
     /// common case (no web storefront) carries zero runtime overhead.
     #[serde(default)]
     pub stock_webhook: StockWebhookConfig,
+    /// CRL (revocation) refresh — opt-in (ADR-0006). Sin `url` ⇒ deshabilitado:
+    /// cero red, offline-first (ADR-0005). Cuando hay `url`, un job recorre la
+    /// cadena firmada de diffs `crl-v{N}.json` desde la última versión vista y
+    /// degrada a Free cualquier license revocada. Best-effort: los errores de
+    /// red se loguean y se ignoran (la revocación nunca bloquea el core).
+    #[serde(default)]
+    pub crl: CrlConfig,
 }
 
 /// Public web-push orders endpoint (ADR-0012 pattern 2).
@@ -240,6 +247,20 @@ pub struct BackupConfig {
     /// `0` = keep forever.
     #[serde(default)]
     pub retention_days: u32,
+}
+
+/// CRL refresh (ADR-0006). Opt-in: deshabilitado salvo que se configure `url`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CrlConfig {
+    /// Base URL del CDN que sirve los CRL firmados (con o sin slash final),
+    /// p.ej. `https://cdn.pharma.example/crl`. El job pide
+    /// `{url}/crl-v{N}.json`. Vacío/None ⇒ refresh deshabilitado.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Cron (`sec min hour day month weekday`, UTC). None/empty ⇒ cada 6 horas
+    /// (`0 0 */6 * * *`). La revocación es best-effort; no necesita ser densa.
+    #[serde(default)]
+    pub schedule: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

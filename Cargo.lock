@@ -236,6 +236,7 @@ dependencies = [
  "auth",
  "axum 0.8.9",
  "axum-prometheus",
+ "base64 0.22.1",
  "bitflags",
  "chrono",
  "criterion",

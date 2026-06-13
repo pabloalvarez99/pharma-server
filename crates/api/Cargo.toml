@@ -65,6 +65,8 @@ hmac.workspace = true
 sha2 = "0.10"
 hex.workspace = true
 jsonwebtoken.workspace = true
+# CRL refresh unit test signs ephemeral CRLs (base64 sig over canonical-JSON).
+base64.workspace = true
 metrics-util = { version = "0.17", features = ["debugging"] }
 # DTE endpoint tests mint a synthetic CAF + cert PEM (mirrors crates/dte tests).
 rsa = { workspace = true, features = ["pem"] }

@@ -54,3 +54,13 @@ hmac_secret = ""
 enabled = false
 target_url = ""
 hmac_secret = ""
+
+[crl]
+# License revocation refresh (ADR-0006). Opt-in + offline-first: empty url =
+# disabled (zero network). When set, a job walks the signed CRL diff chain
+# {url}/crl-v{N}.json from the last seen version and degrades any revoked
+# license to Free (never a kill-switch — ADR-0005 §6). Best-effort: network
+# errors are logged and ignored.
+url = ""
+# Cron "sec min hour day month weekday" (UTC). Empty = every 6h.
+schedule = ""
