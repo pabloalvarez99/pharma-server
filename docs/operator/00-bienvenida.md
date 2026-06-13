@@ -19,12 +19,22 @@ icono y se abre la aplicación.
 - **Vender** — registrar boletas, cobrar en efectivo o con tarjeta.
 - **Inventario** — saber cuántas unidades de cada producto tenés, en qué lote y
   cuándo se vencen.
-- **Reportes** — cuánto vendiste hoy, cuáles fueron tus productos estrella.
 - **Caja** — abrir caja en la mañana, hacer arqueo al cierre del día.
-- **Recetas** — registrar recetas magistrales y recetas de productos
-  controlados.
+- **Clientes** — guardar tus clientes y sus puntos de fidelidad.
+- **Compras** — pedir mercadería a proveedores, recibirla (sube el stock) y
+  llevar lo que les debés.
+- **Boletas y facturas** — emitir boletas y facturas electrónicas al SII, con
+  notas de crédito/débito y guías.
+- **Devoluciones** — reembolsar una venta cuando el cliente devuelve algo.
+- **Recetas** — registrar recetas magistrales y el libro de productos
+  controlados (Ley 20.000).
+- **Reportes** — cuánto vendiste hoy, tus productos estrella y tus márgenes.
 - **Respaldo** — cada noche se guarda una copia completa de la información,
   automáticamente.
+
+No hace falta que aprendas todo de una vez: cada parte tiene su capítulo en este
+manual (mirá el [índice](./README.md)). Empezá por **vender** y **mirar el
+inventario**; el resto lo vas usando a medida que lo necesitás.
 
 Todo eso pasa **adentro del computador de la farmacia**. No hay nube, no hay
 servidores afuera. Si te cortan internet podés seguir trabajando sin ningún
@@ -66,11 +76,19 @@ Cuando entrás correctamente, la pantalla de login se desvanece y aparece el
 **Columna izquierda — el menú**
 
 Es una barra angosta a la izquierda. Arriba aparece el logo de Tu Farmacia
-chiquito, y debajo tres botones grandes que son los módulos:
+chiquito, y debajo la lista de **módulos**. Los que más vas a usar en el
+mostrador:
 
+- **Panel** — un resumen del día.
 - **POS** (Punto de venta) — para cobrar.
+- **Devoluciones** — para reembolsar una venta.
 - **Inventario** (Stock y lotes) — para ver qué tenés.
-- **Reportes** (Ventas y márgenes) — para ver cómo va el negocio.
+- **Caja** — apertura y arqueo del turno.
+
+Y los que usa más quien administra la farmacia: **Clientes**, **Compras**,
+**Recetas**, **Boletas**, **Facturas**, **Gastos**, **Reportes**, **Auditoría**,
+**Importar** y **Configuración**. No te asustes por la cantidad: cada uno tiene
+su capítulo y los vas conociendo de a poco.
 
 Al final del menú hay un botón gris que dice **Cerrar sesión**. Lo usás cuando
 terminás tu turno.
@@ -89,9 +107,9 @@ Te dice, de izquierda a derecha:
 **Centro — el contenido**
 
 Es la zona más grande, donde aparece lo que estás haciendo. Cuando recién
-entrás, te muestra el **Inventario** (porque casi siempre vas a querer ver el
-stock primero). Si tocás el botón **POS** del menú, la zona del centro cambia
-y te muestra el punto de venta. Y así con cada módulo.
+entrás, te muestra el **Panel** (un resumen del día). Si tocás el botón **POS**
+del menú, la zona del centro cambia y te muestra el punto de venta. Y así con
+cada módulo.
 
 ## La regla de oro
 
