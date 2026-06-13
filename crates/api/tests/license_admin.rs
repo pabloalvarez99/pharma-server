@@ -155,3 +155,63 @@ async fn reload_with_invalid_file_falls_back_to_free() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["tier"], "free");
 }
+
+/// Escribe un `crl_state.json` (cache local ya aplicado) que revoca `ids`.
+fn write_crl_state(dir: &std::path::Path, version: u64, ids: &[&str]) {
+    let revoked: Vec<serde_json::Value> = ids
+        .iter()
+        .map(|i| serde_json::Value::String((*i).into()))
+        .collect();
+    let state = serde_json::json!({
+        "last_seen_version": version,
+        "updated_at": Utc::now(),
+        "revoked": revoked,
+    });
+    let path = dir.join("crl_state.json");
+    std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+}
+
+#[tokio::test]
+async fn crl_status_empty_when_no_cache() {
+    // license_path en un dir sin crl_state.json ⇒ estado vacío, no error.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("license.json");
+    let app = api::build_router(state_with(pro_license(), Some(path)));
+    let (status, json) = call(app, "GET", "/api/v1/admin/license/crl/status", "admin").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["last_seen_version"], 0);
+    assert_eq!(json["revoked_count"], 0);
+    assert_eq!(json["active_license_id"], "lic_test_pro");
+    assert_eq!(json["active_license_revoked"], false);
+    assert_eq!(json["readable"], true);
+}
+
+#[tokio::test]
+async fn crl_status_flags_active_license_revoked() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("license.json");
+    // El cache revoca exactamente el license_id activo (`lic_test_pro`).
+    write_crl_state(dir.path(), 7, &["lic_test_pro", "lic_other"]);
+    let app = api::build_router(state_with(pro_license(), Some(path)));
+    let (status, json) = call(app, "GET", "/api/v1/admin/license/crl/status", "admin").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["last_seen_version"], 7);
+    assert_eq!(json["revoked_count"], 2);
+    assert_eq!(json["active_license_revoked"], true);
+}
+
+#[tokio::test]
+async fn crl_status_forbidden_without_admin_role() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("license.json");
+    let app = api::build_router(state_with(pro_license(), Some(path)));
+    let (status, _) = call(app, "GET", "/api/v1/admin/license/crl/status", "cashier").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn crl_status_without_path_returns_503() {
+    let app = api::build_router(state_with(pro_license(), None));
+    let (status, _) = call(app, "GET", "/api/v1/admin/license/crl/status", "admin").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}
