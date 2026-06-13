@@ -1965,3 +1965,11 @@ El 402 `FEATURE_REQUIRES_UPGRADE` es **la** señal del modelo freemium (qué pay
 - **`crates/api/src/error.rs`**: `ApiError::payment_required(feature, tier_required)` — el chokepoint único de todo 402 (lo atraviesan `From<GateError>` y el path `dte.sii_send`) — ahora incrementa `pharma_feature_gate_blocked_total{feature, tier_required}` vía el recorder global de `metrics` (mismo que `/metrics`, token-gated). Cardinalidad acotada (catálogo de features/tiers cerrado), **agregado y sin PII** → encaja en telemetría opt-in (ADR-0005 §3). Sin recorder (unit tests) el macro es no-op.
 - **Por qué ahí**: instrumentar el constructor capta TODOS los 402 con su label de feature, sin tocar cada handler. Reusa el patrón `metrics::counter!` ya usado en `stock_webhook.rs`.
 - **Tests**: +1 en `error.rs` (con `metrics_util::DebuggingRecorder` + `with_local_recorder`, scoped sin estado global: 2 llamadas ⇒ counter 2 con labels `feature`/`tier_required`). GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **493 passed / 6 ignored** (+1). Commit en PR #153.
+
+
+## 2026-06-13 — Lane A: métrica de refresh CRL (observabilidad de revocación, PR #154)
+
+Cierra el par de observabilidad junto a #153. Worktree `pharma-server-wt-91f`, scope `crates/api`. El job de refresh CRL (#139) logueaba pero no emitía métrica — un nodo que no alcanza el CDN se queda **ciego a revocaciones** en silencio (relevante para seguridad), aunque el core siga operativo.
+
+- **`crates/api/src/lib.rs`**: el `crl_refresh_job` ahora emite `pharma_crl_refresh_total{result}` con `result` en set cerrado `applied|noop|error` (cardinalidad baja, sin PII). Un alza de `error` en `/metrics` = alerta de "el nodo no se está enterando de revocaciones". Helper puro `crl_refresh_label(&Result)` mapea el resultado a la etiqueta (testeable sin levantar el scheduler ni HTTP).
+- **Tests**: +1 en `crl_refresh_tests` (`crl_refresh_label`: Ok(0)→noop, Ok(n)→applied, Err→error). GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **494 passed / 6 ignored** (+1). Commit en PR #154.
