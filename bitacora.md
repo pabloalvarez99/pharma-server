@@ -1956,3 +1956,12 @@ Completa la superficie operativa del CRL (ADR-0006): la CLI ya tenía `crl-impor
 - **`GET /api/v1/admin/license/crl/status`** (admin+, read-only, sin red): lee el cache local `crl_state.json` (hermano del `license.json`) y devuelve `{ crl_path, readable, last_seen_version, updated_at, revoked_count, revoked[], active_license_id, active_license_revoked }`. El campo clave es **`active_license_revoked`**: cruza el `license_id` activo contra el set revocado → responde directo "¿mi licencia está revocada?". Cache ausente ⇒ estado vacío (no error, offline-first); cache ilegible ⇒ `readable=false` + vacío (best-effort, nunca tumba el endpoint). Sin `license_path` (no configurado) ⇒ 503, igual que `license/reload`.
 - Cero cambios en `AppState` (usa `license_path` + `license` ya presentes) ⇒ blast radius nulo sobre los ~22 constructores de test. Registrado en el router de `v1::license` + OpenAPI.
 - **Tests**: +5 en `license_admin.rs` (cache vacío ⇒ version 0; cache que revoca el id activo ⇒ `active_license_revoked=true`; 403 sin admin; 503 sin path). GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **492 passed / 6 ignored** (+4). Commit en PR #152.
+
+
+## 2026-06-13 — Lane A: métrica de gate-block freemium (señal de upsell, PR #153)
+
+El 402 `FEATURE_REQUIRES_UPGRADE` es **la** señal del modelo freemium (qué paywall se topa cada operador → funnel de upsell), pero no se medía. Worktree `pharma-server-wt-91f`, scope `crates/api`.
+
+- **`crates/api/src/error.rs`**: `ApiError::payment_required(feature, tier_required)` — el chokepoint único de todo 402 (lo atraviesan `From<GateError>` y el path `dte.sii_send`) — ahora incrementa `pharma_feature_gate_blocked_total{feature, tier_required}` vía el recorder global de `metrics` (mismo que `/metrics`, token-gated). Cardinalidad acotada (catálogo de features/tiers cerrado), **agregado y sin PII** → encaja en telemetría opt-in (ADR-0005 §3). Sin recorder (unit tests) el macro es no-op.
+- **Por qué ahí**: instrumentar el constructor capta TODOS los 402 con su label de feature, sin tocar cada handler. Reusa el patrón `metrics::counter!` ya usado en `stock_webhook.rs`.
+- **Tests**: +1 en `error.rs` (con `metrics_util::DebuggingRecorder` + `with_local_recorder`, scoped sin estado global: 2 llamadas ⇒ counter 2 con labels `feature`/`tier_required`). GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **493 passed / 6 ignored** (+1). Commit en PR #153.

@@ -127,6 +127,18 @@ impl ApiError {
     /// minimum tier (`pro` | `business` | `enterprise`). Spec:
     /// `docs/strategy/license-architecture.md` §7.2.
     pub fn payment_required(feature: &str, tier_required: &str) -> Self {
+        // Señal de upsell del modelo freemium: cada paywall que se topa queda
+        // contado por feature + tier requerido. Cardinalidad acotada (el
+        // catálogo de features/tiers es chico y cerrado), agregado y sin PII —
+        // encaja en telemetría opt-in (ADR-0005 §3). Se renderiza en `/metrics`
+        // (token-gated) vía el recorder global; si no hay recorder (unit tests)
+        // el macro es no-op.
+        metrics::counter!(
+            "pharma_feature_gate_blocked_total",
+            "feature" => feature.to_string(),
+            "tier_required" => tier_required.to_string(),
+        )
+        .increment(1);
         Self::new(
             StatusCode::PAYMENT_REQUIRED,
             "FEATURE_REQUIRES_UPGRADE",
@@ -303,6 +315,30 @@ mod tests {
         let api_err: ApiError = gate_err.into();
         assert_eq!(api_err.status, StatusCode::PAYMENT_REQUIRED);
         assert_eq!(api_err.code, "FEATURE_REQUIRES_UPGRADE");
+    }
+
+    #[test]
+    fn payment_required_increments_gate_block_counter() {
+        use metrics_util::debugging::{DebugValue, DebuggingRecorder};
+
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        metrics::with_local_recorder(&recorder, || {
+            let _ = ApiError::payment_required("reports.margins_daily", "pro");
+            let _ = ApiError::payment_required("reports.margins_daily", "pro");
+        });
+
+        let hit = snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .find(|(ck, _, _, _)| ck.key().name() == "pharma_feature_gate_blocked_total");
+        let (ck, _, _, value) = hit.expect("gate-block counter recorded");
+        assert!(matches!(value, DebugValue::Counter(2)), "got {value:?}");
+        // Labels carry feature + required tier for the upsell funnel.
+        let labels: Vec<_> = ck.key().labels().map(|l| (l.key(), l.value())).collect();
+        assert!(labels.contains(&("feature", "reports.margins_daily")));
+        assert!(labels.contains(&("tier_required", "pro")));
     }
 
     #[tokio::test]
