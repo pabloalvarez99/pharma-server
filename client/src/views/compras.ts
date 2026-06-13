@@ -15,13 +15,18 @@ import {
   getPurchaseOrder,
   createPurchaseOrder,
   receivePurchaseOrder,
+  getPoPayments,
+  createPoPayment,
+  cashSessions,
   type PurchaseOrder,
   type PurchaseOrderDetail,
   type NewPurchaseOrderItem,
   type ReceiveLine,
   type Supplier,
+  type PurchasePaymentSummary,
+  type PurchasePayment,
 } from "../api";
-import { clp, num } from "../format";
+import { clp, num, toNumber } from "../format";
 import { kpiSkeleton, tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 /** Statuses a PO can be received from (server allows receiving from these). */
@@ -525,6 +530,7 @@ function openPoDetailModal(
     const canReceive = RECEIVABLE.includes(po.status.toLowerCase()) && pending > 0;
     body.innerHTML = `
       ${renderPoDetail(po)}
+      <div id="po-d-ap" class="po-ap">${tableSkeleton(2)}</div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" id="po-d-close">Cerrar</button>
         ${canReceive ? `<button type="button" class="btn-primary modal-confirm" id="po-d-receive">Recibir mercadería</button>` : ""}
@@ -536,7 +542,165 @@ function openPoDetailModal(
         openReceiveModal(modalHost, serverUrl, po, onChanged);
       });
     }
+    void loadAp(serverUrl, po, body.querySelector<HTMLElement>("#po-d-ap")!);
   })();
+}
+
+/** Load and render the accounts-payable block of a PO: total / paid / balance,
+ *  the recorded payments, and (when there's a balance and the PO is live) an
+ *  inline "registrar pago" form. Re-invokes itself after a payment so the
+ *  drawer stays open and refreshes in place. */
+async function loadAp(
+  serverUrl: string,
+  po: PurchaseOrderDetail,
+  apHost: HTMLElement,
+): Promise<void> {
+  apHost.innerHTML = tableSkeleton(2);
+  let summary: PurchasePaymentSummary;
+  try {
+    summary = await getPoPayments(serverUrl, po.id);
+  } catch (err) {
+    apHost.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    return;
+  }
+  apHost.innerHTML = renderApSection(summary, po);
+
+  const payBtn = apHost.querySelector<HTMLButtonElement>("#po-ap-pay");
+  const formHost = apHost.querySelector<HTMLElement>("#po-ap-form");
+  if (!payBtn || !formHost) return;
+  payBtn.addEventListener("click", () => {
+    payBtn.hidden = true;
+    formHost.hidden = false;
+    formHost.innerHTML = paymentFormHtml(summary.balance);
+    const amountEl = formHost.querySelector<HTMLInputElement>("#po-ap-amount")!;
+    const methodEl = formHost.querySelector<HTMLSelectElement>("#po-ap-method")!;
+    const refEl = formHost.querySelector<HTMLInputElement>("#po-ap-ref")!;
+    const errEl = formHost.querySelector<HTMLElement>("#po-ap-error")!;
+    const confirmBtn = formHost.querySelector<HTMLButtonElement>("#po-ap-confirm")!;
+    formHost.querySelector<HTMLButtonElement>("#po-ap-cancel")!.addEventListener("click", () => {
+      formHost.hidden = true;
+      formHost.innerHTML = "";
+      payBtn.hidden = false;
+    });
+    amountEl.focus();
+    amountEl.select();
+
+    confirmBtn.addEventListener("click", async () => {
+      const fail = (msg: string) => {
+        errEl.hidden = false;
+        errEl.textContent = msg;
+      };
+      const amount = amountEl.value.trim();
+      const amountNum = Number(amount);
+      if (!amount || !Number.isFinite(amountNum) || amountNum <= 0) {
+        return fail("Ingresa un monto mayor a 0.");
+      }
+      if (amountNum > toNumber(summary.balance)) {
+        return fail(`El monto supera el saldo pendiente (${clp(summary.balance)}).`);
+      }
+      const method = methodEl.value;
+      errEl.hidden = true;
+      confirmBtn.classList.add("loading");
+      confirmBtn.disabled = true;
+      try {
+        // Cash payments surface in the drawer arqueo, so attach the open session
+        // when there is one (the server requires it for cash with an open till).
+        let cashSession: string | undefined;
+        if (method === "cash") {
+          const open = await cashSessions(serverUrl, "open", 1);
+          cashSession = open[0]?.id;
+        }
+        await createPoPayment(serverUrl, po.id, {
+          amount,
+          paymentMethod: method,
+          cashSession,
+          reference: refEl.value.trim() || undefined,
+        });
+        await loadAp(serverUrl, po, apHost);
+      } catch (err) {
+        confirmBtn.classList.remove("loading");
+        confirmBtn.disabled = false;
+        fail(asMessage(err));
+      }
+    });
+  });
+}
+
+/** Payment medios — server values `cash`/`bank`/`card`/`transfer` mapped to
+ *  Spanish labels for the picker + the payments table. */
+const PAY_METHODS: { value: string; label: string }[] = [
+  { value: "transfer", label: "Transferencia" },
+  { value: "bank", label: "Depósito bancario" },
+  { value: "card", label: "Tarjeta" },
+  { value: "cash", label: "Efectivo (caja)" },
+];
+
+function methodLabel(m: string): string {
+  return PAY_METHODS.find((x) => x.value === m)?.label ?? m;
+}
+
+function renderApSection(s: PurchasePaymentSummary, po: PurchaseOrderDetail): string {
+  const cancelled = po.status.toLowerCase() === "cancelled";
+  const canPay = !cancelled && !s.fully_paid && toNumber(s.balance) > 0;
+  const badge = s.fully_paid
+    ? `<span class="pill pill-ok">Pagada</span>`
+    : cancelled
+      ? `<span class="pill pill-danger">OC cancelada</span>`
+      : `<span class="pill pill-warn">Saldo ${clp(s.balance)}</span>`;
+  const payments = s.payments.length
+    ? `<table class="data-table">
+        <thead><tr><th>Fecha</th><th>Medio</th><th>Referencia</th><th class="num">Monto</th></tr></thead>
+        <tbody>${s.payments.map(payRow).join("")}</tbody>
+      </table>`
+    : `<p class="muted">Sin pagos registrados.</p>`;
+  return `
+    <h4 class="section-title po-ap-title">Cuenta por pagar ${badge}</h4>
+    <div class="rcpt-totals po-ap-totals">
+      <div class="rcpt-line"><span>Total OC</span><strong>${clp(s.total)}</strong></div>
+      <div class="rcpt-line"><span>Pagado</span><strong>${clp(s.paid)}</strong></div>
+      <div class="rcpt-line total"><span>Saldo</span><strong>${clp(s.balance)}</strong></div>
+    </div>
+    ${payments}
+    ${canPay
+      ? `<button type="button" class="btn-ghost" id="po-ap-pay">+ Registrar pago</button>
+         <div id="po-ap-form" hidden></div>`
+      : ""}
+  `;
+}
+
+function payRow(p: PurchasePayment): string {
+  return `
+    <tr>
+      <td>${escapeHtml(fmtDate(p.paid_at))}</td>
+      <td>${escapeHtml(methodLabel(p.payment_method))}</td>
+      <td><span class="muted">${escapeHtml(p.reference || "—")}</span></td>
+      <td class="num">${clp(p.amount)}</td>
+    </tr>`;
+}
+
+function paymentFormHtml(balance: string): string {
+  return `
+    <div class="po-ap-pay-form">
+      <div class="modal-field">
+        <label class="modal-label" for="po-ap-amount">Monto del pago</label>
+        <input id="po-ap-amount" type="number" min="0" step="1" value="${escapeHtml(balance)}" />
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="po-ap-method">Medio de pago</label>
+        <select id="po-ap-method">
+          ${PAY_METHODS.map((m) => `<option value="${m.value}">${m.label}</option>`).join("")}
+        </select>
+      </div>
+      <div class="modal-field">
+        <label class="modal-label" for="po-ap-ref">Referencia (N° transferencia / comprobante, opcional)</label>
+        <input id="po-ap-ref" type="text" autocomplete="off" />
+      </div>
+      <div id="po-ap-error" class="form-error" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" id="po-ap-cancel">Cancelar</button>
+        <button type="button" class="btn-primary" id="po-ap-confirm">Registrar pago</button>
+      </div>
+    </div>`;
 }
 
 function renderPoDetail(po: PurchaseOrderDetail): string {

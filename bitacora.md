@@ -1880,9 +1880,20 @@ Capa cliente de revocación de licencias (ADR-0006), avanza el "CRL refresh" pen
 - **`crates/cli/src/main.rs`**: `pharma license crl-import <file> [--snapshot]` (verifica + aplica + reporta si la license activa quedó revocada) y `pharma license crl-status` (imprime cache: versión + revocados). Vía manual para el operador; el refresh job HTTP del CDN reusará estas mismas primitivas (lane siguiente).
 - **Tests**: 6 nuevos en `crl.rs` — cadena multi-versión, fuera-de-secuencia rechazado, firma alterada (`InvalidSignature`), key desconocida (`UnknownKeyId`), snapshot replace + rollback rechazado, roundtrip a disco. GATE workspace verde: `fmt` + `clippy -D warnings` + **473 passed / 6 ignored**.
 - **Commit**: `153bf0b` (PR #132). Pendiente cola Fase 10: refresh job HTTP (fetch CDN) + key real producción ya embebida (ver `[[license-prodkey-already-embedded]]`).
+## 2026-06-13 — Lane B: cuentas por pagar (Compras) + capítulos 05/06/07 del manual (PRs #134, #135)
+
+Lane B (worktree `pharma-server-wt-client`, scope `client/`+`docs/`). Dos ítems mergeados a `feature/erp-parity`, ambos cierran loop (merge, no PR-abierto).
+
+- **PR #134 — `feat(client)` cuentas por pagar**: la vista Compras mostraba OC + recepción pero no la cuenta por pagar al proveedor, pese a que el server ya exponía `GET/POST /api/v1/purchase-orders/{id}/payments`. **Full-stack sobre endpoints existentes, cero cambios en `crates/`**:
+  - `client/src-tauri/src/lib.rs`: comandos Tauri `get_po_payments` (cashier+) y `create_po_payment` (admin+) + structs `PurchasePayment`/`PurchasePaymentSummary` (dinero STRING); registrados en `invoke_handler!`.
+  - `client/src/api.ts`: tipos + wrappers `getPoPayments`/`createPoPayment`.
+  - `client/src/views/compras.ts`: bloque "Cuenta por pagar" en el drawer de detalle de OC — Total/Pagado/Saldo + badge, listado de pagos, form inline "Registrar pago" (monto≤saldo, medio transfer/bank/card/cash; efectivo adjunta la sesión de caja abierta para que el egreso entre al arqueo). Refresca en sitio.
+  - GATE: `npm run build` (tsc+vite) + `cargo fmt`/`clippy --manifest-path client/src-tauri/Cargo.toml -- -D warnings` (target-dir aislado `target-tauri-laneb`) verdes. Commit `df73640`.
+- **PR #135 — `docs(operator)` capítulos faltantes**: el README del manual enlazaba 05/06/07 pero los archivos NO existían → 3 links rotos en docs publicados. Creados: `05-fin-de-dia.md` (cierre de caja/arqueo, multi-caja), `06-problemas-comunes.md` (troubleshooting día a día + reaseguro offline-first), `07-respaldo.md` (snapshot tar.gz, automático nocturno + `pharma backup create|list|restore`, copia fuera del equipo). Mecánica real (`caja.ts`, `crates/cli/src/backup_cmd.rs`, config `[backup]`). Docs-only → cero cargo. 244 líneas.
+- **Pipeline sano**: Lane A (crates/, CRL #132/#133) y Lane B (client/+docs/) intercalaron merges ff a `feature/erp-parity` sin contención; único roce bitacora.md, resuelto append-only al fondo.
 
 
-## 2026-06-13 — Lane A: job de refresh CRL opt-in desde CDN (PR #134)
+## 2026-06-13 — Lane A: job de refresh CRL opt-in desde CDN (PR #139)
 
 Cierra el "CRL refresh" pendiente de Fase 10: el nodo ahora se pone al día solo. Worktree aislado `pharma-server-wt-91f`, scope `crates/api` + `crates/core` (config) + `config/default.toml`. Construido sobre las primitivas puras del PR #132.
 
@@ -1890,4 +1901,4 @@ Cierra el "CRL refresh" pendiente de Fase 10: el nodo ahora se pone al día solo
 - **`crates/api/src/lib.rs`**: `crl_refresh_job` agregado al scheduler hub (junto a backup + idempotency-purge). Sólo se agenda cuando hay `url`. Una pasada: `refresh_crl_once` → `apply_crl_chain` recorre `{url}/crl-v{N}.json` desde `last_seen+1`, verifica + aplica cada versión (claves prod embebidas), **para limpio en 404** (cabeza de la cadena), persiste el cache sólo si aplicó algo, cota 1000/pasada. Tras aplicar, re-evalúa la license vía `load_license_from` + `ArcSwap.store` → una license recién revocada **degrada a Free sin reiniciar** (ADR-0005 §6, nunca kill-switch). Errores de red/verify se loguean y se ignoran (best-effort; el core nunca se bloquea). El cache CRL se escribe en `license_path.parent()` (= dir del `license.json`), **no** en el subdir SurrealKv.
 - **`apply_crl_chain`** factorizado HTTP-agnóstico (el `fetch` se inyecta) ⇒ unit-testeable sin socket. `apply_version` ya garantiza monotonicidad + verificación, así que un blob alterado/fuera-de-secuencia aborta la pasada sin corromper el cache en disco.
 - **Tests**: 2 nuevos (`crates/api`, fetch en memoria con keypair efímero) — walk de cadena v1→v2 + persistencia + parada en 404 + idempotencia; blob alterado aborta sin escribir cache. `base64` agregado a dev-deps. GATE workspace verde (core compartido tocado): `fmt` + `clippy -D warnings` + **475 passed / 6 ignored**.
-- Doc operativo: stanza `[crl]` comentada en `config/default.toml`. La vía manual (`pharma license crl-import`) del PR #132 sigue para bootstrap por snapshot. Commit en PR #134.
+- Doc operativo: stanza `[crl]` comentada en `config/default.toml`. La vía manual (`pharma license crl-import`) del PR #132 sigue para bootstrap por snapshot. Commit en PR #139.

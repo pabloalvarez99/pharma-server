@@ -52,6 +52,11 @@ servidor. Para eso existe el manual técnico (`docs/ops/`).
 10. [Facturas, notas y guías](./09-facturas-notas-guias.md)
    — emitir factura (33), nota de crédito/débito (61/56) y guía de despacho
    (52): validación del RUT, desglose neto/IVA en vivo y envío al SII.
+11. [Compras a proveedores](./10-compras.md)
+   — proveedores, órdenes de compra, recepción de mercadería (sube el stock) y
+   cuenta por pagar.
+12. [Recetas y libro de controlados](./11-recetas-controlados.md)
+   — registro de recetas y libro de controlados (Ley 20.000) con export CSV.
 
 ## Cómo imprimir todo el manual
 

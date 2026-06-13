@@ -401,6 +401,36 @@ pub struct ReceiveLine {
     pub qty_received: i64,
 }
 
+/// Mirrors `crates/domain/src/purchasing/model.rs::PurchasePaymentDto` — one
+/// recorded supplier payment against a PO. `amount` crosses the wire as STRING
+/// (Decimal); `paid_at`/`created_at` are RFC3339 strings.
+#[derive(Serialize, Deserialize)]
+pub struct PurchasePayment {
+    pub id: String,
+    pub purchase_order: String,
+    pub amount: String,
+    pub currency: String,
+    pub payment_method: String,
+    pub cash_session: Option<String>,
+    pub reference: Option<String>,
+    pub note: Option<String>,
+    pub paid_at: String,
+    pub created_at: String,
+}
+
+/// Mirrors `PurchasePaymentSummary` — the accounts-payable rollup of a PO plus
+/// its recorded payments. `total`/`paid`/`balance` are STRINGS (Decimal).
+#[derive(Serialize, Deserialize)]
+pub struct PurchasePaymentSummary {
+    pub purchase_order: String,
+    pub status: String,
+    pub total: String,
+    pub paid: String,
+    pub balance: String,
+    pub fully_paid: bool,
+    pub payments: Vec<PurchasePayment>,
+}
+
 /// One printable line of a [`Receipt`] (`sales/model.rs::ReceiptItem`). Money
 /// fields (`unit_price`/`line_total`) cross the wire as STRINGS.
 #[derive(Serialize, Deserialize)]
@@ -2167,6 +2197,77 @@ async fn get_purchase_order(
         .map_err(|e| format!("Respuesta de orden de compra inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/purchase-orders/{id}/payments` (Bearer, cashier+) — accounts-
+/// payable rollup of a PO: `total` / `paid` / `balance` (STRING Decimals),
+/// `fully_paid`, and the recorded payments. Drives the "Cuenta por pagar" block
+/// of the PO detail drawer.
+#[tauri::command]
+async fn get_po_payments(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<PurchasePaymentSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/purchase-orders/{id}/payments"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de pagos de OC inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/purchase-orders/{id}/payments` (Bearer, admin+) — record a
+/// supplier payment against a PO. `amount` is a STRING (Decimal) forwarded
+/// verbatim; `payment_method` is `cash`/`bank`/`card`/`transfer`. `cash_session`
+/// is required by the server when paying `cash` with an open drawer (so the
+/// outflow shows in the arqueo). Empty optionals are omitted. Returns the
+/// created payment.
+#[tauri::command]
+async fn create_po_payment(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    amount: String,
+    payment_method: Option<String>,
+    cash_session: Option<String>,
+    reference: Option<String>,
+) -> Result<PurchasePayment, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "amount": amount });
+    if let Some(v) = payment_method.filter(|s| !s.is_empty()) {
+        body["payment_method"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = cash_session.filter(|s| !s.is_empty()) {
+        body["cash_session"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = reference.filter(|s| !s.is_empty()) {
+        body["reference"] = serde_json::Value::String(v);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/purchase-orders/{id}/payments"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de pago de OC inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/suppliers` (Bearer, cashier+). `search` filters by name on the
 /// server; `limit` caps rows. Used by the suppliers list and the "Nueva OC"
 /// supplier picker.
@@ -2774,6 +2875,8 @@ pub fn run() {
             create_supplier,
             create_purchase_order,
             receive_purchase_order,
+            get_po_payments,
+            create_po_payment,
             list_expenses,
             create_expense,
             margins_daily,
