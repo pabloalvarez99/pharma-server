@@ -122,10 +122,9 @@ resumen por tipo de documento y el detalle folio por folio.
 ## Facturas, notas de crédito/débito y guías de despacho
 
 Además de boletas, el sistema emite **factura electrónica (33)**, **nota de
-débito (56)**, **nota de crédito (61)** y **guía de despacho (52)**. Por ahora
-estas se emiten vía la API de administración (`POST /api/v1/dte/documentos`)
-— la pantalla dedicada viene en una actualización próxima. Lo que hay que
-saber:
+débito (56)**, **nota de crédito (61)** y **guía de despacho (52)** desde la
+pantalla **Facturas**. El paso a paso completo está en el capítulo
+[Facturas, notas y guías](./09-facturas-notas-guias.md). Lo esencial:
 
 - Cada tipo necesita **su propio CAF** (igual que la boleta: se descarga del
   SII y se importa con `pharma caf import`).
