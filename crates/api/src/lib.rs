@@ -420,7 +420,8 @@ fn crl_refresh_job(p: CrlRefresh) -> anyhow::Result<tokio_cron_scheduler::Job> {
         let lic_path = p.license_path.clone();
         let lic = p.license.clone();
         Box::pin(async move {
-            match refresh_crl_once(&url, &dir).await {
+            let res = refresh_crl_once(&url, &dir).await;
+            match &res {
                 Ok(0) => {}
                 Ok(n) => {
                     tracing::info!(applied = n, "CRL refresh: aplicadas versiones nuevas");
@@ -434,12 +435,29 @@ fn crl_refresh_job(p: CrlRefresh) -> anyhow::Result<tokio_cron_scheduler::Job> {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "CRL refresh falló (best-effort, ignorado)")
+                    tracing::warn!(error = %e, "CRL refresh falló (best-effort, ignorado)");
                 }
             }
+            // Observabilidad: `pharma_crl_refresh_total{result}` con result en un
+            // set cerrado (applied|noop|error) — cardinalidad baja, sin PII. Un
+            // alza de `error` = el nodo no puede alcanzar el CDN y se está
+            // quedando ciego a revocaciones (relevante para seguridad), pese a
+            // que el core siga operativo (best-effort, ADR-0005).
+            metrics::counter!("pharma_crl_refresh_total", "result" => crl_refresh_label(&res))
+                .increment(1);
         })
     })?;
     Ok(job)
+}
+
+/// Etiqueta de métrica para una pasada de refresh CRL — set cerrado para
+/// mantener baja la cardinalidad de `pharma_crl_refresh_total{result}`.
+fn crl_refresh_label(res: &anyhow::Result<u64>) -> &'static str {
+    match res {
+        Ok(0) => "noop",
+        Ok(_) => "applied",
+        Err(_) => "error",
+    }
 }
 
 /// Una pasada de refresh: descarga + aplica la cadena de diffs desde el CDN.
@@ -838,6 +856,16 @@ mod crl_refresh_tests {
         assert_eq!(again, 0);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refresh_label_maps_result_to_closed_set() {
+        assert_eq!(crl_refresh_label(&Ok(0)), "noop");
+        assert_eq!(crl_refresh_label(&Ok(3)), "applied");
+        assert_eq!(
+            crl_refresh_label(&Err(anyhow::anyhow!("red caída"))),
+            "error"
+        );
     }
 
     #[tokio::test]
