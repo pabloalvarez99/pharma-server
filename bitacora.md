@@ -1880,3 +1880,16 @@ Capa cliente de revocación de licencias (ADR-0006), avanza el "CRL refresh" pen
 - **`crates/cli/src/main.rs`**: `pharma license crl-import <file> [--snapshot]` (verifica + aplica + reporta si la license activa quedó revocada) y `pharma license crl-status` (imprime cache: versión + revocados). Vía manual para el operador; el refresh job HTTP del CDN reusará estas mismas primitivas (lane siguiente).
 - **Tests**: 6 nuevos en `crl.rs` — cadena multi-versión, fuera-de-secuencia rechazado, firma alterada (`InvalidSignature`), key desconocida (`UnknownKeyId`), snapshot replace + rollback rechazado, roundtrip a disco. GATE workspace verde: `fmt` + `clippy -D warnings` + **473 passed / 6 ignored**.
 - **Commit**: `153bf0b` (PR #132). Pendiente cola Fase 10: refresh job HTTP (fetch CDN) + key real producción ya embebida (ver `[[license-prodkey-already-embedded]]`).
+
+
+## 2026-06-13 — Lane B: cuentas por pagar (Compras) + capítulos 05/06/07 del manual (PRs #134, #135)
+
+Lane B (worktree `pharma-server-wt-client`, scope `client/`+`docs/`). Dos ítems mergeados a `feature/erp-parity`, ambos cierran loop (merge, no PR-abierto).
+
+- **PR #134 — `feat(client)` cuentas por pagar**: la vista Compras mostraba OC + recepción pero no la cuenta por pagar al proveedor, pese a que el server ya exponía `GET/POST /api/v1/purchase-orders/{id}/payments`. **Full-stack sobre endpoints existentes, cero cambios en `crates/`**:
+  - `client/src-tauri/src/lib.rs`: comandos Tauri `get_po_payments` (cashier+) y `create_po_payment` (admin+) + structs `PurchasePayment`/`PurchasePaymentSummary` (dinero STRING); registrados en `invoke_handler!`.
+  - `client/src/api.ts`: tipos + wrappers `getPoPayments`/`createPoPayment`.
+  - `client/src/views/compras.ts`: bloque "Cuenta por pagar" en el drawer de detalle de OC — Total/Pagado/Saldo + badge, listado de pagos, form inline "Registrar pago" (monto≤saldo, medio transfer/bank/card/cash; efectivo adjunta la sesión de caja abierta para que el egreso entre al arqueo). Refresca en sitio.
+  - GATE: `npm run build` (tsc+vite) + `cargo fmt`/`clippy --manifest-path client/src-tauri/Cargo.toml -- -D warnings` (target-dir aislado `target-tauri-laneb`) verdes. Commit `df73640`.
+- **PR #135 — `docs(operator)` capítulos faltantes**: el README del manual enlazaba 05/06/07 pero los archivos NO existían → 3 links rotos en docs publicados. Creados: `05-fin-de-dia.md` (cierre de caja/arqueo, multi-caja), `06-problemas-comunes.md` (troubleshooting día a día + reaseguro offline-first), `07-respaldo.md` (snapshot tar.gz, automático nocturno + `pharma backup create|list|restore`, copia fuera del equipo). Mecánica real (`caja.ts`, `crates/cli/src/backup_cmd.rs`, config `[backup]`). Docs-only → cero cargo. 244 líneas.
+- **Pipeline sano**: Lane A (crates/, CRL #132/#133) y Lane B (client/+docs/) intercalaron merges ff a `feature/erp-parity` sin contención; único roce bitacora.md, resuelto append-only al fondo.
