@@ -49,6 +49,9 @@ servidor. Para eso existe el manual técnico (`docs/ops/`).
 9. [Boletas electrónicas SII](./08-boletas-sii.md)
    — certificado digital, folios (CAF), emitir y firmar boletas, libro de
    ventas mensual para el contador.
+10. [Facturas, notas y guías](./09-facturas-notas-guias.md)
+   — emitir factura (33), nota de crédito/débito (61/56) y guía de despacho
+   (52): validación del RUT, desglose neto/IVA en vivo y envío al SII.
 
 ## Cómo imprimir todo el manual
 
