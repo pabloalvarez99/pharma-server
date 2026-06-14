@@ -2130,3 +2130,26 @@ WAC base rule, alta SKU→lote→alerta→ajuste auditado, gasto→total→caja 
 multi-rubro farmacia/minimarket, estados OC es-CL + KPIs, FEFO, ABC). GATE cliente
 verde: `npm run build` (tsc+vite) + `vitest run` 69/69 (33 format + 7 vertical +
 21 stock-helpers + 8 journeys… resto). Sin cambios src-tauri ni backend.
+
+## 2026-06-14 — Stock view-journeys LANE B (marvin · phase 2)
+Vista de inventario test-driven a nivel presentación (lo que el químico/dueño VE,
+no sólo la matemática). 3 piezas de view-logic puras nuevas en stock-helpers.ts,
+cableadas a inventory.ts, + 6 user-journeys (inventory-view.test.ts):
+  - `nearExpiryView`: la pestaña "Próximos a vencer" ahora IMPONE orden FEFO
+    (caducados primero, más vencido arriba; luego el que vence antes) y precomputa
+    tono/etiqueta — el feed del server no garantiza orden. Cableado en
+    renderVencimientos/nearRow.
+  - `reorderSuggestion`/`reorderList`: alerta de stock mínimo accionable — cada SKU
+    bajo/agotado muestra "Reponer N u." (cuánto comprar hasta el objetivo
+    REORDER_TARGET=20); worklist prioriza agotado→menor stock y excluye los sanos
+    (cero alertas falsas). "Reponer N" cableado en productRow.
+  - `rotacionRows` + pestaña "Rotación" nueva: ranking ABC (Pareto) sobre unidades
+    vendidas del feed `stock-rotation` (Free, no Pro-gated) — A=lo que se mueve,
+    C=stock muerto; participación en % entero. Fila clickeable al detalle.
+Journeys (J9–J14): orden+resaltado FEFO (incl. days<0 con expired=false →
+defensivo), multi-rubro perecibles minimarket (pan/leche), recompra sugerida,
+worklist priorizada, ranking ABC, rotación multi-rubro/stock muerto. Ambos
+verticales. GATE cliente verde: `npm run build` (tsc+vite) + `vitest run` 80/80.
+Sin cambios src-tauri ni backend; api.ts intacto (stockRotation ya existía).
+NO bug de prod hallado — la lógica era correcta; el valor es blindar la
+presentación (orden/resaltado/recompra/ABC) contra divergencia UI↔test.
