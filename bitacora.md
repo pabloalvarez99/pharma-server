@@ -2081,3 +2081,18 @@ Worktree `pharma-wt-seed-svc` off `origin/feature/erp-parity` (v0.1.28). El seed
 - **`crates/api/src/v1/seed.rs` (nuevo)**: `POST /api/v1/admin/seed-demo {vertical, force}` — gated admin/owner (require_admin in-handler, mismo patrón que audit; NO usa el role::layer con BUG-001), tenant SIEMPRE del JWT, responde el `SeedSummary`. Registrado en `v1/mod.rs` (merge additive). `DomainError::Conflict → 409` ya mapeado en `error.rs`.
 - **Tests**: `crates/domain/tests/seed.rs` (5, kv-mem) lockea el invariante de ledger + idempotencia/force/vertical desconocido; `crates/api/tests/seed_demo_endpoint.rs` (3) lockea el contrato HTTP (403 no-admin, 200+summary, 409 re-seed, 200 force, 401/403 sin token). GATE workspace verde: `fmt` + `clippy --all-targets -D warnings` + `cargo test --workspace` (92 suites ok, 0 failed).
 - **Para ye**: el botón de seed en la app ya tiene a quién llamar — `POST /api/v1/admin/seed-demo` con token admin, body `{"vertical":"pharmacy"|"minimarket","force":false}`. Respuesta: `{vertical, products_created, batches_created, movements_emitted, wiped}`.
+
+
+## 2026-06-14 — PAUL: polish POS (qty teclable + devolución UX honesta) + seed-demo CLI + verificación viva
+
+Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los gaps que dejé fuera del PR #165 + agrega el seeder para probar la app viva.
+
+**Fixes cliente**:
+- **`pos.ts` — carrito teclable**: cada `.pos-line` ahora es `tabindex=0 role=group` con keydown: ↑/→/`+` suma, ↓/←/`−` resta, Supr/Backspace borra la línea. `refocusLine(id)` re-enfoca la misma línea tras el re-render (mantener apretada una flecha sigue editándola); si la línea desaparece (qty→0) cae al buscador. Helpers `removeLine`/`refocusLine`. Antes qty era sólo mouse.
+- **`devoluciones.ts` — UX honesta**: (1) el `tipo` ya no es un `<select>` libre que podía contradecir las cantidades — se **deriva** (badge): "Total" sólo si toda línea vendida se devuelve completa, si no "Parcial"; recalcula en cada `input` de cantidad y se manda `deriveTipo()` al server. (2) restock: checkbox explícito **deshabilitado** con el motivo real visible ("no disponible desde la boleta: no identifica el producto"), en vez de un `restock:false` oculto. El flag se manda sólo si el toggle está ON **y** la línea trae product id (la boleta no → queda false).
+
+**Seeder `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket [--reset]`** (`crates/cli`, + dep `domain`): find-or-create tenant + admin `owner` (`admin@<slug>.cl` / `demo1234`) + catálogo de 5 productos por rubro. Pharmacy trae `active_ingredient`+`prescription_type`+`laboratory` (incl. receta retenida/controlada); minimarket los deja `None` — así el POS (que no renderiza ninguno) es probablemente idéntico entre rubros. Idempotente (skip por slug); `--reset` borra productos del tenant.
+
+**Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
