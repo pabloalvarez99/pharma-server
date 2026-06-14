@@ -2096,3 +2096,16 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+
+## 2026-06-14 — MILTON: backup CLI hardening — restore validate-before-wipe + confirmación + alias `now`
+
+Branch `feat/backup-cli-commands` (off fresh `origin/feature/erp-parity`). Scope: `crates/cli/src/backup_cmd.rs` (disjunto). El grueso del pilar #8 ya estaba en erp-parity (`pharma backup create|restore|list`, 12 tests, errores ES, chequeo de puerto-listening antes de restaurar). Cerré los GAPS reales de la lane LANE A sin duplicar:
+
+- **`backup restore` ahora es *validate-before-wipe*** (gap "valida antes de pisar"): antes el comando borraba el dir de datos vivo y *después* extraía — un .tar.gz corrupto/truncado = pérdida de datos. Nuevo `restore_archive()` extrae primero a un staging `.restore-staging-<ts>/`, **verifica que el archivo contenga `surreal/`**, y sólo entonces hace el swap (remove live + rename staging→db_path + mueve agent.key). Archivo corrupto, truncado o sin `surreal/` ⇒ error en español + **datos vivos intactos** + staging limpiado. Rechaza entradas con path-traversal (`dest.starts_with(staging)`).
+- **Confirmación explícita** (gap "prompt o --yes"): `restore` pregunta `[s/N]` por stdin salvo `--yes`/`-y`. `confirm_restore()` acepta s/si/sí/y/yes (case-insensitive); EOF/stdin cerrado/cualquier otra cosa ⇒ NO confirma (default seguro → runs no-interactivos sin `--yes` abortan sin pisar nada).
+- **Alias `now`**: `pharma backup now` = `create` (`#[command(visible_alias = "now")]`), dispara snapshot manual e imprime path+size (ya lo hacía `create`).
+
+**Tests** (+8 nuevos, total 18 en backup_cmd, 0 ignored): parse `now`/`--yes`, confirm acepta afirmativos / rechaza negativos+EOF, restore con archivo corrupto preserva data viva + sin staging huérfano, restore sin `surreal/` rechazado + data intacta, restore válido reemplaza data viva + limpia staging. GATE workspace VERDE: `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` (exit 0, todas las suites ok).
+
+NOTA paxoloop: `backup list` sigue leyendo del filesystem (`<data_dir>/backups/`), NO de la tabla `backup_log` — esa vive en PR #184 (feat/backup-snapshot-job, db::backup_log + mig 0028), aún sin integrar. Cablear `list` al `backup_log` (estado/status por entrada) es un follow-up additive una vez #184 aterrice. Sin migración nueva en este PR.

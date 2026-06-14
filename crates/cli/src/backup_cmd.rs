@@ -12,8 +12,13 @@
 //! - `backup restore`: overwrites the live data dir.  The server MUST be
 //!   stopped first.  The command checks for a listening port before
 //!   proceeding and aborts with a Spanish error message if it detects one.
+//!   Restore is *validate-before-wipe*: the archive is fully extracted to a
+//!   staging directory and verified to contain a `surreal/` payload BEFORE
+//!   the live data dir is touched, so a corrupt or truncated archive can
+//!   never destroy live data.  Restore also asks for explicit confirmation
+//!   unless `--yes` is passed (non-interactive runs without `--yes` abort).
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
@@ -27,7 +32,8 @@ use sha2::{Digest, Sha256};
 
 #[derive(Subcommand)]
 pub enum BackupCmd {
-    /// Crear un snapshot tar.gz del directorio de datos.
+    /// Crear un snapshot tar.gz del directorio de datos (alias: `now`).
+    #[command(visible_alias = "now")]
     Create {
         /// Ruta de salida.  Por defecto: `./backups/pharma-backup-<ts>.tar.gz`.
         #[arg(long, short = 'o')]
@@ -38,6 +44,10 @@ pub enum BackupCmd {
     Restore {
         /// Ruta al archivo .tar.gz generado por `backup create`.
         path: PathBuf,
+        /// Confirmar la restauración sin preguntar (sobrescribe los datos
+        /// actuales).  Sin esta opción se solicita confirmación interactiva.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Listar backups disponibles (más reciente primero).
     List {
@@ -57,7 +67,7 @@ pub async fn run(cmd: BackupCmd) -> anyhow::Result<()> {
 
     match cmd {
         BackupCmd::Create { output } => cmd_create(&db_path, output),
-        BackupCmd::Restore { path } => cmd_restore(&db_path, &path, &cfg.bind),
+        BackupCmd::Restore { path, yes } => cmd_restore(&db_path, &path, &cfg.bind, yes),
         BackupCmd::List { dir } => cmd_list(&db_path, dir),
     }
 }
@@ -125,7 +135,7 @@ fn cmd_create(db_path: &Path, output: Option<PathBuf>) -> anyhow::Result<()> {
 // backup restore
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn cmd_restore(db_path: &Path, archive: &Path, bind_addr: &str) -> anyhow::Result<()> {
+fn cmd_restore(db_path: &Path, archive: &Path, bind_addr: &str, yes: bool) -> anyhow::Result<()> {
     // Verify the server is not running by trying to connect to its port.
     if server_is_listening(bind_addr) {
         return Err(anyhow!(
@@ -138,54 +148,152 @@ fn cmd_restore(db_path: &Path, archive: &Path, bind_addr: &str) -> anyhow::Resul
         return Err(anyhow!("Archivo no encontrado: {}", archive.display()));
     }
 
+    // Explicit confirmation: restore overwrites the live data dir.  Skip the
+    // prompt only when `--yes` is passed.  Non-interactive runs (no `--yes`,
+    // EOF/closed stdin) abort safely.
+    if !yes {
+        println!(
+            "Vas a restaurar desde {} y SOBRESCRIBIR los datos actuales en {}.",
+            archive.display(),
+            db_path.display()
+        );
+        print!("¿Continuar? Escribe 's' para confirmar [s/N]: ");
+        std::io::stdout().flush().ok();
+        let stdin = std::io::stdin();
+        let mut reader = stdin.lock();
+        if !confirm_restore(&mut reader) {
+            return Err(anyhow!("Restauración cancelada por el usuario."));
+        }
+    }
+
     println!("Restaurando base de datos desde {}...", archive.display());
 
+    restore_archive(db_path, archive)?;
+
+    println!("✓ Restauración completada.");
+    Ok(())
+}
+
+/// Reads one line and returns `true` only for an affirmative answer
+/// (`s`/`si`/`sí`/`y`/`yes`, case-insensitive).  EOF/empty/anything else =>
+/// `false` (safe default: do not overwrite).
+fn confirm_restore(reader: &mut impl BufRead) -> bool {
+    let mut line = String::new();
+    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+        return false; // EOF / closed stdin
+    }
+    matches!(
+        line.trim().to_lowercase().as_str(),
+        "s" | "si" | "sí" | "y" | "yes"
+    )
+}
+
+/// Validate-before-wipe restore.  Extracts the archive into a staging dir,
+/// verifies it contains a `surreal/` payload, and only then swaps it into the
+/// live data dir.  If the archive is corrupt/truncated or lacks `surreal/`,
+/// returns an error WITHOUT touching the live data dir.
+fn restore_archive(db_path: &Path, archive: &Path) -> anyhow::Result<()> {
     let data_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
 
-    // Remove the current surreal dir before extracting so stale files don't
-    // linger after a partial restore.
+    // Staging dir sibling of db_path so the final rename stays on one volume.
+    let staging = data_dir.join(format!(
+        ".restore-staging-{}",
+        Utc::now().format("%Y%m%d-%H%M%S-%f")
+    ));
+    // Best-effort cleanup of a leftover staging dir from a crashed run.
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    std::fs::create_dir_all(&staging)
+        .with_context(|| format!("crear staging {}", staging.display()))?;
+
+    // Extract fully into staging; on ANY failure, drop staging and bail with
+    // the live data dir untouched.
+    let extract = || -> anyhow::Result<bool> {
+        let f =
+            std::fs::File::open(archive).with_context(|| format!("abrir {}", archive.display()))?;
+        let gz = flate2::read::GzDecoder::new(f);
+        let mut tar = tar::Archive::new(gz);
+
+        let mut saw_surreal = false;
+        for entry in tar.entries().context("leer entradas del archivo")? {
+            let mut entry = entry.context("entrada inválida en el archivo")?;
+            let entry_path = entry
+                .path()
+                .context("ruta inválida en el archivo")?
+                .into_owned();
+            let entry_path_str = entry_path.to_string_lossy();
+
+            // Map `surreal/...` → `<staging>/surreal/...` and `agent.key` →
+            // `<staging>/agent.key`; reject path-traversal entries.
+            let dest = if entry_path_str.starts_with("surreal") {
+                saw_surreal = true;
+                staging.join(&*entry_path)
+            } else if entry_path_str == "agent.key" {
+                staging.join("agent.key")
+            } else {
+                continue;
+            };
+            if !dest.starts_with(&staging) {
+                return Err(anyhow!(
+                    "Entrada con ruta no permitida en el archivo: {entry_path_str}"
+                ));
+            }
+
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("crear directorio {}", parent.display()))?;
+            }
+            if entry.header().entry_type().is_file() {
+                let mut out = std::fs::File::create(&dest)
+                    .with_context(|| format!("crear {}", dest.display()))?;
+                std::io::copy(&mut entry, &mut out)
+                    .with_context(|| format!("escribir {}", dest.display()))?;
+            }
+        }
+        Ok(saw_surreal)
+    };
+
+    let result = extract();
+    let saw_surreal = match result {
+        Ok(true) => true,
+        Ok(false) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(anyhow!(
+                "El archivo no contiene datos de SurrealKv (carpeta `surreal/`); \
+                 restauración abortada, los datos actuales no fueron tocados."
+            ));
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(
+                e.context("archivo inválido o corrupto; los datos actuales no fueron tocados")
+            );
+        }
+    };
+    debug_assert!(saw_surreal);
+
+    // Staging validated.  NOW swap into place.
     if db_path.exists() {
         std::fs::remove_dir_all(db_path)
             .with_context(|| format!("limpiar {}", db_path.display()))?;
     }
+    std::fs::rename(staging.join("surreal"), db_path).with_context(|| {
+        format!(
+            "mover {} → {}",
+            staging.join("surreal").display(),
+            db_path.display()
+        )
+    })?;
 
-    let f = std::fs::File::open(archive).with_context(|| format!("abrir {}", archive.display()))?;
-    let gz = flate2::read::GzDecoder::new(f);
-    let mut tar = tar::Archive::new(gz);
-
-    for entry in tar.entries().context("leer entradas del archivo")? {
-        let mut entry = entry.context("entrada inválida en el archivo")?;
-        let entry_path = entry
-            .path()
-            .context("ruta inválida en el archivo")?
-            .into_owned();
-        let entry_path_str = entry_path.to_string_lossy();
-
-        // Map `surreal/...` → `<data_dir>/surreal/...` and `agent.key` → `<data_dir>/agent.key`.
-        let dest = if entry_path_str.starts_with("surreal") {
-            data_dir.join(&*entry_path)
-        } else if entry_path_str == "agent.key" {
-            data_dir.join("agent.key")
-        } else {
-            // Skip unrecognised entries.
-            continue;
-        };
-
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("crear directorio {}", parent.display()))?;
-        }
-
-        // Only extract regular files (skip directory entries — create_dir_all above handles them).
-        if entry.header().entry_type().is_file() {
-            let mut out = std::fs::File::create(&dest)
-                .with_context(|| format!("crear {}", dest.display()))?;
-            std::io::copy(&mut entry, &mut out)
-                .with_context(|| format!("escribir {}", dest.display()))?;
-        }
+    let staged_key = staging.join("agent.key");
+    if staged_key.exists() {
+        let dest_key = data_dir.join("agent.key");
+        std::fs::rename(&staged_key, &dest_key)
+            .with_context(|| format!("mover {}", dest_key.display()))?;
     }
 
-    println!("✓ Restauración completada.");
+    let _ = std::fs::remove_dir_all(&staging);
     Ok(())
 }
 
@@ -365,11 +473,45 @@ mod tests {
         }
 
         let cli = TestCli::parse_from(["pharma", "restore", "/tmp/snap.tar.gz"]);
-        if let BackupCmd::Restore { path } = cli.cmd {
+        if let BackupCmd::Restore { path, yes } = cli.cmd {
             assert_eq!(path, PathBuf::from("/tmp/snap.tar.gz"));
+            assert!(!yes, "yes defaults to false");
         } else {
             panic!("expected Restore");
         }
+    }
+
+    #[test]
+    fn parse_backup_restore_yes() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: super::BackupCmd,
+        }
+
+        let cli = TestCli::parse_from(["pharma", "restore", "/tmp/snap.tar.gz", "--yes"]);
+        if let BackupCmd::Restore { yes, .. } = cli.cmd {
+            assert!(yes, "--yes must set yes=true");
+        } else {
+            panic!("expected Restore");
+        }
+    }
+
+    #[test]
+    fn parse_backup_now_alias() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: super::BackupCmd,
+        }
+
+        // `now` is a visible alias of `create`.
+        let cli = TestCli::parse_from(["pharma", "now"]);
+        assert!(matches!(cli.cmd, BackupCmd::Create { output: None }));
     }
 
     #[test]
@@ -465,8 +607,9 @@ mod tests {
         std::fs::remove_dir_all(&db_path).unwrap();
         assert!(!db_path.exists());
 
-        // Restore — pass a bind addr that is definitely not listening.
-        cmd_restore(&db_path, &archive, "127.0.0.1:19999").expect("restore");
+        // Restore — pass a bind addr that is definitely not listening, --yes
+        // to skip the interactive prompt.
+        cmd_restore(&db_path, &archive, "127.0.0.1:19999", true).expect("restore");
 
         assert!(db_path.exists(), "surreal dir must be restored");
         assert!(
@@ -511,11 +654,119 @@ mod tests {
         let db_path = tmp.path().join("surreal");
         let missing = tmp.path().join("does-not-exist.tar.gz");
 
-        let err = cmd_restore(&db_path, &missing, "127.0.0.1:19999")
+        let err = cmd_restore(&db_path, &missing, "127.0.0.1:19999", true)
             .expect_err("should fail on missing archive");
         assert!(
             err.to_string().contains("Archivo no encontrado"),
             "unexpected error: {err}"
         );
+    }
+
+    // ── confirmation prompt ──────────────────────────────────────────────────
+
+    #[test]
+    fn confirm_accepts_affirmatives() {
+        for ans in ["s\n", "S\n", "si\n", "sí\n", "y\n", "yes\n", "  s  \n"] {
+            let mut r = std::io::Cursor::new(ans.as_bytes().to_vec());
+            assert!(confirm_restore(&mut r), "{ans:?} should confirm");
+        }
+    }
+
+    #[test]
+    fn confirm_rejects_negatives_and_eof() {
+        for ans in ["", "n\n", "no\n", "\n", "x\n", "yep\n"] {
+            let mut r = std::io::Cursor::new(ans.as_bytes().to_vec());
+            assert!(!confirm_restore(&mut r), "{ans:?} should NOT confirm");
+        }
+    }
+
+    // ── validate-before-wipe restore ─────────────────────────────────────────
+
+    #[test]
+    fn restore_corrupt_archive_keeps_live_data() {
+        let (_tmp, db_path) = make_fake_data_dir();
+        // A garbage file that is NOT a valid tar.gz.
+        let bad = _tmp.path().join("corrupt.tar.gz");
+        std::fs::write(&bad, b"this is not a gzip archive at all").unwrap();
+
+        let err =
+            restore_archive(&db_path, &bad).expect_err("corrupt archive must fail to restore");
+        assert!(
+            err.to_string().contains("no fueron tocados")
+                || err
+                    .chain()
+                    .any(|c| c.to_string().contains("no fueron tocados")),
+            "error should state live data was untouched: {err:#}"
+        );
+        // Live data still intact.
+        assert!(db_path.join("data.db").exists(), "live data.db preserved");
+        assert_eq!(
+            std::fs::read(db_path.join("data.db")).unwrap(),
+            b"fake-surreal-data"
+        );
+        // No staging dir left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(_tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".restore-staging")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "staging dir must be cleaned up");
+    }
+
+    #[test]
+    fn restore_archive_without_surreal_keeps_live_data() {
+        let (_tmp, db_path) = make_fake_data_dir();
+        // Build a valid tar.gz that contains ONLY agent.key (no surreal/).
+        let archive = _tmp.path().join("no-surreal.tar.gz");
+        {
+            let f = std::fs::File::create(&archive).unwrap();
+            let gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            let mut tar = tar::Builder::new(gz);
+            let mut kf = std::fs::File::open(_tmp.path().join("agent.key")).unwrap();
+            tar.append_file("agent.key", &mut kf).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+
+        let err = restore_archive(&db_path, &archive)
+            .expect_err("archive without surreal/ must be rejected");
+        assert!(
+            err.to_string().contains("no contiene datos de SurrealKv"),
+            "unexpected error: {err}"
+        );
+        assert!(db_path.join("data.db").exists(), "live data preserved");
+    }
+
+    #[test]
+    fn restore_archive_valid_swaps_in_place() {
+        let (_tmp, db_path) = make_fake_data_dir();
+        let archive = _tmp.path().join("good.tar.gz");
+        cmd_create(&db_path, Some(archive.clone())).expect("create");
+
+        // Mutate live data so we can prove the restore replaced it.
+        std::fs::write(db_path.join("data.db"), b"STALE-mutated").unwrap();
+
+        restore_archive(&db_path, &archive).expect("valid restore");
+
+        assert_eq!(
+            std::fs::read(db_path.join("data.db")).unwrap(),
+            b"fake-surreal-data",
+            "restore must replace live data with archived contents"
+        );
+        assert!(_tmp.path().join("agent.key").exists());
+        // No staging dir left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(_tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".restore-staging")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "staging dir must be cleaned up");
     }
 }
