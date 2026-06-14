@@ -2091,6 +2091,7 @@ version = "0.1.28"
 dependencies = [
  "anyhow",
  "chrono",
+ "criterion",
  "db",
  "pharma-core",
  "proptest",

@@ -28,3 +28,9 @@ chrono = { workspace = true }
 surrealdb = { workspace = true, features = ["kv-mem"] }
 # Property-based testing of the canonical invariants (`crate::invariants`).
 proptest = "1"
+# POS hot-path bench (benches/pos_hotpath.rs). Mirrors crates/api/benches.
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+
+[[bench]]
+name = "pos_hotpath"
+harness = false
