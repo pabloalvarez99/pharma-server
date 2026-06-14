@@ -2096,3 +2096,31 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — ye · PHASE 2 LANE A: first-run journey QA (multi-rubro)
+
+`feat/onboarding-firstrun-qa`. Extraje la lógica pura del primer-inicio a
+`client/src/views/first-run.ts` (single-source, sin DOM, mismo patrón que
+cashier-loop.ts/stock-helpers.ts) y la cubrí con 9 user-journeys (21 tests) que
+simulan al farmacéutico recién instalado: install → conectar servidor → login →
+elegir rubro → cargar datos → POS. Helpers: `resolveServerConfig`
+(stored>env>loopback + firstLaunch), `validateServerUrl` (scheme/host/normaliza,
+errores es), `connectionState` (/health → pill es; inalcanzable=mensaje claro, no
+crash), `firstRunStep` (máquina de pasos; rubro = bloqueo SUAVE, no dead-end),
+`dashboardReadiness` (poblado vs empty-state tras seed), `visibleModules` (gate
+recetas pharmacy-only, single-source del que aplica shell.ts).
+
+Cableado en `login.ts`: reemplacé el `resolveServer` duplicado por
+`resolveServerConfig`; el "Probar conexión" y la validación de submit ahora usan
+`validateServerUrl`+`connectionState` (typo de URL se atrapa inline antes de
+probar; mensajes es centralizados). Quité `FALLBACK_SERVER` local (vive en
+first-run.ts) para no romper noUnusedLocals.
+
+Ambos verticales: farmacia muestra Recetas; minimarket/otro la ocultan pero
+mantienen boleta/factura (DTE universal). GATE cliente verde: `npm run build`
+(tsc + vite) + `vitest run` 73/73 (+21). Sin Rust tocado.
+
+FINDING (first-run sin CLI): en `origin/feature/erp-parity` NO existe el comando
+Tauri `seed_demo` — cargar datos demo HOY requiere CLI `pharma seed-demo`. El
+botón in-app está en el PR #175 (parqueado para integración por paxoloop). La
+máquina de pasos ya contempla `cargar-datos` para cuando el botón aterrice.
