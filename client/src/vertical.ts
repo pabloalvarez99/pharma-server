@@ -109,3 +109,102 @@ export async function loadBusinessName(serverUrl: string): Promise<string | null
     return null;
   }
 }
+
+// --- rubro catalog (onboarding "elige tu rubro") ----------------------------
+//
+// The onboarding grid (docs/strategy/rubro-catalog.md). The catalog LISTS every
+// rubro from day one; the seed pack + vertical features are built per-rubro as
+// each is validated with a real client (anti-premature-framework discipline).
+//
+// Naming (docs/strategy/rubro-catalog.md §naming): the seed-demo endpoint speaks
+// English (`pharmacy`/`minimarket`). The client historically stored Spanish
+// (`farmacia`) for the gated rubros, and other lanes (recetas/facturas) gate on
+// those Spanish values via {@link parseVertical}. To avoid breaking that
+// contract we KEEP the stored value as-is and only map es→en at the seed call
+// (see `seedVertical`). Core rubros keep their Spanish stored value; extras use
+// their catalog key (which `parseVertical` coerces to `otro` = generic ERP).
+
+/** Seed pack a rubro maps to (en, for the seed-demo endpoint), or `null` when
+ *  no demo pack exists yet for that rubro. */
+export type SeedVertical = "pharmacy" | "minimarket" | null;
+
+/** One card of the onboarding rubro grid. */
+export interface RubroCard {
+  /** Value persisted as `business.vertical`. */
+  value: string;
+  /** Operator-facing label (Spanish). */
+  label: string;
+  /** Emoji icon for the card. */
+  icon: string;
+  /** One-line description shown under the label. */
+  help: string;
+  /** Seed pack to request (es→en), or `null` if none yet. */
+  seedVertical: SeedVertical;
+}
+
+/** Catalog v1 — taxonomy reused from the founder's DSS project + farmacia/
+ *  minimarket. `✅` packs today: farmacia, minimarket; the rest seed nothing
+ *  until their rubro is validated. */
+export const RUBRO_CATALOG: readonly RubroCard[] = [
+  {
+    value: "farmacia",
+    label: "Farmacia",
+    icon: "💊",
+    help: "Recetas + libro de controlados (Ley 20.000), principio activo, lotes.",
+    seedVertical: "pharmacy",
+  },
+  {
+    value: "minimarket",
+    label: "Minimarket / Almacén",
+    icon: "🛒",
+    help: "Abarrotes y perecibles. POS, inventario y boletas. Sin recetas.",
+    seedVertical: "minimarket",
+  },
+  {
+    value: "restaurant",
+    label: "Restaurant / Comida",
+    icon: "🍽",
+    help: "ERP genérico. Pack demo próximamente.",
+    seedVertical: null,
+  },
+  {
+    value: "cafe",
+    label: "Café / Pastelería",
+    icon: "☕",
+    help: "ERP genérico. Pack demo próximamente.",
+    seedVertical: null,
+  },
+  {
+    value: "tienda",
+    label: "Tienda / Retail",
+    icon: "🛍",
+    help: "ERP genérico. POS e inventario.",
+    seedVertical: null,
+  },
+  {
+    value: "belleza",
+    label: "Belleza / Estética",
+    icon: "💅",
+    help: "Servicios y agenda; poco stock físico.",
+    seedVertical: null,
+  },
+  {
+    value: "servicios",
+    label: "Servicios / Oficios",
+    icon: "🔧",
+    help: "Ventas de servicios sin inventario físico.",
+    seedVertical: null,
+  },
+  {
+    value: "otro",
+    label: "Otro",
+    icon: "➕",
+    help: "ERP genérico, sin secciones específicas de un rubro.",
+    seedVertical: null,
+  },
+] as const;
+
+/** The seed pack (en) for a stored rubro value, or `null` when none exists. */
+export function seedVerticalFor(value: string | null | undefined): SeedVertical {
+  return RUBRO_CATALOG.find((r) => r.value === (value ?? "").trim())?.seedVertical ?? null;
+}

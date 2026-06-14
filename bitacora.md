@@ -2326,3 +2326,19 @@ Branch `feat/client-rutbrand-pos` (off `feature/erp-parity` @ b27b3db). Aplica l
 Sin cambios de lógica: solo clases additive + un CSS nuevo. `api.ts` intacto (append-only respetado, no se tocó). No se halló bug ni hardcode de farmacia en estas vistas (son rubro-agnósticas).
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite, CSS 43kB con brand.css inlined) + `vitest run` 52/52.
+
+## 2026-06-14 — ye — RutBrand + rubro grid + datos-demo + URL server configurable (feat/client-rutbrand-onboarding)
+
+Ola rutbrand sobre `feature/erp-parity` (tip b27b3db, post-#173). Lane onboarding/config (ye). Cuatro slices coherentes:
+
+1. **Adopción marca RutBusiness**: `main.ts` importa `./brand.css` (design system canónico `--rb-*` + `.rb-*`), agrega `body.rb` y restaura tema persistido antes del primer paint. Tema **dark/light** en `admin_setting`-style localStorage (`pharma:theme`, default dark) con `applyTheme`/`currentTheme` exportados desde `configuracion.ts` + selector en Configuración (`data-theme` que honra brand.css). Login y shell **de-pharmacy**: quitado `/tu-farmacia-logo.jpeg` + copy "Tu Farmacia/Coquimbo"; ahora `rb-mark` SVG + `rb-wordmark` "RutBusiness" + tagline genérico ("Tu negocio, listo. Tu RUT es la llave."). NO se cargaron Google Fonts por CDN: CSP `default-src 'self'` + offline-first (ADR-0005) lo prohíben; brand.css cae a system fonts. Self-host woff2 = futuro (ADR-0015 P4).
+
+2. **URL de server configurable (ADR-0015 P0)**: `api.ts` (append-only) agrega `storedServerUrl()`/`rememberServerUrl()` + `SERVER_STORE_KEY`/`FALLBACK_SERVER_URL` (clave compartida con login). Sección "Conexión al servidor" en Configuración: editar IP LAN + "Probar conexión" (`serverHealth`) + guardar (se aplica al re-login). Habilita tablet-caja en la WiFi del local casi sin código.
+
+3. **Botón "Cargar datos demo"**: nuevo Tauri command `seed_demo` (`client/src-tauri/src/lib.rs`, append al final del `invoke_handler` tras `cancel_dte`) → `POST /api/v1/admin/seed-demo {vertical,force}` (endpoint de #172). 409 (ya existe) → sentinel `SEED_ALREADY_EXISTS` → la UI ofrece regenerar con `force`. `api.ts` `seedDemo()` + `SeedSummary`. Botón en Configuración: confirm DEMO, deshabilitado en rubros sin pack.
+
+4. **Grid de rubros (catálogo)**: `vertical.ts` (append) agrega `RUBRO_CATALOG` (8 rubros de `docs/strategy/rubro-catalog.md`: farmacia/minimarket/restaurant/cafe/tienda/belleza/servicios/otro, con icono+help+`seedVertical`) + `seedVerticalFor()`. Configuración reemplaza el `<select>` de rubro por una **grid de tarjetas**. **Naming es→en sin romper contrato** (rubro-catalog.md §naming): core rubros guardan español (`farmacia`/`minimarket`/`otro` — gating de `vertical.ts` que leen lucy/paul/marvin intacto), extras guardan su key (parseVertical→`otro`=genérico); el map es→en (`farmacia→pharmacy`) ocurre SOLO al llamar seed-demo. Packs demo hoy: farmacia/minimarket; resto = botón deshabilitado.
+
+CSS nuevo en `styles.css` (rubro-grid/rubro-card/cfg-demo + escala de `.rb-mark` en sidebar), usando los tokens existentes para coherencia con el resto del config view.
+
+GATE: `cd client && npm run build` (tsc --noEmit + vite) verde + `npm test` (vitest) **52/52** verde. src-tauri (toqué lib.rs): `cargo fmt --manifest-path client/src-tauri/Cargo.toml --all -- --check` verde + `cargo clippy --manifest-path client/src-tauri/Cargo.toml -- -D warnings` verde. Sin cambios en crates del workspace (el endpoint ya existía). MULTI-RUBRO FINDINGS actualizado en teamwork_op.txt.
