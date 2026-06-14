@@ -2482,3 +2482,86 @@ button {
   align-items: center;
   gap: 10px;
 }
+
+/* --- rubro grid (onboarding "elige tu rubro") ----------------------------- */
+.rubro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.rubro-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px;
+  text-align: left;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  position: relative;
+}
+.rubro-card:hover {
+  border-color: var(--accent);
+}
+.rubro-card.selected {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.rubro-icon {
+  font-size: 26px;
+  line-height: 1;
+}
+.rubro-label {
+  font-weight: 600;
+  font-size: 15px;
+}
+.rubro-help {
+  font-size: 12px;
+  color: var(--muted);
+}
+.rubro-tag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-2);
+  border-radius: var(--radius-pill);
+  padding: 2px 7px;
+}
+
+/* --- datos demo block ----------------------------------------------------- */
+.cfg-demo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+.cfg-demo-copy strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* RutBusiness brand mark — scaled down for the sidebar rail. */
+.sidebar-brand .rb-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+.sidebar-brand .rb-mark svg {
+  width: 16px;
+  height: 16px;
+}

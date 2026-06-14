@@ -149,8 +149,15 @@ export function renderShell(
     <div class="shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <img src="/tu-farmacia-logo.jpeg" alt="" width="26" height="26" />
-          <span id="brand-name">pharma-server</span>
+          <span class="rb-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"></path>
+              <path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
+              <path d="M9 11h6M9 15h4"></path>
+            </svg>
+            <span class="rb-dv"></span>
+          </span>
+          <span id="brand-name" class="rb-wordmark">RutBusiness</span>
         </div>
         <nav id="nav">
           ${NAV.map(

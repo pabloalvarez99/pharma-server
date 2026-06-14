@@ -76,23 +76,28 @@ export function renderLogin(
       <div class="login-frame">
         <aside class="login-brand-panel" aria-hidden="true">
           <div class="brand-stack">
-            <div class="brand-mark" aria-label="Tu Farmacia">
-              <img src="/tu-farmacia-logo.jpeg" alt="Tu Farmacia" width="44" height="44" />
+            <div class="rb-mark" aria-label="RutBusiness">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"></path>
+                <path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
+                <path d="M9 11h6M9 15h4"></path>
+              </svg>
+              <span class="rb-dv"></span>
             </div>
             <div class="brand-wordmark">
-              <span class="wm-main">Tu Farmacia</span>
-              <span class="wm-sub">COQUIMBO · CHILE</span>
+              <span class="wm-main rb-wordmark">Rut<b>Business</b></span>
+              <span class="wm-sub">EL SO DE TU NEGOCIO</span>
             </div>
           </div>
 
           <div class="brand-tagline">
-            <h2>Tu farmacia, lista.</h2>
-            <p>Tu catálogo, tus ventas y tus recetas — siempre en tu local.</p>
+            <h2 class="rb-display">Tu negocio, listo.</h2>
+            <p>Tu catálogo, tus ventas y tu caja — siempre en tu local. Tu RUT es la llave.</p>
           </div>
 
           <ul class="brand-pillars">
             <li><span class="pillar-dot"></span> Funciona sin internet</li>
-            <li><span class="pillar-dot"></span> Boleta SII · ISP · recetas</li>
+            <li><span class="pillar-dot"></span> Boleta y factura SII</li>
             <li><span class="pillar-dot"></span> POS en menos de 50 ms</li>
           </ul>
         </aside>

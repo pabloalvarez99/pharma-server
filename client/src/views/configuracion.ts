@@ -5,13 +5,21 @@
 // editor per setting rather than a raw key/value grid. Unset keys (404 → null)
 // fall back to a documented default. Same skeleton → fetch → swap pattern as the
 // other views; Spanish throughout.
-import { getSetting, setSetting } from "../api";
+import {
+  getSetting,
+  setSetting,
+  serverHealth,
+  seedDemo,
+  storedServerUrl,
+  rememberServerUrl,
+  SEED_ALREADY_EXISTS,
+} from "../api";
 import { isValidRut, canonicalRut, formatRut } from "../format";
 import {
   VERTICAL_KEY,
   BUSINESS_NAME_KEY,
-  VERTICAL_OPTIONS,
-  parseVertical,
+  RUBRO_CATALOG,
+  seedVerticalFor,
 } from "../vertical";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
@@ -81,8 +89,36 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         </div>
       </div>
 
+      <h3 class="section-title">Conexión al servidor</h3>
+      <p class="muted">Apunta este terminal al servidor de tu local. <code>localhost</code> si el servidor corre en este mismo equipo; la IP de red (ej: <code>http://192.168.1.50:8080</code>) si usas una tablet u otro equipo como caja. Se aplica al volver a iniciar sesión.</p>
+      <div class="cfg-emisor-form rb">
+        <div class="field">
+          <label class="rb-label" for="cfg-server-url">URL del servidor</label>
+          <input id="cfg-server-url" class="rb-input" type="text" spellcheck="false"
+                 placeholder="http://127.0.0.1:8080" value="${escapeHtml(storedServerUrl())}" autocomplete="off" />
+          <p class="muted cfg-help">Sesión actual: <code>${escapeHtml(serverUrl)}</code>.</p>
+        </div>
+        <div class="cfg-edit">
+          <button class="rb-btn ghost" id="cfg-server-test" type="button">Probar conexión</button>
+          <button class="rb-btn" id="cfg-server-save" type="button">Guardar URL</button>
+          <span class="cfg-status" id="cfg-server-status" hidden></span>
+        </div>
+      </div>
+
+      <h3 class="section-title">Apariencia</h3>
+      <p class="muted">Tema de la interfaz. Se guarda en este equipo.</p>
+      <div class="cfg-emisor-form rb">
+        <div class="field">
+          <label class="rb-label" for="cfg-theme">Tema</label>
+          <select id="cfg-theme" class="rb-input">
+            <option value="dark">Oscuro</option>
+            <option value="light">Claro</option>
+          </select>
+        </div>
+      </div>
+
       <h3 class="section-title">Rubro del negocio</h3>
-      <p class="muted">Define qué secciones del ERP se muestran. El módulo de Recetas y el Libro de controlados (Ley 20.000) sólo aparecen en el rubro Farmacia. Las boletas y facturas electrónicas (SII) funcionan en todos los rubros.</p>
+      <p class="muted">Elige el rubro de tu negocio. Define qué secciones del ERP se muestran: el módulo de Recetas y el Libro de controlados (Ley 20.000) sólo aparecen en Farmacia. Las boletas y facturas electrónicas (SII) funcionan en todos los rubros.</p>
       <div id="cfg-vertical">${tableSkeleton(2)}</div>
 
       <h3 class="section-title">Parámetros del servidor</h3>
@@ -331,7 +367,15 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
-  // --- Rubro / vertical ------------------------------------------------------
+  // --- Rubro / vertical (grid del catálogo) ----------------------------------
+  //
+  // The onboarding "elige tu rubro" grid (docs/strategy/rubro-catalog.md). The
+  // chosen card is persisted as `business.vertical`; the seed button below uses
+  // it (es→en mapped) to fill the tenant with the matching DEMO pack.
+
+  // Currently selected card value (kept in closure so the demo button + save
+  // act on the operator's pick before they hit "Guardar rubro").
+  let selectedVertical = "otro";
 
   async function loadVerticalForm(): Promise<void> {
     verticalEl.innerHTML = tableSkeleton(2);
@@ -340,22 +384,25 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         getSetting(serverUrl, VERTICAL_KEY),
         getSetting(serverUrl, BUSINESS_NAME_KEY),
       ]);
-      const current = parseVertical(vSetting?.value ?? null);
+      // Highlight the stored raw value (not parseVertical) so catalog extras
+      // beyond the gated trio still show as selected.
+      const stored = (vSetting?.value ?? "").trim();
+      selectedVertical = RUBRO_CATALOG.some((r) => r.value === stored) ? stored : "otro";
       const name = nameSetting?.value ?? "";
       verticalEl.innerHTML = `
+        <div class="rubro-grid">
+          ${RUBRO_CATALOG.map(
+            (r) => `
+            <button type="button" class="rubro-card${r.value === selectedVertical ? " selected" : ""}"
+                    data-vertical="${r.value}" aria-pressed="${r.value === selectedVertical}">
+              <span class="rubro-icon" aria-hidden="true">${r.icon}</span>
+              <span class="rubro-label">${escapeHtml(r.label)}</span>
+              <span class="rubro-help">${escapeHtml(r.help)}</span>
+              ${r.seedVertical ? `<span class="rubro-tag">datos demo</span>` : ""}
+            </button>`,
+          ).join("")}
+        </div>
         <div class="cfg-emisor-form">
-          <div class="field">
-            <label for="cfg-vert-select">Rubro</label>
-            <select id="cfg-vert-select">
-              ${VERTICAL_OPTIONS.map(
-                (o) =>
-                  `<option value="${o.value}" ${o.value === current ? "selected" : ""}>${escapeHtml(o.label)}</option>`,
-              ).join("")}
-            </select>
-            <p class="muted cfg-help" id="cfg-vert-help">${escapeHtml(
-              VERTICAL_OPTIONS.find((o) => o.value === current)?.help ?? "",
-            )}</p>
-          </div>
           <div class="field">
             <label for="cfg-vert-name">Nombre del negocio (opcional)</label>
             <input id="cfg-vert-name" type="text" placeholder="Mi Negocio"
@@ -367,30 +414,48 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
             <span class="cfg-status" id="cfg-vert-status" hidden></span>
           </div>
         </div>
+
+        <div class="cfg-demo">
+          <div class="cfg-demo-copy">
+            <strong>Cargar datos demo</strong>
+            <p class="muted cfg-help" id="cfg-demo-help"></p>
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-ghost" id="cfg-demo-btn">Cargar datos demo</button>
+            <span class="cfg-status" id="cfg-demo-status" hidden></span>
+          </div>
+        </div>
       `;
       wireVertical();
+      wireDemo();
     } catch (err) {
       verticalEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     }
   }
 
   function wireVertical(): void {
-    const select = verticalEl.querySelector<HTMLSelectElement>("#cfg-vert-select")!;
-    const help = verticalEl.querySelector<HTMLElement>("#cfg-vert-help")!;
+    const cards = Array.from(verticalEl.querySelectorAll<HTMLButtonElement>(".rubro-card"));
     const nameEl = verticalEl.querySelector<HTMLInputElement>("#cfg-vert-name")!;
     const saveBtn = verticalEl.querySelector<HTMLButtonElement>("#cfg-vert-save")!;
     const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-vert-status")!;
 
-    select.addEventListener("change", () => {
-      const opt = VERTICAL_OPTIONS.find((o) => o.value === select.value);
-      help.textContent = opt?.help ?? "";
-    });
+    const select = (value: string): void => {
+      selectedVertical = value;
+      cards.forEach((c) => {
+        const on = c.dataset.vertical === value;
+        c.classList.toggle("selected", on);
+        c.setAttribute("aria-pressed", String(on));
+      });
+      refreshDemoHelp();
+    };
+
+    cards.forEach((c) => c.addEventListener("click", () => select(c.dataset.vertical!)));
 
     saveBtn.addEventListener("click", async () => {
       statusEl.hidden = true;
       saveBtn.disabled = true;
       try {
-        await setSetting(serverUrl, VERTICAL_KEY, parseVertical(select.value));
+        await setSetting(serverUrl, VERTICAL_KEY, selectedVertical);
         await setSetting(serverUrl, BUSINESS_NAME_KEY, nameEl.value.trim());
         statusEl.textContent = "Guardado — reinicia la app para aplicar a todo el menú.";
         statusEl.className = "cfg-status cfg-status-ok";
@@ -406,9 +471,159 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
+  // --- Datos demo ------------------------------------------------------------
+
+  function refreshDemoHelp(): void {
+    const help = verticalEl.querySelector<HTMLElement>("#cfg-demo-help");
+    const btn = verticalEl.querySelector<HTMLButtonElement>("#cfg-demo-btn");
+    if (!help || !btn) return;
+    const pack = seedVerticalFor(selectedVertical);
+    if (pack) {
+      help.textContent =
+        "Llena el negocio con un catálogo de ejemplo (productos, lotes y ventas) para probar la app. Idempotente; puedes regenerarlo.";
+      btn.disabled = false;
+    } else {
+      help.textContent = "Este rubro aún no tiene pack de datos demo.";
+      btn.disabled = true;
+    }
+  }
+
+  function wireDemo(): void {
+    const btn = verticalEl.querySelector<HTMLButtonElement>("#cfg-demo-btn")!;
+    const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-demo-status")!;
+    refreshDemoHelp();
+
+    const run = async (pack: "pharmacy" | "minimarket", force: boolean): Promise<void> => {
+      statusEl.hidden = true;
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = "Cargando…";
+      try {
+        const s = await seedDemo(serverUrl, pack, force);
+        statusEl.textContent = `Listo: ${s.products_created} productos, ${s.batches_created} lotes, ${s.movements_emitted} ventas${s.wiped > 0 ? ` (se reemplazaron ${s.wiped})` : ""}.`;
+        statusEl.className = "cfg-status cfg-status-ok";
+        statusEl.hidden = false;
+        toast("Datos demo cargados");
+      } catch (err) {
+        if (err === SEED_ALREADY_EXISTS) {
+          if (
+            window.confirm(
+              "Ya hay datos demo cargados. ¿Regenerarlos? Se borrará el pack demo anterior y se volverá a sembrar.",
+            )
+          ) {
+            await run(pack, true);
+            return;
+          }
+          statusEl.hidden = true;
+        } else {
+          statusEl.textContent = asMessage(err);
+          statusEl.className = "cfg-status cfg-status-err";
+          statusEl.hidden = false;
+        }
+      } finally {
+        btn.textContent = prev;
+        refreshDemoHelp();
+      }
+    };
+
+    btn.addEventListener("click", () => {
+      const pack = seedVerticalFor(selectedVertical);
+      if (!pack) return;
+      if (
+        !window.confirm(
+          `Vas a cargar DATOS DE EJEMPLO para el rubro seleccionado. Úsalo solo en una instalación de prueba, no sobre datos reales. ¿Continuar?`,
+        )
+      ) {
+        return;
+      }
+      void run(pack, false);
+    });
+  }
+
+  // --- Conexión al servidor + tema -------------------------------------------
+
+  function wireServerAndTheme(): void {
+    const urlEl = host.querySelector<HTMLInputElement>("#cfg-server-url")!;
+    const testBtn = host.querySelector<HTMLButtonElement>("#cfg-server-test")!;
+    const saveBtn = host.querySelector<HTMLButtonElement>("#cfg-server-save")!;
+    const statusEl = host.querySelector<HTMLElement>("#cfg-server-status")!;
+
+    testBtn.addEventListener("click", async () => {
+      const url = urlEl.value.trim();
+      if (!url) {
+        statusEl.textContent = "Escribe una URL primero.";
+        statusEl.className = "cfg-status cfg-status-err";
+        statusEl.hidden = false;
+        return;
+      }
+      testBtn.disabled = true;
+      statusEl.textContent = "Probando…";
+      statusEl.className = "cfg-status";
+      statusEl.hidden = false;
+      try {
+        const h = await serverHealth(url);
+        const ok = h.reachable && h.status === "ok" && h.db === "ok";
+        statusEl.textContent = ok
+          ? "✓ Servidor accesible."
+          : `Servidor responde (estado: ${h.status}, db: ${h.db}).`;
+        statusEl.className = `cfg-status ${ok ? "cfg-status-ok" : "cfg-status-err"}`;
+      } catch (err) {
+        statusEl.textContent = asMessage(err);
+        statusEl.className = "cfg-status cfg-status-err";
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const url = urlEl.value.trim();
+      if (!url) {
+        statusEl.textContent = "La URL no puede estar vacía.";
+        statusEl.className = "cfg-status cfg-status-err";
+        statusEl.hidden = false;
+        return;
+      }
+      rememberServerUrl(url);
+      statusEl.textContent = "Guardado — se usará al volver a iniciar sesión.";
+      statusEl.className = "cfg-status cfg-status-ok";
+      statusEl.hidden = false;
+      toast("URL del servidor guardada");
+    });
+
+    const themeEl = host.querySelector<HTMLSelectElement>("#cfg-theme")!;
+    themeEl.value = currentTheme();
+    themeEl.addEventListener("change", () => {
+      applyTheme(themeEl.value === "light" ? "light" : "dark");
+      toast("Tema actualizado");
+    });
+  }
+
+  wireServerAndTheme();
   void loadVerticalForm();
   void load();
   void loadEmisor();
+}
+
+/** localStorage key for the operator's UI theme preference. */
+const THEME_KEY = "pharma:theme";
+
+/** The persisted theme, defaulting to dark (the app's native palette). */
+export function currentTheme(): "dark" | "light" {
+  try {
+    return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+/** Apply + persist the UI theme (sets `data-theme` for the RutBusiness tokens). */
+export function applyTheme(theme: "dark" | "light"): void {
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* noop */
+  }
 }
 
 function fmtDate(iso: string): string {
