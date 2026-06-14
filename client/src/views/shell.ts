@@ -221,6 +221,9 @@ async function hydrateBranding(root: HTMLElement, serverUrl: string): Promise<vo
   if (name) {
     const brand = root.querySelector<HTMLSpanElement>("#brand-name");
     if (brand) brand.textContent = name;
+    // Persist so the next pre-auth login screen shows the operator's brand
+    // instead of the neutral fallback (login can't read settings without a token).
+    try { localStorage.setItem("pharma:brand-name", name); } catch { /* noop */ }
   }
   if (!hasRecetas(vertical)) {
     const recetasBtn = root.querySelector<HTMLButtonElement>('.nav-item[data-nav="recetas"]');

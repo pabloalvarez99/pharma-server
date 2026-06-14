@@ -2008,3 +2008,10 @@ Cierra la única brecha de cobertura que dejó #139: el unit test de `apply_crl_
 - **`vertical.test.ts`** (NUEVO, 7 tests) — parse/default/gates/catálogo.
 - **Task 3 (botón demo-seed) BLOQUEADO**: requiere seeder backend inexistente; no se fabricó botón sin backend (ver findings). **`login.ts` pre-auth** sigue farmacia-only (no puede leer settings sin token) — anotado para lane de branding.
 - GATE cliente verde: `npm run build` (tsc --noEmit + vite) OK, `npm test` 27 passed (7 vertical + 20 format). Cero Rust tocado → sin workspace GATE.
+
+## 2026-06-13 — Session "ye" (cont.): branding genérico pre-auth + estado botón demo
+
+- **Lane cascada** (worktree reusado `pharma-wt-p2-onboard`, branch `feat/client-seed-button` off `feat/client-onboarding-vertical`). Cliente puro, GATE cliente.
+- **Task 1 HECHO — `login.ts` branding rubro-neutral**: removidos `DEFAULT_TENANT="tufarmacia"` / `DEFAULT_EMAIL="admin@tufarmacia.cl"`; marca/tagline/wordmark/pillars/footer ya no dicen "farmacia". Resolución pre-auth: `VITE_BRAND_NAME`/`VITE_BRAND_TAGLINE` (build override) > `localStorage[pharma:brand-name]` (lo persiste `shell.ts` tras login) > fallback neutral `pharma-server` / "Tu negocio, listo.". Sucursal recordada en `localStorage[pharma:last-tenant]`. `shell.ts` ahora guarda el business.name a localStorage para que el login lo recupere.
+- **Task 2 (botón demo) AÚN BLOQUEADO**: marvin landeó `pharma seed-demo` como **CLI** (PR #163), pero **no existe** el endpoint HTTP `POST /api/v1/admin/seed-demo` que el cliente necesita. No se fabricó botón sin endpoint. **⚠️ Mismatch**: CLI usa `pharmacy` (inglés), `vertical.ts` usa `farmacia` (español) — el endpoint puente debe mapear. Detallado en `docs/strategy/multi-rubro-findings.md`.
+- GATE cliente verde: `npm run build` OK, `npm test` 27/27. Cero Rust tocado.

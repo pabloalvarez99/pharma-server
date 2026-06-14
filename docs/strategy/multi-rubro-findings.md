@@ -38,18 +38,28 @@ Hallazgos de la lane onboarding/selección-de-rubro (Session "ye",
 
 ## Pendiente / bloqueado para lanes hermanas
 
-1. **Botón "cargar datos demo" (task 3) — BLOQUEADO**: requiere un seeder que
-   no existe. Necesita primero una lane backend que cree
-   `crates/cli/src/seed_cmd.rs` (`pharma seed-demo --vertical <v>`,
-   idempotente, datos rotulados DEMO) y/o un comando Tauri que lo invoque.
-   Recién entonces el cliente puede exponer el botón. **No se fabricó un botón
-   sin backend.**
-2. **`login.ts` sigue con defaults farmacia-only** (`DEFAULT_TENANT="tufarmacia"`,
-   `DEFAULT_EMAIL="admin@tufarmacia.cl"`, marca "Tu Farmacia", tagline "Tu
-   farmacia, lista."). Es **pre-auth**: no se puede leer `business.*` antes de
-   iniciar sesión (no hay token ni tenant aún). Degenerizarlo requiere otra
-   fuente (config de build, o un endpoint público de branding) → fuera de
-   scope de esta lane, anotado para la lane de branding.
+1. **Botón "cargar datos demo" (task 3) — AÚN BLOQUEADO (parcial)**:
+   - **Actualización 2026-06-13**: marvin landeó `pharma seed-demo` como **CLI**
+     (PR #163, `crates/cli/src/seed_cmd.rs`, `pub async fn run(tenant_slug,
+     vertical, force)`). Pero **NO existe el endpoint HTTP**
+     `POST /api/v1/admin/seed-demo` que el botón del cliente necesita
+     (`git grep seed.demo origin/feat/cli-seed-demo-rutagentia -- crates/api/`
+     = 0 hits). El cliente Tauri llama endpoints HTTP, no la CLI del server.
+   - **Falta** una lane que exponga el CLI seed como endpoint admin
+     (`POST /api/v1/admin/seed-demo {vertical}` → summary), idempotente.
+     Recién ahí se cablea el botón. **No se fabricó botón sin endpoint.**
+   - **⚠️ MISMATCH DE NOMBRES**: el CLI de marvin usa `pharmacy|minimarket`
+     (inglés); `client/src/vertical.ts` usa `farmacia|minimarket|otro`
+     (español). El endpoint puente DEBE mapear `business.vertical` (es) →
+     pack del seeder (en): `farmacia→pharmacy`, `minimarket→minimarket`,
+     `otro→` (sin pack, error claro). Integrador: alinear o mapear.
+2. **`login.ts` branding genérico — ✅ HECHO (esta lane)**: removidos
+   `DEFAULT_TENANT="tufarmacia"` / `DEFAULT_EMAIL="admin@tufarmacia.cl"`; marca,
+   tagline, wordmark, pillars y footer ya no dicen "farmacia". Branding pre-auth
+   resuelve: `VITE_BRAND_NAME`/`VITE_BRAND_TAGLINE` (override de build) >
+   `localStorage["pharma:brand-name"]` (persistido por `shell.ts` tras login) >
+   fallback neutral `pharma-server` / "Tu negocio, listo.". La sucursal se
+   recuerda en `localStorage["pharma:last-tenant"]` (sin default de rubro).
 3. **`server-side` no lee `business.vertical`** — hoy es señal 100% de UI. Si
    en el futuro alguna regla de negocio debe depender del rubro (p.ej. rechazar
    crear una receta en un minimarket), hay que leerlo en el backend. Por ahora

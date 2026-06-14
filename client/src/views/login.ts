@@ -2,7 +2,8 @@
 // + server, then a "produced" transition into the ERP shell.
 //
 // Polish wave (feat/client-login-polish):
-//  - Brand panel + tagline ("Tu farmacia, lista.") in a two-column launcher layout.
+//  - Brand panel + tagline (rubro-neutral by default; overridable) in a
+//    two-column launcher layout.
 //  - Server URL moved behind a collapsible "Conexión avanzada" disclosure.
 //  - Password show/hide toggle.
 //  - Field-level inline errors in Spanish (no toast spam).
@@ -11,19 +12,51 @@
 //  - Existing Tauri command + payload shapes (server_url/tenant/email/password)
 //    and the onSuccess(session, serverUrl) callback are untouched.
 import { login, serverHealth, type SessionInfo } from "../api";
+import { escapeHtml } from "./inventory";
 
 const FALLBACK_SERVER = "http://127.0.0.1:8080";
-const DEFAULT_TENANT = "tufarmacia";
-const DEFAULT_EMAIL = "admin@tufarmacia.cl";
 const SERVER_STORE_KEY = "pharma:last-server";
+const TENANT_STORE_KEY = "pharma:last-tenant";
+const BRAND_STORE_KEY = "pharma:brand-name";
 
-/** Build-time override baked by Vite (`VITE_SERVER_URL`), if any. Lets a
- *  field-install build ship pointing at the pharmacy's real server IP. */
-function envServer(): string | undefined {
-  // No vite/client types in this project, so reach `import.meta.env` via an
-  // unknown cast rather than augmenting global ImportMeta.
+// Generic, rubro-neutral brand defaults. The pivote rule is "no hardcodear
+// farmacia por defecto": pre-auth we can't read `business.name` (no token yet),
+// so branding resolves from, in order: build-time env override > the name the
+// operator set last session (persisted by the shell) > a neutral fallback.
+const FALLBACK_BRAND = "pharma-server";
+const FALLBACK_TAGLINE = "Tu negocio, listo.";
+
+/** Read a Vite build-time env var via an unknown cast (no vite/client types in
+ *  this project). Empty/whitespace → undefined. */
+function envVar(name: string): string | undefined {
   const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-  return env?.VITE_SERVER_URL?.trim() || undefined;
+  return env?.[name]?.trim() || undefined;
+}
+
+/** Build-time server override (`VITE_SERVER_URL`). Lets a field-install build
+ *  ship pointing at the customer's real server IP. */
+function envServer(): string | undefined {
+  return envVar("VITE_SERVER_URL");
+}
+
+/** Brand name shown pre-auth. `VITE_BRAND_NAME` (build override) > last
+ *  `business.name` the shell persisted > neutral fallback. Never "farmacia". */
+function brandName(): string {
+  const stored = (() => {
+    try { return localStorage.getItem(BRAND_STORE_KEY)?.trim() || undefined; } catch { return undefined; }
+  })();
+  return envVar("VITE_BRAND_NAME") ?? stored ?? FALLBACK_BRAND;
+}
+
+/** Tagline shown pre-auth. `VITE_BRAND_TAGLINE` override > neutral fallback. */
+function brandTagline(): string {
+  return envVar("VITE_BRAND_TAGLINE") ?? FALLBACK_TAGLINE;
+}
+
+/** Last sucursal slug used, so a returning operator doesn't retype it. No
+ *  rubro-specific default. */
+function storedTenant(): string {
+  try { return localStorage.getItem(TENANT_STORE_KEY)?.trim() || ""; } catch { return ""; }
 }
 
 /** Last server the user logged into successfully, persisted across launches. */
@@ -66,6 +99,9 @@ export function renderLogin(
   onSuccess: (session: SessionInfo, serverUrl: string) => void,
 ): void {
   const initialServer = resolveServer();
+  const brand = escapeHtml(brandName());
+  const tagline = escapeHtml(brandTagline());
+  const initialTenant = escapeHtml(storedTenant());
   root.innerHTML = `
     <div class="login-stage" role="main">
       <div class="login-bg" aria-hidden="true">
@@ -76,23 +112,23 @@ export function renderLogin(
       <div class="login-frame">
         <aside class="login-brand-panel" aria-hidden="true">
           <div class="brand-stack">
-            <div class="brand-mark" aria-label="Tu Farmacia">
-              <img src="/tu-farmacia-logo.jpeg" alt="Tu Farmacia" width="44" height="44" />
+            <div class="brand-mark" aria-label="${brand}">
+              <img src="/tu-farmacia-logo.jpeg" alt="${brand}" width="44" height="44" />
             </div>
             <div class="brand-wordmark">
-              <span class="wm-main">Tu Farmacia</span>
-              <span class="wm-sub">COQUIMBO · CHILE</span>
+              <span class="wm-main">${brand}</span>
+              <span class="wm-sub">ERP · CHILE</span>
             </div>
           </div>
 
           <div class="brand-tagline">
-            <h2>Tu farmacia, lista.</h2>
-            <p>Tu catálogo, tus ventas y tus recetas — siempre en tu local.</p>
+            <h2>${tagline}</h2>
+            <p>Tu catálogo, tus ventas y tu caja — siempre en tu local.</p>
           </div>
 
           <ul class="brand-pillars">
             <li><span class="pillar-dot"></span> Funciona sin internet</li>
-            <li><span class="pillar-dot"></span> Boleta SII · ISP · recetas</li>
+            <li><span class="pillar-dot"></span> Boleta y factura electrónica SII</li>
             <li><span class="pillar-dot"></span> POS en menos de 50 ms</li>
           </ul>
         </aside>
@@ -115,7 +151,7 @@ export function renderLogin(
                 autocomplete="organization"
                 spellcheck="false"
                 placeholder="ej: principal"
-                value="${DEFAULT_TENANT}"
+                value="${initialTenant}"
                 aria-describedby="${FIELDS.tenant.err}"
                 required
               />
@@ -132,8 +168,8 @@ export function renderLogin(
                 autocapitalize="none"
                 autocomplete="username"
                 spellcheck="false"
-                placeholder="usuario@farmacia.cl"
-                value="${DEFAULT_EMAIL}"
+                placeholder="usuario@miempresa.cl"
+                value=""
                 aria-describedby="${FIELDS.email.err}"
                 required
               />
@@ -212,7 +248,7 @@ export function renderLogin(
           </form>
 
           <footer class="login-foot">
-            <span class="foot-line">Funciona sin internet — datos siempre en tu farmacia.</span>
+            <span class="foot-line">Funciona sin internet — datos siempre en tu local.</span>
             <span class="foot-meta">El token de sesión vive sólo en memoria.</span>
           </footer>
         </section>
@@ -356,6 +392,8 @@ export function renderLogin(
       const session = await login(serverUrl, tenant, email, password);
       // Friendly tenant label for the shell (server /me only returns the record id).
       try { sessionStorage.setItem("tenant_slug", tenant); } catch { /* noop */ }
+      // Recall the sucursal next launch (rubro-neutral — no farmacia default).
+      try { localStorage.setItem(TENANT_STORE_KEY, tenant); } catch { /* noop */ }
       // Remember the server that worked so the next launch pre-fills it (and
       // the advanced panel stays collapsed — this machine is configured now).
       try { localStorage.setItem(SERVER_STORE_KEY, serverUrl); } catch { /* noop */ }
