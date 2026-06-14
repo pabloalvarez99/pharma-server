@@ -344,9 +344,14 @@ pub async fn receive_purchase_order(
 ) -> Result<Json<PurchaseOrderDto>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
-    Ok(Json(
-        service::receive_purchase_order_lines(&db, &t, &id, input, Some(&claims.sub)).await?,
-    ))
+    // Capture received PO-line ids before `input` is moved (ADR-0013 trigger
+    // `po.receive`: a receipt increments stock). Resolved to product ids inside.
+    let po_line_ids: Vec<String> = input.lines.iter().map(|l| l.po_line_id.clone()).collect();
+    let resp =
+        service::receive_purchase_order_lines(&db, &t, &id, input, Some(&claims.sub)).await?;
+    // ERP→web stock push: fire-and-forget, never blocks the response.
+    crate::stock_webhook::notify_po_receive(&s, t.clone(), po_line_ids);
+    Ok(Json(resp))
 }
 
 /// Resumen de pagos de una OC (total, pagado, saldo). Requiere cashier+.

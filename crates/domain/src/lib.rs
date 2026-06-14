@@ -15,6 +15,7 @@ pub mod prescriptions;
 pub mod purchasing;
 pub mod reports;
 pub mod sales;
+pub mod seed;
 pub mod settings;
 
 pub mod errors;

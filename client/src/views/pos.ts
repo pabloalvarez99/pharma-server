@@ -24,7 +24,7 @@ import {
   type Receipt,
   type LowStockAlert,
 } from "../api";
-import { clp, toNumber, num } from "../format";
+import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 interface CartLine {
@@ -56,12 +56,6 @@ const METHOD_LABEL: Record<string, string> = {
   pos_credit: "Crédito",
   pos_mixed: "Mixto",
 };
-
-/** Parse a free-typed CLP amount ("10.000", "$10000") to an integer number. */
-function parseCash(raw: string): number {
-  const n = Number(raw.replace(/[^\d]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
 
 export function renderPos(host: HTMLElement, serverUrl: string): void {
   const cart: CartLine[] = [];
@@ -214,21 +208,11 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   function renderQuickChips(): void {
-    const total = cartTotal();
-    if (total <= 0) {
+    const amounts = quickCashAmounts(cartTotal());
+    if (amounts.length === 0) {
       quickEl.innerHTML = "";
       return;
     }
-    const amounts = Array.from(
-      new Set([
-        Math.round(total),
-        Math.ceil(total / 1000) * 1000,
-        Math.ceil(total / 5000) * 5000,
-        Math.ceil(total / 10000) * 10000,
-      ]),
-    )
-      .filter((a) => a > 0)
-      .slice(0, 4);
     quickEl.innerHTML = amounts
       .map((a) => `<button type="button" class="pos-quick-chip" data-amt="${a}">${clp(a)}</button>`)
       .join("");
@@ -245,19 +229,18 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       vueltoEl.hidden = true;
       return;
     }
-    const received = parseCash(cashIn.value);
-    const total = cartTotal();
-    if (received <= 0 || total <= 0) {
+    const v = vuelto(parseCash(cashIn.value), cartTotal());
+    if (v.kind === "none") {
       vueltoEl.hidden = true;
       return;
     }
     vueltoEl.hidden = false;
-    if (received >= total) {
+    if (v.kind === "ok") {
       vueltoEl.className = "pos-vuelto ok";
-      vueltoEl.innerHTML = `Vuelto <strong>${clp(received - total)}</strong>`;
+      vueltoEl.innerHTML = `Vuelto <strong>${clp(v.amount)}</strong>`;
     } else {
       vueltoEl.className = "pos-vuelto short";
-      vueltoEl.innerHTML = `Faltan <strong>${clp(total - received)}</strong>`;
+      vueltoEl.innerHTML = `Faltan <strong>${clp(v.amount)}</strong>`;
     }
   }
 
@@ -369,6 +352,23 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     renderCart();
   }
 
+  function removeLine(id: string): void {
+    const i = cart.findIndex((l) => l.product === id);
+    if (i < 0) return;
+    cart.splice(i, 1);
+    renderCart();
+    searchEl.focus(); // line gone — return to the scan box
+  }
+
+  // renderCart() rewrites the lines' innerHTML, dropping DOM focus. Re-focus the
+  // same line by id after a qty tweak so holding ↑/↓ keeps editing it; if the
+  // line vanished (qty hit 0), fall back to the search box.
+  function refocusLine(id: string): void {
+    const el = linesEl.querySelector<HTMLElement>(`.pos-line[data-id="${CSS.escape(id)}"]`);
+    if (el) el.focus();
+    else searchEl.focus();
+  }
+
   function renderCart(): void {
     if (cart.length === 0) {
       linesEl.innerHTML = `<p class="empty">El carrito está vacío. Busca un producto para agregarlo.</p>`;
@@ -376,7 +376,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       linesEl.innerHTML = cart
         .map(
           (l) => `
-        <div class="pos-line" data-id="${escapeHtml(l.product)}">
+        <div class="pos-line" data-id="${escapeHtml(l.product)}" tabindex="0" role="group"
+             aria-label="${escapeHtml(l.name)}, ${l.qty} unidad(es). Flechas para ajustar, Supr para quitar.">
           <div class="pos-line-info">
             <div class="cell-main">${escapeHtml(l.name)}</div>
             <div class="cell-sub muted">${clp(l.unit_price)} c/u</div>
@@ -394,6 +395,28 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         b.addEventListener("click", () => {
           const id = b.closest<HTMLElement>(".pos-line")!.dataset.id!;
           changeQty(id, b.dataset.act === "inc" ? 1 : -1);
+        });
+      });
+      // Keyboard-editable cart: a focused line takes ↑/+/→ to add, ↓/−/← to
+      // remove one, Supr/Backspace to drop it — so the cashier never leaves the
+      // keyboard between scanning and checkout. Focus is preserved across the
+      // re-render by id so holding a key keeps adjusting the same line.
+      linesEl.querySelectorAll<HTMLElement>(".pos-line").forEach((row) => {
+        row.addEventListener("keydown", (e) => {
+          const id = row.dataset.id!;
+          const k = e.key;
+          if (k === "ArrowUp" || k === "ArrowRight" || k === "+") {
+            e.preventDefault();
+            changeQty(id, 1);
+            refocusLine(id);
+          } else if (k === "ArrowDown" || k === "ArrowLeft" || k === "-") {
+            e.preventDefault();
+            changeQty(id, -1);
+            refocusLine(id);
+          } else if (k === "Delete" || k === "Backspace") {
+            e.preventDefault();
+            removeLine(id);
+          }
         });
       });
     }
@@ -424,8 +447,12 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   // ---- checkout ----
-  chargeBtn.addEventListener("click", async () => {
-    if (cart.length === 0) return;
+  // Keyboard-first: the click handler and the cash-input Enter both route here,
+  // so a cashier never has to reach for the mouse to close a cash sale. The
+  // `chargeBtn.disabled` guard doubles as a re-entrancy lock (empty cart OR a
+  // sale already in flight), so a double Enter can't post twice.
+  async function charge(): Promise<void> {
+    if (chargeBtn.disabled || cart.length === 0) return;
     clearError();
     chargeBtn.disabled = true;
     chargeBtn.classList.add("loading");
@@ -443,8 +470,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     let cash: string | undefined;
     let card: string | undefined;
     if (method === "pos_cash") {
-      const received = parseCash(cashIn.value);
-      cash = String(received >= total ? received : total);
+      cash = String(effectiveTender(parseCash(cashIn.value), total));
     } else {
       card = String(total);
     }
@@ -487,6 +513,14 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       chargeBtn.classList.remove("loading");
       chargeBtn.disabled = cart.length === 0;
     }
+  }
+
+  chargeBtn.addEventListener("click", () => void charge());
+  // Enter in the cash field closes the sale — the fast path for Efectivo.
+  cashIn.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    void charge();
   });
 
   function flashLowStock(alerts: LowStockAlert[]): void {

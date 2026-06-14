@@ -30,7 +30,7 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
       <div class="view-head">
         <div>
           <h2>Panel</h2>
-          <p class="muted">Resumen ejecutivo de tu farmacia hoy.</p>
+          <p class="muted">Resumen ejecutivo de tu negocio hoy.</p>
         </div>
       </div>
 

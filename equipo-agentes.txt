@@ -1,0 +1,55 @@
+================================================================================
+ EQUIPO DE AGENTES PERSISTENTE — pharma-server / RutAgentIA
+ Agentes con nombre fijo que EXISTEN SIEMPRE para el proyecto.
+ Charters: .claude/agents/   ·   Tarea actual: teamwork_op.txt (STATUS BOARD)
+ Detalle en CLAUDE.md § "Equipo de agentes PERSISTENTE".
+================================================================================
+
+ROSTER
+  AGENTE     COLOR   ROL                         SCOPE (sus archivos)
+  paxoloop   blue    Orquestador (ultrathink)    dispatch, integración PRs, ESTADO ACTUAL
+  paul       green   Cashier loop                client/src/views/{pos,devoluciones,clientes,caja}.ts
+  marvin     orange  Stock + servicios backend   views/{inventory,compras,gastos}.ts + domain/api/cli
+  ye         yellow  Onboarding + multi-rubro    views/{login,configuracion,dashboard,shell,importar}.ts + business.vertical
+  bob        purple  E2E + compliance            client/e2e/ + format.ts + views/{boletas,facturas,recetas,auditoria,reports}.ts
+  lucy       red     Backend flexible            asignado por paxoloop
+
+================================================================================
+ CÓMO LIMPIAR CONTEXTO SIN PERDER AL AGENTE (control de tokens)
+================================================================================
+Ciclo por pane:
+  1. Trabaja tu lane hasta dejar un PR verde.
+  2. /clear            (borra el contexto acumulado → ~0 tokens)
+  3. Pega tu bootstrap de 1 línea (abajo).
+  4. El agente re-lee: su charter (corto) + STATUS BOARD de teamwork_op.txt +
+     SOLO sus archivos → re-entra barato, sin re-derivar el repo.
+Regla: PR abierto, o ~80k tokens a mitad de lane → /clear + re-bootstrap.
+El estado durable vive FUERA del contexto (teamwork_op.txt + memoria + git);
+el pane es desechable, el agente no.
+
+BOOTSTRAPS (pega tras cada /clear):
+  Eres paul.     Lee .claude/agents/paul.md y sigue tu protocolo.
+  Eres marvin.   Lee .claude/agents/marvin.md y sigue tu protocolo.
+  Eres ye.       Lee .claude/agents/ye.md y sigue tu protocolo.
+  Eres bob.      Lee .claude/agents/bob.md y sigue tu protocolo.
+  Eres lucy.     Lee .claude/agents/lucy.md y sigue tu protocolo.
+  Eres paxoloop. Lee .claude/agents/paxoloop.md y sigue tu protocolo.
+Rotular el pane: /rename <nombre>  +  /color <color>
+
+================================================================================
+ REGLAS GLOBALES (todas en CLAUDE.md)
+================================================================================
+- Visión = RutAgentIA MULTI-RUBRO (1 RUT = 1 agente IA; farmacia = beachhead,
+  no límite). docs/strategy/rutagentia-vision.md. Cada lane testea pharmacy +
+  minimarket. Datos: pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket
+- Verdad de código = origin/feature/erp-parity (el checkout local va atrás → git fetch).
+- Scope DISJUNTO (1 agente = 1 worktree, paths sin solape → cero contención merge).
+- GATE antes de PR. Cliente: cd client && npm run build && npm test. Backend:
+  cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings
+  && cargo test --workspace. NUNCA debilitar asserts para forzar verde.
+- ESTADO ACTUAL (bitacora.md) lo toca SOLO paxoloop.
+- api.ts = APPEND-ONLY entre lanes. business.vertical: ye escribe, otros leen
+  (fallback "pharmacy").
+- Bug → BUG LOG en teamwork_op.txt. Asunción-farmacia → MULTI-RUBRO FINDINGS.
+- NO autónomo (pausar + confirmar fundador): release MSI, source público,
+  force-push, deploy Vercel/Webpay, creds SII. Push/PR normal SÍ es autónomo.

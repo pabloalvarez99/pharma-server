@@ -130,11 +130,11 @@ function openRefundModal(
         <div id="dev-f-items"><p class="empty">Carga una boleta para elegir qué devolver.</p></div>
         <div class="dev-fields-grid">
           <div class="modal-field">
-            <label class="modal-label" for="dev-f-tipo">Tipo</label>
-            <select id="dev-f-tipo" class="view-select">
-              <option value="parcial">Parcial</option>
-              <option value="total">Total</option>
-            </select>
+            <span class="modal-label">Tipo</span>
+            <!-- Derived from the quantities below, not picked by hand: "Total"
+                 only when every sold line is returned in full, else "Parcial".
+                 Removes the old free select that could contradict the items. -->
+            <div id="dev-f-tipo-badge" class="pill pill-warn dev-tipo-badge">Parcial</div>
           </div>
           <div class="modal-field">
             <label class="modal-label" for="dev-f-metodo">Método de reembolso</label>
@@ -151,7 +151,11 @@ function openRefundModal(
           <label class="modal-label" for="dev-f-notas">Notas (opcional)</label>
           <input id="dev-f-notas" type="text" autocomplete="off" />
         </div>
-        <p class="muted dev-restock-note">El reabastecimiento no es automático: reingresa el stock vendible vía Inventario → Ajustar stock.</p>
+        <label class="dev-restock-toggle">
+          <input id="dev-f-restock" type="checkbox" disabled />
+          <span>Reingresar al stock</span>
+        </label>
+        <p class="muted dev-restock-note">No disponible desde la boleta: no identifica el producto (sólo nombre). Reingresa el stock vendible vía Inventario → Ajustar stock.</p>
         <div id="dev-f-error" class="form-error" hidden></div>
         <div class="modal-actions">
           <button type="button" class="btn-ghost" id="dev-f-cancel">Cancelar</button>
@@ -168,7 +172,8 @@ function openRefundModal(
   const loadBtn = modalHost.querySelector<HTMLButtonElement>("#dev-f-load")!;
   const itemsHost = modalHost.querySelector<HTMLElement>("#dev-f-items")!;
   const motivoEl = modalHost.querySelector<HTMLInputElement>("#dev-f-motivo")!;
-  const tipoEl = modalHost.querySelector<HTMLSelectElement>("#dev-f-tipo")!;
+  const tipoBadge = modalHost.querySelector<HTMLElement>("#dev-f-tipo-badge")!;
+  const restockEl = modalHost.querySelector<HTMLInputElement>("#dev-f-restock")!;
   const metodoEl = modalHost.querySelector<HTMLSelectElement>("#dev-f-metodo")!;
   const notasEl = modalHost.querySelector<HTMLInputElement>("#dev-f-notas")!;
   const errEl = modalHost.querySelector<HTMLElement>("#dev-f-error")!;
@@ -188,6 +193,28 @@ function openRefundModal(
     errEl.textContent = msg;
   };
 
+  // "Total" only when every sold line is returned in full; otherwise "Parcial".
+  // Derived live from the qty inputs so the badge can never disagree with what
+  // the cashier actually picked.
+  const currentQtys = (): number[] =>
+    Array.from(itemsHost.querySelectorAll<HTMLInputElement>(".dev-l-qty")).map((el) =>
+      Number(el.value),
+    );
+  const deriveTipo = (): "total" | "parcial" => {
+    if (!receipt) return "parcial";
+    const qtys = currentQtys();
+    const anyReturned = qtys.some((q) => q > 0);
+    const allFull = receipt.items.every((it, i) => qtys[i] === it.qty);
+    return anyReturned && allFull ? "total" : "parcial";
+  };
+  const refreshTipoBadge = () => {
+    const t = deriveTipo();
+    tipoBadge.textContent = t === "total" ? "Total" : "Parcial";
+    tipoBadge.className = `pill dev-tipo-badge ${t === "total" ? "pill-danger" : "pill-warn"}`;
+  };
+  // Recompute as the cashier edits any quantity (delegated; survives reloads).
+  itemsHost.addEventListener("input", refreshTipoBadge);
+
   const loadReceipt = async () => {
     const id = orderEl.value.trim();
     if (id === "") return fail("Ingresa el número de orden.");
@@ -198,6 +225,7 @@ function openRefundModal(
     try {
       receipt = await getReceipt(serverUrl, id);
       renderItemRows(itemsHost, receipt);
+      refreshTipoBadge();
       saveBtn.disabled = false;
     } catch (err) {
       receipt = null;
@@ -232,8 +260,10 @@ function openRefundModal(
         items.push({
           product_name: item.name,
           quantity: qty,
+          // restock only when the toggle is on AND the line identifies a product
+          // (boleta lines don't, so this stays false — the toggle is disabled).
           unit_price: item.unit_price,
-          restock: false, // boleta lines carry no product id; restock requires one
+          restock: restockEl.checked && Boolean((item as { product?: string }).product),
         });
       }
     }
@@ -245,7 +275,7 @@ function openRefundModal(
     try {
       await createRefund(serverUrl, motivo, items, {
         order: receipt.order_id,
-        tipo: tipoEl.value,
+        tipo: deriveTipo(),
         notas: notasEl.value.trim() || undefined,
         metodoReembolso: metodoEl.value,
       });

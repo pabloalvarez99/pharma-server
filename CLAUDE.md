@@ -232,6 +232,60 @@ Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agen
 - **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
 - Ver memoria `[[parallel-agent-pipeline]]` para el detalle operativo.
 
+### Equipo de agentes PERSISTENTE (nombres fijos + control de tokens)
+
+El equipo ya no es anónimo: son **agentes con nombre que existen siempre** para el
+proyecto. Charters versionados en [`.claude/agents/`](./.claude/agents/) (cada uno
+con frontmatter `name/description` → también son subagents válidos del Task tool).
+Tarjeta de uso + bootstraps en [`.claude/agents/README.md`](./.claude/agents/README.md).
+Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz).
+
+| Agente | Color | Rol | Scope |
+|--------|-------|-----|-------|
+| **paxoloop** | blue | Orquestador (ultrathink) | dispatch, integración PRs, **único que toca ESTADO ACTUAL** |
+| **paul** | green | Cashier loop | `client/src/views/{pos,devoluciones,clientes,caja}.ts` |
+| **marvin** | orange | Stock + servicios backend | `views/{inventory,compras,gastos}.ts` + domain/api/cli compartidos |
+| **ye** | yellow | Onboarding + multi-rubro | `views/{login,configuracion,dashboard,shell,importar}.ts` + `business.vertical` |
+| **bob** | purple | E2E + compliance | `client/e2e/` + `format.ts` + `views/{boletas,facturas,recetas,auditoria,reports}.ts` |
+| **lucy** | red | Backend flexible | asignado por paxoloop |
+
+- **Fuente única de tarea por agente** = STATUS BOARD en `teamwork_op.txt` (raíz;
+  incluye lanes activas, BUG LOG, MULTI-RUBRO FINDINGS). El estado durable vive AHÍ
+  + memoria + git, **nunca** solo en el contexto del pane.
+- **Control de tokens (ciclo por pane)**: trabajar lane → PR verde → **`/clear`** →
+  pegar bootstrap de 1 línea (`Eres <nombre>. Lee .claude/agents/<nombre>.md y sigue
+  tu protocolo.`) → tomar siguiente tarea del status board. Re-entra barato (charter
+  corto + status board + solo sus archivos), sin re-derivar el repo. Regla: PR abierto
+  o ~80k tokens → `/clear` + re-bootstrap.
+- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; farmacia = beachhead, no
+  límite) → [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+  Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
+  `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
+
+### Catálogo de rubros (onboarding "elige tu rubro")
+
+Al primer inicio el operador elige su **rubro** de un catálogo (no solo
+farmacia/minimarket). Guardar en `admin_setting business.vertical`. La UI gatea
+features por rubro (ej: recetas/controlados solo farmacia). Detalle + plan en
+[`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md). Catálogo v1
+(taxonomía reusada de **DSS**): `farmacia`·`minimarket`·`restaurant`·`cafe`·`tienda`·
+`belleza`·`servicios`·`otro`. Pack seed hoy: farmacia ✅, minimarket ✅; resto se
+agrega al validar el rubro (disciplina anti-framework). Valor interno EN, UI ES
+(mapear es→en al llamar seed-demo).
+
+### Integración DSS (storefront) + cliente universal cross-platform
+
+- **DSS** (https://dss-spa.vercel.app, Vercel/CF, fundador) = **capa storefront** de
+  RutAgentIA (front-office del cliente final), acoplada por el seam HTTP existente
+  ([ADR-0012](./docs/adr/0012-web-onprem-interop.md)/[ADR-0013](./docs/adr/0013-sync-bidireccional-stock.md)):
+  pull catálogo · push stock · push pedidos. Sin cross-import; web = tier pago;
+  core sigue offline. Plan en capas L0→L4 → [ADR-0014](./docs/adr/0014-dss-storefront-integration.md).
+- **Cliente universal**: el client ya es **Tauri 2** → un solo frontend a
+  desktop+Android+iOS + build PWA/web. Server = verdad offline-first; móvil/web =
+  terminales en red (URL de server configurable; tablet en WiFi = caja móvil). App
+  del OPERADOR (Tauri) ≠ storefront del CLIENTE FINAL (DSS). Plan en
+  [ADR-0015](./docs/adr/0015-universal-cross-platform-client.md).
+
 ## Vault Obsidian — leer bajo demanda
 
 Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`

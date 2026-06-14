@@ -262,9 +262,10 @@ pub async fn adjust_stock(
 ) -> Result<Json<ProductDto>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
-    Ok(Json(
-        service::adjust_stock(&db, &t, &id, adj, Some(&claims.sub)).await?,
-    ))
+    let product = service::adjust_stock(&db, &t, &id, adj, Some(&claims.sub)).await?;
+    // ERP→web stock push (ADR-0013 trigger `manual.adjust`): fire-and-forget.
+    crate::stock_webhook::notify_products(&s, t.clone(), vec![id.clone()]);
+    Ok(Json(product))
 }
 
 /// Bulk update de precios por % o monto. Requiere admin+.

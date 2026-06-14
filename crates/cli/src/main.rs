@@ -92,6 +92,53 @@ enum Cmd {
         #[command(subcommand)]
         cmd: backup_cmd::BackupCmd,
     },
+    /// Webhook ERP→web (ADR-0013 Patrón B) — probar conectividad/firma.
+    Webhook {
+        #[command(subcommand)]
+        cmd: WebhookCmd,
+    },
+    /// Sembrar data demo (productos + lotes + movimientos) para un tenant.
+    /// Mismo servicio que usa el botón "datos demo" de la app. Marca DEMO,
+    /// reversible con --force. NO se ejecuta solo.
+    SeedDemo {
+        /// Slug del tenant a sembrar.
+        #[arg(long)]
+        tenant: String,
+        /// Vertical del pack: pharmacy (default) | minimarket.
+        #[arg(long, default_value = "pharmacy")]
+        vertical: String,
+        /// Si ya hay data demo, regenerarla (wipe + reseed) en vez de fallar.
+        #[arg(long)]
+        force: bool,
+        /// Salida como JSON en vez de texto.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WebhookCmd {
+    /// Envía un webhook de stock sintético al endpoint configurado para
+    /// verificar conectividad + firma HMAC end-to-end (no toca la DB).
+    /// Usa `[stock_webhook]` del config salvo override por flags.
+    TestStock {
+        /// Tenant slug (campo `tenant_slug`/`X-Pharma-Tenant` del payload).
+        #[arg(long)]
+        tenant: String,
+        /// SKU comercial (`external_id`). Default `TEST-SKU`.
+        #[arg(long, default_value = "TEST-SKU")]
+        sku: String,
+        /// Stock final a reportar (`new_stock`). Default 0.
+        #[arg(long, default_value_t = 0)]
+        stock: i64,
+        /// URL destino. Default: `stock_webhook.target_url` del config.
+        #[arg(long)]
+        url: Option<String>,
+        /// HMAC secret. Default: `stock_webhook.hmac_secret` del config
+        /// (o env `PHARMA__STOCK_WEBHOOK__HMAC_SECRET`).
+        #[arg(long)]
+        secret: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -752,10 +799,128 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Cmd::SeedDemo {
+            tenant,
+            vertical,
+            force,
+            json,
+        } => {
+            let cfg = pharma_core::config::AppConfig::load()?;
+            let db_handle = db::connect(&cfg.db).await?;
+            let mut tq = db_handle
+                .query("SELECT * FROM tenant WHERE slug = $slug LIMIT 1")
+                .bind(("slug", tenant.clone()))
+                .await
+                .context("lookup tenant by slug")?;
+            let tenant_row: Option<TenantRow> = tq.take(0)?;
+            let tenant_row =
+                tenant_row.ok_or_else(|| anyhow!("tenant with slug '{tenant}' not found"))?;
+            let summary = domain::seed::seed_demo(&db_handle, &tenant_row.id, &vertical, force)
+                .await
+                .map_err(|e| anyhow!("seed demo falló: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            } else {
+                println!(
+                    "seed demo ok: vertical={} productos={} lotes={} movimientos={} borrados={}",
+                    summary.vertical,
+                    summary.products_created,
+                    summary.batches_created,
+                    summary.movements_emitted,
+                    summary.wiped
+                );
+            }
+            tracing::info!(
+                tenant = %tenant,
+                vertical = %summary.vertical,
+                products = summary.products_created,
+                wiped = summary.wiped,
+                "seed demo complete"
+            );
+        }
         Cmd::Backup { cmd } => backup_cmd::run(cmd).await?,
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
         Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,
+        Cmd::Webhook { cmd } => match cmd {
+            WebhookCmd::TestStock {
+                tenant,
+                sku,
+                stock,
+                url,
+                secret,
+            } => webhook_test_stock(tenant, sku, stock, url, secret).await?,
+        },
+    }
+    Ok(())
+}
+
+/// Build a synthetic ADR-0013 stock payload, HMAC-sign it, and POST it to the
+/// configured (or overridden) web endpoint. Surfaces the HTTP status so an
+/// operator can confirm the storefront accepts the signature before wiring the
+/// live trigger. Pure connectivity probe — reads no tenant data.
+async fn webhook_test_stock(
+    tenant: String,
+    sku: String,
+    stock: i64,
+    url: Option<String>,
+    secret: Option<String>,
+) -> anyhow::Result<()> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let cfg = pharma_core::config::AppConfig::load().ok();
+    let target = url
+        .or_else(|| cfg.as_ref().map(|c| c.stock_webhook.target_url.clone()))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow!("sin URL destino: pasa --url o configura [stock_webhook] target_url")
+        })?;
+    let secret = secret
+        .or_else(|| cfg.as_ref().map(|c| c.stock_webhook.hmac_secret.clone()))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow!("sin HMAC secret: pasa --secret o exporta PHARMA__STOCK_WEBHOOK__HMAC_SECRET")
+        })?;
+
+    let ts = chrono::Utc::now().to_rfc3339();
+    let key = uuid::Uuid::now_v7().to_string();
+    let body = serde_json::json!({
+        "schema_version": "1.0",
+        "tenant_slug": tenant,
+        "external_id": sku,
+        "new_stock": stock,
+        "in_stock": stock > 0,
+        "ts": ts,
+        "idempotency_key": key,
+    });
+    let raw = serde_json::to_vec(&body)?;
+
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts keys of any length");
+    mac.update(&raw);
+    let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+
+    println!("POST {target}");
+    println!("  X-Pharma-Tenant: {tenant}");
+    println!("  Idempotency-Key: {key}");
+    let resp = reqwest::Client::new()
+        .post(&target)
+        .header("content-type", "application/json")
+        .header("x-pharma-signature", &signature)
+        .header("x-pharma-timestamp", &ts)
+        .header("x-pharma-tenant", &tenant)
+        .header("idempotency-key", &key)
+        .body(raw)
+        .send()
+        .await
+        .with_context(|| format!("POST {target}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if status.is_success() {
+        println!("OK: HTTP {status}");
+    } else {
+        return Err(anyhow!("webhook rechazado: HTTP {status} body={text}"));
     }
     Ok(())
 }
@@ -787,4 +952,61 @@ fn resolve_password(arg: Option<String>) -> anyhow::Result<String> {
         return Err(anyhow!("passwords do not match"));
     }
     Ok(p)
+}
+
+#[cfg(test)]
+mod webhook_tests {
+    use super::*;
+    use httpmock::prelude::*;
+
+    #[tokio::test]
+    async fn test_stock_signs_and_posts_then_reports_2xx() {
+        let server = MockServer::start_async().await;
+        // The web side verifies HMAC-SHA256 over the raw body; here we just
+        // assert the signature header is present + well-formed and the expected
+        // headers ride along, then return 200.
+        let m = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path("/api/webhooks/pharma-stock")
+                    .header("x-pharma-tenant", "coquimbo-centro")
+                    .header_exists("x-pharma-signature")
+                    .header_exists("idempotency-key");
+                then.status(200).body("ok");
+            })
+            .await;
+
+        let url = format!("{}/api/webhooks/pharma-stock", server.base_url());
+        webhook_test_stock(
+            "coquimbo-centro".into(),
+            "PARA-500".into(),
+            42,
+            Some(url),
+            Some("shared-secret".into()),
+        )
+        .await
+        .expect("synthetic webhook should succeed");
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_stock_errors_on_non_2xx() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST);
+                then.status(401).body("bad signature");
+            })
+            .await;
+        let err = webhook_test_stock(
+            "t".into(),
+            "SKU".into(),
+            0,
+            Some(server.base_url()),
+            Some("s".into()),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("401"), "got: {err}");
+    }
 }

@@ -1996,3 +1996,103 @@ Cierra la única brecha de cobertura que dejó #139: el unit test de `apply_crl_
 - **Refactor `crates/api/src/lib.rs`**: `refresh_crl_once` delega en `refresh_crl_once_with_keys(base, dir, keys)` (`pub`, mirrors el patrón `_with_keys` ya usado en `load_license_from_with_keys` / `parse_and_verify_with_keys`) — permite servir CRLs firmados con keypair efímero desde un server de test sin la clave privada real. Comportamiento de producción intacto (pasa `LICENSER_KEYS`).
 - **`crates/api/tests/crl_refresh_http.rs`** (nuevo, 2 tests): levanta un server axum local (`127.0.0.1:0`) que sirve `/crl/crl-v{n}.json` desde un mapa (404 para el resto), y verifica sobre **sockets reales**: (1) recorre la cadena firmada v1→v2, para en el 404 de v3, persiste el cache + idempotencia en 2ª pasada; (2) nodo fresco contra CDN sin CRLs (todo 404) ⇒ 0 aplicadas sin error, cache no escrito. Introduce el patrón server-in-test (no existía en `crates/api/tests`).
 - GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **496 passed / 6 ignored** (+2, 90 suites). Commit en PR #155.
+
+## 2026-06-13 — Session 3 (parallel lane): License key rotation multi-key (ADR-0007)
+
+- **Lane aislada** (worktree `pharma-wt-keyrot`, branch `feat/license-key-rotation` off `feature/erp-parity` v0.1.28). Scope estricto `crates/license` — cero contención con las otras 4 lanes paralelas.
+- **`crates/license/src/keys.rs`**: trust store ADR-0007 con metadata de rotación. Nuevo `struct KeyEntry { key_id, did, accepted }` + `const TRUST_STORE` (la key activa `lk-prod-2026-01` doblada como legacy + dev placeholder). `LICENSER_KEYS` (tupla plana) se mantiene intacta para los consumidores fuera de lane (CRL verify, inyección de keys en `api`). Nuevas helpers: `LEGACY_KEY_ID`, `resolve_key_id` (key_id vacío → legacy), `is_accepted` (gate de retiro). `lookup_did` ahora aplica el fallback legacy. Test `trust_store_and_flat_view_stay_in_sync` previene drift entre las dos vistas.
+- **`crates/license/src/schema.rs`**: `License.key_id` marcado `#[serde(default)]` → una license sin el campo (pre-rotación) deserializa a `""` en vez de fallar. **Backward-compat mandatoria del ADR**: rotar la key nunca invalida licenses históricas. Tipo `String` sin cambio (no rompe `api`/`cli`/tests fuera de lane).
+- **`crates/license/src/verify.rs`**: `parse_and_verify_with_keys` resuelve key_id vacío → `LEGACY_KEY_ID` antes de buscar el DID; `parse_and_verify` (path embebido de producción) rechaza keys retiradas vía `is_accepted` con nuevo error `RetiredKeyId`. Selección de pubkey por key_id; key_id desconocido → `UnknownKeyId`.
+- **`crates/license/tests/key_rotation.rs`** (nuevo, 6 tests): dos keypairs deterministas (0xAA/0xBB) — license firmada por A verifica, por B verifica, key_id desconocido rechaza, license legacy SIN campo key_id cae al legacy y verifica, DID equivocado para un key_id rechaza, helper de retiro refleja el trust store. + 4 unit tests en `keys::tests`.
+- GATE workspace verde: `fmt --check` limpio, `clippy --workspace --all-targets -D warnings` exit 0, `cargo test --workspace` 50 suites ok / 0 failures (license crate 10 passed). Commit en PR (feat/license-key-rotation → feature/erp-parity).
+
+
+## 2026-06-13 — Session 2: C14N 1.0 canonicalización DTE XML-DSig (subtask 9.1.b.4, PR)
+
+Worktree `pharma-wt-c14n` off `origin/feature/erp-parity` (v0.1.28), scope `crates/dte`. La firma 9.1.b.2 firmaba bytes "determinísticos pero no canónicos" y difería C14N 1.0 a esta subtask. El validador detached del SII recanonicaliza `<SignedInfo>` y `<Documento>` con C14N 1.0 (REC-xml-c14n-20010315) antes de verificar digest+firma — si firmamos bytes no canónicos, el SII recanonicaliza a bytes distintos y la firma no valida.
+
+- **`crates/dte/src/c14n.rs`** (nuevo): `canonicalize(&str) -> Result<String>`, Canonical XML 1.0 **inclusiva sin comentarios** vía `quick-xml` Reader + pila de namespaces propia. Implementa el subconjunto que aplica al XML que emitimos (sin DTD, sin entidades, UTF-8): orden de nodos namespace (default primero, luego por prefijo) y de atributos (clave primaria URI ns, secundaria nombre local), remoción de decls de namespace superfluas (`xmlns=""` sólo si cancela default heredado), elementos vacíos → par start-end, escape de contenido (`& < > #xD`) y de atributos (`& < " #x9 #xA #xD`, `>` no), normalización CDATA de valor de atributo, comentarios removidos, whitespace de contenido preservado.
+- **Fuera de alcance (justificado)**: defaults de `<!ATTLIST>`, entidades de DTD, tipos NMTOKENS/ID, conversión de encoding (ejemplos W3C 3.1/3.5/3.6/3.7/3.8) — requieren DTD, que el DTE del SII nunca usa.
+- **`crates/dte/src/sign.rs`**: digest de `<Documento>` y bytes firmados de `<SignedInfo>` ahora pasan por `c14n::canonicalize`; `verify_*` recanonicaliza igual que el SII antes de verificar. API pública (`sign_xml`/`verify_signature`/`sign_libro`/...) estable. Doc del módulo actualizada (C14N ya no diferida).
+- **Tests offline (TDD, RED→GREEN)**: 9 nuevos en `c14n.rs` incl. **vectores oficiales W3C §3.2 (whitespace) y §3.3 (orden attr/ns + decls superfluas)** como fixtures, escapes de contenido/atributo, normalización CDATA, idempotencia, y equivalencia canónica bajo reordenamiento de atributos (el valor real de C14N para el SII). Roundtrips de firma DTE/Libro siguen verdes con el canonicalizador nuevo.
+- GATE workspace verde: `fmt --check` + `clippy --all-targets -D warnings` + `cargo test --workspace` (50 suites ok, 0 failed). **9.1.l (round-trip vivo `maullin.sii.cl`) sigue bloqueado por credenciales SII reales** — independiente de esta subtask.
+
+
+## 2026-06-13 — Session 1: completar ADR-0013 Patrón B — triggers faltantes + publish_to_web gate + CLI test (Fase 12)
+
+Branch `feat/sync-engine-fase-12`, worktree `pharma-wt-sync` off `origin/feature/erp-parity` (v0.1.28, PR #158). **Hallazgo clave**: el prompt original pedía un crate `crates/sync` con outbox persistente, pero (a) el push ERP→web ya está implementado en `crates/api/src/stock_webhook.rs` (HMAC-SHA256 + retry 1/5/30s + drop+métrica + payload schema 1.0, wired en `AppState` + `sales.rs`), y (b) un outbox **contradice** ADR-0013, que eligió explícitamente *drop tras 4 intentos, sin persistencia* + reconcile nightly vía pull-catalog. Pivote: **completar** Patrón B en vez de duplicarlo. Scope estricto: `crates/api` + `crates/cli` + migración 0024 (cero edits a `crates/domain` → cero contención con otras lanes).
+
+Gaps reales cerrados:
+- **Triggers**: sólo `pos.sale` estaba wired. ADR-0013 lista 5. Agregados al nivel handler (mismo patrón que `sales.rs:126`, fire-and-forget, nunca bloquea la request): `pos.refund` (`sales.rs::create_refund`), `manual.adjust` (`inventory.rs::adjust_movement` + `catalog.rs::adjust_stock`), `po.receive` (`purchasing.rs::receive_purchase_order`). `expiry.write_off` NO tiene endpoint HTTP (vive en `domain::sales::interactions`) → diferido (cubierto por reconcile nightly).
+- **`migrations/0024_product_publish_to_web.surql`** (nuevo): `DEFINE FIELD publish_to_web ON product TYPE bool DEFAULT false`. Gate opt-in por SKU (ADR-0013: "NO disparan movimientos en SKUs con publish_to_web=false"). Sin índice nuevo (columna en tabla ya tenant-scoped, no tabla nueva).
+- **Refactor `stock_webhook.rs`**: un solo dispatcher. Nuevo `notify_products(state, tenant, product_ids)` (lee stock/external_id/publish_to_web post-cambio y empuja por SKU publicable) + `notify_po_receive` (resuelve `purchase_order_item`→product) + `dispatch` (loop de entrega reusable) + `publishable()` (gate puro testeable). `notify_sale` queda como wrapper. Eliminados `StockChange`/`notify`/`collect_changes` viejos (reemplazados por `collect_payloads` con filtro `publish_to_web`). `new_stock` absoluto (idempotente bajo retry).
+- **CLI `pharma webhook test-stock --tenant <slug> [--sku --stock --url --secret]`**: firma+POSTea un payload sintético al endpoint configurado (lee `[stock_webhook]` del config, override por flags) y reporta el status HTTP. Probe de conectividad/firma end-to-end, no toca la DB. `hmac` agregado a `crates/cli/Cargo.toml`.
+
+Tests: +`publishable_gate` + `dispatch_disabled_is_noop` (api lib, puros), +2 CLI (`test_stock_signs_and_posts_then_reports_2xx`, `test_stock_errors_on_non_2xx`, vía httpmock). GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace` exit 0 (CLI bin 13 passed incl. 2 nuevos). PR contra `feature/erp-parity`.
+
+**Pendiente (no autónomo / fuera de lane)**: `expiry.write_off` trigger (sin endpoint HTTP); receptor web real (otro repo); promover MSI; deploy license-server.
+
+## 2026-06-13 — Session "ye" (parallel lane): onboarding + selección de rubro (multi-rubro pivot)
+
+- **Lane aislada** (worktree `pharma-wt-p2-onboard`, branch `feat/client-onboarding-vertical` off `feature/erp-parity` v0.1.28). Scope cliente puro → GATE cliente. Cero contención con las lanes de crates.
+- **Premisa del prompt FALSA**: afirmaba seeder ya hecho (`pharma seed-demo --vertical`, `crates/cli/src/seed_cmd.rs`). Verificado: no existe en el branch ni en `git log --all`. Tampoco existía concepto `vertical` en ningún lado. Documentado en `docs/strategy/multi-rubro-findings.md` (NUEVO).
+- **`client/src/vertical.ts`** (NUEVO) — single source of truth del rubro: `Vertical = farmacia|minimarket|otro`, claves `business.vertical`/`business.name` (admin_setting), `parseVertical` (default `otro`, nunca farmacia), `hasRecetas` (sólo farmacia — gate Ley 20.000), `hasDte` (universal CL), loaders async sin throw. Contrato compartido para la lane de compliance (importa `hasRecetas`/`hasDte`).
+- **`configuracion.ts`** — sección "Rubro del negocio": selector + nombre del negocio, persistidos en admin_setting, ayuda inline.
+- **`shell.ts`** — branding dinámico desde `business.name` (fallback genérico `pharma-server`, ya NO "Tu Farmacia" hardcodeado); nav "Recetas" oculto cuando rubro ≠ farmacia (`hydrateBranding` post-render, firma de `renderShell` intacta).
+- **`dashboard.ts`** — copy genérico ("tu negocio").
+- **`vertical.test.ts`** (NUEVO, 7 tests) — parse/default/gates/catálogo.
+- **Task 3 (botón demo-seed) BLOQUEADO**: requiere seeder backend inexistente; no se fabricó botón sin backend (ver findings). **`login.ts` pre-auth** sigue farmacia-only (no puede leer settings sin token) — anotado para lane de branding.
+- GATE cliente verde: `npm run build` (tsc --noEmit + vite) OK, `npm test` 27 passed (7 vertical + 20 format). Cero Rust tocado → sin workspace GATE.
+
+
+## 2026-06-13 — PAUL: cashier loop multi-rubro — POS money helpers + keyboard checkout (client)
+
+Branch `feat/client-test-pos-loop`, worktree `pharma-wt-p2-pos` off `origin/feature/erp-parity`. Test manual del loop de cajero (POS → caja → devolución → arqueo) sobre `pos.ts`/`devoluciones.ts`/`clientes.ts`/`caja.ts`.
+
+**Hallazgo multi-rubro (positivo)**: el loop de cajero **ya es rubro-neutral**. Ninguna de las 4 vistas asume farmacia — no renderizan receta, principio activo ni advertencia de interacción. `active_ingredient` existe en el tipo `Product` (api.ts) pero el POS nunca lo muestra (la card de resultado es nombre+stock+precio). Lo farmacéutico vive sólo en `recetas.ts`/`inventory.ts` (fuera del loop). En minimarket el POS funciona idéntico sin estorbo. No requirió condicionar nada.
+
+**Fixes (money + teclado, el path más sensible del brief)**:
+- **`format.ts`**: extraídos 4 helpers puros desde `pos.ts` (antes inline, sin test): `parseCash` (strip cosméticos → entero ≥0; un `-` perdido NO produce tender negativo), `effectiveTender` (single-tender: manda lo recibido si cubre, si no el total exacto — nunca menos), `vuelto` (`ok|short|none`, **amount siempre ≥0; el signo vive en `kind`**, la UI no puede pintar un vuelto negativo), `quickCashAmounts` (chips: exacto + siguiente billete 1k/5k/10k, dedup, ≤4, ascendente). `pos.ts` ahora los importa.
+- **Teclado-only**: el checkout estaba atrapado en click de mouse. Extraído `charge()` reusable; `chargeBtn` y **Enter en el campo de efectivo** ambos lo invocan → cerrar venta cash sin tocar el mouse (el path rápido de cajero). El guard `chargeBtn.disabled` dobla como lock de re-entrancy: un doble-Enter no postea dos veces.
+
+**Tests**: +13 en `format.test.ts` (parseCash/effectiveTender/vuelto/quickCashAmounts, incl. invariante de no-negatividad del vuelto y dedup de chips) → **33 passed** (era 20). GATE cliente verde: `npm run build` (tsc --noEmit + vite build) rc=0 + `vitest run` 33/33.
+
+**Notas / follow-ups** (no en este PR): devoluciones `tipo` (parcial/total) es etiqueta libre, no derivada de las cantidades elegidas; restock en devolución no es automático (la boleta no porta product id — documentado en la vista); navegación teclado de qty (+/−) sigue siendo mouse.
+
+
+## 2026-06-13 — MARVIN: stock & money-out multi-rubro (cliente Tauri, PR)
+
+Worktree `pharma-wt-p2-stock` off `origin/feature/erp-parity` (v0.1.28), scope `client/src/views/{inventory,gastos}.ts` + nuevo `client/src/views/stock-helpers.ts`. Foco: bugfix + multi-rubro + tests del cliente (vistas vanilla TS + Vite + vitest).
+
+- **BUG date-slip en vencimiento de lote (inventory)**: `createBatch` anclaba la fecha a `T00:00:00Z` (medianoche UTC). En la TZ de Chile (UTC-3/-4) `toLocaleDateString("es-CL")` la renderiza **un día antes** (un lote que vence 01-05 se mostraba 30-04) — riesgo legal/caducados. `gastos.ts` ya usaba mediodía para esquivarlo; ahora ambos usan el helper compartido `toRfc3339Noon` (ancla mediodía UTC). Test de regresión prueba que medianoche se corre al día 30 y mediodía no.
+- **Multi-rubro**: los campos clínicos del form de producto (Laboratorio, Principio activo) ahora se condicionan a la setting `business_vertical`. Default = farmacia (back-compat); en `minimarket`/`general`/`almacén`/`retail`/… se ocultan. Presentación se mantiene (genérica). **Lote/vencimiento queda para todos** — perecibles (pan, leche) lo necesitan igual que fármacos. La setting se lee una vez vía `getSetting` y tolera 403/404/null cayendo al default farmacia.
+- **`stock-helpers.ts` (nuevo)**: módulo puro sin imports DOM/Tauri (testeable bajo node como `format.ts`): `toRfc3339Noon`, `stockLevel` (out/low/ok, NaN→out), `expiryStatus` (verdict de vencimiento por límites de día UTC, alineado con `days_to_expiry` del server), `pharmaFieldsVisible`. `inventory.ts` usa los 4; `gastos.ts` reusa `toRfc3339Noon` (dedup del helper local).
+- **compras.ts**: revisado (OC multilínea → recepción → stock+WAC, AP/pagos, caps de cantidad pendiente, validación de inputs negativos/cero). Sin defecto real — WAC y reconciliación de stock viven server-side; los caps de recepción y la validación de líneas son correctos. Sin cambios.
+- **Tests (TDD)**: `stock-helpers.test.ts` (12) incl. regresión date-slip, buckets de stock, ventana de vencimiento y visibilidad multi-rubro. GATE cliente verde: `tsc --noEmit` + `vitest run` (32 tests, 2 archivos) + `vite build`.
+- **Follow-up (fuera de lane)**: agregar el toggle de `business_vertical` en `configuracion.ts` para que el dueño elija rubro desde la UI (hoy se setea vía API/CLI).
+
+
+## 2026-06-14 — MARVIN: seed-demo como servicio + endpoint admin (desbloquea botón app, PR)
+
+Worktree `pharma-wt-seed-svc` off `origin/feature/erp-parity` (v0.1.28). El seed demo NO existía en la rama real (el prompt asumía `crates/cli/src/seed_cmd.rs`, ausente en el tip) → net-new: servicio reutilizable + CLI + endpoint admin, para que el **botón "datos demo" de la app** lo pueda llamar (antes no había forma de hacerlo desde la UI).
+
+- **`crates/domain/src/seed.rs` (nuevo)**: `pub async fn seed_demo(db, tenant, vertical, force) -> DomainResult<SeedSummary>`. Packs `pharmacy` (fármacos con laboratorio + principio activo) y `minimarket` (abarrotes/perecibles sin campos clínicos pero CON lote/vencimiento). `SeedVertical::parse` acepta sinónimos ES (farmacia/almacén/general). **Invariante de stock honrado**: cada producto se crea con `stock=0` y luego un lote con stock>0 vía `inventory::service::create_batch` → emite `stock_movement` y materializa `product.stock` en la misma tx ⇒ `product.stock == Σ batch.stock == Σ movement.delta`. Marca DEMO vía `external_id="DEMO-<slug>"`; `force` hace wipe (movimientos+lotes+productos demo del tenant, acotado por marca+tenant) antes de re-sembrar; sin `force` y con data demo previa → `Conflict` (409). NO auto-run.
+- **`crates/cli/src/main.rs`**: subcomando `pharma seed-demo --tenant <slug> [--vertical pharmacy|minimarket] [--force] [--json]` que resuelve el tenant por slug y delega en `domain::seed`. (+ dep `domain` en `cli/Cargo.toml`.)
+- **`crates/api/src/v1/seed.rs` (nuevo)**: `POST /api/v1/admin/seed-demo {vertical, force}` — gated admin/owner (require_admin in-handler, mismo patrón que audit; NO usa el role::layer con BUG-001), tenant SIEMPRE del JWT, responde el `SeedSummary`. Registrado en `v1/mod.rs` (merge additive). `DomainError::Conflict → 409` ya mapeado en `error.rs`.
+- **Tests**: `crates/domain/tests/seed.rs` (5, kv-mem) lockea el invariante de ledger + idempotencia/force/vertical desconocido; `crates/api/tests/seed_demo_endpoint.rs` (3) lockea el contrato HTTP (403 no-admin, 200+summary, 409 re-seed, 200 force, 401/403 sin token). GATE workspace verde: `fmt` + `clippy --all-targets -D warnings` + `cargo test --workspace` (92 suites ok, 0 failed).
+- **Para ye**: el botón de seed en la app ya tiene a quién llamar — `POST /api/v1/admin/seed-demo` con token admin, body `{"vertical":"pharmacy"|"minimarket","force":false}`. Respuesta: `{vertical, products_created, batches_created, movements_emitted, wiped}`.
+
+
+## 2026-06-14 — PAUL: polish POS (qty teclable + devolución UX honesta) + seed-demo CLI + verificación viva
+
+Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los gaps que dejé fuera del PR #165 + agrega el seeder para probar la app viva.
+
+**Fixes cliente**:
+- **`pos.ts` — carrito teclable**: cada `.pos-line` ahora es `tabindex=0 role=group` con keydown: ↑/→/`+` suma, ↓/←/`−` resta, Supr/Backspace borra la línea. `refocusLine(id)` re-enfoca la misma línea tras el re-render (mantener apretada una flecha sigue editándola); si la línea desaparece (qty→0) cae al buscador. Helpers `removeLine`/`refocusLine`. Antes qty era sólo mouse.
+- **`devoluciones.ts` — UX honesta**: (1) el `tipo` ya no es un `<select>` libre que podía contradecir las cantidades — se **deriva** (badge): "Total" sólo si toda línea vendida se devuelve completa, si no "Parcial"; recalcula en cada `input` de cantidad y se manda `deriveTipo()` al server. (2) restock: checkbox explícito **deshabilitado** con el motivo real visible ("no disponible desde la boleta: no identifica el producto"), en vez de un `restock:false` oculto. El flag se manda sólo si el toggle está ON **y** la línea trae product id (la boleta no → queda false).
+
+**Seeder `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket [--reset]`** (`crates/cli`, + dep `domain`): find-or-create tenant + admin `owner` (`admin@<slug>.cl` / `demo1234`) + catálogo de 5 productos por rubro. Pharmacy trae `active_ingredient`+`prescription_type`+`laboratory` (incl. receta retenida/controlada); minimarket los deja `None` — así el POS (que no renderiza ninguno) es probablemente idéntico entre rubros. Idempotente (skip por slug); `--reset` borra productos del tenant.
+
+**Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.

@@ -9,6 +9,10 @@ import {
   canonicalRut,
   formatRut,
   desgloseIva,
+  parseCash,
+  effectiveTender,
+  vuelto,
+  quickCashAmounts,
 } from "./format";
 
 // RUT verifier vectors computed by hand from the mód-11 rule (multiply the body
@@ -136,5 +140,86 @@ describe("money helpers", () => {
     expect(toNumber("1190.50")).toBe(1190.5);
     expect(toNumber("garbage")).toBe(0);
     expect(toNumber(42)).toBe(42);
+  });
+});
+
+describe("parseCash", () => {
+  it("strips currency cosmetics to an integer", () => {
+    expect(parseCash("$10.000")).toBe(10000);
+    expect(parseCash("10000")).toBe(10000);
+    expect(parseCash(" 5.000 CLP ")).toBe(5000);
+  });
+
+  it("floors empty / garbage to 0 (never NaN)", () => {
+    expect(parseCash("")).toBe(0);
+    expect(parseCash("abc")).toBe(0);
+    expect(parseCash("$")).toBe(0);
+  });
+
+  it("a stray minus cannot yield a negative tender", () => {
+    expect(parseCash("-500")).toBe(500);
+  });
+});
+
+describe("effectiveTender", () => {
+  it("sends the tendered amount when it covers the total", () => {
+    expect(effectiveTender(10000, 8990)).toBe(10000);
+    expect(effectiveTender(8990, 8990)).toBe(8990); // exact
+  });
+
+  it("falls back to the exact total on a short tender (never sends less)", () => {
+    expect(effectiveTender(5000, 8990)).toBe(8990);
+    expect(effectiveTender(0, 8990)).toBe(8990);
+  });
+});
+
+describe("vuelto", () => {
+  it("reports change due when cash covers the total", () => {
+    expect(vuelto(10000, 8990)).toEqual({ kind: "ok", amount: 1010 });
+    expect(vuelto(8990, 8990)).toEqual({ kind: "ok", amount: 0 });
+  });
+
+  it("reports a positive shortfall when cash falls short", () => {
+    expect(vuelto(5000, 8990)).toEqual({ kind: "short", amount: 3990 });
+  });
+
+  it("shows nothing with no cash or an empty cart", () => {
+    expect(vuelto(0, 8990)).toEqual({ kind: "none", amount: 0 });
+    expect(vuelto(10000, 0)).toEqual({ kind: "none", amount: 0 });
+  });
+
+  it("amount is always non-negative — the sign lives in kind", () => {
+    for (const [r, t] of [
+      [0, 0],
+      [1, 99999],
+      [99999, 1],
+      [4990, 5000],
+    ] as const) {
+      expect(vuelto(r, t).amount).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+describe("quickCashAmounts", () => {
+  it("offers the exact total first, then the next round bills", () => {
+    expect(quickCashAmounts(8990)).toEqual([8990, 9000, 10000]);
+  });
+
+  it("dedups when the total is already a round bill", () => {
+    expect(quickCashAmounts(10000)).toEqual([10000]);
+    // 5000 collapses the 1k/5k tiers but the 10k tier still rounds up.
+    expect(quickCashAmounts(5000)).toEqual([5000, 10000]);
+  });
+
+  it("ascending, positive, capped at 4", () => {
+    const a = quickCashAmounts(1234);
+    expect(a).toEqual([1234, 2000, 5000, 10000]);
+    expect(a.length).toBeLessThanOrEqual(4);
+    expect([...a].sort((x, y) => x - y)).toEqual(a);
+  });
+
+  it("empty for a non-positive total", () => {
+    expect(quickCashAmounts(0)).toEqual([]);
+    expect(quickCashAmounts(-5)).toEqual([]);
   });
 });

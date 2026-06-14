@@ -108,6 +108,8 @@ pub async fn adjust_movement(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     let (movement, product) = service::adjust(&db, &t, adj, Some(&claims.sub)).await?;
+    // ERP→web stock push (ADR-0013 trigger `manual.adjust`): fire-and-forget.
+    crate::stock_webhook::notify_products(&s, t.clone(), vec![movement.product.clone()]);
     Ok(Json(MovementResponse { movement, product }))
 }
 
