@@ -11,8 +11,10 @@ use std::sync::Arc;
 use surrealdb::{Connection, Surreal};
 use tokio_cron_scheduler::{Job, JobScheduler};
 
+pub mod backup;
 pub mod near_expiry;
 
+pub use backup::{inspect_snapshot, retain_recent, SnapshotInspection};
 pub use near_expiry::{run_near_expiry_scan, NearExpiryAlert};
 
 /// Errors surfaced by background jobs.

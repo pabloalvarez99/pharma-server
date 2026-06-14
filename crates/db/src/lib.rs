@@ -1,3 +1,4 @@
+pub mod backup_log;
 pub mod client;
 pub mod migrate;
 
