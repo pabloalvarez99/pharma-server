@@ -9,6 +9,7 @@
 import { listExpenses, createExpense, type Expense } from "../api";
 import { clp, num } from "../format";
 import { kpiCard, kpiSkeleton, tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { toRfc3339Noon } from "./stock-helpers";
 
 const PAGE_LIMIT = 100;
 
@@ -256,7 +257,7 @@ function openModal(
         // Send the amount as a plain integer string — server parses Decimal.
         amount: String(Math.trunc(n)),
         paymentMethod: methodEl.value,
-        incurredAt: dateToRfc3339(dateEl.value),
+        incurredAt: toRfc3339Noon(dateEl.value),
       });
       close();
       await onDone();
@@ -292,14 +293,6 @@ function todayInput(): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-/** A `<input type="date">` value (`YYYY-MM-DD`) → RFC3339 the server parses as
- *  `DateTime<Utc>`. Empty input ⇒ undefined (server defaults to now). Noon UTC
- *  avoids the date slipping a day across timezones. */
-function dateToRfc3339(value: string): string | undefined {
-  if (!value) return undefined;
-  return `${value}T12:00:00Z`;
 }
 
 function fmtDate(iso: string): string {

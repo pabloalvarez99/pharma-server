@@ -2058,3 +2058,15 @@ Branch `feat/client-test-pos-loop`, worktree `pharma-wt-p2-pos` off `origin/feat
 **Tests**: +13 en `format.test.ts` (parseCash/effectiveTender/vuelto/quickCashAmounts, incl. invariante de no-negatividad del vuelto y dedup de chips) → **33 passed** (era 20). GATE cliente verde: `npm run build` (tsc --noEmit + vite build) rc=0 + `vitest run` 33/33.
 
 **Notas / follow-ups** (no en este PR): devoluciones `tipo` (parcial/total) es etiqueta libre, no derivada de las cantidades elegidas; restock en devolución no es automático (la boleta no porta product id — documentado en la vista); navegación teclado de qty (+/−) sigue siendo mouse.
+
+
+## 2026-06-13 — MARVIN: stock & money-out multi-rubro (cliente Tauri, PR)
+
+Worktree `pharma-wt-p2-stock` off `origin/feature/erp-parity` (v0.1.28), scope `client/src/views/{inventory,gastos}.ts` + nuevo `client/src/views/stock-helpers.ts`. Foco: bugfix + multi-rubro + tests del cliente (vistas vanilla TS + Vite + vitest).
+
+- **BUG date-slip en vencimiento de lote (inventory)**: `createBatch` anclaba la fecha a `T00:00:00Z` (medianoche UTC). En la TZ de Chile (UTC-3/-4) `toLocaleDateString("es-CL")` la renderiza **un día antes** (un lote que vence 01-05 se mostraba 30-04) — riesgo legal/caducados. `gastos.ts` ya usaba mediodía para esquivarlo; ahora ambos usan el helper compartido `toRfc3339Noon` (ancla mediodía UTC). Test de regresión prueba que medianoche se corre al día 30 y mediodía no.
+- **Multi-rubro**: los campos clínicos del form de producto (Laboratorio, Principio activo) ahora se condicionan a la setting `business_vertical`. Default = farmacia (back-compat); en `minimarket`/`general`/`almacén`/`retail`/… se ocultan. Presentación se mantiene (genérica). **Lote/vencimiento queda para todos** — perecibles (pan, leche) lo necesitan igual que fármacos. La setting se lee una vez vía `getSetting` y tolera 403/404/null cayendo al default farmacia.
+- **`stock-helpers.ts` (nuevo)**: módulo puro sin imports DOM/Tauri (testeable bajo node como `format.ts`): `toRfc3339Noon`, `stockLevel` (out/low/ok, NaN→out), `expiryStatus` (verdict de vencimiento por límites de día UTC, alineado con `days_to_expiry` del server), `pharmaFieldsVisible`. `inventory.ts` usa los 4; `gastos.ts` reusa `toRfc3339Noon` (dedup del helper local).
+- **compras.ts**: revisado (OC multilínea → recepción → stock+WAC, AP/pagos, caps de cantidad pendiente, validación de inputs negativos/cero). Sin defecto real — WAC y reconciliación de stock viven server-side; los caps de recepción y la validación de líneas son correctos. Sin cambios.
+- **Tests (TDD)**: `stock-helpers.test.ts` (12) incl. regresión date-slip, buckets de stock, ventana de vencimiento y visibilidad multi-rubro. GATE cliente verde: `tsc --noEmit` + `vitest run` (32 tests, 2 archivos) + `vite build`.
+- **Follow-up (fuera de lane)**: agregar el toggle de `business_vertical` en `configuracion.ts` para que el dueño elija rubro desde la UI (hoy se setea vía API/CLI).
