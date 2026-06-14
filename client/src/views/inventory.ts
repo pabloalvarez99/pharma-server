@@ -26,7 +26,13 @@ import {
   type NewProductInput,
 } from "../api";
 import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
-import { toRfc3339Noon, stockLevel, expiryStatus, pharmaFieldsVisible } from "./stock-helpers";
+import {
+  toRfc3339Noon,
+  stockLevel,
+  expiryStatus,
+  pharmaFieldsVisible,
+  validateStockAdjust,
+} from "./stock-helpers";
 
 const PAGE_LIMIT = 60;
 type Tab = "productos" | "vencimientos";
@@ -448,16 +454,9 @@ async function openProductDetail(
     btn.addEventListener("click", async () => {
       const raw = qtyEl.value.trim();
       const n = Number(raw);
-      if (raw === "" || !Number.isInteger(n)) {
-        showErr(errEl, "Ingresa una cantidad entera.");
-        return;
-      }
-      if (modeEl.value === "set" && n < 0) {
-        showErr(errEl, "El stock fijado no puede ser negativo.");
-        return;
-      }
-      if (modeEl.value === "delta" && n === 0) {
-        showErr(errEl, "El ajuste no puede ser cero.");
+      const adjErr = raw === "" ? "Ingresa una cantidad entera." : validateStockAdjust(modeEl.value as "delta" | "set", n);
+      if (adjErr) {
+        showErr(errEl, adjErr);
         return;
       }
       const reason = reasonEl.value.trim() || undefined;
