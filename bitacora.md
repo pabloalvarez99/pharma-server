@@ -1996,3 +1996,18 @@ Cierra la única brecha de cobertura que dejó #139: el unit test de `apply_crl_
 - **Refactor `crates/api/src/lib.rs`**: `refresh_crl_once` delega en `refresh_crl_once_with_keys(base, dir, keys)` (`pub`, mirrors el patrón `_with_keys` ya usado en `load_license_from_with_keys` / `parse_and_verify_with_keys`) — permite servir CRLs firmados con keypair efímero desde un server de test sin la clave privada real. Comportamiento de producción intacto (pasa `LICENSER_KEYS`).
 - **`crates/api/tests/crl_refresh_http.rs`** (nuevo, 2 tests): levanta un server axum local (`127.0.0.1:0`) que sirve `/crl/crl-v{n}.json` desde un mapa (404 para el resto), y verifica sobre **sockets reales**: (1) recorre la cadena firmada v1→v2, para en el 404 de v3, persiste el cache + idempotencia en 2ª pasada; (2) nodo fresco contra CDN sin CRLs (todo 404) ⇒ 0 aplicadas sin error, cache no escrito. Introduce el patrón server-in-test (no existía en `crates/api/tests`).
 - GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **496 passed / 6 ignored** (+2, 90 suites). Commit en PR #155.
+
+
+## 2026-06-13 — PAUL: cashier loop multi-rubro — POS money helpers + keyboard checkout (client)
+
+Branch `feat/client-test-pos-loop`, worktree `pharma-wt-p2-pos` off `origin/feature/erp-parity`. Test manual del loop de cajero (POS → caja → devolución → arqueo) sobre `pos.ts`/`devoluciones.ts`/`clientes.ts`/`caja.ts`.
+
+**Hallazgo multi-rubro (positivo)**: el loop de cajero **ya es rubro-neutral**. Ninguna de las 4 vistas asume farmacia — no renderizan receta, principio activo ni advertencia de interacción. `active_ingredient` existe en el tipo `Product` (api.ts) pero el POS nunca lo muestra (la card de resultado es nombre+stock+precio). Lo farmacéutico vive sólo en `recetas.ts`/`inventory.ts` (fuera del loop). En minimarket el POS funciona idéntico sin estorbo. No requirió condicionar nada.
+
+**Fixes (money + teclado, el path más sensible del brief)**:
+- **`format.ts`**: extraídos 4 helpers puros desde `pos.ts` (antes inline, sin test): `parseCash` (strip cosméticos → entero ≥0; un `-` perdido NO produce tender negativo), `effectiveTender` (single-tender: manda lo recibido si cubre, si no el total exacto — nunca menos), `vuelto` (`ok|short|none`, **amount siempre ≥0; el signo vive en `kind`**, la UI no puede pintar un vuelto negativo), `quickCashAmounts` (chips: exacto + siguiente billete 1k/5k/10k, dedup, ≤4, ascendente). `pos.ts` ahora los importa.
+- **Teclado-only**: el checkout estaba atrapado en click de mouse. Extraído `charge()` reusable; `chargeBtn` y **Enter en el campo de efectivo** ambos lo invocan → cerrar venta cash sin tocar el mouse (el path rápido de cajero). El guard `chargeBtn.disabled` dobla como lock de re-entrancy: un doble-Enter no postea dos veces.
+
+**Tests**: +13 en `format.test.ts` (parseCash/effectiveTender/vuelto/quickCashAmounts, incl. invariante de no-negatividad del vuelto y dedup de chips) → **33 passed** (era 20). GATE cliente verde: `npm run build` (tsc --noEmit + vite build) rc=0 + `vitest run` 33/33.
+
+**Notas / follow-ups** (no en este PR): devoluciones `tipo` (parcial/total) es etiqueta libre, no derivada de las cantidades elegidas; restock en devolución no es automático (la boleta no porta product id — documentado en la vista); navegación teclado de qty (+/−) sigue siendo mouse.
