@@ -1996,3 +1996,15 @@ Cierra la única brecha de cobertura que dejó #139: el unit test de `apply_crl_
 - **Refactor `crates/api/src/lib.rs`**: `refresh_crl_once` delega en `refresh_crl_once_with_keys(base, dir, keys)` (`pub`, mirrors el patrón `_with_keys` ya usado en `load_license_from_with_keys` / `parse_and_verify_with_keys`) — permite servir CRLs firmados con keypair efímero desde un server de test sin la clave privada real. Comportamiento de producción intacto (pasa `LICENSER_KEYS`).
 - **`crates/api/tests/crl_refresh_http.rs`** (nuevo, 2 tests): levanta un server axum local (`127.0.0.1:0`) que sirve `/crl/crl-v{n}.json` desde un mapa (404 para el resto), y verifica sobre **sockets reales**: (1) recorre la cadena firmada v1→v2, para en el 404 de v3, persiste el cache + idempotencia en 2ª pasada; (2) nodo fresco contra CDN sin CRLs (todo 404) ⇒ 0 aplicadas sin error, cache no escrito. Introduce el patrón server-in-test (no existía en `crates/api/tests`).
 - GATE workspace verde (api lib tocado): `fmt` + `clippy -D warnings` + **496 passed / 6 ignored** (+2, 90 suites). Commit en PR #155.
+
+## 2026-06-13 — Session "ye" (parallel lane): onboarding + selección de rubro (multi-rubro pivot)
+
+- **Lane aislada** (worktree `pharma-wt-p2-onboard`, branch `feat/client-onboarding-vertical` off `feature/erp-parity` v0.1.28). Scope cliente puro → GATE cliente. Cero contención con las lanes de crates.
+- **Premisa del prompt FALSA**: afirmaba seeder ya hecho (`pharma seed-demo --vertical`, `crates/cli/src/seed_cmd.rs`). Verificado: no existe en el branch ni en `git log --all`. Tampoco existía concepto `vertical` en ningún lado. Documentado en `docs/strategy/multi-rubro-findings.md` (NUEVO).
+- **`client/src/vertical.ts`** (NUEVO) — single source of truth del rubro: `Vertical = farmacia|minimarket|otro`, claves `business.vertical`/`business.name` (admin_setting), `parseVertical` (default `otro`, nunca farmacia), `hasRecetas` (sólo farmacia — gate Ley 20.000), `hasDte` (universal CL), loaders async sin throw. Contrato compartido para la lane de compliance (importa `hasRecetas`/`hasDte`).
+- **`configuracion.ts`** — sección "Rubro del negocio": selector + nombre del negocio, persistidos en admin_setting, ayuda inline.
+- **`shell.ts`** — branding dinámico desde `business.name` (fallback genérico `pharma-server`, ya NO "Tu Farmacia" hardcodeado); nav "Recetas" oculto cuando rubro ≠ farmacia (`hydrateBranding` post-render, firma de `renderShell` intacta).
+- **`dashboard.ts`** — copy genérico ("tu negocio").
+- **`vertical.test.ts`** (NUEVO, 7 tests) — parse/default/gates/catálogo.
+- **Task 3 (botón demo-seed) BLOQUEADO**: requiere seeder backend inexistente; no se fabricó botón sin backend (ver findings). **`login.ts` pre-auth** sigue farmacia-only (no puede leer settings sin token) — anotado para lane de branding.
+- GATE cliente verde: `npm run build` (tsc --noEmit + vite) OK, `npm test` 27 passed (7 vertical + 20 format). Cero Rust tocado → sin workspace GATE.

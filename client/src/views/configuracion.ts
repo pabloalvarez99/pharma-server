@@ -7,6 +7,12 @@
 // other views; Spanish throughout.
 import { getSetting, setSetting } from "../api";
 import { isValidRut, canonicalRut, formatRut } from "../format";
+import {
+  VERTICAL_KEY,
+  BUSINESS_NAME_KEY,
+  VERTICAL_OPTIONS,
+  parseVertical,
+} from "../vertical";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 type SettingKind = "boolean" | "number";
@@ -75,6 +81,11 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         </div>
       </div>
 
+      <h3 class="section-title">Rubro del negocio</h3>
+      <p class="muted">Define qué secciones del ERP se muestran. El módulo de Recetas y el Libro de controlados (Ley 20.000) sólo aparecen en el rubro Farmacia. Las boletas y facturas electrónicas (SII) funcionan en todos los rubros.</p>
+      <div id="cfg-vertical">${tableSkeleton(2)}</div>
+
+      <h3 class="section-title">Parámetros del servidor</h3>
       <div id="cfg-body">${tableSkeleton(SETTINGS.length)}</div>
 
       <h3 class="section-title">Boleta electrónica — datos del emisor</h3>
@@ -85,6 +96,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     </section>
   `;
 
+  const verticalEl = host.querySelector<HTMLElement>("#cfg-vertical")!;
   const bodyEl = host.querySelector<HTMLElement>("#cfg-body")!;
   const emisorEl = host.querySelector<HTMLElement>("#cfg-emisor")!;
   const toastEl = host.querySelector<HTMLElement>("#cfg-toast")!;
@@ -319,6 +331,82 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
+  // --- Rubro / vertical ------------------------------------------------------
+
+  async function loadVerticalForm(): Promise<void> {
+    verticalEl.innerHTML = tableSkeleton(2);
+    try {
+      const [vSetting, nameSetting] = await Promise.all([
+        getSetting(serverUrl, VERTICAL_KEY),
+        getSetting(serverUrl, BUSINESS_NAME_KEY),
+      ]);
+      const current = parseVertical(vSetting?.value ?? null);
+      const name = nameSetting?.value ?? "";
+      verticalEl.innerHTML = `
+        <div class="cfg-emisor-form">
+          <div class="field">
+            <label for="cfg-vert-select">Rubro</label>
+            <select id="cfg-vert-select">
+              ${VERTICAL_OPTIONS.map(
+                (o) =>
+                  `<option value="${o.value}" ${o.value === current ? "selected" : ""}>${escapeHtml(o.label)}</option>`,
+              ).join("")}
+            </select>
+            <p class="muted cfg-help" id="cfg-vert-help">${escapeHtml(
+              VERTICAL_OPTIONS.find((o) => o.value === current)?.help ?? "",
+            )}</p>
+          </div>
+          <div class="field">
+            <label for="cfg-vert-name">Nombre del negocio (opcional)</label>
+            <input id="cfg-vert-name" type="text" placeholder="Mi Negocio"
+                   value="${escapeHtml(name)}" autocomplete="off" />
+            <p class="muted cfg-help">Se muestra en la barra lateral y en el panel. Si lo dejas vacío, se usa un nombre genérico.</p>
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-vert-save">Guardar rubro</button>
+            <span class="cfg-status" id="cfg-vert-status" hidden></span>
+          </div>
+        </div>
+      `;
+      wireVertical();
+    } catch (err) {
+      verticalEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  function wireVertical(): void {
+    const select = verticalEl.querySelector<HTMLSelectElement>("#cfg-vert-select")!;
+    const help = verticalEl.querySelector<HTMLElement>("#cfg-vert-help")!;
+    const nameEl = verticalEl.querySelector<HTMLInputElement>("#cfg-vert-name")!;
+    const saveBtn = verticalEl.querySelector<HTMLButtonElement>("#cfg-vert-save")!;
+    const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-vert-status")!;
+
+    select.addEventListener("change", () => {
+      const opt = VERTICAL_OPTIONS.find((o) => o.value === select.value);
+      help.textContent = opt?.help ?? "";
+    });
+
+    saveBtn.addEventListener("click", async () => {
+      statusEl.hidden = true;
+      saveBtn.disabled = true;
+      try {
+        await setSetting(serverUrl, VERTICAL_KEY, parseVertical(select.value));
+        await setSetting(serverUrl, BUSINESS_NAME_KEY, nameEl.value.trim());
+        statusEl.textContent = "Guardado — reinicia la app para aplicar a todo el menú.";
+        statusEl.className = "cfg-status cfg-status-ok";
+        statusEl.hidden = false;
+        toast("Rubro guardado");
+      } catch (err) {
+        statusEl.textContent = asMessage(err);
+        statusEl.className = "cfg-status cfg-status-err";
+        statusEl.hidden = false;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  void loadVerticalForm();
   void load();
   void loadEmisor();
 }
