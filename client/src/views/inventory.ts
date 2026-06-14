@@ -18,6 +18,7 @@ import {
   listBatches,
   createBatch,
   nearExpiry,
+  stockRotation,
   getSetting,
   type Product,
   type ProductDetail,
@@ -32,10 +33,13 @@ import {
   expiryStatus,
   pharmaFieldsVisible,
   validateStockAdjust,
+  nearExpiryView,
+  reorderSuggestion,
+  rotacionRows,
 } from "./stock-helpers";
 
 const PAGE_LIMIT = 60;
-type Tab = "productos" | "vencimientos";
+type Tab = "productos" | "vencimientos" | "rotacion";
 
 export function renderInventory(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -60,6 +64,7 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
       <div class="inv-tabs" role="tablist">
         <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true">Productos</button>
         <button class="inv-tab" data-tab="vencimientos" role="tab" aria-selected="false">Próximos a vencer</button>
+        <button class="inv-tab" data-tab="rotacion" role="tab" aria-selected="false">Rotación</button>
       </div>
 
       <div id="inv-kpis" class="kpi-grid">${kpiSkeleton()}</div>
@@ -123,8 +128,10 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
         searchEl.value.trim(),
         openDetail,
       );
-    } else {
+    } else if (next === "vencimientos") {
       renderVencimientos(panel, serverUrl, openDetail);
+    } else {
+      renderRotacion(panel, serverUrl, openDetail);
     }
   }
 
@@ -211,6 +218,12 @@ async function loadProducts(
 
 function productRow(p: Product): string {
   const sub = p.laboratory || p.active_ingredient || "";
+  // Min-stock signal: when a SKU is low/out, surface a concrete reorder hint so
+  // the operator knows not just THAT it ran low but HOW MUCH to buy back.
+  const reorder =
+    stockLevel(p.stock) !== "ok"
+      ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
+      : "";
   return `
     <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0">
       <td>
@@ -219,7 +232,7 @@ function productRow(p: Product): string {
       </td>
       <td class="num">${clp(p.price)}</td>
       <td class="num">${num(p.stock)}</td>
-      <td>${stockPill(p.stock)}</td>
+      <td>${stockPill(p.stock)}${reorder}</td>
     </tr>
   `;
 }
@@ -624,11 +637,14 @@ function renderVencimientos(
   const load = async (): Promise<void> => {
     tableHost.innerHTML = tableSkeleton();
     try {
-      const rows = await nearExpiry(serverUrl, days);
-      if (rows.length === 0) {
+      const raw = await nearExpiry(serverUrl, days);
+      if (raw.length === 0) {
         tableHost.innerHTML = `<p class="empty">Sin lotes próximos a vencer en ${days} días. 👍</p>`;
         return;
       }
+      // FEFO surface order: the operator must see the most urgent lote first
+      // (caducados, luego el que vence antes), no matter how the feed arrives.
+      const rows = nearExpiryView(raw);
       tableHost.innerHTML = `
         <table class="data-table inv-venc">
           <thead><tr>
@@ -659,9 +675,7 @@ function renderVencimientos(
   void load();
 }
 
-function nearRow(r: NearExpiryRow): string {
-  const tone = r.expired ? "danger" : r.days_to_expiry <= 30 ? "warn" : "ok";
-  const label = r.expired ? "Caducado" : "Por vencer";
+function nearRow(r: NearExpiryRow & { tone: "danger" | "warn" | "ok"; label: string }): string {
   return `
     <tr data-id="${escapeHtml(r.product_id)}" class="inv-row" tabindex="0">
       <td>${escapeHtml(r.product_name)}</td>
@@ -669,7 +683,61 @@ function nearRow(r: NearExpiryRow): string {
       <td>${fmtDate(r.expiry_date)}</td>
       <td class="num">${num(r.stock)}</td>
       <td class="num">${r.days_to_expiry}</td>
-      <td><span class="pill pill-${tone}">${label}</span></td>
+      <td><span class="pill pill-${r.tone}">${r.label}</span></td>
+    </tr>
+  `;
+}
+
+// --- "Rotación" tab (ABC / Pareto over units sold) --------------------------
+
+function renderRotacion(
+  panel: HTMLElement,
+  serverUrl: string,
+  onOpen: (id: string) => void,
+): void {
+  panel.innerHTML = `
+    <div class="inv-venc-head">
+      <span class="muted">Rotación por unidades vendidas — clasificación ABC (Pareto). A = lo que más se mueve, C = baja rotación.</span>
+    </div>
+    <div class="table-card"><div id="inv-rot-table">${tableSkeleton()}</div></div>
+  `;
+  const tableHost = panel.querySelector<HTMLElement>("#inv-rot-table")!;
+  void (async (): Promise<void> => {
+    try {
+      const raw = await stockRotation(serverUrl);
+      if (raw.length === 0) {
+        tableHost.innerHTML = `<p class="empty">Sin ventas en el período para calcular rotación.</p>`;
+        return;
+      }
+      const rows = rotacionRows(raw);
+      tableHost.innerHTML = `
+        <table class="data-table inv-rot">
+          <thead><tr>
+            <th>Producto</th><th>Clase</th>
+            <th class="num">Vendidas</th><th class="num">Participación</th><th class="num">Stock</th>
+          </tr></thead>
+          <tbody>${rows.map(rotacionRow).join("")}</tbody>
+        </table>
+        <p class="table-foot muted">${rows.length} producto(s) · toca una fila para ver el detalle</p>
+      `;
+      tableHost.querySelectorAll<HTMLElement>("tr[data-id]").forEach((tr) =>
+        tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
+      );
+    } catch (err) {
+      tableHost.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  })();
+}
+
+function rotacionRow(r: ReturnType<typeof rotacionRows>[number]): string {
+  const tone = r.class === "A" ? "ok" : r.class === "B" ? "warn" : "danger";
+  return `
+    <tr data-id="${escapeHtml(r.id)}" class="inv-row" tabindex="0">
+      <td>${escapeHtml(r.name)}</td>
+      <td><span class="pill pill-${tone}">${r.class}</span></td>
+      <td class="num">${num(r.qty_sold)}</td>
+      <td class="num">${escapeHtml(r.sharePct)}</td>
+      <td class="num">${num(r.current_stock)}</td>
     </tr>
   `;
 }
@@ -763,6 +831,7 @@ function invStyles(): string {
     .view-inventory .inv-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
     .view-inventory tr.inv-row { cursor: pointer; }
     .view-inventory tr.inv-row:hover { background: var(--bg-2); }
+    .view-inventory .inv-reorder { color: var(--accent); font-weight: 600; margin-top: 2px; }
     .view-inventory .inv-venc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
     .view-inventory .inv-chips { display: flex; gap: 6px; }
     .view-inventory .inv-chip {

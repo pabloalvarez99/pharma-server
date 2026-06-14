@@ -351,3 +351,104 @@ export function abcClassify(items: AbcItem[]): AbcRanked[] {
     return { ...it, share, cumShare: total > 0 ? cumVal / total : 0, class: cls };
   });
 }
+
+// ===========================================================================
+//  LANE B — view presentation logic (inventory.ts delegates to these so the
+//  ordering / highlight / reorder / rotation decisions the operator SEES are
+//  single-source and unit-tested, not buried inline in the render).
+// ===========================================================================
+
+/** A near-expiry row as the view orders + highlights it. The server's
+ *  `near-expiry` feed is not guaranteed sorted; the operator must see the most
+ *  urgent lote FIRST — expired (most overdue first), then soonest to expire.
+ *  `tone`/`label` are precomputed here so the row renderer is dumb. Vertical-
+ *  agnostic: a caducated leche and a caducated fármaco surface identically. */
+export interface NearExpiryView {
+  tone: "danger" | "warn" | "ok";
+  label: string;
+}
+export function nearExpiryView<T extends { days_to_expiry: number; expired: boolean }>(
+  rows: T[],
+): (T & NearExpiryView)[] {
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, z) => a.r.days_to_expiry - z.r.days_to_expiry || a.i - z.i)
+    .map(({ r }) => {
+      const expired = r.expired || r.days_to_expiry < 0;
+      const tone: NearExpiryView["tone"] = expired ? "danger" : r.days_to_expiry <= 30 ? "warn" : "ok";
+      const label = expired ? "Caducado" : "Por vencer";
+      return { ...r, tone, label };
+    });
+}
+
+/** Default restock target for the reorder suggestion: how many units back on the
+ *  shelf a "Reponer" action proposes. The min-stock alert (stockLevel "low"/"out")
+ *  tells the operator WHAT to reorder; this tells them HOW MUCH. Conservative
+ *  multiple of the low threshold so a one-off restock clears the alert band. */
+export const REORDER_TARGET = 20;
+
+/** Units to buy to bring `stock` back up to `target`. Never negative; an item at
+ *  or above target suggests 0 (no reorder). NaN/junk stock → full target. */
+export function reorderSuggestion(stock: number, target = REORDER_TARGET): number {
+  const s = Number.isFinite(stock) ? stock : 0;
+  return Math.max(0, Math.ceil(target - s));
+}
+
+/** The reorder worklist: products at/below the low-stock threshold, each with a
+ *  suggested buy-back quantity, ordered by urgency (agotado first, then lowest
+ *  stock first; ties keep input order). Items with healthy stock are excluded —
+ *  no noise. Vertical-agnostic: works for fármacos and abarrotes alike. */
+export interface ReorderItem<T> {
+  item: T;
+  stock: number;
+  level: StockLevel;
+  suggest: number;
+}
+export function reorderList<T extends { stock: number }>(
+  items: T[],
+  lowThreshold = 5,
+  target = REORDER_TARGET,
+): ReorderItem<T>[] {
+  return items
+    .map((item, i) => ({ item, i, level: stockLevel(item.stock, lowThreshold) }))
+    .filter((x) => x.level !== "ok")
+    .sort((a, z) => a.item.stock - z.item.stock || a.i - z.i)
+    .map(({ item, level }) => ({
+      item,
+      stock: item.stock,
+      level,
+      suggest: reorderSuggestion(item.stock, target),
+    }));
+}
+
+/** Rotation rows ranked for the "Rotación" view: ABC (Pareto) over units sold in
+ *  the period. Free-tier rotation signal computed client-side from the
+ *  `stock-rotation` feed (qty_sold per product) — what moves (A) vs dead stock
+ *  (C). `sharePct` is the participation as a whole-number percent STRING for the
+ *  UI. Sorted by qty_sold desc (abcClassify's order). Never-sold items → class C,
+ *  0%. Vertical-agnostic. */
+export interface RotacionRow {
+  id: string;
+  name: string;
+  qty_sold: number;
+  current_stock: number;
+  class: "A" | "B" | "C";
+  sharePct: string;
+}
+export function rotacionRows(
+  rows: { product_id: string; product_name: string; qty_sold: number; current_stock: number }[],
+): RotacionRow[] {
+  const ranked = abcClassify(rows.map((r) => ({ id: r.product_id, value: r.qty_sold })));
+  const byId = new Map(rows.map((r) => [r.product_id, r]));
+  return ranked.map((r) => {
+    const src = byId.get(r.id)!;
+    return {
+      id: r.id,
+      name: src.product_name,
+      qty_sold: src.qty_sold,
+      current_stock: src.current_stock,
+      class: r.class,
+      sharePct: `${Math.round(r.share * 100)}%`,
+    };
+  });
+}
