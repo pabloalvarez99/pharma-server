@@ -87,14 +87,17 @@ version = "0.1.28"
 dependencies = [
  "bs58",
  "chrono",
+ "db",
  "ed25519-dalek",
  "hex",
  "rand 0.8.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "surrealdb",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

@@ -2096,3 +2096,23 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — LUCY: relay store-and-forward para peers federados offline (BACKLOG #7, PR)
+
+Branch `feat/agent-relay-offline-peer` (off fresh `origin/feature/erp-parity`). Cola store-and-forward para enviar `Envelope` Ed25519 firmados a un peer federado caído, drenando cuando vuelve.
+
+**`crates/agent/src/relay.rs` (NEW)** — reusa `envelope.rs` (no se inventa wire format):
+- `enqueue(db, tenant, envelope, peer_did)`: verifica la firma **antes** de encolar (envelope forjado/tampered → `SignatureInvalid`, nunca se guarda). Idempotente sobre `(tenant, msg_id)` — re-encolar el mismo envelope devuelve la fila existente, no duplica (índice UNIQUE + fallback en carrera).
+- `drain<T: PeerTransport>(db, tenant, peer_did, transport, now)`: selecciona filas `pending` vencidas (`next_attempt_at <= now`), **re-verifica el envelope guardado** (tamper at-rest → terminal `failed`, jamás se entrega), y entrega vía `transport`. Éxito → `sent` (terminal, nunca re-seleccionado ⇒ sin doble entrega). Fallo → backoff exponencial acotado (`backoff(n)=2·2^(n-1)s` cap 3600s) y reprograma, hasta `MAX_ATTEMPTS=8` ⇒ terminal `failed`. `now` inyectado para tests deterministas.
+- `PeerTransport` trait (async fn nativa, sin `async-trait`): abstrae el transporte real (HTTP push al `/agent/inbox` del peer, se cablea en `crates/api`), manteniendo `agent` libre de networking. Helpers `get`/`count` para status queries.
+- `pub mod relay;` en `lib.rs` (+1 línea). Variantes `AgentError::{Db,Transport}`.
+
+**Migración `0025_agent_relay.surql` (NEW)** — SCHEMAFULL, tenant-scoped: `tenant record<tenant>`, `msg_id`, `target_did`, `envelope_json`, `status pending|sent|failed`, `attempts`, `next_attempt_at`, `last_error`, timestamps. Índice UNIQUE `(tenant, msg_id)` = idempotencia; índice de drain `(tenant, target_did, status, next_attempt_at)`. Gate `federation_enabled` lo aplica el caller (como `/agent/inbox`), nunca la tabla.
+
+**Gotcha resuelto**: bind de `chrono::DateTime<Utc>` en un `WHERE … <= $now` se serializa como string y nunca matchea el datetime almacenado → usar `surrealdb::sql::Datetime::from(dt)` (mismo patrón que `crates/api/src/v1/audit.rs`).
+
+**Dep**: `agent` gana `surrealdb` (kv-surrealkv en binario; `kv-mem`+`tokio`+`db` sólo en dev-deps para los tests, espejando el harness de `crates/domain`).
+
+Tests (kv-mem, 6 nuevos = 18 total -p agent): enqueue→drain happy, peer-offline→pending→drena en retry (con avance de tiempo), tamper-at-rest rechazado en drain (0 entregas), enqueue idempotente + re-drain sin doble entrega, envelope forjado rechazado en enqueue, backoff acotado+exponencial. GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace`.
+
+**Nota para paxoloop (integración)**: el board pre-asignó 0024=paul/0025=lucy, pero `origin/feature/erp-parity` ya trae `0024_product_publish_to_web.surql` → tomé **0025** (libre en todos los remotes). La branch de paul `feat/sync-engine-fase-12` aún no publicó su migración de outbox; cuando lo haga necesitará 0026 (no 0024). Lane previa de lucy (audit-log query, `feat/api-audit-log-query-v3-lucy`) quedó **superseded**: `origin/feature/erp-parity` ya tiene un endpoint de audit más completo (`GET /api/v1/admin/audit-log`, `audit.rs` vía PR #103) — sin PR para esa branch.

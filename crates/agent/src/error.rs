@@ -44,6 +44,16 @@ pub enum AgentError {
     /// (de)serialization, value→json conversion).
     #[error("serialización: {0}")]
     Serde(#[from] serde_json::Error),
+
+    /// Relay persistence (SurrealDB) failure on the store-and-forward queue.
+    #[error("relay db: {0}")]
+    Db(String),
+
+    /// Peer delivery failed during a relay drain (peer offline / transport
+    /// error). Carries the transport's error string; the queued row is
+    /// rescheduled with backoff rather than dropped.
+    #[error("relay transport: {0}")]
+    Transport(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;
