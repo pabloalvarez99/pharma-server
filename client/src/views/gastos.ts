@@ -8,8 +8,16 @@
 // Same skeleton → fetch → swap pattern as the other views (compras + caja).
 import { listExpenses, createExpense, type Expense } from "../api";
 import { clp, num } from "../format";
-import { kpiCard, kpiSkeleton, tableSkeleton, asMessage, escapeHtml } from "./inventory";
-import { toRfc3339Noon } from "./stock-helpers";
+import {
+  kpiCard,
+  kpiSkeleton,
+  tableSkeleton,
+  asMessage,
+  escapeHtml,
+  emptyStateHtml,
+  errorStateHtml,
+} from "./inventory";
+import { toRfc3339Noon, gastosEmpty } from "./stock-helpers";
 
 const PAGE_LIMIT = 100;
 
@@ -99,7 +107,7 @@ export function renderGastos(host: HTMLElement, serverUrl: string): void {
     try {
       const rows = await listExpenses(serverUrl, category, undefined, PAGE_LIMIT);
       renderKpis(kpiHost, rows);
-      renderTable(tableHost, rows);
+      renderTable(tableHost, rows, category !== undefined);
     } catch (err) {
       kpiHost.innerHTML = "";
       tableHost.innerHTML = renderError(err);
@@ -126,9 +134,14 @@ function renderKpis(host: HTMLElement, rows: Expense[]): void {
   ].join("");
 }
 
-function renderTable(host: HTMLElement, rows: Expense[]): void {
+function renderTable(host: HTMLElement, rows: Expense[], filtered: boolean): void {
   if (rows.length === 0) {
-    host.innerHTML = `<p class="empty">Sin gastos para el filtro seleccionado.</p>`;
+    host.innerHTML = emptyStateHtml(gastosEmpty(filtered), filtered ? undefined : "gastos-empty-new");
+    host
+      .querySelector<HTMLButtonElement>("#gastos-empty-new")
+      ?.addEventListener("click", () =>
+        host.closest(".view-gastos")?.querySelector<HTMLButtonElement>("#gastos-new-btn")?.click(),
+      );
     return;
   }
 
@@ -273,18 +286,9 @@ function openModal(
 // --- helpers ---------------------------------------------------------------
 
 function renderError(err: unknown): string {
-  const msg = asMessage(err);
-  // 403 = cashier doesn't have access (shouldn't happen but be graceful).
-  if (msg.includes("403") || msg.includes("denegado")) {
-    return `
-      <div class="caja-empty">
-        <div class="caja-empty-mark">●</div>
-        <h3>Sin acceso a gastos</h3>
-        <p class="muted">Tu rol no tiene permiso para ver los gastos. Contacta al administrador.</p>
-      </div>
-    `;
-  }
-  return `<div class="view-error">${escapeHtml(msg)}</div>`;
+  // Shared classifier → same degrade (permiso / sin conexión / genérico) as
+  // inventory and compras. No blank screen, no raw English code to the operator.
+  return errorStateHtml(err, "los gastos");
 }
 
 /** `YYYY-MM-DD` for today (local) — the default value of the date input. */
