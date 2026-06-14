@@ -92,6 +92,23 @@ enum Cmd {
         #[command(subcommand)]
         cmd: backup_cmd::BackupCmd,
     },
+    /// Sembrar data demo (productos + lotes + movimientos) para un tenant.
+    /// Mismo servicio que usa el botón "datos demo" de la app. Marca DEMO,
+    /// reversible con --force. NO se ejecuta solo.
+    SeedDemo {
+        /// Slug del tenant a sembrar.
+        #[arg(long)]
+        tenant: String,
+        /// Vertical del pack: pharmacy (default) | minimarket.
+        #[arg(long, default_value = "pharmacy")]
+        vertical: String,
+        /// Si ya hay data demo, regenerarla (wipe + reseed) en vez de fallar.
+        #[arg(long)]
+        force: bool,
+        /// Salida como JSON en vez de texto.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -752,6 +769,45 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Cmd::SeedDemo {
+            tenant,
+            vertical,
+            force,
+            json,
+        } => {
+            let cfg = pharma_core::config::AppConfig::load()?;
+            let db_handle = db::connect(&cfg.db).await?;
+            let mut tq = db_handle
+                .query("SELECT * FROM tenant WHERE slug = $slug LIMIT 1")
+                .bind(("slug", tenant.clone()))
+                .await
+                .context("lookup tenant by slug")?;
+            let tenant_row: Option<TenantRow> = tq.take(0)?;
+            let tenant_row =
+                tenant_row.ok_or_else(|| anyhow!("tenant with slug '{tenant}' not found"))?;
+            let summary = domain::seed::seed_demo(&db_handle, &tenant_row.id, &vertical, force)
+                .await
+                .map_err(|e| anyhow!("seed demo falló: {e}"))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            } else {
+                println!(
+                    "seed demo ok: vertical={} productos={} lotes={} movimientos={} borrados={}",
+                    summary.vertical,
+                    summary.products_created,
+                    summary.batches_created,
+                    summary.movements_emitted,
+                    summary.wiped
+                );
+            }
+            tracing::info!(
+                tenant = %tenant,
+                vertical = %summary.vertical,
+                products = summary.products_created,
+                wiped = summary.wiped,
+                "seed demo complete"
+            );
+        }
         Cmd::Backup { cmd } => backup_cmd::run(cmd).await?,
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,

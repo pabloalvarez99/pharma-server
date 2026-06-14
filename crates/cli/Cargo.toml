@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 pharma-core = { path = "../core" }
 db = { path = "../db" }
+domain = { path = "../domain" }
 auth = { path = "../auth" }
 agent = { path = "../agent" }
 license = { path = "../license" }
