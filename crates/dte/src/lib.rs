@@ -15,6 +15,7 @@
 //! Schema persistente: migración `migrations/0017_dte.surql` (tablas `dte`,
 //! `caf`, `cert_digital`).
 
+pub mod c14n;
 pub mod caf;
 pub mod cancel;
 pub mod cert;

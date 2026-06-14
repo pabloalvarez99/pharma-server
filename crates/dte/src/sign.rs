@@ -44,23 +44,18 @@
 //! </Signature>
 //! ```
 //!
-//! ## Canonicalización (alcance de esta subtask)
+//! ## Canonicalización (subtask 9.1.b.4 — implementada)
 //!
-//! El digest cubre los **bytes UTF-8 exactos del subtree `<Documento>...
-//! </Documento>`** tal como los emite `xml::writer` (serializador
-//! determinístico, sin pretty-print, sin comentarios, orden de atributos
-//! estable). La `SignatureValue` cubre los bytes exactos del `<SignedInfo>`
-//! emitido (con su `xmlns` heredado materializado, como exige C14N al
-//! canonicalizar el nodo de forma aislada). Esto es **consistente entre firma
-//! y verificación** y coincide con el enfoque ya usado para el `<DD>` del TED.
-//!
-//! Una pasada de **C14N 1.0 completa** (normalización de namespaces heredados
-//! para validadores detached, expansión de elementos vacíos, reordenamiento de
-//! atributos) se difiere a subtask **9.1.b.4**, gated por el resultado real del
-//! sandbox `maullin.sii.cl`: si SII acepta el documento determinístico tal
-//! cual, no se agrega complejidad de C14N; si lo rechaza, se refina ahí con la
-//! respuesta real como fixture. No firmamos a ciegas un C14N que no podemos
-//! validar contra el SII todavía.
+//! El digest cubre la **forma Canonical XML 1.0** (`crate::c14n`) del subtree
+//! `<Documento>...</Documento>`, y la `SignatureValue` cubre la C14N 1.0 del
+//! `<SignedInfo>` (con su `xmlns` heredado de `<Signature>` materializado). Esto
+//! coincide con lo que el validador del SII recanonicaliza antes de verificar
+//! (el `CanonicalizationMethod Algorithm=".../REC-xml-c14n-20010315"` del
+//! perfil), por lo que firma y verificación local usan exactamente los mismos
+//! bytes que el SII. Ver `c14n.rs` para el alcance (subconjunto sin DTD, que es
+//! lo que emite nuestro serializador) y los vectores W3C usados como fixtures.
+//! El round-trip vivo contra `maullin.sii.cl` sigue gated por credenciales SII
+//! reales (subtask 9.1.l).
 //!
 //! ## Material de clave (PFX → `KeyMaterial`)
 //!
@@ -280,12 +275,13 @@ fn sign_enveloped(
 ) -> Result<String, DteError> {
     let (subtree, id) = extract_subtree_with_id(xml, tag)?;
 
-    // 1. DigestValue = base64(sha1(<{tag}>...</{tag}>)).
-    let digest_value = B64.encode(sha1_bytes(subtree.as_bytes()));
+    // 1. DigestValue = base64(sha1(C14N(<{tag}>...</{tag}>))). El SII
+    //    recanonicaliza con C14N 1.0 antes de digerir; firmamos la misma forma.
+    let digest_value = B64.encode(sha1_bytes(crate::c14n::canonicalize(&subtree)?.as_bytes()));
 
-    // 2. SignedInfo canónico (con xmlns materializado para firmar el nodo
-    //    aislado, como hace C14N al heredarlo de <Signature>).
-    let signed_info = build_signed_info(&id, &digest_value);
+    // 2. SignedInfo canónico C14N 1.0 (el xmlns heredado de <Signature> viene
+    //    materializado en build_signed_info; canonicalize fija orden + escapes).
+    let signed_info = crate::c14n::canonicalize(&build_signed_info(&id, &digest_value))?;
 
     // 3. SignatureValue = base64(rsa-sha1(SignedInfo)).
     let signature_value = sign_rsa_sha1(signed_info.as_bytes(), &key.priv_key)?;
@@ -451,7 +447,9 @@ fn verify_enveloped(signed_xml: &str, tag: &str) -> Result<(), DteError> {
     use rsa::traits::SignatureScheme;
 
     let (documento, _id) = extract_subtree_with_id(signed_xml, tag)?;
-    let digest_calc = B64.encode(sha1_bytes(documento.as_bytes()));
+    let digest_calc = B64.encode(sha1_bytes(
+        crate::c14n::canonicalize(&documento)?.as_bytes(),
+    ));
     let digest_xml = extract_element(signed_xml, "DigestValue")
         .ok_or_else(|| DteError::SignFailed("firma sin <DigestValue>".to_string()))?;
     if digest_calc != digest_xml {
@@ -460,8 +458,11 @@ fn verify_enveloped(signed_xml: &str, tag: &str) -> Result<(), DteError> {
         )));
     }
 
-    let signed_info = extract_subtree(signed_xml, "SignedInfo")
+    let signed_info_raw = extract_subtree(signed_xml, "SignedInfo")
         .ok_or_else(|| DteError::SignFailed("firma sin <SignedInfo>".to_string()))?;
+    // Recanonicalizar el <SignedInfo> con C14N 1.0 antes de verificar la firma,
+    // igual que hace el validador del SII (CanonicalizationMethod del perfil).
+    let signed_info = crate::c14n::canonicalize(&signed_info_raw)?;
     let sig_b64 = extract_element(signed_xml, "SignatureValue")
         .ok_or_else(|| DteError::SignFailed("firma sin <SignatureValue>".to_string()))?;
     let sig = B64
