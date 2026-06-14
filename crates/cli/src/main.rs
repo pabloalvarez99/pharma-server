@@ -114,6 +114,45 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Claves de API con scopes para el seam público DSS (ADR-0014 L1).
+    /// Endurece `/public/catalog` (scope `catalog:read`) y
+    /// `/public/orders/web` (scope `orders:write`). Activa el chequeo con
+    /// `public_catalog.require_api_key` / `public_orders.require_api_key`.
+    ApiKey {
+        #[command(subcommand)]
+        cmd: ApiKeyCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ApiKeyCmd {
+    /// Crear una clave para un tenant. Imprime el secreto UNA sola vez
+    /// (solo se guarda su hash SHA-256). Guárdalo: no se puede recuperar.
+    Create {
+        /// Tenant slug.
+        #[arg(long)]
+        tenant: String,
+        /// Scopes separados por coma. Válidos: catalog:read, orders:write.
+        #[arg(long, default_value = "catalog:read")]
+        scopes: String,
+        /// Etiqueta opcional (ej: "storefront DSS coquimbo").
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Listar claves de un tenant (id + hash + scopes; nunca el secreto).
+    List {
+        /// Tenant slug.
+        #[arg(long)]
+        tenant: String,
+        /// Salida como JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revocar (desactivar) una clave por su record id.
+    Revoke {
+        /// Record id completo, ej: `api_key:xxxxx` (de `pharma api-key list`).
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -287,6 +326,28 @@ struct UserRow {
     email: String,
     tenant: surrealdb::sql::Thing,
     roles: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiKeyRow {
+    id: surrealdb::sql::Thing,
+    key_hash: String,
+    scopes: Vec<String>,
+    #[serde(default)]
+    label: Option<String>,
+    active: bool,
+}
+
+/// SHA-256 hex of a plaintext API key. MUST stay byte-identical to
+/// `api::api_key::hash_key` (the seam verifier) — both are plain SHA-256 hex,
+/// cross-pinned by the SHA-256("abc") known-answer test in that module. The CLI
+/// does not depend on the `api` crate (avoids pulling the axum graph), so the
+/// 3-line hash is replicated here.
+fn hash_api_key(plaintext: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(plaintext.as_bytes());
+    hex::encode(h.finalize())
 }
 
 #[tokio::main]
@@ -838,6 +899,115 @@ async fn main() -> anyhow::Result<()> {
                 "seed demo complete"
             );
         }
+        Cmd::ApiKey { cmd } => match cmd {
+            ApiKeyCmd::Create {
+                tenant,
+                scopes,
+                label,
+            } => {
+                const VALID_SCOPES: &[&str] = &["catalog:read", "orders:write"];
+                let scopes_vec: Vec<String> = scopes
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if scopes_vec.is_empty() {
+                    return Err(anyhow!(
+                        "--scopes no puede estar vacío; válidos: {VALID_SCOPES:?}"
+                    ));
+                }
+                for s in &scopes_vec {
+                    if !VALID_SCOPES.contains(&s.as_str()) {
+                        return Err(anyhow!("scope inválido '{s}'; válidos: {VALID_SCOPES:?}"));
+                    }
+                }
+                let cfg = pharma_core::config::AppConfig::load()?;
+                let db_handle = db::connect(&cfg.db).await?;
+                let mut tq = db_handle
+                    .query("SELECT * FROM tenant WHERE slug = $slug LIMIT 1")
+                    .bind(("slug", tenant.clone()))
+                    .await
+                    .context("lookup tenant by slug")?;
+                let tenant_row: Option<TenantRow> = tq.take(0)?;
+                let tenant_row =
+                    tenant_row.ok_or_else(|| anyhow!("tenant with slug '{tenant}' not found"))?;
+
+                // High-entropy secret (244 bits = two UUIDv4). Shown once.
+                let secret = format!(
+                    "pk_{}{}",
+                    uuid::Uuid::new_v4().simple(),
+                    uuid::Uuid::new_v4().simple()
+                );
+                let hash = hash_api_key(&secret);
+                let mut res = db_handle
+                    .query(
+                        "CREATE api_key SET tenant = $tenant, key_hash = $hash, \
+                         scopes = $scopes, label = $label, active = true RETURN AFTER",
+                    )
+                    .bind(("tenant", tenant_row.id.clone()))
+                    .bind(("hash", hash))
+                    .bind(("scopes", scopes_vec.clone()))
+                    .bind(("label", label.clone()))
+                    .await
+                    .context("CREATE api_key query")?;
+                let row: Option<ApiKeyRow> = res.take(0)?;
+                let row = row.ok_or_else(|| anyhow!("api_key create returned no row"))?;
+                println!("api key creada: id={} scopes={:?}", row.id, row.scopes);
+                println!("SECRETO (guárdalo, no se vuelve a mostrar):");
+                println!("{secret}");
+                tracing::info!(api_key_id = %row.id, tenant = %tenant, scopes = ?scopes_vec, "api key created");
+            }
+            ApiKeyCmd::List { tenant, json } => {
+                let cfg = pharma_core::config::AppConfig::load()?;
+                let db_handle = db::connect(&cfg.db).await?;
+                let mut tq = db_handle
+                    .query("SELECT * FROM tenant WHERE slug = $slug LIMIT 1")
+                    .bind(("slug", tenant.clone()))
+                    .await
+                    .context("lookup tenant by slug")?;
+                let tenant_row: Option<TenantRow> = tq.take(0)?;
+                let tenant_row =
+                    tenant_row.ok_or_else(|| anyhow!("tenant with slug '{tenant}' not found"))?;
+                let mut res = db_handle
+                    .query("SELECT * FROM api_key WHERE tenant = $t ORDER BY created_at")
+                    .bind(("t", tenant_row.id.clone()))
+                    .await
+                    .context("SELECT api_key")?;
+                let rows: Vec<ApiKeyRow> = res.take(0)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&rows)?);
+                } else {
+                    println!("{:<28}  {:<7}  {:<24}  SCOPES", "ID", "ACTIVE", "LABEL");
+                    for r in &rows {
+                        println!(
+                            "{:<28}  {:<7}  {:<24}  {}",
+                            r.id.to_string(),
+                            r.active,
+                            r.label.clone().unwrap_or_default(),
+                            r.scopes.join(",")
+                        );
+                    }
+                    println!("({} claves)", rows.len());
+                }
+            }
+            ApiKeyCmd::Revoke { id } => {
+                let thing = surrealdb::sql::thing(&id)
+                    .map_err(|_| anyhow!("id inválido '{id}' (esperado api_key:xxxx)"))?;
+                let cfg = pharma_core::config::AppConfig::load()?;
+                let db_handle = db::connect(&cfg.db).await?;
+                let mut res = db_handle
+                    .query("UPDATE $id SET active = false RETURN AFTER")
+                    .bind(("id", thing))
+                    .await
+                    .context("UPDATE api_key")?;
+                let row: Option<ApiKeyRow> = res.take(0)?;
+                match row {
+                    Some(r) => println!("api key revocada: id={} active={}", r.id, r.active),
+                    None => return Err(anyhow!("no existe api_key con id '{id}'")),
+                }
+                tracing::info!(api_key = %id, "api key revoked");
+            }
+        },
         Cmd::Backup { cmd } => backup_cmd::run(cmd).await?,
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
