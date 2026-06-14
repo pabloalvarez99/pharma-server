@@ -13,15 +13,21 @@
 //! * [`envelope::Envelope`] — a topic-tagged JSON message, signed over a
 //!   canonical (sorted-key) byte encoding so any peer can verify authenticity
 //!   without a central authority.
+//! * [`relay`] — a store-and-forward queue (tenant-scoped `agent_relay` table)
+//!   that holds signed envelopes for a temporarily-offline peer and drains them
+//!   with bounded-backoff retry. Delivery itself is abstracted behind the
+//!   [`relay::PeerTransport`] trait, keeping the wire transport out of here.
 //!
-//! No networking here — transport (HTTP push / optional relay / NATS) lives in
-//! a future `sync`/transport crate. This crate is offline-pure and unit-tested.
+//! Networking still lives elsewhere (HTTP push / NATS, wired in `crates/api`);
+//! this crate only provides the crypto primitives plus the persistence + retry
+//! state machine, and is unit-tested against an in-memory SurrealDB.
 
 pub mod canonical;
 pub mod card;
 pub mod envelope;
 pub mod error;
 pub mod identity;
+pub mod relay;
 
 pub use card::{AgentCard, AgentKind};
 pub use envelope::Envelope;
