@@ -2096,3 +2096,27 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — License: CLI `pharma license keys list` (ADR-0007 cierre lane ye)
+
+Hallazgo al re-entrar (verificando origin, no el snapshot local): la lane LANE A
+"License key rotation" (ADR-0007 multi-key key_id) **ya está landed** en
+origin/feature/erp-parity vía PR #160 (integrado en PR #173): `schema.key_id`
+opcional, `keys::TRUST_STORE` multi-entry con `accepted`/`LEGACY_KEY_ID`, verify
+selecciona pubkey por key_id (legacy fallback + retired→reject), CRL resuelve
+key_id→DID, y tests (`tests/key_rotation.rs` 6 + `keys.rs` 4 + `verify_unknown_key.rs`).
+Items 1/2/4/5 del brief = superseded.
+
+Único deliverable faltante del brief (item 3) = CLI `pharma license keys list`.
+Implementado, scope acotado:
+- `crates/license/src/keys.rs`: `KeyStatus` + `list_keys()` (vista read-only del
+  TRUST_STORE: key_id, did, accepted, legacy, active=primer accepted). 100% local,
+  sin seed privada ni red (ADR-0002 offline-first). +2 tests unit (mirrors_trust_store,
+  flags_active_legacy).
+- `crates/cli/src/main.rs`: `LicenseCmd::Keys{ cmd: KeysCmd::List{ json } }` aditivo
+  (tabla es-CL: KEY_ID/ESTADO/ACTIVA/LEGADO/DID, o `--json`).
+
+GATE workspace verde: `fmt --check` ok · `clippy --workspace --all-targets -D warnings`
+clean · `cargo test --workspace` 0 failed (1 ignored pre-existente). Smoke real del
+binario: `pharma license keys list` lista lk-prod-2026-01 (vigente/activa/legado) +
+lk-dev-2026 (vigente). Branch feat/license-keys-cli.
