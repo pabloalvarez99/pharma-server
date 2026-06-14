@@ -17,7 +17,11 @@ tracing.workspace = true
 async-trait.workspace = true
 surrealdb.workspace = true
 chrono.workspace = true
+flate2.workspace = true
+tar.workspace = true
 
 [dev-dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+filetime = "0.2"
