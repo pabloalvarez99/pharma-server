@@ -26,3 +26,9 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 # kv-mem only enabled for domain's own test build (not the shipped binary).
 surrealdb = { workspace = true, features = ["kv-mem"] }
+# POS hot-path bench (benches/pos_hotpath.rs). Mirrors crates/api/benches.
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+
+[[bench]]
+name = "pos_hotpath"
+harness = false

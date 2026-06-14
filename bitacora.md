@@ -2096,3 +2096,30 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — POS DB hot-path bench (crates/domain/benches/pos_hotpath.rs) [bob]
+
+Lane `feat/perf-bench-pos-hotpath` (crates/db+benches). Criterion harness que mide
+las 5 operaciones de DB que un cajero martillea todo el día, a escala real (50k SKUs,
+kv-mem): `lookup_by_barcode` (índice único product_barcode), `lookup_by_sku`
+(índice product.external_id), `stock_stats_agg` (catalog::stats), `cierre_caja_agg`
+(cash_register::compute_summary) y `post_sale_insert` (sales::post_sale, único write,
+registrado último para no contaminar las lecturas). Sibling del bench HTTP existente
+`crates/api/benches/pos_sale.rs` pero una capa abajo (servicios de dominio directos,
+catálogo grande). Como Criterion reporta media/mediana pero NO p99, el bench corre
+además un **pase manual de percentiles** (p50/p95/p99 por op) y un veredicto de budget
+(<50ms p99, CLAUDE.md) impreso a stderr. Seeder bulk-INSERT por chunks (record-id +
+strings deterministas interpolados; money via bind sql::Number — `serde-with-str`
+serializa Decimal como string y el campo decimal lo rechaza). Tunables por env
+(PHARMA_BENCH_PRODUCTS/SALES/SAMPLES). Bench = gate LOCAL (CI billing-walled,
+bench.yml es workflow_dispatch). README en crates/domain/benches/README.md.
+
+**Hallazgos (medido, NO arreglado — lane = medir):** a 50k SKUs los lookups del
+scan-gun son instantáneos (barcode p99 1.55ms, sku p99 0.85ms — los índices funcionan)
+y el cierre de caja ok (p99 44ms). Pero DOS ops revientan el budget y escalan con el
+tamaño del catálogo: `stock_stats_agg` p50 2677ms (full-scan agregado, BUG-perf-001 →
+milton) y, peor, `post_sale_insert` p50 3144ms vs 51ms@800 SKUs → el POS write path es
+**O(catálogo)**: `load_products_for_sale` + `load_active_ingredients` usan
+`FROM product WHERE id IN $ids` y SurrealDB escanea la tabla entera (BUG-perf-002).
+Fix sugerido: `SELECT ... FROM $ids WHERE tenant=$t` (fetch directo por record-id).
+Ambos fileados en teamwork_op.txt BUG LOG P1 para asignación de backend.
