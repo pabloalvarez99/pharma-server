@@ -92,6 +92,20 @@ enum Cmd {
         #[command(subcommand)]
         cmd: backup_cmd::BackupCmd,
     },
+    /// Sembrar datos demo (tenant + admin + catálogo por rubro) para probar la
+    /// app viva. Idempotente: re-ejecutar no duplica tenant/usuario.
+    SeedDemo {
+        /// Slug del tenant a crear/usar. Login: admin@<slug>.cl / demo1234.
+        #[arg(long, default_value = "demo")]
+        tenant: String,
+        /// Rubro del catálogo: `pharmacy` (con principio activo/receta) o
+        /// `minimarket` (retail simple, sin campos farmacéuticos).
+        #[arg(long, default_value = "pharmacy")]
+        vertical: String,
+        /// Borrar los productos del tenant antes de sembrar (re-seed limpio).
+        #[arg(long)]
+        reset: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -756,7 +770,245 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
         Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,
+        Cmd::SeedDemo {
+            tenant,
+            vertical,
+            reset,
+        } => seed_demo(&tenant, &vertical, reset).await?,
     }
+    Ok(())
+}
+
+/// One demo catalogue row. `active_ingredient`/`prescription_type`/`laboratory`
+/// are only set for the pharmacy vertical; minimarket leaves them `None` so the
+/// POS (which renders none of them) is provably identical across rubros.
+struct SeedProduct {
+    name: &'static str,
+    sku: &'static str,
+    price: i64,
+    stock: i64,
+    active_ingredient: Option<&'static str>,
+    laboratory: Option<&'static str>,
+    prescription_type: Option<&'static str>,
+}
+
+fn pharmacy_catalog() -> Vec<SeedProduct> {
+    vec![
+        SeedProduct {
+            name: "Paracetamol 500mg x16",
+            sku: "PARA-500-16",
+            price: 1290,
+            stock: 120,
+            active_ingredient: Some("Paracetamol"),
+            laboratory: Some("Laboratorio Chile"),
+            prescription_type: Some("direct"),
+        },
+        SeedProduct {
+            name: "Ibuprofeno 400mg x20",
+            sku: "IBU-400-20",
+            price: 2390,
+            stock: 80,
+            active_ingredient: Some("Ibuprofeno"),
+            laboratory: Some("Saval"),
+            prescription_type: Some("direct"),
+        },
+        SeedProduct {
+            name: "Amoxicilina 500mg x21",
+            sku: "AMOX-500-21",
+            price: 5990,
+            stock: 40,
+            active_ingredient: Some("Amoxicilina"),
+            laboratory: Some("Andrómaco"),
+            prescription_type: Some("retenida"),
+        },
+        SeedProduct {
+            name: "Loratadina 10mg x30",
+            sku: "LORA-10-30",
+            price: 1990,
+            stock: 60,
+            active_ingredient: Some("Loratadina"),
+            laboratory: Some("Mintlab"),
+            prescription_type: Some("direct"),
+        },
+        SeedProduct {
+            name: "Clonazepam 0.5mg x30",
+            sku: "CLON-05-30",
+            price: 8990,
+            stock: 15,
+            active_ingredient: Some("Clonazepam"),
+            laboratory: Some("Saval"),
+            prescription_type: Some("controlada"),
+        },
+    ]
+}
+
+fn minimarket_catalog() -> Vec<SeedProduct> {
+    vec![
+        SeedProduct {
+            name: "Coca-Cola 1.5L",
+            sku: "BEB-CC-15",
+            price: 1990,
+            stock: 60,
+            active_ingredient: None,
+            laboratory: None,
+            prescription_type: None,
+        },
+        SeedProduct {
+            name: "Pan Hallulla (kg)",
+            sku: "PAN-HAL-KG",
+            price: 1890,
+            stock: 100,
+            active_ingredient: None,
+            laboratory: None,
+            prescription_type: None,
+        },
+        SeedProduct {
+            name: "Arroz Grado 1 1kg",
+            sku: "ABA-ARR-1K",
+            price: 1290,
+            stock: 50,
+            active_ingredient: None,
+            laboratory: None,
+            prescription_type: None,
+        },
+        SeedProduct {
+            name: "Leche Entera 1L",
+            sku: "LAC-LE-1L",
+            price: 1190,
+            stock: 80,
+            active_ingredient: None,
+            laboratory: None,
+            prescription_type: None,
+        },
+        SeedProduct {
+            name: "Cerveza Lata 470cc",
+            sku: "BEB-CER-470",
+            price: 1490,
+            stock: 120,
+            active_ingredient: None,
+            laboratory: None,
+            prescription_type: None,
+        },
+    ]
+}
+
+/// Seed a self-contained demo tenant for the live client walkthrough. Creates
+/// (idempotently) the tenant + an `owner` admin, then a vertical-specific
+/// catalogue. Re-running is safe; `--reset` wipes the tenant's products first.
+async fn seed_demo(tenant_slug: &str, vertical: &str, reset: bool) -> anyhow::Result<()> {
+    let catalog = match vertical {
+        "pharmacy" => pharmacy_catalog(),
+        "minimarket" => minimarket_catalog(),
+        other => {
+            return Err(anyhow!(
+                "vertical inválido '{other}'; usa 'pharmacy' o 'minimarket'"
+            ))
+        }
+    };
+
+    let cfg = pharma_core::config::AppConfig::load()?;
+    let db_handle = db::connect(&cfg.db).await?;
+    // Apply bundled migrations so a fresh temp DB has the schema.
+    db::run_embedded(&db_handle).await?;
+
+    // --- tenant (find-or-create) ---
+    let mut tq = db_handle
+        .query("SELECT id, name, slug FROM tenant WHERE slug = $s LIMIT 1")
+        .bind(("s", tenant_slug.to_string()))
+        .await?;
+    let existing: Option<TenantRow> = tq.take(0)?;
+    let tenant = if let Some(t) = existing {
+        println!("tenant existe: {} ({})", t.slug, t.id);
+        t
+    } else {
+        let name = format!("Demo {tenant_slug}");
+        let mut r = db_handle
+            .query("CREATE tenant SET name = $name, slug = $slug RETURN AFTER")
+            .bind(("name", name))
+            .bind(("slug", tenant_slug.to_string()))
+            .await?;
+        let t: Option<TenantRow> = r.take(0)?;
+        let t = t.ok_or_else(|| anyhow!("tenant create returned no row"))?;
+        println!("tenant creado: {} ({})", t.slug, t.id);
+        t
+    };
+
+    // --- admin user (find-or-create) ---
+    let email = format!("admin@{tenant_slug}.cl");
+    let password = "demo1234";
+    let mut uq = db_handle
+        .query("SELECT id FROM user WHERE tenant = $t AND email = $e LIMIT 1")
+        .bind(("t", tenant.id.clone()))
+        .bind(("e", email.clone()))
+        .await?;
+    let user_exists: Option<UserRow> = uq.take(0)?;
+    if user_exists.is_some() {
+        println!("usuario existe: {email}");
+    } else {
+        let hash = auth::password::hash(password)?;
+        db_handle
+            .query(
+                "CREATE user SET tenant = $t, email = $e, password = $p, \
+                 roles = $r, active = true RETURN AFTER",
+            )
+            .bind(("t", tenant.id.clone()))
+            .bind(("e", email.clone()))
+            .bind(("p", hash))
+            .bind(("r", vec!["owner".to_string()]))
+            .await?;
+        println!("usuario creado: {email}");
+    }
+
+    // --- products ---
+    if reset {
+        db_handle
+            .query("DELETE product WHERE tenant = $t")
+            .bind(("t", tenant.id.clone()))
+            .await?;
+        println!("productos previos borrados (--reset)");
+    }
+
+    let mut created = 0usize;
+    let mut skipped = 0usize;
+    for p in &catalog {
+        let slug = slugify(p.name);
+        if domain::catalog::repo::product_slug_exists(&db_handle, &tenant.id, &slug)
+            .await
+            .unwrap_or(false)
+        {
+            skipped += 1;
+            continue;
+        }
+        let input = domain::catalog::model::NewProduct {
+            name: p.name.to_string(),
+            slug: Some(slug),
+            description: None,
+            price: rust_decimal::Decimal::from(p.price),
+            cost_price: None,
+            stock: p.stock,
+            category: None,
+            image_url: None,
+            external_id: Some(p.sku.to_string()),
+            laboratory: p.laboratory.map(str::to_string),
+            therapeutic_action: None,
+            active_ingredient: p.active_ingredient.map(str::to_string),
+            prescription_type: p.prescription_type.map(str::to_string),
+            presentation: None,
+            discount_percent: None,
+        };
+        domain::catalog::service::create_product(&db_handle, &tenant.id, input)
+            .await
+            .map_err(|e| anyhow!("crear producto «{}»: {e}", p.name))?;
+        created += 1;
+    }
+
+    println!();
+    println!("✓ seed '{vertical}' listo — {created} productos creados, {skipped} ya existían");
+    println!("  Login en el cliente:");
+    println!("    Sucursal:   {tenant_slug}");
+    println!("    Correo:     {email}");
+    println!("    Contraseña: {password}");
+    println!("    Servidor:   http://127.0.0.1:8080");
     Ok(())
 }
 

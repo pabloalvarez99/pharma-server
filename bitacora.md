@@ -2011,3 +2011,18 @@ Branch `feat/client-test-pos-loop`, worktree `pharma-wt-p2-pos` off `origin/feat
 **Tests**: +13 en `format.test.ts` (parseCash/effectiveTender/vuelto/quickCashAmounts, incl. invariante de no-negatividad del vuelto y dedup de chips) → **33 passed** (era 20). GATE cliente verde: `npm run build` (tsc --noEmit + vite build) rc=0 + `vitest run` 33/33.
 
 **Notas / follow-ups** (no en este PR): devoluciones `tipo` (parcial/total) es etiqueta libre, no derivada de las cantidades elegidas; restock en devolución no es automático (la boleta no porta product id — documentado en la vista); navegación teclado de qty (+/−) sigue siendo mouse.
+
+
+## 2026-06-14 — PAUL: polish POS (qty teclable + devolución UX honesta) + seed-demo CLI + verificación viva
+
+Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los gaps que dejé fuera del PR #165 + agrega el seeder para probar la app viva.
+
+**Fixes cliente**:
+- **`pos.ts` — carrito teclable**: cada `.pos-line` ahora es `tabindex=0 role=group` con keydown: ↑/→/`+` suma, ↓/←/`−` resta, Supr/Backspace borra la línea. `refocusLine(id)` re-enfoca la misma línea tras el re-render (mantener apretada una flecha sigue editándola); si la línea desaparece (qty→0) cae al buscador. Helpers `removeLine`/`refocusLine`. Antes qty era sólo mouse.
+- **`devoluciones.ts` — UX honesta**: (1) el `tipo` ya no es un `<select>` libre que podía contradecir las cantidades — se **deriva** (badge): "Total" sólo si toda línea vendida se devuelve completa, si no "Parcial"; recalcula en cada `input` de cantidad y se manda `deriveTipo()` al server. (2) restock: checkbox explícito **deshabilitado** con el motivo real visible ("no disponible desde la boleta: no identifica el producto"), en vez de un `restock:false` oculto. El flag se manda sólo si el toggle está ON **y** la línea trae product id (la boleta no → queda false).
+
+**Seeder `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket [--reset]`** (`crates/cli`, + dep `domain`): find-or-create tenant + admin `owner` (`admin@<slug>.cl` / `demo1234`) + catálogo de 5 productos por rubro. Pharmacy trae `active_ingredient`+`prescription_type`+`laboratory` (incl. receta retenida/controlada); minimarket los deja `None` — así el POS (que no renderiza ninguno) es probablemente idéntico entre rubros. Idempotente (skip por slug); `--reset` borra productos del tenant.
+
+**Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.

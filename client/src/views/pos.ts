@@ -352,6 +352,23 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     renderCart();
   }
 
+  function removeLine(id: string): void {
+    const i = cart.findIndex((l) => l.product === id);
+    if (i < 0) return;
+    cart.splice(i, 1);
+    renderCart();
+    searchEl.focus(); // line gone — return to the scan box
+  }
+
+  // renderCart() rewrites the lines' innerHTML, dropping DOM focus. Re-focus the
+  // same line by id after a qty tweak so holding ↑/↓ keeps editing it; if the
+  // line vanished (qty hit 0), fall back to the search box.
+  function refocusLine(id: string): void {
+    const el = linesEl.querySelector<HTMLElement>(`.pos-line[data-id="${CSS.escape(id)}"]`);
+    if (el) el.focus();
+    else searchEl.focus();
+  }
+
   function renderCart(): void {
     if (cart.length === 0) {
       linesEl.innerHTML = `<p class="empty">El carrito está vacío. Busca un producto para agregarlo.</p>`;
@@ -359,7 +376,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       linesEl.innerHTML = cart
         .map(
           (l) => `
-        <div class="pos-line" data-id="${escapeHtml(l.product)}">
+        <div class="pos-line" data-id="${escapeHtml(l.product)}" tabindex="0" role="group"
+             aria-label="${escapeHtml(l.name)}, ${l.qty} unidad(es). Flechas para ajustar, Supr para quitar.">
           <div class="pos-line-info">
             <div class="cell-main">${escapeHtml(l.name)}</div>
             <div class="cell-sub muted">${clp(l.unit_price)} c/u</div>
@@ -377,6 +395,28 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         b.addEventListener("click", () => {
           const id = b.closest<HTMLElement>(".pos-line")!.dataset.id!;
           changeQty(id, b.dataset.act === "inc" ? 1 : -1);
+        });
+      });
+      // Keyboard-editable cart: a focused line takes ↑/+/→ to add, ↓/−/← to
+      // remove one, Supr/Backspace to drop it — so the cashier never leaves the
+      // keyboard between scanning and checkout. Focus is preserved across the
+      // re-render by id so holding a key keeps adjusting the same line.
+      linesEl.querySelectorAll<HTMLElement>(".pos-line").forEach((row) => {
+        row.addEventListener("keydown", (e) => {
+          const id = row.dataset.id!;
+          const k = e.key;
+          if (k === "ArrowUp" || k === "ArrowRight" || k === "+") {
+            e.preventDefault();
+            changeQty(id, 1);
+            refocusLine(id);
+          } else if (k === "ArrowDown" || k === "ArrowLeft" || k === "-") {
+            e.preventDefault();
+            changeQty(id, -1);
+            refocusLine(id);
+          } else if (k === "Delete" || k === "Backspace") {
+            e.preventDefault();
+            removeLine(id);
+          }
         });
       });
     }
