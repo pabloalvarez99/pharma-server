@@ -28,9 +28,15 @@ import {
 } from "../api";
 import { clp, num, toNumber } from "../format";
 import { kpiSkeleton, tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
-
-/** Statuses a PO can be received from (server allows receiving from these). */
-const RECEIVABLE = ["sent", "approved", "partial", "partially_received"];
+import {
+  poIsReceivable,
+  poStatusMeta,
+  poKpis,
+  poPending,
+  parsePoLines,
+  validateReceiveQty,
+  type PoLineDraft,
+} from "./stock-helpers";
 
 const PAGE_LIMIT = 60;
 
@@ -38,8 +44,11 @@ const STATUS_OPTS: { value: string; label: string }[] = [
   { value: "", label: "Todas" },
   { value: "draft", label: "Borrador" },
   { value: "sent", label: "Enviadas" },
+  { value: "approved", label: "Aprobadas" },
   { value: "received", label: "Recibidas" },
-  { value: "partial", label: "Parciales" },
+  // The server status is `partially_received` — the old `partial` matched
+  // nothing, so the "Parciales" filter returned an empty list every time.
+  { value: "partially_received", label: "Parciales" },
   { value: "cancelled", label: "Canceladas" },
 ];
 
@@ -247,11 +256,10 @@ function openSupplierModal(
 }
 
 function renderKpis(host: HTMLElement, rows: PurchaseOrder[]): void {
-  const total = rows.length;
-  const pending = rows.filter((r) =>
-    ["draft", "sent", "partial"].includes(r.status.toLowerCase()),
-  ).length;
-  const totalValue = rows.reduce((sum, r) => sum + Number(r.total), 0);
+  // Open = draft·sent·approved·partially_received (a partially-received OC still
+  // has goods incoming). The old set missed approved + partially_received and
+  // used the phantom `partial` status → the count under-reported pending orders.
+  const { total, pending, totalValue } = poKpis(rows);
   host.innerHTML = `
     <div class="kpi-card">
       <span class="kpi-label">Órdenes</span>
@@ -317,35 +325,11 @@ function poRow(po: PurchaseOrder): string {
 }
 
 function statusPill(status: string): string {
-  const s = status.toLowerCase();
-  let cls = "pill-ok";
-  let label = status;
-  switch (s) {
-    case "draft":
-      cls = "pill-warn";
-      label = "Borrador";
-      break;
-    case "sent":
-      cls = "pill-warn";
-      label = "Enviada";
-      break;
-    case "received":
-      cls = "pill-ok";
-      label = "Recibida";
-      break;
-    case "partial":
-      cls = "pill-warn";
-      label = "Parcial";
-      break;
-    case "cancelled":
-      cls = "pill-danger";
-      label = "Cancelada";
-      break;
-    default:
-      cls = "pill-ok";
-      label = status;
-  }
-  return `<span class="pill ${cls}">${escapeHtml(label)}</span>`;
+  // Centralised es-CL labels + tones. Adds the `approved` + `partially_received`
+  // cases the old switch was missing (a real PO in those states used to leak the
+  // raw English status to the operator via the `default` branch).
+  const { label, tone } = poStatusMeta(status);
+  return `<span class="pill pill-${tone}">${escapeHtml(label)}</span>`;
 }
 
 // --- Nueva OC (create) modal -----------------------------------------------
@@ -454,21 +438,16 @@ function openPoCreateModal(
         errEl.hidden = false;
         errEl.textContent = msg;
       };
-      const items: NewPurchaseOrderItem[] = [];
-      for (const row of Array.from(linesHost.querySelectorAll<HTMLElement>(".po-line"))) {
-        const name = row.querySelector<HTMLInputElement>(".po-l-name")!.value.trim();
-        const qty = Number(row.querySelector<HTMLInputElement>(".po-l-qty")!.value);
-        const cost = row.querySelector<HTMLInputElement>(".po-l-cost")!.value.trim();
-        if (name === "" && cost === "") continue; // skip blank rows
-        if (name === "") return fail("Cada línea necesita un nombre de producto.");
-        if (!Number.isInteger(qty) || qty < 1) return fail("La cantidad debe ser un entero ≥ 1.");
-        const costNum = Number(cost);
-        if (cost === "" || !Number.isFinite(costNum) || costNum < 0) {
-          return fail("El costo unitario debe ser un número válido ≥ 0.");
-        }
-        items.push({ product_name: name, quantity: qty, unit_cost: cost });
-      }
-      if (items.length === 0) return fail("Agrega al menos una línea con producto y costo.");
+      const drafts: PoLineDraft[] = Array.from(
+        linesHost.querySelectorAll<HTMLElement>(".po-line"),
+      ).map((row) => ({
+        name: row.querySelector<HTMLInputElement>(".po-l-name")!.value,
+        qty: row.querySelector<HTMLInputElement>(".po-l-qty")!.value,
+        cost: row.querySelector<HTMLInputElement>(".po-l-cost")!.value,
+      }));
+      const parsed = parsePoLines(drafts);
+      if (!parsed.ok) return fail(parsed.error);
+      const items: NewPurchaseOrderItem[] = parsed.value;
 
       errEl.hidden = true;
       saveBtn.classList.add("loading");
@@ -528,8 +507,8 @@ function openPoDetailModal(
       return;
     }
 
-    const pending = po.items.reduce((n, it) => n + Math.max(0, it.quantity - it.qty_received), 0);
-    const canReceive = RECEIVABLE.includes(po.status.toLowerCase()) && pending > 0;
+    const pending = poPending(po.items);
+    const canReceive = poIsReceivable(po.status) && pending > 0;
     body.innerHTML = `
       ${renderPoDetail(po)}
       <div id="po-d-ap" class="po-ap">${tableSkeleton(2)}</div>
@@ -817,8 +796,8 @@ function openReceiveModal(
       const id = row.dataset.line!;
       const max = Number(row.dataset.max);
       const qty = Number(row.querySelector<HTMLInputElement>(".po-r-qty")!.value);
-      if (!Number.isInteger(qty) || qty < 0) return fail("Las cantidades deben ser enteros ≥ 0.");
-      if (qty > max) return fail("No puedes recibir más de lo pendiente.");
+      const err = validateReceiveQty(qty, max);
+      if (err) return fail(err);
       if (qty > 0) lines.push({ po_line_id: id, qty_received: qty });
     }
     if (lines.length === 0) return fail("Ingresa al menos una cantidad a recibir.");

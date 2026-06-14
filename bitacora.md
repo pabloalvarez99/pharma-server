@@ -2096,3 +2096,37 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — PHASE 2 marvin: stock user-journeys (test-driven) + fix estados OC
+
+Lane `feat/stock-userjourney-qa` (Phase 2, charter scope inventory/compras/gastos).
+Meta: ¿puede el químico/dueño gestionar stock un día entero? → user-journeys
+test-driven sobre el código REAL de las vistas (no clicks).
+
+**Refactor anti-duplicación**: la lógica inline de validación / agregación /
+estado de las 3 vistas se delega a `views/stock-helpers.ts` (export nuevos), así
+los journeys ejercitan el camino real, no copias. Helpers nuevos:
+`poIsOpen/poIsReceivable/poStatusMeta/poKpis/poPending/parsePoLines/
+validateReceiveQty/weightedAverageCost` (compras), `validateStockAdjust`
+(inventario), `parseExpense/expenseTotal/cashEgresos` (gastos), `fefoOrder/
+abcClassify` (LANE B). `weightedAverageCost` es espejo FIEL del contrato server
+(crates/domain/src/purchasing/service.rs): `(old_stock·old_cost + Σqty·cost)/
+(old_stock+Σqty)`, base rule primer-ingreso/stock≤0 = promedio de línea, buckets
+por producto antes del promedio.
+
+**BUG-marvin-001 (P2, FIJADO)**: compras.ts usaba el estado fantasma `partial`
+(el server emite `partially_received`). Triple impacto: (a) filtro "Parciales"
+devolvía vacío siempre; (b) KPI "Pendientes" sub-contaba (sólo draft/sent, sin
+approved ni partially_received); (c) `statusPill` caía al `default` → fugaba el
+estado inglés crudo `partially_received`/`approved` al operador. Centralizado en
+`poStatusMeta`/`poKpis`/`poIsReceivable`; STATUS_OPTS corregido +`approved`.
+
+**BUG-marvin-002 (trivial, FIJADO)**: `abcClassify` (LANE B nuevo) bucketeaba ABC
+sumando shares normalizadas → 0.8+0.15=0.95000…1 > 0.95 mis-bucketeaba el ítem en
+el borde exacto del 95%. Cambiado a comparar valor acumulado vs umbral·total.
+
+8 journeys nuevos en `stock-journeys.test.ts` (compra→recepción parcial→total→WAC,
+WAC base rule, alta SKU→lote→alerta→ajuste auditado, gasto→total→caja efectivo,
+multi-rubro farmacia/minimarket, estados OC es-CL + KPIs, FEFO, ABC). GATE cliente
+verde: `npm run build` (tsc+vite) + `vitest run` 69/69 (33 format + 7 vertical +
+21 stock-helpers + 8 journeys… resto). Sin cambios src-tauri ni backend.

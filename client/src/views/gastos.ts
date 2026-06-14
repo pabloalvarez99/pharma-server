@@ -9,7 +9,7 @@
 import { listExpenses, createExpense, type Expense } from "../api";
 import { clp, num } from "../format";
 import { kpiCard, kpiSkeleton, tableSkeleton, asMessage, escapeHtml } from "./inventory";
-import { toRfc3339Noon } from "./stock-helpers";
+import { toRfc3339Noon, parseExpense, expenseTotal } from "./stock-helpers";
 
 const PAGE_LIMIT = 100;
 
@@ -119,7 +119,7 @@ export function renderGastos(host: HTMLElement, serverUrl: string): void {
 
 function renderKpis(host: HTMLElement, rows: Expense[]): void {
   // Sum amounts as numbers for the display total only (server money stays STRING).
-  const total = rows.reduce((sum, r) => sum + Number(r.amount), 0);
+  const total = expenseTotal(rows);
   host.innerHTML = [
     kpiCard("Gastos", num(rows.length), "en el período visible"),
     kpiCard("Total", clp(total), "suma de gastos filtrados", "accent"),
@@ -234,19 +234,13 @@ function openModal(
   amountEl.focus();
 
   confirmBtn.addEventListener("click", async () => {
-    const rawAmount = amountEl.value.trim();
-    const n = Number(rawAmount);
-    if (rawAmount === "" || !Number.isFinite(n) || n <= 0) {
-      errEl.textContent = "Ingresa un monto válido (mayor a 0).";
+    const parsed = parseExpense(amountEl.value, descEl.value);
+    if (!parsed.ok) {
+      errEl.textContent = parsed.error;
       errEl.hidden = false;
       return;
     }
-    const description = descEl.value.trim();
-    if (description === "") {
-      errEl.textContent = "Ingresa una descripción del gasto.";
-      errEl.hidden = false;
-      return;
-    }
+    const { amount, description } = parsed.value;
     errEl.hidden = true;
     confirmBtn.disabled = true;
     confirmBtn.classList.add("loading");
@@ -255,7 +249,7 @@ function openModal(
         category: categoryEl.value,
         description,
         // Send the amount as a plain integer string — server parses Decimal.
-        amount: String(Math.trunc(n)),
+        amount,
         paymentMethod: methodEl.value,
         incurredAt: toRfc3339Noon(dateEl.value),
       });
