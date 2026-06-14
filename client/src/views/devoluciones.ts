@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { deriveTipo as deriveTipoOf, validateRefund, type RefundDraftLine } from "./cashier-loop";
 
 const PAGE_LIMIT = 60;
 
@@ -200,13 +201,20 @@ function openRefundModal(
     Array.from(itemsHost.querySelectorAll<HTMLInputElement>(".dev-l-qty")).map((el) =>
       Number(el.value),
     );
-  const deriveTipo = (): "total" | "parcial" => {
-    if (!receipt) return "parcial";
+  // Align the loaded boleta items with the typed quantities into the pure draft
+  // model, so tipo-derivation and validation are single-sourced with the tests.
+  const draftLines = (): RefundDraftLine[] => {
+    if (!receipt) return [];
     const qtys = currentQtys();
-    const anyReturned = qtys.some((q) => q > 0);
-    const allFull = receipt.items.every((it, i) => qtys[i] === it.qty);
-    return anyReturned && allFull ? "total" : "parcial";
+    return receipt.items.map((it, i) => ({
+      name: it.name,
+      sold: it.qty,
+      qty: qtys[i],
+      unit_price: it.unit_price,
+      product: (it as { product?: string }).product,
+    }));
   };
+  const deriveTipo = (): "total" | "parcial" => deriveTipoOf(draftLines());
   const refreshTipoBadge = () => {
     const t = deriveTipo();
     tipoBadge.textContent = t === "total" ? "Total" : "Parcial";
@@ -249,25 +257,12 @@ function openRefundModal(
     const motivo = motivoEl.value.trim();
     if (motivo === "") return fail("El motivo es obligatorio.");
 
-    const items: RefundItem[] = [];
-    const rows = Array.from(itemsHost.querySelectorAll<HTMLElement>(".dev-line"));
-    for (let i = 0; i < rows.length; i++) {
-      const item = receipt.items[i];
-      const qty = Number(rows[i].querySelector<HTMLInputElement>(".dev-l-qty")!.value);
-      if (!Number.isInteger(qty) || qty < 0) return fail("Las cantidades deben ser enteros ≥ 0.");
-      if (qty > item.qty) return fail(`No puedes devolver más de lo vendido en «${item.name}».`);
-      if (qty > 0) {
-        items.push({
-          product_name: item.name,
-          quantity: qty,
-          // restock only when the toggle is on AND the line identifies a product
-          // (boleta lines don't, so this stays false — the toggle is disabled).
-          unit_price: item.unit_price,
-          restock: restockEl.checked && Boolean((item as { product?: string }).product),
-        });
-      }
-    }
-    if (items.length === 0) return fail("Ingresa al menos una cantidad a devolver.");
+    // Validate + build the refund lines with the same pure logic the tests drive.
+    // restock only sticks when the toggle is on AND the line identifies a product
+    // (boleta lines don't, so it stays false — the toggle is disabled).
+    const validated = validateRefund(draftLines(), { restock: restockEl.checked });
+    if (!validated.ok) return fail(validated.error);
+    const items: RefundItem[] = validated.value.items;
 
     errEl.hidden = true;
     saveBtn.classList.add("loading");

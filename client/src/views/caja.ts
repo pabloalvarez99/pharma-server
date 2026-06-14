@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { clp, toNumber } from "../format";
 import { kpiSkeleton, asMessage, escapeHtml } from "./inventory";
+import { expectedCash, discrepancy } from "./cashier-loop";
 
 export function renderCaja(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -270,11 +271,12 @@ async function closeFlow(
   let expected = toNumber(session.opening_cash);
   try {
     const a = await cashArqueo(serverUrl, session.id);
-    expected =
-      toNumber(a.session.opening_cash) +
-      toNumber(a.cash_sales) +
-      toNumber(a.movements_in) -
-      toNumber(a.movements_out);
+    expected = expectedCash({
+      opening_cash: a.session.opening_cash,
+      cash_sales: a.cash_sales,
+      movements_in: a.movements_in,
+      movements_out: a.movements_out,
+    });
     arqueoEl.innerHTML = `
       <div class="arqueo-row"><span>Apertura</span><strong>${clp(a.session.opening_cash)}</strong></div>
       <div class="arqueo-row"><span>Ventas efectivo</span><strong>${clp(a.cash_sales)}</strong></div>
@@ -293,12 +295,9 @@ async function closeFlow(
       diffEl.hidden = true;
       return;
     }
-    const counted = toNumber(raw);
-    const diff = counted - expected;
-    const tone = diff === 0 ? "ok" : diff > 0 ? "warn" : "danger";
-    const label = diff === 0 ? "Cuadra" : diff > 0 ? "Sobrante" : "Faltante";
-    diffEl.className = `arqueo-diff arqueo-${tone}`;
-    diffEl.innerHTML = `${label}: <strong>${clp(Math.abs(diff))}</strong>`;
+    const d = discrepancy(toNumber(raw), expected);
+    diffEl.className = `arqueo-diff arqueo-${d.tone}`;
+    diffEl.innerHTML = `${d.label}: <strong>${clp(d.amount)}</strong>`;
     diffEl.hidden = false;
   };
   countedEl.addEventListener("input", recomputeDiff);

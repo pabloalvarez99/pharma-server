@@ -26,14 +26,12 @@ import {
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
-
-interface CartLine {
-  product: string; // record id
-  name: string;
-  unit_price: string; // original server Decimal string
-  qty: number;
-  stock: number; // last-known stock, for the +/- guard
-}
+import {
+  addToCart as addCartLine,
+  changeQty as changeCartQty,
+  cartTotal as cartTotalOf,
+  type CartLine,
+} from "./cashier-loop";
 
 interface PickedCustomer {
   id: string;
@@ -143,8 +141,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   const quickEl = host.querySelector<HTMLElement>("#pos-quick")!;
   const vueltoEl = host.querySelector<HTMLElement>("#pos-vuelto")!;
 
-  const cartTotal = (): number =>
-    cart.reduce((sum, l) => sum + toNumber(l.unit_price) * l.qty, 0);
+  const cartTotal = (): number => cartTotalOf(cart);
 
   // ---- product search (debounced, server-side) ----
   let timer: number | undefined;
@@ -328,27 +325,14 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   // ---- cart ops ----
   function addToCart(p: Product): void {
-    if (p.stock <= 0) return; // guarded in the UI too, defensive here
-    const existing = cart.find((l) => l.product === p.id);
-    if (existing) {
-      if (existing.qty < existing.stock) existing.qty += 1;
-    } else {
-      cart.push({ product: p.id, name: p.name, unit_price: p.price, qty: 1, stock: p.stock });
-    }
+    addCartLine(cart, p); // pure: out-of-stock reject + stock-capped increment
     clearError();
     renderCart();
     searchEl.focus(); // keep the scanner/keyboard flow going
   }
 
   function changeQty(id: string, delta: number): void {
-    const line = cart.find((l) => l.product === id);
-    if (!line) return;
-    line.qty += delta;
-    if (line.qty <= 0) {
-      cart.splice(cart.indexOf(line), 1);
-    } else if (line.qty > line.stock) {
-      line.qty = line.stock;
-    }
+    changeCartQty(cart, id, delta); // pure: clamp to stock, drop at 0
     renderCart();
   }
 
