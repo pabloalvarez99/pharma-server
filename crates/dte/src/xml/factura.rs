@@ -6,7 +6,7 @@
 //! Detalle + Referencia opcional); difieren sólo en validaciones de entrada
 //! (notas exigen referencias, guía exige `IndTraslado`).
 
-use crate::types::{Dte, DteItem, EmisorConfig};
+use crate::types::{Dte, DteItem, EmisorConfig, TipoValorDr};
 use crate::xml::boleta::{clp_int, decimal_str};
 use crate::xml::schema::*;
 use crate::xml::writer::to_xml_string;
@@ -66,6 +66,7 @@ pub(crate) fn render_documento(dte: &Dte, emisor: &EmisorConfig) -> Result<Strin
         id,
         encabezado: build_encabezado(dte, emisor),
         detalle: dte.items.iter().map(build_detalle).collect(),
+        dsc_rcg_global: build_dsc_rcg_global(dte),
         referencia: build_referencias(dte),
         tmst_firma: dte.fecha_emision.format("%Y-%m-%dT%H:%M:%S").to_string(),
     };
@@ -123,6 +124,26 @@ fn build_detalle(item: &DteItem) -> Detalle {
         prc_item: decimal_str(item.precio_unitario),
         monto_item: clp_int(item.monto_item),
     }
+}
+
+/// Mapea los descuentos/recargos globales del `Dte` al elemento xsd. `ValorDR`
+/// se serializa como porcentaje (decimal normalizado) o monto CLP entero según
+/// `tipo_valor`. Compartido con el renderer de boleta.
+pub(crate) fn build_dsc_rcg_global(dte: &Dte) -> Vec<DscRcgGlobal> {
+    dte.descuentos_globales
+        .iter()
+        .map(|d| DscRcgGlobal {
+            nro_lin_dr: d.nro_linea,
+            tpo_mov: d.tipo_mov.code().to_string(),
+            glosa_dr: d.glosa.clone(),
+            tpo_valor: d.tipo_valor.code().to_string(),
+            valor_dr: match d.tipo_valor {
+                TipoValorDr::Porcentaje => decimal_str(d.valor),
+                TipoValorDr::Monto => clp_int(d.valor).to_string(),
+            },
+            ind_exe_dr: d.ind_exe,
+        })
+        .collect()
 }
 
 fn build_referencias(dte: &Dte) -> Vec<Referencia> {

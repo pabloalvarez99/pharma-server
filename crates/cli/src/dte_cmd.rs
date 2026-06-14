@@ -538,6 +538,7 @@ fn stub_dte_for_transition(row: &DteRow) -> anyhow::Result<dte::Dte> {
         comuna_receptor: None,
         ind_traslado: None,
         referencias: vec![],
+        descuentos_globales: vec![],
         monto_neto: Decimal::ZERO,
         iva: Decimal::ZERO,
         monto_exento: Decimal::ZERO,
@@ -655,6 +656,7 @@ async fn dte_emit_doc(db: &Db, args: DteEmitDocArgs) -> anyhow::Result<()> {
         items: file.items,
         referencias,
         ind_traslado: file.ind_traslado,
+        descuentos_globales: vec![],
     };
     // Validar lo barato antes de pedir passphrase o quemar folio.
     dte::emit::build_documento(&spec, 1, "validacion", Utc::now()).map_err(|e| anyhow!("{e}"))?;

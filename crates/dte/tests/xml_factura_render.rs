@@ -4,7 +4,7 @@ mod common;
 
 use chrono::{TimeZone, Utc};
 use dte::xml::render_unsigned;
-use dte::{DteReferencia, DteTipo};
+use dte::{DescuentoGlobal, DteReferencia, DteTipo, TipoMovDr, TipoValorDr};
 use rust_decimal::Decimal;
 
 use crate::common::{dte_boleta_minimal, emisor_test};
@@ -183,6 +183,58 @@ fn item_exento_emite_ind_exe() {
     let pos_exe = xml.find("<IndExe>1</IndExe>").unwrap();
     let pos_nmb = xml.find("<NmbItem>").unwrap();
     assert!(pos_lin < pos_exe && pos_exe < pos_nmb);
+}
+
+#[test]
+fn factura_33_render_dsc_rcg_global() {
+    let mut dte = dte_factura_minimal(90);
+    dte.descuentos_globales = vec![DescuentoGlobal {
+        nro_linea: 1,
+        tipo_mov: TipoMovDr::Descuento,
+        glosa: Some("PROMO INVIERNO".to_string()),
+        tipo_valor: TipoValorDr::Porcentaje,
+        valor: Decimal::from(10),
+        ind_exe: None,
+    }];
+    let xml = render_unsigned(&dte, &emisor_test()).expect("render factura con DscRcgGlobal");
+
+    assert!(xml.contains("<DscRcgGlobal>"));
+    assert!(xml.contains("<NroLinDR>1</NroLinDR>"));
+    assert!(xml.contains("<TpoMov>D</TpoMov>"));
+    assert!(xml.contains("<GlosaDR>PROMO INVIERNO</GlosaDR>"));
+    assert!(xml.contains("<TpoValor>%</TpoValor>"));
+    assert!(xml.contains("<ValorDR>10</ValorDR>"));
+    // Sin IndExeDR cuando aplica al afecto.
+    assert!(!xml.contains("<IndExeDR>"));
+    // xsd: DscRcgGlobal va tras el último Detalle y antes de TmstFirma/TED.
+    let pos_det = xml.rfind("</Detalle>").unwrap();
+    let pos_dr = xml.find("<DscRcgGlobal>").unwrap();
+    let pos_tmst = xml.find("<TmstFirma>").unwrap();
+    assert!(pos_det < pos_dr && pos_dr < pos_tmst);
+}
+
+#[test]
+fn factura_33_dsc_rcg_global_antes_de_referencia() {
+    // Con referencia presente: orden xsd Detalle → DscRcgGlobal → Referencia.
+    let mut dte = dte_factura_minimal(91);
+    dte.tipo = DteTipo::NotaCredito;
+    dte.referencias = vec![referencia_a_factura()];
+    dte.descuentos_globales = vec![DescuentoGlobal {
+        nro_linea: 1,
+        tipo_mov: TipoMovDr::Recargo,
+        glosa: None,
+        tipo_valor: TipoValorDr::Monto,
+        valor: Decimal::from(500),
+        ind_exe: Some(1),
+    }];
+    let xml = render_unsigned(&dte, &emisor_test()).expect("render NC con DscRcgGlobal");
+    assert!(xml.contains("<TpoMov>R</TpoMov>"));
+    assert!(xml.contains("<TpoValor>$</TpoValor>"));
+    assert!(xml.contains("<ValorDR>500</ValorDR>"));
+    assert!(xml.contains("<IndExeDR>1</IndExeDR>"));
+    let pos_dr = xml.find("<DscRcgGlobal>").unwrap();
+    let pos_ref = xml.find("<Referencia>").unwrap();
+    assert!(pos_dr < pos_ref);
 }
 
 #[test]

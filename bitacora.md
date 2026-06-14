@@ -2215,3 +2215,46 @@ cross-tenant.
 GATE: `fmt --check` + `clippy --workspace --all-targets -D warnings` verde (boxeé
 `SyncError::Db`/`Agent` por `result_large_err`, igual que `DomainError`) + `cargo test
 -p sync` 13/13 + workspace test.
+
+---
+
+## 2026-06-14 — DTE DscRcgGlobal (descuento/recargo global a nivel documento)
+
+**Qué**: implementado el elemento SII `<DscRcgGlobal>` (descuento/recargo global a
+nivel documento) en `crates/dte`, completando el gap real que quedaba del lane DTE
+(lane original C14N 9.1.b.4 estaba SUPERSEDED — c14n.rs + notas 56/61 + libro ya
+landed en origin vía #161/#172). Soporta TpoMov D/R, TpoValor %/$, IndExeDR (afecto
+vs exento), hasta 20 líneas. El monto de cada línea se calcula sobre la base ORIGINAL
+de su categoría (no acumulativo); el desglose IVA se hace sobre la base ya ajustada.
+
+**Por qué**: `ItemSpec.descuento_pct` existía a nivel línea pero no había D/R global
+de documento (DscRcgGlobal). Es offline-implementable + unit-testable sin creds SII
+(la única parte bloqueada es el round-trip live SII, 9.1.l). Valor real verificable.
+
+**Convención (gotcha SII a validar contra sandbox real, 9.1.l)**: el crate trabaja
+montos IVA-incluido (gross) y desglosa al final (`desglose_iva`). DscRcgGlobal se
+aplica sobre la base gross afecta/exenta para preservar `neto + IVA == total afecto`.
+La convención net-vs-gross exacta de SII para ValorDR queda por confirmar contra el
+ambiente de pruebas real (diferido a 9.1.l, mismo bloqueo que el round-trip live).
+
+**Archivos**:
+- `crates/dte/src/types.rs` — enums `TipoMovDr`/`TipoValorDr` + struct `DescuentoGlobal`
+  + campo `descuentos_globales: Vec<DescuentoGlobal>` en `Dte` (serde default, skip si vacío).
+- `crates/dte/src/emit.rs` — `DescuentoGlobalSpec` + campo en `DocumentoSpec` +
+  `aplicar_dsc_rcg_global` (valida valor>0, %≤100, ≤20 líneas, base no negativa) + 8 tests.
+- `crates/dte/src/xml/schema.rs` — struct `DscRcgGlobal` + campo en `Documento`
+  (orden xsd: tras Detalle, antes de Referencia).
+- `crates/dte/src/xml/factura.rs` — helper `build_dsc_rcg_global` (compartido 33/56/61/52).
+- `crates/dte/src/xml/boleta.rs` — wire del helper (boleta también puede llevar D/R global).
+- `crates/dte/src/lib.rs` — re-export tipos nuevos.
+- `crates/dte/tests/xml_factura_render.rs` — 2 tests de render (posición xsd + IndExeDR).
+- `crates/api/src/v1/dte.rs`, `crates/cli/src/dte_cmd.rs` — `descuentos_globales: vec![]`
+  en literales `Dte`/`DocumentoSpec` (sin cambio de comportamiento; wiring de request
+  DTO end-to-end = follow-up trivial, no en esta slice).
+
+**Estado**: 9.1.b.4 (C14N) ya estaba done en origin. 9.1.l (round-trip live SII +
+validación convención DscRcgGlobal) sigue bloqueado por creds SII reales.
+
+GATE workspace: `cargo fmt --all -- --check` verde + `cargo clippy --workspace
+--all-targets -- -D warnings` verde. `cargo test -p dte` 45+14 verde (8 DscRcgGlobal +
+2 render nuevos). `cargo test --workspace` corriendo.
