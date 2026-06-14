@@ -2031,3 +2031,15 @@ Gaps reales cerrados:
 Tests: +`publishable_gate` + `dispatch_disabled_is_noop` (api lib, puros), +2 CLI (`test_stock_signs_and_posts_then_reports_2xx`, `test_stock_errors_on_non_2xx`, vía httpmock). GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace` exit 0 (CLI bin 13 passed incl. 2 nuevos). PR contra `feature/erp-parity`.
 
 **Pendiente (no autónomo / fuera de lane)**: `expiry.write_off` trigger (sin endpoint HTTP); receptor web real (otro repo); promover MSI; deploy license-server.
+
+## 2026-06-13 — Session "ye" (parallel lane): onboarding + selección de rubro (multi-rubro pivot)
+
+- **Lane aislada** (worktree `pharma-wt-p2-onboard`, branch `feat/client-onboarding-vertical` off `feature/erp-parity` v0.1.28). Scope cliente puro → GATE cliente. Cero contención con las lanes de crates.
+- **Premisa del prompt FALSA**: afirmaba seeder ya hecho (`pharma seed-demo --vertical`, `crates/cli/src/seed_cmd.rs`). Verificado: no existe en el branch ni en `git log --all`. Tampoco existía concepto `vertical` en ningún lado. Documentado en `docs/strategy/multi-rubro-findings.md` (NUEVO).
+- **`client/src/vertical.ts`** (NUEVO) — single source of truth del rubro: `Vertical = farmacia|minimarket|otro`, claves `business.vertical`/`business.name` (admin_setting), `parseVertical` (default `otro`, nunca farmacia), `hasRecetas` (sólo farmacia — gate Ley 20.000), `hasDte` (universal CL), loaders async sin throw. Contrato compartido para la lane de compliance (importa `hasRecetas`/`hasDte`).
+- **`configuracion.ts`** — sección "Rubro del negocio": selector + nombre del negocio, persistidos en admin_setting, ayuda inline.
+- **`shell.ts`** — branding dinámico desde `business.name` (fallback genérico `pharma-server`, ya NO "Tu Farmacia" hardcodeado); nav "Recetas" oculto cuando rubro ≠ farmacia (`hydrateBranding` post-render, firma de `renderShell` intacta).
+- **`dashboard.ts`** — copy genérico ("tu negocio").
+- **`vertical.test.ts`** (NUEVO, 7 tests) — parse/default/gates/catálogo.
+- **Task 3 (botón demo-seed) BLOQUEADO**: requiere seeder backend inexistente; no se fabricó botón sin backend (ver findings). **`login.ts` pre-auth** sigue farmacia-only (no puede leer settings sin token) — anotado para lane de branding.
+- GATE cliente verde: `npm run build` (tsc --noEmit + vite) OK, `npm test` 27 passed (7 vertical + 20 format). Cero Rust tocado → sin workspace GATE.

@@ -26,6 +26,7 @@ import { renderConfiguracion } from "./configuracion";
 import { renderImportar } from "./importar";
 import { renderBoletas } from "./boletas";
 import { renderFacturas } from "./facturas";
+import { loadVertical, loadBusinessName, hasRecetas } from "../vertical";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
@@ -149,7 +150,7 @@ export function renderShell(
       <aside class="sidebar">
         <div class="sidebar-brand">
           <img src="/tu-farmacia-logo.jpeg" alt="" width="26" height="26" />
-          <span>Tu Farmacia</span>
+          <span id="brand-name">pharma-server</span>
         </div>
         <nav id="nav">
           ${NAV.map(
@@ -205,6 +206,26 @@ export function renderShell(
   dispatchNav(host, LANDING, serverUrl);
   void hydrateLicense(root, serverUrl);
   void hydrateHealth(root, serverUrl);
+  void hydrateBranding(root, serverUrl);
+}
+
+// Apply the operator-chosen business name + rubro: rename the brand and hide
+// pharmacy-only nav (Recetas / Ley 20.000) when the vertical isn't farmacia.
+// Done post-render so renderShell stays synchronous; default state shows the
+// generic brand and keeps Recetas until the setting says otherwise.
+async function hydrateBranding(root: HTMLElement, serverUrl: string): Promise<void> {
+  const [vertical, name] = await Promise.all([
+    loadVertical(serverUrl),
+    loadBusinessName(serverUrl),
+  ]);
+  if (name) {
+    const brand = root.querySelector<HTMLSpanElement>("#brand-name");
+    if (brand) brand.textContent = name;
+  }
+  if (!hasRecetas(vertical)) {
+    const recetasBtn = root.querySelector<HTMLButtonElement>('.nav-item[data-nav="recetas"]');
+    recetasBtn?.remove();
+  }
 }
 
 async function hydrateLicense(root: HTMLElement, serverUrl: string): Promise<void> {
