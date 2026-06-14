@@ -34,7 +34,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use surrealdb::sql::{thing, Thing};
 use tokio::sync::Mutex as AsyncMutex;
@@ -190,21 +189,12 @@ pub async fn post_sale(
         .map(|i| parse_tenant_thing(&i.product, "product"))
         .collect::<DomainResult<Vec<_>>>()?;
 
-    // Money totals
-    let subtotal: Decimal = req
-        .items
-        .iter()
-        .map(|i| i.unit_price * Decimal::from(i.quantity))
-        .sum();
+    // Money totals — canonical formulas in `crate::invariants` (property-tested).
+    let subtotal =
+        crate::invariants::order_subtotal(req.items.iter().map(|i| (i.unit_price, i.quantity)));
     let discount_in = req.discount.unwrap_or_default();
-    let discount = if discount_in > subtotal {
-        subtotal
-    } else if discount_in.is_sign_negative() {
-        Decimal::ZERO
-    } else {
-        discount_in
-    };
-    let total = subtotal - discount;
+    let discount = crate::invariants::clamp_discount(discount_in, subtotal);
+    let total = crate::invariants::order_total(subtotal, discount);
 
     // Mixed payment cross-check
     if req.payment_method == "pos_mixed" {
@@ -305,8 +295,7 @@ pub async fn post_sale(
     let mut loyalty_awarded = 0_i64;
     if let Some(c) = customer.as_ref() {
         let clp_per_point = resolve_loyalty_rate(db, tenant).await?;
-        let points_dec = (total / Decimal::from(clp_per_point)).trunc();
-        let points_i = points_dec.to_i64().unwrap_or(0).max(0);
+        let points_i = crate::invariants::loyalty_points(total, clp_per_point).max(0);
         if points_i > 0 {
             repo::award_loyalty(db, tenant, c, points_i, "sale", &applied.order.id).await?;
             loyalty_awarded = points_i;
@@ -475,14 +464,16 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
             name: it.product_name.clone(),
             qty: it.quantity,
             unit_price: it.unit_price,
-            line_total: it.unit_price * Decimal::from(it.quantity),
+            line_total: crate::invariants::line_total(it.unit_price, it.quantity),
         })
         .collect();
 
     // Cash change is only meaningful for a pure-cash counter sale. Mixed/card
     // sales have no "vuelto" to print.
     let change = if order.payment_method == "pos_cash" {
-        order.cash_amount.map(|cash| cash - order.total)
+        order
+            .cash_amount
+            .map(|cash| crate::invariants::cash_change(cash, order.total))
     } else {
         None
     };
@@ -623,7 +614,8 @@ pub async fn create_refund(
                         "producto {p} no estaba en la orden"
                     )));
                 }
-                if *acc > sold_qty {
+                if crate::invariants::refund_exceeds_sold(*acc - it.quantity, it.quantity, sold_qty)
+                {
                     return Err(DomainError::Invalid(format!(
                         "devolución de {p} excede lo vendido ({acc} > {sold_qty})"
                     )));

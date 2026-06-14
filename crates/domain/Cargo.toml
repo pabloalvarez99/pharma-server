@@ -26,3 +26,5 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 # kv-mem only enabled for domain's own test build (not the shipped binary).
 surrealdb = { workspace = true, features = ["kv-mem"] }
+# Property-based testing of the canonical invariants (`crate::invariants`).
+proptest = "1"

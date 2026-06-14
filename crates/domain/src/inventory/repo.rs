@@ -492,23 +492,13 @@ pub async fn plan_fefo(
     }
     let rows: Vec<Row> = r.take(0)?;
 
-    let mut remaining = qty;
-    let mut plan = Vec::new();
-    for row in rows {
-        if remaining == 0 {
-            break;
-        }
-        let take = remaining.min(row.stock);
-        plan.push(FefoAllocation {
-            batch: row.id.to_string(),
-            qty: take,
-        });
-        remaining -= take;
-    }
-    if remaining > 0 {
-        return Err(DomainError::InsufficientStock);
-    }
-    Ok(plan)
+    // Rows arrive already FEFO-sorted (expiry ASC, created ASC) from SQL; the
+    // pure allocator in `crate::invariants` is property-tested.
+    let lots: Vec<(String, i64)> = rows
+        .into_iter()
+        .map(|row| (row.id.to_string(), row.stock))
+        .collect();
+    crate::invariants::fefo_plan(&lots, qty)
 }
 
 // --- falta -----------------------------------------------------------------

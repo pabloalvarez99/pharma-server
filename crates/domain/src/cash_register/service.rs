@@ -320,7 +320,12 @@ pub async fn compute_summary(
     let movements_in = sum_movements(db, tenant, &sid, "ingreso").await?;
     let movements_out = sum_movements(db, tenant, &sid, "retiro").await?;
     let cash_sales = sum_cash_sales(db, tenant, session.opened_at, at).await?;
-    let expected = session.opening_cash + cash_sales + movements_in - movements_out;
+    let expected = crate::invariants::expected_drawer(
+        session.opening_cash,
+        cash_sales,
+        movements_in,
+        movements_out,
+    );
     Ok((session, cash_sales, movements_in, movements_out, expected))
 }
 
@@ -343,7 +348,7 @@ pub async fn close_session(
             "closing_cash_counted debe ser >= 0".into(),
         ));
     }
-    let discrepancia = input.closing_cash_counted - expected;
+    let discrepancia = crate::invariants::discrepancy(input.closing_cash_counted, expected);
     let sid = thing(session_id).unwrap();
     db.query(
         "UPDATE cash_register_session SET \
