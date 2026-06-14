@@ -1,5 +1,6 @@
 mod backup_cmd;
 mod dte_cmd;
+mod seed_cmd;
 
 use std::path::PathBuf;
 
@@ -91,6 +92,21 @@ enum Cmd {
     Backup {
         #[command(subcommand)]
         cmd: backup_cmd::BackupCmd,
+    },
+    /// Poblar un tenant con una farmacia chilena de demostración (productos,
+    /// lotes, clientes) para probar la app contra datos creíbles. Idempotente;
+    /// todo lo sembrado queda marcado DEMO y es borrable con --force.
+    SeedDemo {
+        /// Tenant slug destino (debe existir).
+        #[arg(long)]
+        tenant: String,
+        /// Rubro del pack demo: pharmacy (default) | minimarket. El core es
+        /// agnóstico de rubro; farmacia es el beachhead, no el límite.
+        #[arg(long, default_value = "pharmacy")]
+        vertical: String,
+        /// Borra los datos DEMO previos y re-siembra (incl. cambiar de vertical).
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -753,6 +769,11 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Cmd::Backup { cmd } => backup_cmd::run(cmd).await?,
+        Cmd::SeedDemo {
+            tenant,
+            vertical,
+            force,
+        } => seed_cmd::run(tenant, vertical, force).await?,
         Cmd::Dte { cmd } => dte_cmd::run_dte(cmd).await?,
         Cmd::Caf { cmd } => dte_cmd::run_caf(cmd).await?,
         Cmd::Cert { cmd } => dte_cmd::run_cert(cmd).await?,
