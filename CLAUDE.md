@@ -232,6 +232,36 @@ Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agen
 - **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
 - Ver memoria `[[parallel-agent-pipeline]]` para el detalle operativo.
 
+### Equipo de agentes PERSISTENTE (nombres fijos + control de tokens)
+
+El equipo ya no es anónimo: son **agentes con nombre que existen siempre** para el
+proyecto. Charters versionados en [`.claude/agents/`](./.claude/agents/) (cada uno
+con frontmatter `name/description` → también son subagents válidos del Task tool).
+Tarjeta de uso + bootstraps en [`.claude/agents/README.md`](./.claude/agents/README.md).
+Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz).
+
+| Agente | Color | Rol | Scope |
+|--------|-------|-----|-------|
+| **paxoloop** | blue | Orquestador (ultrathink) | dispatch, integración PRs, **único que toca ESTADO ACTUAL** |
+| **paul** | green | Cashier loop | `client/src/views/{pos,devoluciones,clientes,caja}.ts` |
+| **marvin** | orange | Stock + servicios backend | `views/{inventory,compras,gastos}.ts` + domain/api/cli compartidos |
+| **ye** | yellow | Onboarding + multi-rubro | `views/{login,configuracion,dashboard,shell,importar}.ts` + `business.vertical` |
+| **bob** | purple | E2E + compliance | `client/e2e/` + `format.ts` + `views/{boletas,facturas,recetas,auditoria,reports}.ts` |
+| **lucy** | red | Backend flexible | asignado por paxoloop |
+
+- **Fuente única de tarea por agente** = STATUS BOARD en `teamwork_op.txt` (raíz;
+  incluye lanes activas, BUG LOG, MULTI-RUBRO FINDINGS). El estado durable vive AHÍ
+  + memoria + git, **nunca** solo en el contexto del pane.
+- **Control de tokens (ciclo por pane)**: trabajar lane → PR verde → **`/clear`** →
+  pegar bootstrap de 1 línea (`Eres <nombre>. Lee .claude/agents/<nombre>.md y sigue
+  tu protocolo.`) → tomar siguiente tarea del status board. Re-entra barato (charter
+  corto + status board + solo sus archivos), sin re-derivar el repo. Regla: PR abierto
+  o ~80k tokens → `/clear` + re-bootstrap.
+- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; farmacia = beachhead, no
+  límite) → [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+  Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
+  `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
+
 ## Vault Obsidian — leer bajo demanda
 
 Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
