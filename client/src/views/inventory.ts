@@ -18,6 +18,7 @@ import {
   listBatches,
   createBatch,
   nearExpiry,
+  getSetting,
   type Product,
   type ProductDetail,
   type Batch,
@@ -25,6 +26,7 @@ import {
   type NewProductInput,
 } from "../api";
 import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
+import { toRfc3339Noon, stockLevel, expiryStatus, pharmaFieldsVisible } from "./stock-helpers";
 
 const PAGE_LIMIT = 60;
 type Tab = "productos" | "vencimientos";
@@ -74,6 +76,20 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
 
   let tab: Tab = "productos";
 
+  // Multi-rubro: pharmacy-only product fields (laboratorio, principio activo)
+  // are shown by default and hidden when the tenant runs a non-pharmacy vertical
+  // (minimarket / general store). Read once; tolerate a 403/404/null by keeping
+  // the pharmacy default (back-compat). Lote/vencimiento stay for everyone —
+  // perishables (pan, leche) need them as much as fármacos do.
+  let showPharma = true;
+  void getSetting(serverUrl, "business_vertical")
+    .then((s) => {
+      showPharma = pharmaFieldsVisible(s?.value ?? null);
+    })
+    .catch(() => {
+      /* keep pharmacy default when the setting can't be read */
+    });
+
   function openDetail(id: string): void {
     void openProductDetail(modalHost, serverUrl, id, toast, refreshProductos);
   }
@@ -111,10 +127,15 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
   );
 
   newBtn.addEventListener("click", () =>
-    openNewProduct(modalHost, serverUrl, (created) => {
-      toast(`Producto creado: ${created.name}`);
-      refreshProductos();
-    }),
+    openNewProduct(
+      modalHost,
+      serverUrl,
+      (created) => {
+        toast(`Producto creado: ${created.name}`);
+        refreshProductos();
+      },
+      showPharma,
+    ),
   );
 
   // Initial paint: KPIs + Productos tab.
@@ -203,7 +224,28 @@ function openNewProduct(
   modalHost: HTMLElement,
   serverUrl: string,
   onDone: (created: ProductDetail) => void,
+  showPharma = true,
 ): void {
+  // Pharmacy-only fields (laboratorio, principio activo) — rendered only for a
+  // pharmacy vertical. Presentación stays for everyone (generic: "500ml", "pack
+  // x6"). When hidden the fields are simply omitted → sent undefined → null.
+  const pharmaRow = showPharma
+    ? `
+        <div class="inv-form-row">
+          <label class="field modal-field">
+            <span class="modal-label">Principio activo</span>
+            <input id="np-ingredient" type="text" autocomplete="off" placeholder="opcional" />
+          </label>
+          <label class="field modal-field">
+            <span class="modal-label">Presentación</span>
+            <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
+          </label>
+        </div>`
+    : `
+        <label class="field modal-field">
+          <span class="modal-label">Presentación</span>
+          <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
+        </label>`;
   modalHost.innerHTML = `
     <div class="modal-backdrop">
       <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="Nuevo producto">
@@ -227,21 +269,16 @@ function openNewProduct(
             <span class="modal-label">Stock inicial</span>
             <input id="np-stock" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
           </label>
-          <label class="field modal-field">
+          ${
+            showPharma
+              ? `<label class="field modal-field">
             <span class="modal-label">Laboratorio</span>
             <input id="np-lab" type="text" autocomplete="off" placeholder="opcional" />
-          </label>
+          </label>`
+              : ""
+          }
         </div>
-        <div class="inv-form-row">
-          <label class="field modal-field">
-            <span class="modal-label">Principio activo</span>
-            <input id="np-ingredient" type="text" autocomplete="off" placeholder="opcional" />
-          </label>
-          <label class="field modal-field">
-            <span class="modal-label">Presentación</span>
-            <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
-          </label>
-        </div>
+        ${pharmaRow}
         <div id="np-error" class="pos-error" hidden></div>
         <div class="modal-actions">
           <button id="np-cancel" class="btn-ghost">Cancelar</button>
@@ -261,8 +298,9 @@ function openNewProduct(
   const priceEl = modalHost.querySelector<HTMLInputElement>("#np-price")!;
   const costEl = modalHost.querySelector<HTMLInputElement>("#np-cost")!;
   const stockEl = modalHost.querySelector<HTMLInputElement>("#np-stock")!;
-  const labEl = modalHost.querySelector<HTMLInputElement>("#np-lab")!;
-  const ingEl = modalHost.querySelector<HTMLInputElement>("#np-ingredient")!;
+  // Pharma-only fields are absent in a non-pharmacy vertical → may be null.
+  const labEl = modalHost.querySelector<HTMLInputElement>("#np-lab");
+  const ingEl = modalHost.querySelector<HTMLInputElement>("#np-ingredient");
   const presEl = modalHost.querySelector<HTMLInputElement>("#np-presentation")!;
   const errEl = modalHost.querySelector<HTMLElement>("#np-error")!;
   const confirmBtn = modalHost.querySelector<HTMLButtonElement>("#np-confirm")!;
@@ -290,8 +328,8 @@ function openNewProduct(
       price: String(Math.trunc(price)),
       costPrice: intStrOrUndef(costEl.value),
       stock: intOrUndef(stockEl.value),
-      laboratory: trimOrUndef(labEl.value),
-      activeIngredient: trimOrUndef(ingEl.value),
+      laboratory: labEl ? trimOrUndef(labEl.value) : undefined,
+      activeIngredient: ingEl ? trimOrUndef(ingEl.value) : undefined,
       presentation: trimOrUndef(presEl.value),
     };
     errEl.hidden = true;
@@ -523,7 +561,10 @@ async function openProductDetail(
       errEl.hidden = true;
       busy(btn, true);
       try {
-        await createBatch(serverUrl, id, code, `${date}T00:00:00Z`, {
+        // Noon-UTC anchor: a midnight anchor renders one day early in CL's TZ
+        // (es-CL `toLocaleDateString`) — a real expiry-date slip. `date` is
+        // validated non-empty just above, so the helper never returns undefined.
+        await createBatch(serverUrl, id, code, toRfc3339Noon(date)!, {
           stock: intOrUndef(stockEl.value),
           cost: intStrOrUndef(costEl.value),
           notes: trimOrUndef(notesEl.value),
@@ -637,20 +678,16 @@ function nearRow(r: NearExpiryRow): string {
 // --- small helpers ----------------------------------------------------------
 
 function stockPill(stock: number): string {
-  return stock <= 0
-    ? `<span class="pill pill-danger">Agotado</span>`
-    : stock <= 5
-      ? `<span class="pill pill-warn">Bajo</span>`
-      : `<span class="pill pill-ok">OK</span>`;
+  const level = stockLevel(stock);
+  const tone = level === "out" ? "danger" : level === "low" ? "warn" : "ok";
+  const label = level === "out" ? "Agotado" : level === "low" ? "Bajo" : "OK";
+  return `<span class="pill pill-${tone}">${label}</span>`;
 }
 
 function expiryPill(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return `<span class="pill">—</span>`;
-  const days = Math.ceil((d.getTime() - Date.now()) / 86_400_000);
-  const tone = days < 0 ? "danger" : days <= 30 ? "warn" : "ok";
-  const label = days < 0 ? "Caducado" : days <= 30 ? "Por vencer" : "Vigente";
-  return `<span class="pill pill-${tone}">${label}</span>`;
+  const s = expiryStatus(iso);
+  if (s.tone === "muted") return `<span class="pill">—</span>`;
+  return `<span class="pill pill-${s.tone}">${s.label}</span>`;
 }
 
 function pdStat(label: string, value: string): string {
