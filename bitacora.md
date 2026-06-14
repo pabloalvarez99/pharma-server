@@ -2096,3 +2096,22 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+
+## 2026-06-14 — MARVIN: DSS seam endurecido — API keys con scopes (ADR-0014 L1)
+
+Branch `feat/api-dss-seam-keys` (off `feature/erp-parity` tip b27b3db). Cierra el item #1 del plan de ejecución de ADR-0014 ("endurecer el seam"): que un storefront DSS conecte a un pharma-server real con auth real, opt-in y fail-closed.
+
+**Migración 0026 `api_key`** (multi-tenant): tabla `api_key { tenant: record<tenant>, key_hash, scopes: array<string>, label?, active, created_at, last_used_at? }`. Sólo se persiste `key_hash` = SHA-256(secreto) hex — el secreto se muestra UNA vez al crear. Índices: `(tenant, key_hash)` UNIQUE (path de lookup) + `key_hash` UNIQUE global (integridad).
+
+**`crates/api/src/api_key.rs` (nuevo)**: `hash_key` (SHA-256 hex, fuente única), `scopes_grant` (membership puro), `authorize(db, tenant, presented, scope) -> Decision` y `guard(...) -> Option<Response>` fail-closed: missing→401 `API_KEY_REQUIRED`, unknown→401 `API_KEY_INVALID`, wrong-scope→403 `API_KEY_SCOPE`, **error de DB→503** (nunca cae abierto). La key se matchea SIEMPRE bajo el tenant ya resuelto (`api_key.tenant = $t`) ⇒ la key de un tenant no puede leer el catálogo de otro. Scopes: `catalog:read`, `orders:write`.
+
+**Wiring (opt-in, default false → backward-compat)**: `public_catalog.require_api_key` y `public_orders.require_api_key` (nuevos campos en `crates/core/src/config.rs`, serde default false). `GET /public/catalog` exige `catalog:read`; `POST /public/orders/web` exige `orders:write` **además** de la firma HMAC del body. Con el flag en false el comportamiento es idéntico al actual.
+
+**CLI `pharma api-key create|list|revoke`** (`crates/cli/src/main.rs`): `create --tenant <slug> --scopes catalog:read,orders:write [--label]` genera secreto de 244 bits (2×UUIDv4), valida scopes contra catálogo cerrado, imprime el secreto UNA vez; `list` muestra id/hash/scopes (nunca el secreto); `revoke <api_key:id>` desactiva. `hash_api_key` replica los 3 renglones de SHA-256 (el cli no depende de `api` para no arrastrar el grafo axum), cross-pinneado por el known-answer SHA-256("abc").
+
+**Patrón B (ADR-0013 push de stock) — verificado, sin cambios**: `crates/api/src/stock_webhook.rs` ya está completo (HMAC-SHA256, retry [1,5,30]s, fire-and-forget no-bloqueante del POS, `publish_to_web` gate, métrica de drops) y testeado. El item del task ("verificar push stock Patrón B") = OK as-is.
+
+**Tests**: unit en `api_key.rs` (memdb): happy/wrong-scope/cross-tenant/inactive/missing + hash known-answer. HTTP e2e `crates/api/tests/public_seam_api_key.rs` (5): default-off mantiene lectura por slug, required+sin-key→401, scope-equivocado→403, key-válida→200, key-de-otro-tenant→401. NOTA de gotcha: en los tests, crear `product` con `price = 1000` literal hace que el read del handler (`price: sql::Number`) falle al deser ("unknown variant 1000"); el flujo real del dominio bindea `rust_decimal::Decimal` y round-trip-ea bien — los tests ahora bindean Decimal igual que el dominio. No es bug de prod.
+
+GATE workspace verde: `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` (0 failed). Migración 0026 (0025 reservada a lucy/relay, sin tocar).

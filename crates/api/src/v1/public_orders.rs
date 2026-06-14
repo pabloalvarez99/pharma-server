@@ -121,6 +121,17 @@ async fn ingest_web_order(
         }
     };
 
+    // 5b. Optional scoped API-key gate (ADR-0014 L1), on TOP of the HMAC body
+    //     signature. Fail-closed: when required, no valid `orders:write` key for
+    //     this tenant → reject (401/403), never falls open.
+    if cfg.require_api_key {
+        if let Some(deny) =
+            crate::api_key::guard(&db, &tenant, &headers, crate::api_key::SCOPE_ORDERS_WRITE).await
+        {
+            return deny;
+        }
+    }
+
     // 6. Parse the (already authenticated) body.
     let req: WebOrderRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,

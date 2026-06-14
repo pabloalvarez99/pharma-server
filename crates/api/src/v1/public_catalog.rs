@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Query, State},
-    http::{HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
@@ -119,6 +119,7 @@ struct ProductRow {
 
 async fn list_public_catalog(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<PublicQuery>,
 ) -> Response {
     // Opt-in check. Disabled → uniform 404 (do NOT leak that the feature exists).
@@ -134,6 +135,16 @@ async fn list_public_catalog(
         Ok(Some(t)) => t,
         _ => return ApiError::not_found().into_response(),
     };
+
+    // Optional scoped API-key gate (ADR-0014 L1). Fail-closed: when required,
+    // a request without a valid `catalog:read` key for this tenant is rejected.
+    if state.public_catalog.require_api_key {
+        if let Some(deny) =
+            crate::api_key::guard(&db, &tenant, &headers, crate::api_key::SCOPE_CATALOG_READ).await
+        {
+            return deny;
+        }
+    }
 
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let offset = q.offset.unwrap_or(0);

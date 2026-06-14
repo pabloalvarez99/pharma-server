@@ -60,6 +60,13 @@ pub struct PublicOrdersConfig {
     /// var in production; never commit a real value.
     #[serde(default)]
     pub hmac_secret: String,
+    /// Require a tenant-scoped API key with the `orders:write` scope, on top of
+    /// the HMAC body signature (ADR-0014 L1 "endurecer el seam"). Default
+    /// `false` keeps the existing HMAC-only behavior. Fail-closed: when `true`,
+    /// a request without a valid scoped key is rejected (401/403), never falls
+    /// open. Keys are minted with `pharma api-key create`.
+    #[serde(default)]
+    pub require_api_key: bool,
 }
 
 fn default_public_orders_enabled() -> bool {
@@ -71,6 +78,7 @@ impl Default for PublicOrdersConfig {
         Self {
             enabled: default_public_orders_enabled(),
             hmac_secret: String::new(),
+            require_api_key: false,
         }
     }
 }
@@ -97,6 +105,13 @@ pub struct PublicCatalogConfig {
     /// Set to `[]` (or any explicit list) to override.
     #[serde(default = "default_public_catalog_cors_origins")]
     pub cors_origins: Vec<String>,
+    /// Require a tenant-scoped API key with the `catalog:read` scope (ADR-0014
+    /// L1 "endurecer el seam"). Default `false` keeps the existing slug-only
+    /// public read. Fail-closed: when `true`, a request without a valid scoped
+    /// key for the requested tenant is rejected (401/403). Keys are minted with
+    /// `pharma api-key create`.
+    #[serde(default)]
+    pub require_api_key: bool,
 }
 
 fn default_public_catalog_enabled() -> bool {
@@ -112,6 +127,7 @@ impl Default for PublicCatalogConfig {
         Self {
             enabled: default_public_catalog_enabled(),
             cors_origins: default_public_catalog_cors_origins(),
+            require_api_key: false,
         }
     }
 }

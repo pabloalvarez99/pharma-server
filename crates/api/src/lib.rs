@@ -10,6 +10,7 @@ use axum::{
 use axum_prometheus::PrometheusMetricLayerBuilder;
 use serde::Serialize;
 
+pub mod api_key;
 pub mod error;
 mod health;
 mod middleware;
