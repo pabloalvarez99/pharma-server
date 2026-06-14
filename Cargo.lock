@@ -1415,6 +1415,7 @@ dependencies = [
  "chrono",
  "clap",
  "db",
+ "domain",
  "dte",
  "flate2",
  "hex",

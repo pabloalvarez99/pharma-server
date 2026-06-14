@@ -20,6 +20,7 @@ pub mod public_catalog;
 pub mod public_orders;
 pub mod purchasing;
 pub mod sales;
+pub mod seed;
 pub mod stock_movements;
 
 use axum::Router;
@@ -42,6 +43,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(backup::router(state.clone()))
         .merge(license::router(state.clone()))
         .merge(audit::router(state.clone()))
+        .merge(seed::router(state.clone()))
         .merge(public_catalog::router(state.clone()))
         .merge(public_orders::router(state.clone()))
         .merge(agent::router(state))
