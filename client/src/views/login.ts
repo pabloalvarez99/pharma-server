@@ -2,7 +2,7 @@
 // + server, then a "produced" transition into the ERP shell.
 //
 // Polish wave (feat/client-login-polish):
-//  - Brand panel + tagline ("Tu farmacia, lista.") in a two-column launcher layout.
+//  - Brand panel + tagline ("Tu negocio, listo.") in a two-column launcher layout.
 //  - Server URL moved behind a collapsible "Conexión avanzada" disclosure.
 //  - Password show/hide toggle.
 //  - Field-level inline errors in Spanish (no toast spam).
@@ -10,12 +10,40 @@
 //  - Focus rings, real <label for>, AA contrast, full keyboard nav.
 //  - Existing Tauri command + payload shapes (server_url/tenant/email/password)
 //    and the onSuccess(session, serverUrl) callback are untouched.
+//
+// Onboarding UX hardening (feat/onboarding-ux-hardening):
+//  - Server URL resolution / validation / connection-state come from first-run.ts
+//    (the single source of truth for the first-run journey) — no drifting copy.
+//  - "Probar conexión" wraps each probe in a hard timeout and retries an
+//    unreachable server with bounded backoff (connFeedback narrates the wait)
+//    instead of spinning forever — the retry loop runs over first-run's
+//    connectionState so the operator-facing messages stay single-sourced.
+//  - The chosen server is persisted (and re-validated on load) via the storage
+//    helpers in onboarding-ux.ts.
 import { login, serverHealth, type SessionInfo } from "../api";
 import { resolveServerConfig, validateServerUrl, connectionState } from "./first-run";
+import {
+  withTimeout,
+  connFeedback,
+  connRetryDelay,
+  shouldRetryConn,
+  CONN_TIMEOUT_MS,
+  loadStoredServer,
+  saveStoredServer,
+  type KeyStore,
+} from "./onboarding-ux";
 
 const DEFAULT_TENANT = "tufarmacia";
 const DEFAULT_EMAIL = "admin@tufarmacia.cl";
-const SERVER_STORE_KEY = "pharma:last-server";
+
+/** localStorage as a KeyStore, or undefined if the platform forbids it. */
+function browserStore(): KeyStore | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Build-time override baked by Vite (`VITE_SERVER_URL`), if any. Lets a
  *  field-install build ship pointing at the pharmacy's real server IP. */
@@ -26,13 +54,11 @@ function envServer(): string | undefined {
   return env?.VITE_SERVER_URL?.trim() || undefined;
 }
 
-/** Last server the user logged into successfully, persisted across launches. */
+/** Last server the user logged into successfully, persisted + re-validated
+ *  across launches (a corrupt stored value must not poison the field). */
 function storedServer(): string | undefined {
-  try {
-    return localStorage.getItem(SERVER_STORE_KEY)?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+  const store = browserStore();
+  return store ? loadStoredServer(store) : undefined;
 }
 
 /** Resolve the server field's initial value and whether this looks like a
@@ -271,34 +297,72 @@ export function renderLogin(
     pwEyeOff.toggleAttribute("hidden", showing);
   });
 
+  const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
   // "Probar conexión" — pings the server's health endpoint so a LAN client can
-  // confirm the URL before typing credentials (no auth needed; reachability only).
+  // confirm the URL before typing credentials (no auth needed; reachability
+  // only). Each attempt is wrapped in a hard timeout (a hung socket must never
+  // freeze the status line) and unreachable servers retry with bounded backoff
+  // instead of spinning forever — connFeedback narrates "Reintentando en Ns…".
+  // The reachable/degraded/unreachable classification + Spanish strings come
+  // from first-run's connectionState so they stay single-sourced with submit.
   const connBtn = root.querySelector<HTMLButtonElement>("#conn-test-btn")!;
   const connStatus = root.querySelector<HTMLSpanElement>("#conn-test-status")!;
   connBtn.addEventListener("click", async () => {
-    // Validate the typed URL inline before probing — a missing scheme / typo is
-    // a clearer error than a generic "no se pudo contactar".
     const check = validateServerUrl(getInput(FIELDS.server.input).value);
     if (!check.ok) {
+      setFieldError("server", check.error);
       connStatus.className = "conn-test-status err";
-      connStatus.textContent = check.error;
+      connStatus.textContent = "Revisa la URL antes de probar.";
       return;
     }
+    const url = check.url;
     connBtn.disabled = true;
-    connStatus.className = "conn-test-status";
-    connStatus.textContent = "Probando…";
-    try {
-      const conn = connectionState(await serverHealth(check.url));
-      const cls = conn.kind === "ok" ? "ok" : conn.kind === "degraded" ? "warn" : "err";
-      connStatus.className = `conn-test-status ${cls}`;
-      connStatus.textContent = conn.message;
-    } catch {
-      const conn = connectionState(null, true);
-      connStatus.className = "conn-test-status err";
-      connStatus.textContent = conn.message;
-    } finally {
-      connBtn.disabled = false;
+    let attempt = 1;
+    for (;;) {
+      connStatus.className = "conn-test-status";
+      connStatus.textContent =
+        attempt === 1 ? "Probando…" : `Probando (intento ${attempt})…`;
+      try {
+        const conn = connectionState(await withTimeout(serverHealth(url), CONN_TIMEOUT_MS));
+        if (conn.kind === "ok") {
+          connStatus.className = "conn-test-status ok";
+          connStatus.textContent = conn.message;
+          break;
+        }
+        if (conn.kind === "degraded") {
+          // Responding but degraded — no point retrying, surface it as a warning.
+          connStatus.className = "conn-test-status warn";
+          connStatus.textContent = conn.message;
+          break;
+        }
+        // unreachable (probe returned but server says not reachable) → retry.
+        const fb = connFeedback(conn.message, attempt);
+        connStatus.className = "conn-test-status err";
+        connStatus.textContent = fb.message;
+        if (!fb.willRetry || !shouldRetryConn(attempt)) break;
+        await sleep(connRetryDelay(attempt + 1));
+        attempt += 1;
+      } catch (err) {
+        const fb = connFeedback(err, attempt);
+        connStatus.className = "conn-test-status err";
+        connStatus.textContent = fb.message;
+        if (!fb.willRetry || !shouldRetryConn(attempt)) break;
+        await sleep(connRetryDelay(attempt + 1));
+        attempt += 1;
+      }
     }
+    connBtn.disabled = false;
+  });
+
+  // Inline server-URL validation when the operator leaves the field. A malformed
+  // URL is flagged on blur so they never hit a cryptic backend error (the generic
+  // input handler below clears the error once they start fixing it).
+  getInput(FIELDS.server.input).addEventListener("blur", () => {
+    const inp = getInput(FIELDS.server.input);
+    if (!inp.value.trim()) return; // empty handled on submit
+    const v = validateServerUrl(inp.value);
+    if (!v.ok) setFieldError("server", v.error);
   });
 
   // Strip stale field errors as the user fixes them.
@@ -318,7 +382,7 @@ export function renderLogin(
     e.preventDefault();
     clearAllErrors();
 
-    const serverUrl = getInput(FIELDS.server.input).value.trim();
+    const rawServer = getInput(FIELDS.server.input).value;
     const tenant = getInput(FIELDS.tenant.input).value.trim();
     const email = getInput(FIELDS.email.input).value.trim();
     const password = getInput(FIELDS.password.input).value;
@@ -336,7 +400,10 @@ export function renderLogin(
       setFieldError("password", "La contraseña es obligatoria.");
       firstInvalid ??= "password";
     }
-    const serverCheck = validateServerUrl(serverUrl);
+    // Full URL validation (empty / malformed / bad scheme), not just non-empty —
+    // so the operator never submits a URL the backend would only reject with a
+    // cryptic transport error.
+    const serverCheck = validateServerUrl(rawServer);
     if (!serverCheck.ok) {
       setFieldError("server", serverCheck.error);
       // Auto-open the disclosure so the user sees the error.
@@ -348,6 +415,8 @@ export function renderLogin(
       getInput(FIELDS[firstInvalid].input).focus();
       return;
     }
+    // Past validation: serverCheck is ok, use the normalised URL.
+    const serverUrl = serverCheck.ok ? serverCheck.url : rawServer.trim();
 
     btn.disabled = true;
     btn.classList.add("loading");
@@ -359,7 +428,9 @@ export function renderLogin(
       try { sessionStorage.setItem("tenant_slug", tenant); } catch { /* noop */ }
       // Remember the server that worked so the next launch pre-fills it (and
       // the advanced panel stays collapsed — this machine is configured now).
-      try { localStorage.setItem(SERVER_STORE_KEY, serverUrl); } catch { /* noop */ }
+      // Persisted in canonical form; survives restart (see onboarding-ux tests).
+      const store = browserStore();
+      if (store) saveStoredServer(store, serverUrl);
       btn.classList.remove("loading");
       btn.classList.add("ok");
       btnLabel.textContent = "LISTO";

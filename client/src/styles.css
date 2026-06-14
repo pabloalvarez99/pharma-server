@@ -905,6 +905,33 @@ button {
   text-align: center;
 }
 
+/* ---- Onboarding readiness CTA (fresh install next-step banner) ---- */
+.onboard-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--accent-soft, rgba(99, 132, 255, 0.12));
+  border: 1px solid rgba(99, 132, 255, 0.35);
+}
+.onboard-cta-text strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+.onboard-cta-text p {
+  margin: 0;
+  font-size: 13px;
+}
+.onboard-cta-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* ---- KPI cards ---- */
 .kpi-grid {
   display: grid;

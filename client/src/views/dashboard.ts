@@ -21,6 +21,7 @@ import {
   asMessage,
   escapeHtml,
 } from "./inventory";
+import { dashboardCta, type DashboardCta } from "./onboarding-ux";
 
 const TOP_LIMIT = 5;
 
@@ -34,6 +35,8 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
         </div>
       </div>
 
+      <div id="dash-cta" hidden></div>
+
       <div id="dash-kpis" class="kpi-grid">${kpiSkeleton(4)}</div>
 
       <div class="table-card">
@@ -43,17 +46,67 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
     </section>
   `;
 
-  void loadKpis(host.querySelector<HTMLElement>("#dash-kpis")!, serverUrl);
+  void loadKpis(
+    host.querySelector<HTMLElement>("#dash-kpis")!,
+    host.querySelector<HTMLElement>("#dash-cta")!,
+    serverUrl,
+  );
   void loadTop(host.querySelector<HTMLElement>("#dash-top")!, serverUrl);
+}
+
+// A freshly-installed panel is mostly zeros — show a next-step banner instead of
+// a wall of "$0". Maps the readiness CTA to an in-shell nav jump (clicking the
+// existing sidebar button) so there's no dead-end and no new routing surface.
+const CTA_NAV: Record<NonNullable<DashboardCta["cta"]>["action"], { nav: string; label: string }> = {
+  "seed-demo": { nav: "importar", label: "Cargar productos" },
+  "first-sale": { nav: "pos", label: "Abrir POS" },
+  config: { nav: "configuracion", label: "Ir a Configuración" },
+};
+
+function renderCta(host: HTMLElement, r: DashboardCta): void {
+  if (!r.cta) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  const dest = CTA_NAV[r.cta.action];
+  host.hidden = false;
+  host.innerHTML = `
+    <div class="onboard-cta" role="region" aria-label="Primeros pasos">
+      <div class="onboard-cta-text">
+        <strong>${escapeHtml(r.cta.title)}</strong>
+        <p class="muted">${escapeHtml(r.cta.body)}</p>
+      </div>
+      <button type="button" class="btn-primary onboard-cta-btn" data-goto="${dest.nav}">
+        ${escapeHtml(dest.label)}
+      </button>
+    </div>
+  `;
+  host.querySelector<HTMLButtonElement>(".onboard-cta-btn")?.addEventListener("click", () => {
+    const navBtn = document.querySelector<HTMLButtonElement>(`.nav-item[data-nav="${dest.nav}"]`);
+    navBtn?.click();
+  });
 }
 
 // One combined KPI strip. We fetch sales + inventory in parallel; each tile
 // degrades on its own (a failed sales call still lets inventory tiles render).
-async function loadKpis(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadKpis(
+  host: HTMLElement,
+  ctaHost: HTMLElement,
+  serverUrl: string,
+): Promise<void> {
   const [salesRes, invRes] = await Promise.allSettled([
     salesDaily(serverUrl),
     inventorySummary(serverUrl),
   ]);
+
+  // Onboarding readiness: empty catalog → "cargar productos"; stock but no sale
+  // yet → "abrir POS". Only when stats actually loaded (a transient error must
+  // not nag). hasSales = any day with orders > 0.
+  const productCount = invRes.status === "fulfilled" ? invRes.value.total : null;
+  const hasSales =
+    salesRes.status === "fulfilled" && salesRes.value.some((r) => r.orders > 0);
+  renderCta(ctaHost, dashboardCta({ productCount, hasSales }));
 
   const tiles: string[] = [];
 
