@@ -232,6 +232,11 @@ enum LicenseCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect the embedded licenser trust store (ADR-0007 key rotation).
+    Keys {
+        #[command(subcommand)]
+        cmd: KeysCmd,
+    },
     /// Verify a license file's signature without importing.
     Verify {
         /// Path to a .lic / .json license file.
@@ -287,6 +292,18 @@ enum LicenseCmd {
         /// Bearer token for the reload endpoint.
         #[arg(long)]
         reload_token: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeysCmd {
+    /// List the licenser key_ids embedded in this binary with rotation status
+    /// (active emitter / legacy / retired). Offline — no private seed, no
+    /// network (ADR-0002, ADR-0007).
+    List {
+        /// Output as a JSON array instead of a table.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -650,6 +667,42 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            LicenseCmd::Keys { cmd } => match cmd {
+                KeysCmd::List { json } => {
+                    let rows = license::keys::list_keys();
+                    if json {
+                        let arr: Vec<_> = rows
+                            .iter()
+                            .map(|r| {
+                                serde_json::json!({
+                                    "key_id": r.key_id,
+                                    "did": r.did,
+                                    "accepted": r.accepted,
+                                    "legacy": r.legacy,
+                                    "active": r.active,
+                                })
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&arr)?);
+                    } else {
+                        println!(
+                            "{:<18} {:<8} {:<7} {:<8} DID",
+                            "KEY_ID", "ESTADO", "ACTIVA", "LEGADO"
+                        );
+                        for r in &rows {
+                            let estado = if r.accepted { "vigente" } else { "retirada" };
+                            println!(
+                                "{:<18} {:<8} {:<7} {:<8} {}",
+                                r.key_id,
+                                estado,
+                                if r.active { "sí" } else { "no" },
+                                if r.legacy { "sí" } else { "no" },
+                                r.did
+                            );
+                        }
+                    }
+                }
+            },
             LicenseCmd::Verify { file } => {
                 let bytes =
                     std::fs::read(&file).with_context(|| format!("read {}", file.display()))?;

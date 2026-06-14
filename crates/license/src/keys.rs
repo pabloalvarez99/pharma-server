@@ -90,6 +90,40 @@ pub fn is_accepted(key_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// A read-only view of one embedded trust-store key, for operator inspection
+/// via `pharma license keys list`. Carries only public material (key_id, DID)
+/// plus rotation flags — never a private seed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyStatus {
+    pub key_id: &'static str,
+    pub did: &'static str,
+    /// Still validates in-the-wild licenses (`accepted`, not retired).
+    pub accepted: bool,
+    /// Resolves pre-`key_id` (legacy) licenses, i.e. `key_id == LEGACY_KEY_ID`.
+    pub legacy: bool,
+    /// Active emitter = the first `accepted` entry (ADR-0007 convention).
+    pub active: bool,
+}
+
+/// Enumerate the embedded licenser trust store for operator inspection
+/// (`pharma license keys list`). The active emitter is the first `accepted`
+/// entry (ADR-0007 convention). 100% local: reflects only the public
+/// key_ids/DIDs baked into this binary — no private seed, no network
+/// (offline-first, ADR-0002).
+pub fn list_keys() -> Vec<KeyStatus> {
+    let active_id = TRUST_STORE.iter().find(|e| e.accepted).map(|e| e.key_id);
+    TRUST_STORE
+        .iter()
+        .map(|e| KeyStatus {
+            key_id: e.key_id,
+            did: e.did,
+            accepted: e.accepted,
+            legacy: e.key_id == LEGACY_KEY_ID,
+            active: Some(e.key_id) == active_id,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +163,30 @@ mod tests {
         assert!(!is_accepted("lk-does-not-exist"));
         assert!(is_accepted("lk-prod-2026-01"));
         assert!(is_accepted("")); // legacy fallback accepted
+    }
+
+    #[test]
+    fn list_keys_mirrors_trust_store() {
+        let rows = list_keys();
+        assert_eq!(rows.len(), TRUST_STORE.len());
+        for (row, entry) in rows.iter().zip(TRUST_STORE.iter()) {
+            assert_eq!(row.key_id, entry.key_id);
+            assert_eq!(row.did, entry.did);
+            assert_eq!(row.accepted, entry.accepted);
+        }
+    }
+
+    #[test]
+    fn list_keys_flags_active_legacy() {
+        let rows = list_keys();
+        // Exactly one active emitter = the first accepted entry.
+        let active: Vec<_> = rows.iter().filter(|r| r.active).collect();
+        assert_eq!(active.len(), 1, "exactly one active emitter");
+        assert_eq!(active[0].key_id, "lk-prod-2026-01");
+        assert!(active[0].accepted, "active key must be accepted");
+        // Exactly one legacy row, matching LEGACY_KEY_ID.
+        let legacy: Vec<_> = rows.iter().filter(|r| r.legacy).collect();
+        assert_eq!(legacy.len(), 1, "exactly one legacy key");
+        assert_eq!(legacy[0].key_id, LEGACY_KEY_ID);
     }
 }

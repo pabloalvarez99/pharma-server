@@ -2149,3 +2149,27 @@ Branch `feat/api-dss-seam-keys` (off `feature/erp-parity` tip b27b3db). Cierra e
 **Tests**: unit en `api_key.rs` (memdb): happy/wrong-scope/cross-tenant/inactive/missing + hash known-answer. HTTP e2e `crates/api/tests/public_seam_api_key.rs` (5): default-off mantiene lectura por slug, required+sin-key→401, scope-equivocado→403, key-válida→200, key-de-otro-tenant→401. NOTA de gotcha: en los tests, crear `product` con `price = 1000` literal hace que el read del handler (`price: sql::Number`) falle al deser ("unknown variant 1000"); el flujo real del dominio bindea `rust_decimal::Decimal` y round-trip-ea bien — los tests ahora bindean Decimal igual que el dominio. No es bug de prod.
 
 GATE workspace verde: `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace` (0 failed). Migración 0026 (0025 reservada a lucy/relay, sin tocar).
+
+## 2026-06-14 — License: CLI `pharma license keys list` (ADR-0007 cierre lane ye)
+
+Hallazgo al re-entrar (verificando origin, no el snapshot local): la lane LANE A
+"License key rotation" (ADR-0007 multi-key key_id) **ya está landed** en
+origin/feature/erp-parity vía PR #160 (integrado en PR #173): `schema.key_id`
+opcional, `keys::TRUST_STORE` multi-entry con `accepted`/`LEGACY_KEY_ID`, verify
+selecciona pubkey por key_id (legacy fallback + retired→reject), CRL resuelve
+key_id→DID, y tests (`tests/key_rotation.rs` 6 + `keys.rs` 4 + `verify_unknown_key.rs`).
+Items 1/2/4/5 del brief = superseded.
+
+Único deliverable faltante del brief (item 3) = CLI `pharma license keys list`.
+Implementado, scope acotado:
+- `crates/license/src/keys.rs`: `KeyStatus` + `list_keys()` (vista read-only del
+  TRUST_STORE: key_id, did, accepted, legacy, active=primer accepted). 100% local,
+  sin seed privada ni red (ADR-0002 offline-first). +2 tests unit (mirrors_trust_store,
+  flags_active_legacy).
+- `crates/cli/src/main.rs`: `LicenseCmd::Keys{ cmd: KeysCmd::List{ json } }` aditivo
+  (tabla es-CL: KEY_ID/ESTADO/ACTIVA/LEGADO/DID, o `--json`).
+
+GATE workspace verde: `fmt --check` ok · `clippy --workspace --all-targets -D warnings`
+clean · `cargo test --workspace` 0 failed (1 ignored pre-existente). Smoke real del
+binario: `pharma license keys list` lista lk-prod-2026-01 (vigente/activa/legado) +
+lk-dev-2026 (vigente). Branch feat/license-keys-cli.
