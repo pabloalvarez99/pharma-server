@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .vite/
+# E2E harness scratch DB (client/e2e/.tmp/<run>/surreal) — never commit.
+e2e/.tmp/
 # package-lock.json IS committed — `npm ci` (build-client.ps1 + CI) needs it for
 # reproducible installs. Do not re-ignore it.
 src-tauri/target/
