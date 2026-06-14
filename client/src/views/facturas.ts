@@ -20,7 +20,8 @@ import {
   type DocItem,
   type DocReferencia,
 } from "../api";
-import { clp, num, isValidRut, canonicalRut, formatRut, desgloseIva } from "../format";
+import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
+import { cssKey, fmtDateCl, cafTone, estadoBadge, upgradeNote, computeDocTotals } from "../dte";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const LIST_LIMIT = 100;
@@ -50,15 +51,6 @@ const COD_REF = [
   { value: 2, label: "2 — Corrige texto" },
   { value: 3, label: "3 — Corrige montos" },
 ] as const;
-
-const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: "Borrador", cls: "pill" },
-  signed: { label: "Firmado", cls: "pill pill-ok" },
-  sent: { label: "Enviado SII", cls: "pill pill-warn" },
-  accepted: { label: "Aceptado", cls: "pill pill-ok" },
-  rejected: { label: "Rechazado", cls: "pill pill-danger" },
-  cancelled: { label: "Anulado", cls: "pill" },
-};
 
 interface ItemRow {
   nombre: string;
@@ -232,27 +224,8 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     renderTotals();
   }
 
-  /** Neto/IVA/exento/total mirroring the server's `desglose_iva`: line amounts
-   *  truncate to integer CLP, the IVA split comes from {@link desgloseIva} (same
-   *  math as `crates/dte/src/emit.rs`) so the cashier sees the totals the server
-   *  will stamp. */
-  function computeTotals(): { neto: number; iva: number; exento: number; total: number } {
-    let afecto = 0;
-    let exento = 0;
-    for (const it of items) {
-      const qty = Number(it.cantidad);
-      const price = Number(it.precio);
-      if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price < 0) continue;
-      const monto = Math.trunc(qty * price);
-      if (it.exento) exento += monto;
-      else afecto += monto;
-    }
-    const { neto, iva } = desgloseIva(afecto);
-    return { neto, iva, exento, total: afecto + exento };
-  }
-
   function renderTotals(): void {
-    const t = computeTotals();
+    const t = computeDocTotals(items);
     if (t.total <= 0) {
       totalsEl.hidden = true;
       totalsEl.innerHTML = "";
@@ -307,7 +280,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
           <span>Importa folios del SII con <code>pharma caf import</code> antes de emitir este tipo.</span>`;
         return;
       }
-      const tone = s.folios_restantes <= 0 ? "pill-danger" : s.folios_restantes <= LOW_FOLIOS ? "pill-warn" : "pill-ok";
+      const tone = cafTone(s.folios_restantes, LOW_FOLIOS);
       cafEl.innerHTML = `<span class="pill ${tone}">${num(s.folios_restantes)} folios</span>
         <span>disponibles para el tipo ${t}.</span>`;
     } catch (err) {
@@ -339,7 +312,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   }
 
   function rowHtml(d: Dte): string {
-    const badge = ESTADO_BADGE[d.estado] ?? { label: d.estado, cls: "pill" };
+    const badge = estadoBadge(d.estado, "documento");
     const sii = d.track_id !== null
       ? `track ${d.track_id}${d.sii_glosa ? ` · ${escapeHtml(d.sii_glosa)}` : ""}`
       : "—";
@@ -358,7 +331,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     return `
       <tr data-dte="${escapeHtml(d.id)}">
         <td class="num">${num(d.folio)}</td>
-        <td>${fmtDate(d.fecha_emision)}</td>
+        <td>${fmtDateCl(d.fecha_emision)}</td>
         <td><div class="cell-main">${escapeHtml(d.razon_social_receptor)}</div><div class="muted">${escapeHtml(d.rut_receptor)}</div></td>
         <td class="num">${clp(d.monto_total)}</td>
         <td><span class="${badge.cls}">${badge.label}</span></td>
@@ -391,10 +364,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         toast(`Documento ${num(d.folio)} enviado al SII`);
         await loadList();
       } catch (err) {
-        const { code, message } = parseSaleError(err);
-        toast(code === "FEATURE_REQUIRES_UPGRADE"
-          ? `Plan Business requerido para envío automático. ${message}`
-          : message);
+        toast(upgradeNote(err, "Business").message);
         btn.disabled = false;
       }
     });
@@ -549,23 +519,6 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
   renderItems();
   void loadCaf();
   void loadList();
-}
-
-/** Record ids (`dte:abc`) are not valid in CSS selectors — strip to the key. */
-function cssKey(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function downloadXml(xml: string, filename: string): void {

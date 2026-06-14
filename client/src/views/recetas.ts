@@ -18,11 +18,38 @@ import {
   type NewPrescriptionInput,
 } from "../api";
 import { isValidRut, canonicalRut, formatRut } from "../format";
+import { loadVertical, hasRecetas } from "../vertical";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const PAGE_LIMIT = 100;
 
+/** Recetas + libro de controlados (Ley 20.000) only apply to the `farmacia`
+ *  vertical. The shell hides the nav for other rubros (see shell.ts); this is
+ *  the defensive VIEW-level gate so a direct dispatch (deep link / future
+ *  router) degrades to a clear "no aplica" panel instead of exposing a
+ *  pharmacy-only module — multi-rubro insight, see
+ *  docs/strategy/multi-rubro-findings.md. `loadVertical` never throws (defaults
+ *  to the generic `otro`), so a settings hiccup hides rather than crashes. */
 export function renderRecetas(host: HTMLElement, serverUrl: string): void {
+  host.innerHTML = `<section class="view view-recetas"><div class="view-head"><div>
+    <h2>Recetas</h2><p class="muted">Cargando…</p></div></div></section>`;
+  void loadVertical(serverUrl).then((v) => {
+    if (!hasRecetas(v)) {
+      host.innerHTML = `
+        <section class="view view-recetas">
+          <div class="view-head"><div>
+            <h2>Recetas</h2>
+            <p class="muted">Módulo exclusivo del rubro Farmacia.</p>
+          </div></div>
+          <p class="empty">Las recetas y el libro de controlados (Ley 20.000) aplican solo a farmacias. Este negocio está configurado como otro rubro — cámbialo en Configuración si corresponde.</p>
+        </section>`;
+      return;
+    }
+    renderRecetasView(host, serverUrl);
+  });
+}
+
+function renderRecetasView(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
     <section class="view view-recetas">
       <div class="view-head">

@@ -21,6 +21,7 @@ import {
   type StockRotationRow,
 } from "../api";
 import { clp, num } from "../format";
+import { pickToday } from "../dte";
 import {
   kpiCard,
   kpiSkeleton,
@@ -90,14 +91,6 @@ async function loadSales(host: HTMLElement, serverUrl: string): Promise<void> {
   } catch (err) {
     host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
   }
-}
-
-/** Pick the most recent row whose date matches today (UTC, YYYY-MM-DD); fall
- *  back to the last row the server returned so a TZ edge never blanks the card. */
-function pickToday<T extends { date: string }>(rows: T[]): T | undefined {
-  if (rows.length === 0) return undefined;
-  const today = new Date().toISOString().slice(0, 10);
-  return rows.find((r) => r.date === today) ?? rows[rows.length - 1];
 }
 
 /** Margins are Pro-gated. On Free the command rejects with the coded string

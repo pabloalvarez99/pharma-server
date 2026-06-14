@@ -65,3 +65,44 @@ Hallazgos de la lane onboarding/selección-de-rubro (Session "ye",
 - `recetas.ts`: condicionar visibilidad/entrada con `hasRecetas(vertical)`
   importado de `client/src/vertical.ts`. El nav ya se oculta en `shell.ts`;
   falta el guard dentro de la vista por si se navega por URL/estado.
+
+---
+
+## Compliance lane — entregado (`feat/client-test-compliance`, 2026-06-14)
+
+Cumple el contrato de arriba. **Cliente puro, GATE cliente verde.** No tocó
+backend ni `shell.ts`/`vertical.ts` (de ye) → cero contención de merge.
+
+### Gating aplicado
+- **`recetas.ts`** — guard a nivel de vista: `renderRecetas` carga el vertical
+  (`loadVertical(serverUrl)`) y, si `!hasRecetas`, muestra "Módulo exclusivo del
+  rubro Farmacia" en vez de la vista de controlados. Cubre el deep-link que
+  saltaría el ocultamiento de nav (gap #3 del contrato cerrado en cliente).
+  Self-contained: la vista ya recibía `serverUrl`, no cambió firma ni `shell.ts`.
+- **`boletas.ts` / `facturas.ts`** — confirmado universal, **sin** gating de
+  vertical. Verificado con seed `minimarket` en la lane E2E
+  (`feat/client-e2e-harness`, PR #167): minimarket emite boleta y no se le exige
+  receta.
+
+### Extracción + cobertura (`client/src/dte.ts` + `dte.test.ts`)
+Las vistas eran renderers DOM con la lógica de compliance **duplicada inline**
+(boletas + facturas). Se extrajo a `client/src/dte.ts` puro y testeable —
+fuente única, dedup real — y las vistas ahora la importan (comportamiento
+idéntico). El test es la cobertura de los riesgos cazados:
+
+| Riesgo | Helper / hallazgo | Estado |
+|---|---|---|
+| 402 sin crash (upsell) | `upgradeNote(err, plan)` — nota calmada Pro/Business, nunca crash/dark-pattern; reportes margins → tarjeta soft | ✅ |
+| neto/IVA | `computeDocTotals` replica `desglose_iva` (`crates/dte/src/emit.rs`): trunc CLP entero, IVA absorbe redondeo, exento aparte | ✅ |
+| CAF/folio | `cafTone`: `<=0` danger / `<=low` warn (boleta 50, factura 20) / ok; "Sin CAF" con `cafs.length===0` | ✅ |
+| Reportes vacío/grande/TZ | `pickToday` cae al último row (borde TZ no deja blanco), `undefined` con 0 rows → "$0"; rotación corta a 15, top a 5 | ✅ |
+| CSV export | `exportLibroRecetas` / `exportProducts` exponen CSV crudo (sin lock-in, ADR-0005 §4); contenido/headers aún sin asserción E2E | ⚠️ observado |
+
+### Gaps abiertos (recomendaciones)
+1. El guard de vista es **defensivo, no autoritativo** — el server no rechaza
+   `GET /prescriptions` por vertical (sigue siendo señal de UI; ver gap #3 de ye).
+   Para cumplimiento duro: gatear también en el API.
+2. `loadVertical` default `otro` en error de red podría ocultar Recetas a una
+   farmacia real durante un hipo de settings. El nav ya gatea, así que el guard
+   sólo se alcanza por deep-link; aceptable, anotado.
+3. **CSV export sin verificación E2E** — candidato a la suite `client/e2e`.

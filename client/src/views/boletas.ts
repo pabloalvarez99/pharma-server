@@ -21,6 +21,7 @@ import {
   type Dte,
 } from "../api";
 import { clp, num } from "../format";
+import { cssKey, fmtDateCl, cafTone, estadoBadge, upgradeNote } from "../dte";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const LIST_LIMIT = 100;
@@ -34,15 +35,6 @@ const ESTADOS = [
   { value: "rejected", label: "Rechazadas" },
   { value: "cancelled", label: "Anuladas" },
 ] as const;
-
-const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: "Borrador", cls: "pill" },
-  signed: { label: "Firmada", cls: "pill pill-ok" },
-  sent: { label: "Enviada SII", cls: "pill pill-warn" },
-  accepted: { label: "Aceptada", cls: "pill pill-ok" },
-  rejected: { label: "Rechazada", cls: "pill pill-danger" },
-  cancelled: { label: "Anulada", cls: "pill" },
-};
 
 export function renderBoletas(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -131,7 +123,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
           <span>No hay folios autorizados cargados. Importa un CAF del SII con <code>pharma caf import</code> antes de emitir.</span>`;
         return;
       }
-      const tone = s.folios_restantes <= 0 ? "pill-danger" : s.folios_restantes <= LOW_FOLIOS ? "pill-warn" : "pill-ok";
+      const tone = cafTone(s.folios_restantes, LOW_FOLIOS);
       cafEl.innerHTML = `<span class="pill ${tone}">${num(s.folios_restantes)} folios</span>
         <span>disponibles para boleta electrónica (tipo ${s.tipo}).</span>`;
     } catch (err) {
@@ -163,7 +155,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
   }
 
   function rowHtml(d: Dte): string {
-    const badge = ESTADO_BADGE[d.estado] ?? { label: d.estado, cls: "pill" };
+    const badge = estadoBadge(d.estado, "boleta");
     const sii = d.track_id !== null
       ? `track ${d.track_id}${d.sii_glosa ? ` · ${escapeHtml(d.sii_glosa)}` : ""}`
       : "—";
@@ -182,7 +174,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
     return `
       <tr data-dte="${escapeHtml(d.id)}">
         <td class="num">${num(d.folio)}</td>
-        <td>${fmtDate(d.fecha_emision)}</td>
+        <td>${fmtDateCl(d.fecha_emision)}</td>
         <td><div class="cell-main">${escapeHtml(d.razon_social_receptor)}</div><div class="muted">${escapeHtml(d.rut_receptor)}</div></td>
         <td class="num">${clp(d.monto_total)}</td>
         <td><span class="${badge.cls}">${badge.label}</span></td>
@@ -215,10 +207,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
         toast(`Boleta ${num(d.folio)} enviada al SII`);
         await loadList();
       } catch (err) {
-        const { code, message } = parseSaleError(err);
-        toast(code === "FEATURE_REQUIRES_UPGRADE"
-          ? `Plan Pro requerido para envío automático. ${message}`
-          : message);
+        toast(upgradeNote(err, "Pro").message);
         btn.disabled = false;
       }
     });
@@ -353,23 +342,6 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
 
   void loadCaf();
   void loadList();
-}
-
-/** Record ids (`dte:abc`) are not valid in CSS selectors — strip to the key. */
-function cssKey(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function downloadXml(xml: string, filename: string): void {
