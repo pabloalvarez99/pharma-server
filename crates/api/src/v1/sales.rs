@@ -230,7 +230,17 @@ pub async fn create_refund(
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
     let user = user_of(&claims).ok();
+    // Capture restocked product ids before `body` is moved (ADR-0013 trigger
+    // `pos.refund`: a return increments stock). Free-text lines (no product)
+    // are skipped.
+    let returned_ids: Vec<String> = body
+        .items
+        .iter()
+        .filter_map(|i| i.product.clone())
+        .collect();
     let resp = service::create_refund(db.as_ref(), &tenant, user.as_ref(), body).await?;
+    // ERP→web stock push: fire-and-forget, never blocks the response.
+    crate::stock_webhook::notify_products(&state, tenant.clone(), returned_ids);
     Ok((StatusCode::CREATED, Json(resp)).into_response())
 }
 

@@ -106,33 +106,24 @@ pub fn should_fire(cfg: &StockWebhookConfig, delta: i64, external_id: Option<&st
         && external_id.is_some_and(|s| !s.is_empty())
 }
 
-/// One stock change to deliver: a built payload plus the delta that produced
-/// it (used by [`should_fire`] before enqueueing).
-#[derive(Debug, Clone)]
-pub struct StockChange {
-    pub external_id: String,
-    pub new_stock: i64,
-    pub delta: i64,
+/// True when a product row is eligible for a stock webhook: the operator marked
+/// it `publish_to_web` (ADR-0013 trigger filter) AND it carries a non-empty
+/// commercial `external_id` (the storefront keys on it). Pure so the gate is
+/// unit-tested without a DB.
+pub fn publishable(external_id: Option<&str>, publish_to_web: bool) -> bool {
+    publish_to_web && external_id.is_some_and(|s| !s.is_empty())
 }
 
-/// Fire-and-forget. Spawns a detached task that signs and POSTs one webhook per
-/// change, with the ADR-0013 retry policy. Returns immediately — never blocks
-/// the caller (the POS hot path). A no-op clone of the config that is disabled
-/// or lacks a target/secret costs one boolean check and returns at once.
-pub fn notify(cfg: Arc<StockWebhookConfig>, tenant_slug: String, changes: Vec<StockChange>) {
+/// Spawn the delivery loop for already-built payloads — the only part that does
+/// network I/O. Split out so every trigger path ([`notify_products`],
+/// [`notify_po_receive`]) and any future synthetic caller reuse the exact
+/// ADR-0013 retry policy. No-op (no task spawned, no runtime required) when the
+/// webhook is disabled/unconfigured or there is nothing to send.
+fn dispatch(cfg: Arc<StockWebhookConfig>, payloads: Vec<StockChangePayload>) {
     if !cfg.enabled || cfg.target_url.is_empty() || cfg.hmac_secret.is_empty() {
         return;
     }
-    let to_send: Vec<StockChangePayload> = changes
-        .into_iter()
-        .filter(|c| should_fire(&cfg, c.delta, Some(c.external_id.as_str())))
-        .map(|c| {
-            let ts = chrono::Utc::now().to_rfc3339();
-            let key = uuid::Uuid::now_v7().to_string();
-            StockChangePayload::new(&tenant_slug, c.external_id, c.new_stock, ts, key)
-        })
-        .collect();
-    if to_send.is_empty() {
+    if payloads.is_empty() {
         return;
     }
     tokio::spawn(async move {
@@ -143,26 +134,22 @@ pub fn notify(cfg: Arc<StockWebhookConfig>, tenant_slug: String, changes: Vec<St
                 return;
             }
         };
-        for payload in to_send {
+        for payload in payloads {
             deliver(&client, &cfg, &payload).await;
         }
     });
 }
 
-/// Hook point for a committed POS sale (ADR-0013 trigger `pos.sale`).
-///
-/// Fire-and-forget: returns immediately and never touches the sale's result.
-/// When the webhook is disabled/unconfigured this costs one boolean check.
-/// Otherwise it spawns a task that resolves the tenant slug, reads each sold
-/// product's *post-sale* `stock` + `external_id` (the sale already committed,
-/// so this reflects the new value), and dispatches one webhook per SKU.
-///
-/// `sold` is `(product_record_id, quantity_sold)`. The delta reported is
-/// `-quantity` (a sale decrements). SKUs with no `external_id` are skipped.
-pub fn notify_sale(
+/// Fire-and-forget ERP→web push for products whose stock just changed
+/// (ADR-0013 triggers `pos.sale`, `pos.refund`, `manual.adjust`). Reads each
+/// product's *post-change* `stock`, `external_id`, and `publish_to_web`, then
+/// pushes one HMAC-signed webhook per publishable SKU. Returns immediately and
+/// never fails the caller's request (offline-first, ADR-0005). No-op when the
+/// webhook is disabled/unconfigured or `product_ids` is empty.
+pub fn notify_products(
     state: &crate::AppState,
     tenant: surrealdb::sql::Thing,
-    sold: Vec<(String, i64)>,
+    product_ids: Vec<String>,
 ) {
     let cfg = state.stock_webhook.clone();
     if !cfg.enabled || cfg.target_url.is_empty() || cfg.hmac_secret.is_empty() {
@@ -171,7 +158,7 @@ pub fn notify_sale(
     let Some(db) = state.db.clone() else {
         return;
     };
-    if sold.is_empty() {
+    if product_ids.is_empty() {
         return;
     }
     tokio::spawn(async move {
@@ -179,15 +166,74 @@ pub fn notify_sale(
             tracing::warn!("stock webhook: tenant slug unresolved; dropping");
             return;
         };
-        let changes = match collect_changes(db.as_ref(), &tenant, &sold).await {
-            Ok(c) => c,
+        let payloads = match collect_payloads(db.as_ref(), &slug, &tenant, &product_ids).await {
+            Ok(p) => p,
             Err(e) => {
                 tracing::warn!(error = %e, "stock webhook: stock read failed; dropping");
                 return;
             }
         };
-        notify(cfg, slug, changes);
+        dispatch(cfg, payloads);
     });
+}
+
+/// PO-receive hook (ADR-0013 trigger `po.receive`). Receipt lines reference
+/// `purchase_order_item` ids, not products; resolve them to product ids first,
+/// then push their post-receive stock. Fire-and-forget like the others.
+pub fn notify_po_receive(
+    state: &crate::AppState,
+    tenant: surrealdb::sql::Thing,
+    po_line_ids: Vec<String>,
+) {
+    let cfg = state.stock_webhook.clone();
+    if !cfg.enabled || cfg.target_url.is_empty() || cfg.hmac_secret.is_empty() {
+        return;
+    }
+    let Some(db) = state.db.clone() else {
+        return;
+    };
+    if po_line_ids.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        let products = match resolve_line_products(db.as_ref(), &tenant, &po_line_ids).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "stock webhook: po-line resolve failed; dropping");
+                return;
+            }
+        };
+        if products.is_empty() {
+            return;
+        }
+        let Some(slug) = resolve_tenant_slug(db.as_ref(), &tenant).await else {
+            tracing::warn!("stock webhook: tenant slug unresolved; dropping");
+            return;
+        };
+        let payloads = match collect_payloads(db.as_ref(), &slug, &tenant, &products).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "stock webhook: stock read failed; dropping");
+                return;
+            }
+        };
+        dispatch(cfg, payloads);
+    });
+}
+
+/// Hook point for a committed POS sale (ADR-0013 trigger `pos.sale`).
+///
+/// Fire-and-forget: returns immediately and never touches the sale's result.
+/// `sold` is `(product_record_id, quantity_sold)`; only the ids matter for the
+/// push — the absolute post-sale stock is read fresh in [`collect_payloads`],
+/// which is idempotent under retry (deltas are not). Thin wrapper over
+/// [`notify_products`].
+pub fn notify_sale(
+    state: &crate::AppState,
+    tenant: surrealdb::sql::Thing,
+    sold: Vec<(String, i64)>,
+) {
+    notify_products(state, tenant, sold.into_iter().map(|(id, _)| id).collect());
 }
 
 /// Resolve `tenant.slug` for a tenant record id. `None` if missing.
@@ -207,52 +253,81 @@ async fn resolve_tenant_slug(db: &db::Db, tenant: &surrealdb::sql::Thing) -> Opt
     row.map(|r| r.slug)
 }
 
-/// Read post-sale `(external_id, stock)` for the sold products and pair each
-/// with the line's delta (`-quantity`). Products with no `external_id` are
-/// dropped (the web keys on it).
-async fn collect_changes(
+/// Resolve `purchase_order_item` ids to their distinct `product` record ids
+/// (string form). Lines with no linked product (free-text buys) are skipped.
+async fn resolve_line_products(
     db: &db::Db,
     tenant: &surrealdb::sql::Thing,
-    sold: &[(String, i64)],
-) -> Result<Vec<StockChange>, surrealdb::Error> {
-    use std::collections::HashMap;
-    let things: Vec<surrealdb::sql::Thing> = sold
+    po_line_ids: &[String],
+) -> Result<Vec<String>, surrealdb::Error> {
+    let things: Vec<surrealdb::sql::Thing> = po_line_ids
         .iter()
-        .filter_map(|(id, _)| surrealdb::sql::thing(id).ok())
+        .filter_map(|s| surrealdb::sql::thing(s).ok())
+        .collect();
+    if things.is_empty() {
+        return Ok(Vec::new());
+    }
+    #[derive(serde::Deserialize)]
+    struct R {
+        product: Option<surrealdb::sql::Thing>,
+    }
+    let rows: Vec<R> = db
+        .query("SELECT product FROM purchase_order_item WHERE tenant = $t AND id IN $ids")
+        .bind(("t", tenant.clone()))
+        .bind(("ids", things))
+        .await?
+        .check()?
+        .take(0)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.product.map(|p| p.to_string()))
+        .collect())
+}
+
+/// Read post-change `(stock, external_id, publish_to_web)` for the products and
+/// build one payload per publishable SKU (see [`publishable`]). `new_stock` is
+/// the absolute current value — idempotent under webhook retry. Non-publishable
+/// rows (internal SKUs, or `external_id` missing) are dropped silently.
+async fn collect_payloads(
+    db: &db::Db,
+    tenant_slug: &str,
+    tenant: &surrealdb::sql::Thing,
+    product_ids: &[String],
+) -> Result<Vec<StockChangePayload>, surrealdb::Error> {
+    let things: Vec<surrealdb::sql::Thing> = product_ids
+        .iter()
+        .filter_map(|s| surrealdb::sql::thing(s).ok())
         .collect();
     if things.is_empty() {
         return Ok(Vec::new());
     }
     #[derive(serde::Deserialize)]
     struct Row {
-        id: surrealdb::sql::Thing,
         stock: i64,
         external_id: Option<String>,
+        #[serde(default)]
+        publish_to_web: bool,
     }
     let rows: Vec<Row> = db
-        .query("SELECT id, stock, external_id FROM product WHERE tenant = $t AND id IN $ids")
+        .query(
+            "SELECT stock, external_id, publish_to_web \
+             FROM product WHERE tenant = $t AND id IN $ids",
+        )
         .bind(("t", tenant.clone()))
         .bind(("ids", things))
         .await?
         .check()?
         .take(0)?;
-    // qty per product id (a cart may list the same SKU twice; sum the deltas).
-    let mut qty: HashMap<String, i64> = HashMap::new();
-    for (id, q) in sold {
-        if let Ok(t) = surrealdb::sql::thing(id) {
-            *qty.entry(t.to_string()).or_default() += *q;
-        }
-    }
     Ok(rows
         .into_iter()
         .filter_map(|r| {
-            let ext = r.external_id.filter(|s| !s.is_empty())?;
-            let q = qty.get(&r.id.to_string()).copied().unwrap_or(0);
-            (q != 0).then_some(StockChange {
-                external_id: ext,
-                new_stock: r.stock,
-                delta: -q,
-            })
+            if !publishable(r.external_id.as_deref(), r.publish_to_web) {
+                return None;
+            }
+            let ext = r.external_id?;
+            let ts = chrono::Utc::now().to_rfc3339();
+            let key = uuid::Uuid::now_v7().to_string();
+            Some(StockChangePayload::new(tenant_slug, ext, r.stock, ts, key))
         })
         .collect())
 }
@@ -438,18 +513,21 @@ mod tests {
     }
 
     #[test]
-    fn notify_disabled_is_noop() {
+    fn dispatch_disabled_is_noop() {
         // No tokio runtime needed: disabled config short-circuits before spawn.
         let c = Arc::new(cfg(false, "https://nope.invalid", "s"));
-        notify(
-            c,
-            "t".into(),
-            vec![StockChange {
-                external_id: "SKU".into(),
-                new_stock: 1,
-                delta: -1,
-            }],
-        );
+        let p = StockChangePayload::new("t", "SKU", 1, "2026-05-24T00:00:00+00:00", "k");
+        dispatch(c, vec![p]);
+    }
+
+    #[test]
+    fn publishable_gate() {
+        // Must be flagged publishable AND carry a non-empty external_id.
+        assert!(publishable(Some("PARA-500"), true));
+        assert!(!publishable(Some("PARA-500"), false)); // internal SKU
+        assert!(!publishable(None, true)); // no commercial id
+        assert!(!publishable(Some(""), true)); // empty id
+        assert!(!publishable(None, false));
     }
 
     #[test]
