@@ -262,6 +262,30 @@ Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz)
   Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
   `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
 
+### Catálogo de rubros (onboarding "elige tu rubro")
+
+Al primer inicio el operador elige su **rubro** de un catálogo (no solo
+farmacia/minimarket). Guardar en `admin_setting business.vertical`. La UI gatea
+features por rubro (ej: recetas/controlados solo farmacia). Detalle + plan en
+[`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md). Catálogo v1
+(taxonomía reusada de **DSS**): `farmacia`·`minimarket`·`restaurant`·`cafe`·`tienda`·
+`belleza`·`servicios`·`otro`. Pack seed hoy: farmacia ✅, minimarket ✅; resto se
+agrega al validar el rubro (disciplina anti-framework). Valor interno EN, UI ES
+(mapear es→en al llamar seed-demo).
+
+### Integración DSS (storefront) + cliente universal cross-platform
+
+- **DSS** (https://dss-spa.vercel.app, Vercel/CF, fundador) = **capa storefront** de
+  RutAgentIA (front-office del cliente final), acoplada por el seam HTTP existente
+  ([ADR-0012](./docs/adr/0012-web-onprem-interop.md)/[ADR-0013](./docs/adr/0013-sync-bidireccional-stock.md)):
+  pull catálogo · push stock · push pedidos. Sin cross-import; web = tier pago;
+  core sigue offline. Plan en capas L0→L4 → [ADR-0014](./docs/adr/0014-dss-storefront-integration.md).
+- **Cliente universal**: el client ya es **Tauri 2** → un solo frontend a
+  desktop+Android+iOS + build PWA/web. Server = verdad offline-first; móvil/web =
+  terminales en red (URL de server configurable; tablet en WiFi = caja móvil). App
+  del OPERADOR (Tauri) ≠ storefront del CLIENTE FINAL (DSS). Plan en
+  [ADR-0015](./docs/adr/0015-universal-cross-platform-client.md).
+
 ## Vault Obsidian — leer bajo demanda
 
 Ubicación: `C:/Users/Administrator/Documents/obsidian-mind/`
