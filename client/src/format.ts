@@ -30,6 +30,60 @@ export function num(value: number): string {
   return NUM.format(value);
 }
 
+// --- POS cash math -----------------------------------------------------------
+// Pure helpers behind the POS checkout. Extracted so the vuelto/quick-cash logic
+// (the cashier-loop money path) is regression-tested without a DOM. CLP has no
+// minor unit, so everything here is integer pesos.
+
+/** Parse a free-typed CLP amount ("$10.000", "10000") to a non-negative integer.
+ *  Strips every non-digit (so a stray "-" can't yield a negative tender) and
+ *  floors garbage/empty to 0 — the cart total never reads "NaN". */
+export function parseCash(raw: string): number {
+  const n = Number(raw.replace(/[^\d]/g, ""));
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+}
+
+/** Cash to hand the server for a single-tender cash sale: the tendered amount
+ *  when it covers the total, otherwise the exact total — so the server's balance
+ *  check passes and it computes a non-negative authoritative vuelto. Never sends
+ *  less than the total (a short tender would be rejected). */
+export function effectiveTender(received: number, total: number): number {
+  return received >= total ? received : total;
+}
+
+/** Live vuelto preview for a cash sale.
+ *  - `ok`    → received covers total; `amount` is the change due.
+ *  - `short` → received falls short; `amount` is the shortfall (positive).
+ *  - `none`  → nothing to show yet (no cash typed, or empty cart).
+ *  `amount` is always non-negative; the sign lives in `kind`, never in the
+ *  number — so the UI can't accidentally render a negative vuelto. */
+export function vuelto(
+  received: number,
+  total: number,
+): { kind: "ok" | "short" | "none"; amount: number } {
+  if (received <= 0 || total <= 0) return { kind: "none", amount: 0 };
+  return received >= total
+    ? { kind: "ok", amount: received - total }
+    : { kind: "short", amount: total - received };
+}
+
+/** Quick-cash chip denominations for a total: the exact amount first, then the
+ *  next round 1k / 5k / 10k bill at or above it. Deduped, positive, ascending,
+ *  capped at 4. Empty for a non-positive total. */
+export function quickCashAmounts(total: number): number[] {
+  if (total <= 0) return [];
+  return Array.from(
+    new Set([
+      Math.round(total),
+      Math.ceil(total / 1000) * 1000,
+      Math.ceil(total / 5000) * 5000,
+      Math.ceil(total / 10000) * 10000,
+    ]),
+  )
+    .filter((a) => a > 0)
+    .slice(0, 4);
+}
+
 // --- IVA CL 19% --------------------------------------------------------------
 // Mirrors the server's `crates/dte/src/emit.rs::desglose_iva` EXACTLY so the
 // cashier's live preview matches the amounts the server will stamp on the DTE:

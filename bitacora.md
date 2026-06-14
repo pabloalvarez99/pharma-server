@@ -2043,3 +2043,18 @@ Tests: +`publishable_gate` + `dispatch_disabled_is_noop` (api lib, puros), +2 CL
 - **`vertical.test.ts`** (NUEVO, 7 tests) — parse/default/gates/catálogo.
 - **Task 3 (botón demo-seed) BLOQUEADO**: requiere seeder backend inexistente; no se fabricó botón sin backend (ver findings). **`login.ts` pre-auth** sigue farmacia-only (no puede leer settings sin token) — anotado para lane de branding.
 - GATE cliente verde: `npm run build` (tsc --noEmit + vite) OK, `npm test` 27 passed (7 vertical + 20 format). Cero Rust tocado → sin workspace GATE.
+
+
+## 2026-06-13 — PAUL: cashier loop multi-rubro — POS money helpers + keyboard checkout (client)
+
+Branch `feat/client-test-pos-loop`, worktree `pharma-wt-p2-pos` off `origin/feature/erp-parity`. Test manual del loop de cajero (POS → caja → devolución → arqueo) sobre `pos.ts`/`devoluciones.ts`/`clientes.ts`/`caja.ts`.
+
+**Hallazgo multi-rubro (positivo)**: el loop de cajero **ya es rubro-neutral**. Ninguna de las 4 vistas asume farmacia — no renderizan receta, principio activo ni advertencia de interacción. `active_ingredient` existe en el tipo `Product` (api.ts) pero el POS nunca lo muestra (la card de resultado es nombre+stock+precio). Lo farmacéutico vive sólo en `recetas.ts`/`inventory.ts` (fuera del loop). En minimarket el POS funciona idéntico sin estorbo. No requirió condicionar nada.
+
+**Fixes (money + teclado, el path más sensible del brief)**:
+- **`format.ts`**: extraídos 4 helpers puros desde `pos.ts` (antes inline, sin test): `parseCash` (strip cosméticos → entero ≥0; un `-` perdido NO produce tender negativo), `effectiveTender` (single-tender: manda lo recibido si cubre, si no el total exacto — nunca menos), `vuelto` (`ok|short|none`, **amount siempre ≥0; el signo vive en `kind`**, la UI no puede pintar un vuelto negativo), `quickCashAmounts` (chips: exacto + siguiente billete 1k/5k/10k, dedup, ≤4, ascendente). `pos.ts` ahora los importa.
+- **Teclado-only**: el checkout estaba atrapado en click de mouse. Extraído `charge()` reusable; `chargeBtn` y **Enter en el campo de efectivo** ambos lo invocan → cerrar venta cash sin tocar el mouse (el path rápido de cajero). El guard `chargeBtn.disabled` dobla como lock de re-entrancy: un doble-Enter no postea dos veces.
+
+**Tests**: +13 en `format.test.ts` (parseCash/effectiveTender/vuelto/quickCashAmounts, incl. invariante de no-negatividad del vuelto y dedup de chips) → **33 passed** (era 20). GATE cliente verde: `npm run build` (tsc --noEmit + vite build) rc=0 + `vitest run` 33/33.
+
+**Notas / follow-ups** (no en este PR): devoluciones `tipo` (parcial/total) es etiqueta libre, no derivada de las cantidades elegidas; restock en devolución no es automático (la boleta no porta product id — documentado en la vista); navegación teclado de qty (+/−) sigue siendo mouse.
