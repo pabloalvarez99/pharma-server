@@ -1418,6 +1418,7 @@ dependencies = [
  "dte",
  "flate2",
  "hex",
+ "hmac 0.12.1",
  "httpmock",
  "license",
  "pharma-core",
