@@ -19,6 +19,7 @@ pub mod seed;
 pub mod settings;
 
 pub mod errors;
+pub mod invariants;
 pub mod money;
 
 pub use errors::{DomainError, DomainResult};
