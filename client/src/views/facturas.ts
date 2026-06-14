@@ -72,7 +72,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     <section class="view view-facturas">
       <div class="view-head">
         <div>
-          <h2>Facturas y otros documentos</h2>
+          <h2 class="rb-display">Facturas y otros documentos</h2>
           <p class="muted">Factura electrónica, notas de crédito/débito y guía de despacho (DTE 33/61/56/52).</p>
         </div>
       </div>
@@ -80,7 +80,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
       <div id="fac-caf" class="caf-banner muted">Consultando folios…</div>
 
       <div class="panel fac-emit">
-        <h3 class="section-title">Emitir documento</h3>
+        <h3 class="section-title rb-display">Emitir documento</h3>
         <div class="bol-emit-form">
           <div class="field">
             <label for="fac-tipo">Tipo de documento</label>
@@ -96,7 +96,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
           </div>
         </div>
 
-        <h4 class="section-title">Cliente (receptor)</h4>
+        <h4 class="section-title rb-display">Cliente (receptor)</h4>
         <div class="bol-emit-form">
           <div class="field"><label for="fac-rut">RUT</label>
             <input id="fac-rut" type="text" placeholder="76123456-7" autocomplete="off" inputmode="text" />
@@ -111,13 +111,13 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
             <input id="fac-comuna" type="text" placeholder="La Serena" autocomplete="off" /></div>
         </div>
 
-        <h4 class="section-title">Items (precios con IVA incluido)</h4>
+        <h4 class="section-title rb-display">Items (precios con IVA incluido)</h4>
         <div id="fac-items"></div>
-        <button id="fac-add-item" class="btn-ghost">+ Agregar item</button>
+        <button id="fac-add-item" class="btn-ghost rb-btn ghost">+ Agregar item</button>
         <div id="fac-totals" class="fac-totals" hidden></div>
 
         <div id="fac-ref-block" hidden>
-          <h4 class="section-title">Documento que corrige (referencia)</h4>
+          <h4 class="section-title rb-display">Documento que corrige (referencia)</h4>
           <p class="muted">Las notas siempre referencian el documento original.</p>
           <div class="bol-emit-form">
             <div class="field"><label for="fac-ref-tipo">Tipo doc. original</label>
@@ -140,7 +140,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
             <label for="fac-pass">Clave del certificado</label>
             <input id="fac-pass" type="password" placeholder="••••••••" autocomplete="off" />
           </div>
-          <button id="fac-emit-btn" class="btn-primary">Emitir y firmar</button>
+          <button id="fac-emit-btn" class="btn-primary rb-btn">Emitir y firmar</button>
         </div>
         <div id="fac-emit-status" class="cfg-status" hidden></div>
       </div>
@@ -150,7 +150,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         <select id="fac-list-tipo">
           ${TIPOS.map((t) => `<option value="${t.value}">${t.label}</option>`).join("")}
         </select>
-        <button id="fac-refresh" class="btn-ghost">Actualizar</button>
+        <button id="fac-refresh" class="btn-ghost rb-btn ghost">Actualizar</button>
       </div>
 
       <div id="fac-list">${tableSkeleton(6)}</div>
@@ -325,7 +325,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
         return;
       }
       listEl.innerHTML = `
-        <table class="data-table">
+        <table class="data-table rb-table">
           <thead>
             <tr><th class="num">Folio</th><th>Fecha</th><th>Receptor</th><th class="num">Total</th><th>Estado</th><th>SII</th><th>Acciones</th></tr>
           </thead>
@@ -346,14 +346,14 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     const k = cssKey(d.id);
     const actions: string[] = [];
     if (d.has_xml) {
-      actions.push(`<button class="btn-ghost" id="fac-xml-${k}" title="Descargar XML firmado">XML</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="fac-xml-${k}" title="Descargar XML firmado">XML</button>`);
     }
     if (d.estado === "signed") {
-      actions.push(`<button class="btn-ghost" id="fac-send-${k}" title="Enviar al SII (requiere plan Business)">Enviar SII</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="fac-send-${k}" title="Enviar al SII (requiere plan Business)">Enviar SII</button>`);
       actions.push(`<button class="btn-ghost-danger" id="fac-cancel-${k}" title="Anular antes de enviar">Anular</button>`);
     }
     if (d.estado === "sent") {
-      actions.push(`<button class="btn-ghost" id="fac-poll-${k}" title="Consultar veredicto del SII">Consultar</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="fac-poll-${k}" title="Consultar veredicto del SII">Consultar</button>`);
     }
     return `
       <tr data-dte="${escapeHtml(d.id)}">

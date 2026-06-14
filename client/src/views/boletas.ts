@@ -49,7 +49,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
     <section class="view view-boletas">
       <div class="view-head">
         <div>
-          <h2>Boletas electrónicas</h2>
+          <h2 class="rb-display">Boletas electrónicas</h2>
           <p class="muted">Emisión, firma y envío al SII de boletas (DTE 39).</p>
         </div>
       </div>
@@ -57,7 +57,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
       <div id="bol-caf" class="caf-banner muted">Consultando folios…</div>
 
       <div class="panel bol-emit">
-        <h3 class="section-title">Emitir boleta de una venta</h3>
+        <h3 class="section-title rb-display">Emitir boleta de una venta</h3>
         <p class="muted">Ingresa el id de la orden pagada (lo muestra el POS al cobrar) y la clave del certificado digital. La boleta queda firmada localmente; el envío al SII es opcional.</p>
         <div class="bol-emit-form">
           <div class="field">
@@ -72,13 +72,13 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
             <label for="bol-rut">RUT receptor (opcional)</label>
             <input id="bol-rut" type="text" placeholder="66666666-6 (consumidor final)" autocomplete="off" />
           </div>
-          <button id="bol-emit-btn" class="btn-primary">Emitir y firmar</button>
+          <button id="bol-emit-btn" class="btn-primary rb-btn">Emitir y firmar</button>
         </div>
         <div id="bol-emit-status" class="cfg-status" hidden></div>
       </div>
 
       <div class="panel bol-libro">
-        <h3 class="section-title">Libro de ventas mensual</h3>
+        <h3 class="section-title rb-display">Libro de ventas mensual</h3>
         <p class="muted">XML <code>LibroCompraVenta</code> con las boletas aceptadas del mes. Sin firma para revisión contable; con la clave del certificado se descarga firmado (EnvioLibro) listo para el portal SII.</p>
         <div class="bol-emit-form">
           <div class="field">
@@ -89,8 +89,8 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
             <label for="bol-libro-pass">Clave del certificado (sólo firmado)</label>
             <input id="bol-libro-pass" type="password" placeholder="••••••••" autocomplete="off" />
           </div>
-          <button id="bol-libro-btn" class="btn-ghost">Descargar XML</button>
-          <button id="bol-libro-signed-btn" class="btn-primary">Descargar firmado</button>
+          <button id="bol-libro-btn" class="btn-ghost rb-btn ghost">Descargar XML</button>
+          <button id="bol-libro-signed-btn" class="btn-primary rb-btn">Descargar firmado</button>
         </div>
         <div id="bol-libro-status" class="cfg-status" hidden></div>
       </div>
@@ -100,7 +100,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
         <select id="bol-estado">
           ${ESTADOS.map((e) => `<option value="${e.value}">${e.label}</option>`).join("")}
         </select>
-        <button id="bol-refresh" class="btn-ghost">Actualizar</button>
+        <button id="bol-refresh" class="btn-ghost rb-btn ghost">Actualizar</button>
       </div>
 
       <div id="bol-list">${tableSkeleton(6)}</div>
@@ -149,7 +149,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
         return;
       }
       listEl.innerHTML = `
-        <table class="data-table">
+        <table class="data-table rb-table">
           <thead>
             <tr><th class="num">Folio</th><th>Fecha</th><th>Receptor</th><th class="num">Total</th><th>Estado</th><th>SII</th><th>Acciones</th></tr>
           </thead>
@@ -170,14 +170,14 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
     const k = cssKey(d.id);
     const actions: string[] = [];
     if (d.has_xml) {
-      actions.push(`<button class="btn-ghost" id="bol-xml-${k}" title="Descargar XML firmado">XML</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-xml-${k}" title="Descargar XML firmado">XML</button>`);
     }
     if (d.estado === "signed") {
-      actions.push(`<button class="btn-ghost" id="bol-send-${k}" title="Enviar al SII (requiere plan Pro)">Enviar SII</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-send-${k}" title="Enviar al SII (requiere plan Pro)">Enviar SII</button>`);
       actions.push(`<button class="btn-ghost-danger" id="bol-cancel-${k}" title="Anular antes de enviar">Anular</button>`);
     }
     if (d.estado === "sent") {
-      actions.push(`<button class="btn-ghost" id="bol-poll-${k}" title="Consultar veredicto del SII">Consultar</button>`);
+      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-poll-${k}" title="Consultar veredicto del SII">Consultar</button>`);
     }
     return `
       <tr data-dte="${escapeHtml(d.id)}">

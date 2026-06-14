@@ -26,7 +26,7 @@ export function renderAuditoria(host: HTMLElement, serverUrl: string): void {
     <section class="view view-auditoria">
       <div class="view-head">
         <div>
-          <h2>Auditoría</h2>
+          <h2 class="rb-display">Auditoría</h2>
           <p class="muted">Registro inmutable de cambios. Sólo administradores.</p>
         </div>
         <div class="audit-filters">
@@ -36,11 +36,11 @@ export function renderAuditoria(host: HTMLElement, serverUrl: string): void {
             ${ACTION_OPTS.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("")}
           </select>
           <input id="aud-table" type="search" class="audit-table-input" placeholder="Tabla (ej. products)" autocomplete="off" />
-          <button id="aud-search" type="button" class="btn-ghost">Buscar</button>
+          <button id="aud-search" type="button" class="btn-ghost rb-btn ghost">Buscar</button>
         </div>
       </div>
 
-      <div class="table-card">
+      <div class="table-card rb-card">
         <div id="aud-table-host">${tableSkeleton(7)}</div>
       </div>
     </section>
@@ -99,7 +99,7 @@ function renderTable(
   const hasNext = offset + rows.length < total;
 
   host.innerHTML = `
-    <table class="data-table">
+    <table class="data-table rb-table">
       <thead>
         <tr>
           <th>Fecha</th>
@@ -116,8 +116,8 @@ function renderTable(
     <div class="audit-pager">
       <span class="muted">${num(from)}–${num(to)} de ${num(total)}</span>
       <div class="audit-pager-btns">
-        <button type="button" class="btn-ghost" id="aud-prev" ${hasPrev ? "" : "disabled"}>‹ Anteriores</button>
-        <button type="button" class="btn-ghost" id="aud-next" ${hasNext ? "" : "disabled"}>Siguientes ›</button>
+        <button type="button" class="btn-ghost rb-btn ghost" id="aud-prev" ${hasPrev ? "" : "disabled"}>‹ Anteriores</button>
+        <button type="button" class="btn-ghost rb-btn ghost" id="aud-next" ${hasNext ? "" : "disabled"}>Siguientes ›</button>
       </div>
     </div>
   `;

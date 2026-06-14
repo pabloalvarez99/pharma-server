@@ -2096,3 +2096,25 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+
+## 2026-06-14 — BOB: harness E2E `npm run e2e` (ambos verticales) + compliance rutbrand + guard recetas
+
+Branch `feat/client-e2e-compliance` (off `feature/erp-parity` fresco). Goal c (E2E) + compliance rutbrand.
+
+**Harness E2E (`client/e2e/`, UN comando `npm run e2e`)** — shape API-level (sin webview, lo más liviano que corre en esta caja Windows): levanta un build real de `pharma-api` contra un SurrealKv tempdir y pega los mismos `/api/v1/*` que invocan las vistas Tauri (`client/src-tauri/src/lib.rs`).
+- `lib/harness.mjs`: build cacheado de `pharma-api`+`pharma` (release, `E2E_REBUILD=1` fuerza), bootstrap CLI (migrate + 2 tenants + admin/owner) con el server ABAJO (SurrealKv = file lock single-writer), boot del server + poll `/health/ready`, cliente HTTP Bearer + aserciones + `knownBug` (xfail).
+- `flows.mjs`: golden path por vertical = login → seed-demo (`POST /admin/seed-demo`, el mismo servicio del botón "datos demo") → catálogo → abrir caja → venta POS (201, stock−1) → boleta receipt → emitir boleta SII (Free sin CAF/cert → 4xx limpio, NUNCA 5xx) → devolución → arqueo → cierre.
+- `run.mjs`: orquesta build → tempdb → bootstrap → boot → golden path en **pharmacy Y minimarket** → teardown. Exit ≠ 0 ante cualquier fallo (gate LOCAL; CI billing-walled).
+- `README.md`: shape + por qué + env knobs + aserciones.
+- `package.json`: script `e2e`. `tsconfig include:["src"]` excluye `e2e/` del tsc.
+
+**Resultado real (build release 30m primera vez):** `E2E: 25 passed, 0 failed, 2 known-bug xfail`. Multi-rubro confirmado por API: minimarket vende SIN receta, `active_ingredient:null`, y emite boleta igual que farmacia (boleta = universal).
+
+**BUG-bob-001 (P1, fuera de mi lane, reportado a paxoloop/paul):** toda devolución da 500 DB_ERROR. `devoluciones.ts` manda `tipo:"total"|"parcial"` (deriveTipo) pero el schema `migrations/0007_sales.surql:66` exige `tipo IN ['venta','cancelacion','garantia','error']`. La lista tb LEE `d.tipo=="total"`. El feature mezcla dos ejes (scope vs motivo) en un campo. La harness lo deja como **xfail** (no debilita el assert: cuando se arregle, `refund.ok` vuelve true y corre la aserción real de restock → la harness se pone roja = señal para borrar el xfail).
+
+**Compliance rutbrand (mis 5 vistas):** clases `rb-*` de `client/src/brand.css` aplicadas ADITIVAMENTE (no rompen `styles.css`) en `boletas/facturas/recetas/auditoria/reports.ts` (títulos `rb-display`, botones `rb-btn[/ghost]`, tablas `rb-table`, cards `rb-card`, pills `rb-pill ok/ctrl`, inputs `rb-input`). brand.css cableado global vía `index.html <link>` (CSP `style-src 'self'` lo permite) — DEDUP con ye si ye lo importa en main.ts (ver BLOCKERS).
+
+**Guard recetas (MULTI-RUBRO):** `renderRecetas` ahora `loadVertical→hasRecetas`; si `!farmacia` muestra placeholder "Recetas no aplican a este rubro" en vez del módulo de controlados (defense-in-depth; el shell ya dropeaba el nav, esto cubre deep-link/estado).
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `npm test` (vitest 52/52) + `npm run e2e` (25/0/2, exit 0). `format.ts` ya tenía cobertura completa (33 tests) → sin cambios.
