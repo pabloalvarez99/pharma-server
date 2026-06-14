@@ -2096,3 +2096,45 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — PAUL: crate `sync` — durable stock-sync outbox (Fase 12, ADR-0013)
+
+Branch `feat/sync-outbox-fase-12` (off fresh `origin/feature/erp-parity`). Capa
+**durable** complementaria al webhook in-memory de stock (`crates/api/src/stock_webhook.rs`,
+PR #162). El webhook es best-effort: tras agotar 3 reintentos **dropea** el evento y
+confía en el reconcile nightly (pull-catalog). Esto pierde exactitud near-real-time
+toda la ventana del outage. ADR-0013 §offline-first pide explícitamente "si la web
+está caída, pharma-server acumula deltas y los empuja cuando vuelve" — esta cola lo
+implementa **acotada y on-disk** (no reintroduce el memory-leak que el ADR rechazó
+para el pusher in-memory: las filas transicionan a sent/failed y son podables).
+
+**Crate nuevo `crates/sync`** (workspace member; reusa `agent` + `db`):
+- `model.rs` — `StockDelta` (schema 1.0, `external_id`/`new_stock` absoluto idempotente
+  bajo retry, no el delta), `OutboxStatus` (pending|sent|failed), `OutboxRow`.
+- `envelope.rs` — `SyncEnvelope`: NO inventa wire format; es un `agent::Envelope`
+  Ed25519 en topic `stock.delta` (reusa canonical + verify). `parse_verified()` re-verifica
+  la firma en el drain → una fila adulterada nunca se entrega.
+- `transport.rs` — traits `PushTransport`/`PullTransport` (seam; HTTP/NATS real fuera,
+  receiver en el OTRO repo; tests usan mock peer).
+- `outbox.rs` — `enqueue` idempotente en (tenant, msg_id); `drain` serializado
+  per-tenant con `AsyncMutex` (mismo patrón que `sales::service::SALE_LOCKS`,
+  BUG-003/004 PR #158) + retry-on-conflict en cada write. **Orden preservado**:
+  drena oldest-first, una falla *retryable* detiene el drain en la cabeza de la cola
+  (N+1 nunca antes que N); una falla *permanente* (tamper/contract 4xx) marca failed y
+  salta (no atasca la cola). Backoff `[1,5,30]`s, budget `MAX_ATTEMPTS=4`.
+- `migrations/0027_sync_outbox.surql` — tabla `sync_outbox` tenant-scoped: índice
+  `(tenant, status, created_at)` para drain ordenado + UNIQUE `(tenant, msg_id)` para
+  idempotencia. (0024=publish_to_web #162, 0026=api_key marvin #178 → me corrí a 0027.)
+
+**Tests (13, kv-mem)**: 12 integración (enqueue happy/idempotente, cross-tenant
+aislado, drain delivers+ack, peer-offline queda pending → drena al volver, backoff
+gatea hasta due, budget agotado→failed con attempts=4, orden head-of-line en falla
+transitoria, envelope adulterado rechazado en drain, contract-error permanente sin
+consumir retry, re-drain idempotente sin doble-entrega, push→pull roundtrip preserva
+orden) + 1 property test (`prop_order.rs`, 24 casos): secuencias aleatorias
+interleavadas en 2 tenants → cada peer recibe el orden FIFO de SU tenant, sin fugas
+cross-tenant.
+
+GATE: `fmt --check` + `clippy --workspace --all-targets -D warnings` verde (boxeé
+`SyncError::Db`/`Agent` por `result_large_err`, igual que `DomainError`) + `cargo test
+-p sync` 13/13 + workspace test.

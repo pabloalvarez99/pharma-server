@@ -13,6 +13,7 @@ members = [
     "crates/agent",
     "crates/license",
     "crates/dte",
+    "crates/sync",
 ]
 # `client/` is the Tauri 2 desktop client (LoL-style operator launcher). It is a
 # STANDALONE cargo project with its own [workspace] in client/src-tauri so the
