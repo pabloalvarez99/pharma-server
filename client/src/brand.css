@@ -1,0 +1,113 @@
+/* RutBusiness — design system (canonical tokens + base components)
+ *
+ * Marca: "El sistema operativo de tu negocio. Tu RUT es la llave."
+ * Multi-rubro (farmacia = beachhead). Fuente de verdad visual; el showcase
+ * vivo está en client/brand/rutbusiness-ui.html (ADR-0015 cliente universal).
+ *
+ * Uso: import "./brand.css" en main.ts (lo cablea la lane de onboarding/shell).
+ * Tipografías (cargar en index.html <head>):
+ *   Fraunces (display) · IBM Plex Sans (UI) · IBM Plex Mono (RUT/CLP/folios)
+ *   https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap
+ */
+
+:root{
+  /* superficie (dark = default) */
+  --rb-ink:#0a0d13; --rb-bg:#0b0f16; --rb-surface:#121826; --rb-surface-2:#161d2d;
+  --rb-raise:#1b2335; --rb-line:#232c40; --rb-line-soft:#1a2233;
+  /* texto */
+  --rb-txt:#eef2f9; --rb-txt-2:#9aa6bd; --rb-txt-3:#5c6880;
+  /* marca + estados */
+  --rb-brand:#19d39a; --rb-brand-deep:#0f9d75; --rb-brand-soft:rgba(25,211,154,.12);
+  --rb-amber:#f5b53d; --rb-danger:#ff5d6c; --rb-info:#5aa9ff;
+  /* forma */
+  --rb-radius:14px; --rb-radius-sm:9px;
+  --rb-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 18px 40px -22px rgba(0,0,0,.8);
+  /* tipografía */
+  --rb-ff-display:"Fraunces",Georgia,serif;
+  --rb-ff-sans:"IBM Plex Sans",system-ui,sans-serif;
+  --rb-ff-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+:root[data-theme="light"]{
+  --rb-ink:#f3efe7; --rb-bg:#f7f4ee; --rb-surface:#ffffff; --rb-surface-2:#fbf9f5;
+  --rb-raise:#ffffff; --rb-line:#e6e0d4; --rb-line-soft:#efeae0;
+  --rb-txt:#161d12; --rb-txt-2:#5c6657; --rb-txt-3:#97a08c;
+  --rb-brand:#0f9d75; --rb-brand-deep:#0b7d5d; --rb-brand-soft:rgba(15,157,117,.10);
+  --rb-shadow:0 1px 0 rgba(255,255,255,.6) inset, 0 22px 44px -28px rgba(40,30,10,.35);
+}
+
+/* base */
+body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
+  font-family:var(--rb-ff-sans);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+
+/* tipografía utilitaria */
+.rb-display{font-family:var(--rb-ff-display);font-weight:600;letter-spacing:-.02em}
+.rb-mono{font-family:var(--rb-ff-mono)}
+.rb-num{font-family:var(--rb-ff-mono);letter-spacing:-.01em} /* CLP / RUT / folios */
+.rb-muted{color:var(--rb-txt-2)} .rb-dim{color:var(--rb-txt-3)}
+
+/* wordmark + mark */
+.rb-wordmark{font-family:var(--rb-ff-display);font-weight:600;letter-spacing:-.02em}
+.rb-wordmark b{color:var(--rb-brand);font-weight:600}
+.rb-mark{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:11px;
+  background:linear-gradient(145deg,var(--rb-raise),var(--rb-surface));
+  border:1px solid var(--rb-line);box-shadow:var(--rb-shadow);position:relative}
+.rb-mark svg{width:22px;height:22px;color:var(--rb-txt)}
+.rb-mark .rb-dv{position:absolute;right:6px;bottom:6px;width:7px;height:7px;border-radius:50%;
+  background:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-bg),0 0 14px var(--rb-brand)}
+
+/* botón primario */
+.rb-btn{border:none;border-radius:var(--rb-radius-sm);padding:13px 16px;cursor:pointer;
+  font-family:var(--rb-ff-sans);font-weight:600;font-size:15px;transition:.18s;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep));color:#04140e;
+  box-shadow:0 10px 24px -12px var(--rb-brand)}
+.rb-btn:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.rb-btn:active{transform:translateY(0)}
+.rb-btn.ghost{background:var(--rb-surface);color:var(--rb-txt-2);border:1px solid var(--rb-line);box-shadow:none}
+.rb-btn.ghost:hover{color:var(--rb-txt);border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+/* input (+ estados validación, p.ej. RUT mód-11) */
+.rb-input{width:100%;background:var(--rb-surface);border:1px solid var(--rb-line);
+  border-radius:var(--rb-radius-sm);color:var(--rb-txt);font-family:var(--rb-ff-mono);
+  font-size:15px;padding:13px 14px;transition:.18s;outline:none}
+.rb-input::placeholder{color:var(--rb-txt-3)}
+.rb-input:focus{border-color:var(--rb-brand);box-shadow:0 0 0 4px var(--rb-brand-soft);background:var(--rb-surface-2)}
+.rb-input.ok{border-color:var(--rb-brand)} .rb-input.bad{border-color:var(--rb-danger)}
+.rb-label{display:block;font-size:12px;color:var(--rb-txt-2);margin-bottom:7px;font-weight:500}
+
+/* card / panel */
+.rb-card{background:var(--rb-surface);border:1px solid var(--rb-line);
+  border-radius:var(--rb-radius);box-shadow:var(--rb-shadow)}
+
+/* KPI */
+.rb-kpi{background:var(--rb-surface);border:1px solid var(--rb-line);border-radius:var(--rb-radius);
+  padding:17px 18px;box-shadow:var(--rb-shadow)}
+.rb-kpi .k{font-size:12px;color:var(--rb-txt-2);margin-bottom:10px}
+.rb-kpi .v{font-family:var(--rb-ff-mono);font-weight:600;font-size:26px}
+.rb-kpi.alert{border-color:color-mix(in srgb,var(--rb-amber) 45%,var(--rb-line))}
+.rb-kpi.alert .v{color:var(--rb-amber)}
+.rb-up{color:var(--rb-brand)} .rb-down{color:var(--rb-danger)}
+
+/* pills (tipo de producto/venta) */
+.rb-pill{font-family:var(--rb-ff-mono);font-size:11px;padding:2px 8px;border-radius:6px}
+.rb-pill.ok{color:var(--rb-brand);background:var(--rb-brand-soft)}
+.rb-pill.rx{color:var(--rb-info);background:color-mix(in srgb,var(--rb-info) 14%,transparent)}
+.rb-pill.ctrl{color:var(--rb-amber);background:color-mix(in srgb,var(--rb-amber) 14%,transparent)}
+
+/* nav (sidebar) */
+.rb-nav{font-size:14px;color:var(--rb-txt-2);display:flex;align-items:center;gap:11px;
+  padding:10px 11px;border-radius:10px;cursor:pointer;transition:.15s}
+.rb-nav:hover{background:var(--rb-surface-2);color:var(--rb-txt)}
+.rb-nav.active{background:var(--rb-brand-soft);color:var(--rb-txt)}
+.rb-tag{font-family:var(--rb-ff-mono);font-size:10px;color:var(--rb-amber);
+  border:1px solid color-mix(in srgb,var(--rb-amber) 40%,transparent);padding:1px 6px;border-radius:6px}
+
+/* tabla de datos */
+.rb-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.rb-table th{text-align:left;font-weight:500;color:var(--rb-txt-3);font-size:11px;
+  text-transform:uppercase;letter-spacing:.06em;padding:11px 18px}
+.rb-table td{padding:12px 18px;border-top:1px solid var(--rb-line-soft)}
+.rb-table .num{text-align:right;font-family:var(--rb-ff-mono)}
+
+/* reveal escalonado (carga de pantalla) */
+.rb-rv{opacity:0;transform:translateY(10px);animation:rb-rv .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes rb-rv{to{opacity:1;transform:none}}
