@@ -79,6 +79,66 @@ pub struct DteItem {
     pub exento: bool,
 }
 
+/// Tipo de movimiento de un descuento/recargo global (`TpoMov` del xsd SII).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TipoMovDr {
+    /// Descuento (resta de la base).
+    #[serde(rename = "D")]
+    Descuento,
+    /// Recargo (suma a la base).
+    #[serde(rename = "R")]
+    Recargo,
+}
+
+impl TipoMovDr {
+    /// Código SII (`D`/`R`).
+    pub fn code(self) -> &'static str {
+        match self {
+            TipoMovDr::Descuento => "D",
+            TipoMovDr::Recargo => "R",
+        }
+    }
+}
+
+/// Cómo se interpreta `ValorDR` (`TpoValor` del xsd SII).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TipoValorDr {
+    /// Porcentaje sobre la base afecta/exenta.
+    #[serde(rename = "%")]
+    Porcentaje,
+    /// Monto CLP fijo.
+    #[serde(rename = "$")]
+    Monto,
+}
+
+impl TipoValorDr {
+    /// Código SII (`%`/`$`).
+    pub fn code(self) -> &'static str {
+        match self {
+            TipoValorDr::Porcentaje => "%",
+            TipoValorDr::Monto => "$",
+        }
+    }
+}
+
+/// Descuento o recargo global a nivel documento (elemento `DscRcgGlobal` del
+/// xsd SII). Hasta 20 por documento; se aplica sobre el total afecto o exento
+/// (según `ind_exe`) y ajusta el desglose de IVA. `valor` es el porcentaje
+/// (si `tipo_valor == Porcentaje`) o el monto CLP (si `Monto`); el caller
+/// (`emit::build_documento`) calcula el monto aplicado.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DescuentoGlobal {
+    pub nro_linea: u32,
+    pub tipo_mov: TipoMovDr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glosa: Option<String>,
+    pub tipo_valor: TipoValorDr,
+    pub valor: rust_decimal::Decimal,
+    /// `IndExeDR = 1` cuando el D/R aplica al monto exento. None = afecto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ind_exe: Option<i32>,
+}
+
 /// Referencia a otro documento tributario (elemento `Referencia` del xsd SII).
 /// Obligatoria en notas de crédito/débito (56/61); opcional en factura (33) y
 /// guía de despacho (52). No aplica a boleta (39).
@@ -127,6 +187,11 @@ pub struct Dte {
     /// `cod_ref`; opcionales en 33/52.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub referencias: Vec<DteReferencia>,
+    /// Descuentos/recargos globales (`DscRcgGlobal`). Ya aplicados al desglose
+    /// (`monto_neto`/`iva`/`monto_exento`/`monto_total`); se conservan para
+    /// renderizarlos en el XML. Vacío = documento sin D/R global.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub descuentos_globales: Vec<DescuentoGlobal>,
     pub monto_neto: rust_decimal::Decimal,
     pub iva: rust_decimal::Decimal,
     pub monto_exento: rust_decimal::Decimal,

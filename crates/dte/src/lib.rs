@@ -37,5 +37,6 @@ pub use sign::{
     build_signed_dte, sign_libro, sign_xml, verify_libro_signature, verify_signature, KeyMaterial,
 };
 pub use types::{
-    Caf, CertDigital, Dte, DteEstado, DteItem, DteReferencia, DteTipo, EmisorConfig, SiiEnv,
+    Caf, CertDigital, DescuentoGlobal, Dte, DteEstado, DteItem, DteReferencia, DteTipo,
+    EmisorConfig, SiiEnv, TipoMovDr, TipoValorDr,
 };

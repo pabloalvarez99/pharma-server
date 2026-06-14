@@ -77,6 +77,7 @@ pub fn dte_boleta_minimal(folio: i64) -> Dte {
         comuna_receptor: None,
         ind_traslado: None,
         referencias: vec![],
+        descuentos_globales: vec![],
         monto_neto: Decimal::ZERO,
         iva: Decimal::ZERO,
         monto_exento: Decimal::ZERO,

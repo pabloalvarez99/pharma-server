@@ -434,6 +434,7 @@ pub async fn emit_boleta(
         comuna_receptor: None,
         ind_traslado: None,
         referencias: vec![],
+        descuentos_globales: vec![],
         // Boleta en modo monto-total (IVA incluido); neto/iva desglosado es
         // opcional en el xsd 39 y el renderer lo soporta así.
         monto_neto: Decimal::ZERO,
@@ -611,6 +612,7 @@ pub async fn emit_documento(
             .collect(),
         referencias,
         ind_traslado: req.ind_traslado,
+        descuentos_globales: vec![],
     };
 
     // 2. Orden vinculada (opcional, tenant-scoped).
@@ -1036,6 +1038,7 @@ async fn build_libro_xml(db: &db::Db, tenant: &Thing, period: &str) -> Result<St
                 comuna_receptor: None,
                 ind_traslado: None,
                 referencias: vec![],
+                descuentos_globales: vec![],
                 monto_neto: r.monto_neto,
                 iva: r.iva,
                 monto_exento: r.monto_exento,
@@ -1320,6 +1323,7 @@ fn stub_for_transition(row: &DteRow) -> Result<dte::Dte, ApiError> {
         comuna_receptor: None,
         ind_traslado: None,
         referencias: vec![],
+        descuentos_globales: vec![],
         monto_neto: Decimal::ZERO,
         iva: Decimal::ZERO,
         monto_exento: Decimal::ZERO,

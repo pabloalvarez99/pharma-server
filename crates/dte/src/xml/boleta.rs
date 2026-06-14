@@ -26,6 +26,7 @@ pub fn render(dte: &Dte, emisor: &EmisorConfig) -> Result<String, DteError> {
         id,
         encabezado: build_encabezado(dte, emisor),
         detalle: dte.items.iter().map(build_detalle).collect(),
+        dsc_rcg_global: crate::xml::factura::build_dsc_rcg_global(dte),
         referencia: Vec::new(),
         tmst_firma: dte.fecha_emision.format("%Y-%m-%dT%H:%M:%S").to_string(),
     };

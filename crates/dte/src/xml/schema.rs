@@ -28,6 +28,10 @@ pub struct Documento {
     pub encabezado: Encabezado,
     #[serde(rename = "Detalle")]
     pub detalle: Vec<Detalle>,
+    /// Descuentos/recargos globales (xsd: tras Detalle, antes de Referencia).
+    /// Hasta 20; vacío = no se serializa.
+    #[serde(rename = "DscRcgGlobal", skip_serializing_if = "Vec::is_empty")]
+    pub dsc_rcg_global: Vec<DscRcgGlobal>,
     /// Referencias a otros documentos (xsd: tras Detalle, antes del TED).
     /// Obligatorias en notas 56/61; vacío = no se serializa.
     #[serde(rename = "Referencia", skip_serializing_if = "Vec::is_empty")]
@@ -115,6 +119,24 @@ pub struct Totales {
     pub iva: Option<i64>,
     #[serde(rename = "MntTotal")]
     pub mnt_total: i64,
+}
+
+/// Elemento `DscRcgGlobal` (xsd: NroLinDR → TpoMov → GlosaDR → TpoValor →
+/// ValorDR → IndExeDR). Hasta 20 por documento.
+#[derive(Debug, Serialize)]
+pub struct DscRcgGlobal {
+    #[serde(rename = "NroLinDR")]
+    pub nro_lin_dr: u32,
+    #[serde(rename = "TpoMov")]
+    pub tpo_mov: String,
+    #[serde(rename = "GlosaDR", skip_serializing_if = "Option::is_none")]
+    pub glosa_dr: Option<String>,
+    #[serde(rename = "TpoValor")]
+    pub tpo_valor: String,
+    #[serde(rename = "ValorDR")]
+    pub valor_dr: String,
+    #[serde(rename = "IndExeDR", skip_serializing_if = "Option::is_none")]
+    pub ind_exe_dr: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
