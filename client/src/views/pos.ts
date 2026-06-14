@@ -26,6 +26,7 @@ import {
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import "./rutbrand.css";
 
 interface CartLine {
   product: string; // record id
@@ -82,7 +83,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
           <div class="pos-total">
             <span>Total</span>
-            <strong id="pos-total-val">${clp(0)}</strong>
+            <strong id="pos-total-val" class="rb-num">${clp(0)}</strong>
           </div>
 
           <!-- customer (loyalty) -->
@@ -237,10 +238,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     vueltoEl.hidden = false;
     if (v.kind === "ok") {
       vueltoEl.className = "pos-vuelto ok";
-      vueltoEl.innerHTML = `Vuelto <strong>${clp(v.amount)}</strong>`;
+      vueltoEl.innerHTML = `Vuelto <strong class="rb-num">${clp(v.amount)}</strong>`;
     } else {
       vueltoEl.className = "pos-vuelto short";
-      vueltoEl.innerHTML = `Faltan <strong>${clp(v.amount)}</strong>`;
+      vueltoEl.innerHTML = `Faltan <strong class="rb-num">${clp(v.amount)}</strong>`;
     }
   }
 
@@ -279,9 +280,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         <button type="button" class="cli-result pos-cust-result" data-id="${escapeHtml(c.id)}">
           <div class="pos-cust-info">
             <div class="cell-main">${escapeHtml(c.name)}</div>
-            <div class="cell-sub muted">${c.rut ? escapeHtml(c.rut) : "sin RUT"}</div>
+            <div class="cell-sub muted rb-num">${c.rut ? escapeHtml(c.rut) : "sin RUT"}</div>
           </div>
-          <span class="cli-points">${num(c.loyalty_points)} pts</span>
+          <span class="cli-points rb-num">${num(c.loyalty_points)} pts</span>
         </button>`,
         )
         .join("");
@@ -314,7 +315,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       custChipEl.hidden = false;
       custChipEl.innerHTML = `
         <span class="customer-chip-name">${escapeHtml(selectedCustomer.name)}</span>
-        <span class="customer-chip-pts">${num(selectedCustomer.points)} pts</span>
+        <span class="customer-chip-pts rb-num">${num(selectedCustomer.points)} pts</span>
         <button type="button" class="customer-chip-x" aria-label="Quitar cliente">×</button>`;
       custChipEl.querySelector<HTMLButtonElement>(".customer-chip-x")!.addEventListener("click", () => {
         selectedCustomer = null;
@@ -380,14 +381,14 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
              aria-label="${escapeHtml(l.name)}, ${l.qty} unidad(es). Flechas para ajustar, Supr para quitar.">
           <div class="pos-line-info">
             <div class="cell-main">${escapeHtml(l.name)}</div>
-            <div class="cell-sub muted">${clp(l.unit_price)} c/u</div>
+            <div class="cell-sub muted rb-num">${clp(l.unit_price)} c/u</div>
           </div>
           <div class="qty">
             <button type="button" class="qty-btn" data-act="dec" aria-label="Quitar uno">−</button>
-            <span class="qty-val">${l.qty}</span>
+            <span class="qty-val rb-num">${l.qty}</span>
             <button type="button" class="qty-btn" data-act="inc" aria-label="Agregar uno" ${l.qty >= l.stock ? "disabled" : ""}>+</button>
           </div>
-          <div class="pos-line-sub num">${clp(toNumber(l.unit_price) * l.qty)}</div>
+          <div class="pos-line-sub num rb-num">${clp(toNumber(l.unit_price) * l.qty)}</div>
         </div>`,
         )
         .join("");
@@ -546,24 +547,24 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         (it) => `
       <tr>
         <td>${escapeHtml(it.name)}</td>
-        <td class="num">${num(it.qty)}</td>
-        <td class="num">${clp(it.unit_price)}</td>
-        <td class="num">${clp(it.line_total)}</td>
+        <td class="num rb-num">${num(it.qty)}</td>
+        <td class="num rb-num">${clp(it.unit_price)}</td>
+        <td class="num rb-num">${clp(it.line_total)}</td>
       </tr>`,
       )
       .join("");
     const discountRow =
       toNumber(r.discount) > 0
-        ? `<div class="rcpt-line"><span>Descuento</span><strong>− ${clp(r.discount)}</strong></div>`
+        ? `<div class="rcpt-line"><span>Descuento</span><strong class="rb-num">− ${clp(r.discount)}</strong></div>`
         : "";
     const cashBlock =
       r.payment_method === "pos_cash" && r.cash_amount
-        ? `<div class="rcpt-line"><span>Recibido</span><strong>${clp(r.cash_amount)}</strong></div>
-           <div class="rcpt-line"><span>Vuelto</span><strong>${clp(r.change ?? "0")}</strong></div>`
+        ? `<div class="rcpt-line"><span>Recibido</span><strong class="rb-num">${clp(r.cash_amount)}</strong></div>
+           <div class="rcpt-line"><span>Vuelto</span><strong class="rb-num">${clp(r.change ?? "0")}</strong></div>`
         : "";
     const loyaltyBlock =
       r.loyalty_points_awarded > 0
-        ? `<div class="rcpt-line accent"><span>Puntos ganados</span><strong>+${num(r.loyalty_points_awarded)}</strong></div>`
+        ? `<div class="rcpt-line accent"><span>Puntos ganados</span><strong class="rb-num">+${num(r.loyalty_points_awarded)}</strong></div>`
         : "";
 
     modalHost.innerHTML = `
@@ -571,7 +572,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         <div class="modal receipt-modal" id="receipt-print">
           <div class="rcpt-head">
             <div class="rcpt-tenant">${escapeHtml(r.tenant_name)}</div>
-            <div class="rcpt-meta muted">Boleta ${escapeHtml(r.folio_or_number)} · ${escapeHtml(when)}</div>
+            <div class="rcpt-meta muted">Boleta <span class="rb-num">${escapeHtml(r.folio_or_number)}</span> · ${escapeHtml(when)}</div>
             ${r.cashier ? `<div class="rcpt-meta muted">Cajero: ${escapeHtml(r.cashier)}</div>` : ""}
           </div>
           <table class="data-table rcpt-table">
@@ -579,9 +580,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             <tbody>${rows}</tbody>
           </table>
           <div class="rcpt-totals">
-            <div class="rcpt-line"><span>Subtotal</span><strong>${clp(r.subtotal)}</strong></div>
+            <div class="rcpt-line"><span>Subtotal</span><strong class="rb-num">${clp(r.subtotal)}</strong></div>
             ${discountRow}
-            <div class="rcpt-line total"><span>Total</span><strong>${clp(r.total)}</strong></div>
+            <div class="rcpt-line total"><span>Total</span><strong class="rb-num">${clp(r.total)}</strong></div>
             <div class="rcpt-line"><span>Pago</span><strong>${escapeHtml(METHOD_LABEL[r.payment_method] ?? r.payment_method)}</strong></div>
             ${cashBlock}
             ${loyaltyBlock}
@@ -619,9 +620,9 @@ function resultCard(p: Product): string {
     <button type="button" class="pos-result ${out ? "is-out" : ""}" ${out ? "disabled" : ""}>
       <div class="pos-result-info">
         <div class="cell-main">${escapeHtml(p.name)}</div>
-        <div class="cell-sub muted">Stock: ${num(p.stock)}${out ? " · agotado" : ""}</div>
+        <div class="cell-sub muted">Stock: <span class="rb-num">${num(p.stock)}</span>${out ? " · agotado" : ""}</div>
       </div>
-      <div class="pos-result-price num">${clp(p.price)}</div>
+      <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>
   `;
 }

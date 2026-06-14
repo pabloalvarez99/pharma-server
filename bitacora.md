@@ -2096,3 +2096,16 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+
+## 2026-06-14 — PAUL: marca RutBusiness + touch-responsive en cashier loop (POS/devoluciones/clientes/caja)
+
+Branch `feat/client-rutbrand-pos` (off `feature/erp-parity` @ b27b3db). Aplica la marca **RutBusiness** (ADR-0015 cliente universal) a mis 4 vistas sin tocar `styles.css` ni `main.ts` (el wiring global de `brand.css` es de la lane onboarding/shell).
+
+**Nuevo `client/src/views/rutbrand.css`** (mío): `@import "../brand.css"` (trae tokens `--rb-*` + utilidades `rb-*`) e importado desde cada uno de mis módulos de vista → se empaqueta una sola vez sin tocar el entry point. Dos preocupaciones, ambas scoped bajo `.view-pos/.view-caja/.view-devoluciones/.view-clientes`:
+1. **CLP/RUT/folios en mono tabular** — regla `.rb-num` (font `--rb-ff-mono` + `tabular-nums`) + barrido de las celdas numéricas existentes. Marqué los montos/RUT/folios cabecera con `class="rb-num"` en el markup de las 4 vistas (total POS, subtotales de línea, precios, vuelto, boleta, arqueo, monto inicial, diff de caja, puntos/total/visitas de cliente, RUT). OFFLINE-FIRST: sin CDN de fuentes (CSP lo bloquea + el producto corre offline); el fallback `ui-monospace` igual da alineación tabular.
+2. **Touch-responsive tablet** — gated en `@media (pointer: coarse), (max-width:1024px)` para que el desktop mouse+teclado quede visualmente idéntico (el fast-path teclado-only es JS, intacto). Tap targets ≥44px: `qty-btn` (era 26px→44px), `pos-method` 48px, `pos-result` 56px, `pos-charge` 56px, quick-cash chips 44px, inputs 48px @16px (evita zoom-jump del webview), botones/inputs de modal y filas de resultado 44px. Grid POS adapta a tablet landscape (cart 320px + cards 180px); portrait <920px ya colapsaba a 1 columna en styles.css.
+
+Sin cambios de lógica: solo clases additive + un CSS nuevo. `api.ts` intacto (append-only respetado, no se tocó). No se halló bug ni hardcode de farmacia en estas vistas (son rubro-agnósticas).
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite, CSS 43kB con brand.css inlined) + `vitest run` 52/52.
