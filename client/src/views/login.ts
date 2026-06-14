@@ -11,8 +11,8 @@
 //  - Existing Tauri command + payload shapes (server_url/tenant/email/password)
 //    and the onSuccess(session, serverUrl) callback are untouched.
 import { login, serverHealth, type SessionInfo } from "../api";
+import { resolveServerConfig, validateServerUrl, connectionState } from "./first-run";
 
-const FALLBACK_SERVER = "http://127.0.0.1:8080";
 const DEFAULT_TENANT = "tufarmacia";
 const DEFAULT_EMAIL = "admin@tufarmacia.cl";
 const SERVER_STORE_KEY = "pharma:last-server";
@@ -41,12 +41,7 @@ function storedServer(): string | undefined {
  *  we surface the "Conexión avanzada" panel by default so a LAN client on a
  *  different machine isn't silently pointed at its own localhost. */
 function resolveServer(): { value: string; firstLaunch: boolean } {
-  const stored = storedServer();
-  const env = envServer();
-  return {
-    value: stored ?? env ?? FALLBACK_SERVER,
-    firstLaunch: !stored && !env,
-  };
+  return resolveServerConfig({ stored: storedServer(), env: envServer() });
 }
 
 interface FieldId {
@@ -281,26 +276,26 @@ export function renderLogin(
   const connBtn = root.querySelector<HTMLButtonElement>("#conn-test-btn")!;
   const connStatus = root.querySelector<HTMLSpanElement>("#conn-test-status")!;
   connBtn.addEventListener("click", async () => {
-    const url = getInput(FIELDS.server.input).value.trim();
-    if (!url) {
+    // Validate the typed URL inline before probing — a missing scheme / typo is
+    // a clearer error than a generic "no se pudo contactar".
+    const check = validateServerUrl(getInput(FIELDS.server.input).value);
+    if (!check.ok) {
       connStatus.className = "conn-test-status err";
-      connStatus.textContent = "Escribe una URL primero.";
+      connStatus.textContent = check.error;
       return;
     }
     connBtn.disabled = true;
     connStatus.className = "conn-test-status";
     connStatus.textContent = "Probando…";
     try {
-      const health = await serverHealth(url);
-      const ok = health.reachable && health.status === "ok" && health.db === "ok";
-      connStatus.className = `conn-test-status ${ok ? "ok" : "warn"}`;
-      connStatus.textContent = ok
-        ? "✓ Servidor accesible."
-        : `Servidor responde (estado: ${health.status}, db: ${health.db}).`;
-    } catch (err) {
+      const conn = connectionState(await serverHealth(check.url));
+      const cls = conn.kind === "ok" ? "ok" : conn.kind === "degraded" ? "warn" : "err";
+      connStatus.className = `conn-test-status ${cls}`;
+      connStatus.textContent = conn.message;
+    } catch {
+      const conn = connectionState(null, true);
       connStatus.className = "conn-test-status err";
-      connStatus.textContent =
-        typeof err === "string" ? err : "No se pudo contactar al servidor.";
+      connStatus.textContent = conn.message;
     } finally {
       connBtn.disabled = false;
     }
@@ -341,8 +336,9 @@ export function renderLogin(
       setFieldError("password", "La contraseña es obligatoria.");
       firstInvalid ??= "password";
     }
-    if (!serverUrl) {
-      setFieldError("server", "La URL del servidor no puede estar vacía.");
+    const serverCheck = validateServerUrl(serverUrl);
+    if (!serverCheck.ok) {
+      setFieldError("server", serverCheck.error);
       // Auto-open the disclosure so the user sees the error.
       const adv = root.querySelector<HTMLDetailsElement>("#adv-conn");
       if (adv) adv.open = true;
