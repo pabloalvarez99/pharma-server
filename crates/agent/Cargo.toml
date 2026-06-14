@@ -17,6 +17,8 @@ hex.workspace = true
 # Relay store-and-forward queue persists to the tenant-scoped `agent_relay`
 # table; the shipped binary uses the workspace kv-surrealkv engine.
 surrealdb.workspace = true
+# Observability spans/events for the relay enqueue/drain/redrive path.
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

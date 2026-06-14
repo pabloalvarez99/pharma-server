@@ -2116,3 +2116,17 @@ Branch `feat/agent-relay-offline-peer` (off fresh `origin/feature/erp-parity`). 
 Tests (kv-mem, 6 nuevos = 18 total -p agent): enqueue→drain happy, peer-offline→pending→drena en retry (con avance de tiempo), tamper-at-rest rechazado en drain (0 entregas), enqueue idempotente + re-drain sin doble entrega, envelope forjado rechazado en enqueue, backoff acotado+exponencial. GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace`.
 
 **Nota para paxoloop (integración)**: el board pre-asignó 0024=paul/0025=lucy, pero `origin/feature/erp-parity` ya trae `0024_product_publish_to_web.surql` → tomé **0025** (libre en todos los remotes). La branch de paul `feat/sync-engine-fase-12` aún no publicó su migración de outbox; cuando lo haga necesitará 0026 (no 0024). Lane previa de lucy (audit-log query, `feat/api-audit-log-query-v3-lucy`) quedó **superseded**: `origin/feature/erp-parity` ya tiene un endpoint de audit más completo (`GET /api/v1/admin/audit-log`, `audit.rs` vía PR #103) — sin PR para esa branch.
+
+## 2026-06-14 — LUCY: relay backpressure + dead-letter queue + tracing (LANE B, PR)
+
+Branch `feat/agent-relay-backpressure-dlq` (cascada off `feat/agent-relay-offline-peer` para mantener PR #176 como unidad revisable limpia). Endurece la cola de relay (`crates/agent/src/relay.rs`) contra particiones de red largas + observabilidad.
+
+**Backpressure** — un peer permanentemente caído no debe hacer crecer la cola sin límite. `enqueue` ahora rechaza un envelope *nuevo* con `AgentError::QueueFull(cap)` cuando el peer ya tiene `MAX_PENDING_PER_PEER=10_000` filas `pending`. Las filas terminales (`sent`/`failed`) no cuentan. Re-encolar un envelope ya en cola (idempotencia) **nunca** se rechaza: corta antes del chequeo de profundidad, así los callers retry-on-timeout siguen idempotentes incluso al tope. Factoricé `enqueue_capped(.., cap)` privado (el `enqueue` público usa la constante) para testear el tope sin materializar 10k filas.
+
+**Dead-letter queue** — una fila terminal `failed` *es* la entrada DLQ. `list_dead_letters(db, tenant, peer, limit)` las inspecciona (orden `next_attempt_at DESC`); `redrive(db, tenant, msg_id)` y `redrive_all(db, tenant, peer)` resetean `failed → pending` (attempts=0, `last_error=NONE`, due now) vía `UPDATE … WHERE status='failed' RETURN AFTER`, de modo que `redrive` de una fila `pending`/`sent`/inexistente es no-op (`false`) — jamás resucita un `sent` ni doble-entrega.
+
+**Observabilidad** — `enqueue`/`drain`/`redrive`/`redrive_all` instrumentados con `#[tracing::instrument(.., err)]`. `warn!` en cola llena y en cada dead-letter (verify-at-rest o tope de intentos), `debug!` con el tally del `DrainReport`, `info!` en redrive. Dep nueva: `tracing.workspace = true` en `crates/agent`.
+
+**Gotcha resuelto**: `ORDER BY updated_at` falla en SurrealDB 2.6 (`Missing order idiom` — el campo de orden debe estar en la proyección SELECT). Cambiado a `ORDER BY next_attempt_at DESC` (ya proyectado).
+
+Tests (kv-mem, 4 nuevos = 10 relay / 22 -p agent): backpressure rechaza al tope + idempotente al tope, dead-letter listado→redrive→drena, redrive no-op sobre pending/sent/inexistente, redrive_all resetea N + segundo pase no-op. Helper `drive_to_failed` lleva una fila a terminal vía drains offline avanzando el tiempo. GATE workspace verde.

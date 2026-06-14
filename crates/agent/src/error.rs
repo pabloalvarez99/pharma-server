@@ -54,6 +54,12 @@ pub enum AgentError {
     /// rescheduled with backoff rather than dropped.
     #[error("relay transport: {0}")]
     Transport(String),
+
+    /// Backpressure: the relay queue for a peer is at its pending-depth cap, so
+    /// the new envelope is refused instead of letting the queue grow unbounded
+    /// while the peer is offline. Carries the cap that was hit.
+    #[error("cola de relay llena (máx {0} pendientes para el peer)")]
+    QueueFull(usize),
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;
