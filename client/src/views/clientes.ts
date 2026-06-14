@@ -23,6 +23,7 @@ import {
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
+import "./rutbrand.css";
 
 const HISTORY_LIMIT = 20;
 
@@ -242,9 +243,9 @@ function resultRow(c: Customer): string {
     <button type="button" class="cli-result" data-id="${escapeHtml(c.id)}">
       <div class="cli-result-info">
         <div class="cell-main">${escapeHtml(c.name)}</div>
-        ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
+        ${sub ? `<div class="cell-sub muted rb-num">${escapeHtml(sub)}</div>` : ""}
       </div>
-      <div class="cli-points">${num(c.loyalty_points)} pts</div>
+      <div class="cli-points rb-num">${num(c.loyalty_points)} pts</div>
     </button>
   `;
 }
@@ -272,7 +273,7 @@ async function loadDetail(
 
 function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
   const contact = [
-    c.rut ? `RUT ${escapeHtml(c.rut)}` : "",
+    c.rut ? `RUT <span class="rb-num">${escapeHtml(c.rut)}</span>` : "",
     c.phone ? escapeHtml(c.phone) : "",
     c.email ? escapeHtml(c.email) : "",
   ]
@@ -298,9 +299,9 @@ function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
       ${c.active ? "" : `<span class="pill pill-warn">Inactivo</span>`}
     </div>
     <div class="cli-stats">
-      <div class="cli-stat"><span class="kpi-label">Puntos</span><strong>${num(c.loyalty_points)}</strong></div>
-      <div class="cli-stat"><span class="kpi-label">Total comprado</span><strong>${clp(c.total_spent)}</strong></div>
-      <div class="cli-stat"><span class="kpi-label">Visitas</span><strong>${num(c.visit_count)}</strong></div>
+      <div class="cli-stat"><span class="kpi-label">Puntos</span><strong class="rb-num">${num(c.loyalty_points)}</strong></div>
+      <div class="cli-stat"><span class="kpi-label">Total comprado</span><strong class="rb-num">${clp(c.total_spent)}</strong></div>
+      <div class="cli-stat"><span class="kpi-label">Visitas</span><strong class="rb-num">${num(c.visit_count)}</strong></div>
     </div>
   `;
 
@@ -327,8 +328,8 @@ function historyRow(o: CustomerOrder): string {
     <tr>
       <td>${fmtDate(o.created_at)}</td>
       <td>${escapeHtml(payLabel(o.payment_method))}</td>
-      <td class="num">${num(o.items_count)}</td>
-      <td class="num">${clp(o.total)}</td>
+      <td class="num rb-num">${num(o.items_count)}</td>
+      <td class="num rb-num">${clp(o.total)}</td>
       <td><span class="pill ${tone}">${escapeHtml(statusLabel(o.status))}</span></td>
     </tr>
   `;

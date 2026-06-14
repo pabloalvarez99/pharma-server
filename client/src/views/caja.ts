@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { clp, toNumber } from "../format";
 import { kpiSkeleton, asMessage, escapeHtml } from "./inventory";
+import "./rutbrand.css";
 
 export function renderCaja(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -121,7 +122,7 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
               <span class="badge tier-free">Abierta</span>
             </div>
             <div class="caja-card-meta">
-              <span>Monto inicial</span><strong>${clp(s.opening_cash)}</strong>
+              <span>Monto inicial</span><strong class="rb-num">${clp(s.opening_cash)}</strong>
             </div>
             <div class="caja-card-meta">
               <span>Apertura</span><strong>${fmtDateTime(s.opened_at)}</strong>
@@ -276,11 +277,11 @@ async function closeFlow(
       toNumber(a.movements_in) -
       toNumber(a.movements_out);
     arqueoEl.innerHTML = `
-      <div class="arqueo-row"><span>Apertura</span><strong>${clp(a.session.opening_cash)}</strong></div>
-      <div class="arqueo-row"><span>Ventas efectivo</span><strong>${clp(a.cash_sales)}</strong></div>
-      <div class="arqueo-row"><span>Ingresos</span><strong>${clp(a.movements_in)}</strong></div>
-      <div class="arqueo-row"><span>Egresos</span><strong>−${clp(a.movements_out)}</strong></div>
-      <div class="arqueo-row arqueo-total"><span>Esperado en caja</span><strong>${clp(expected)}</strong></div>
+      <div class="arqueo-row"><span>Apertura</span><strong class="rb-num">${clp(a.session.opening_cash)}</strong></div>
+      <div class="arqueo-row"><span>Ventas efectivo</span><strong class="rb-num">${clp(a.cash_sales)}</strong></div>
+      <div class="arqueo-row"><span>Ingresos</span><strong class="rb-num">${clp(a.movements_in)}</strong></div>
+      <div class="arqueo-row"><span>Egresos</span><strong class="rb-num">−${clp(a.movements_out)}</strong></div>
+      <div class="arqueo-row arqueo-total"><span>Esperado en caja</span><strong class="rb-num">${clp(expected)}</strong></div>
     `;
   } catch (err) {
     arqueoEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
@@ -298,7 +299,7 @@ async function closeFlow(
     const tone = diff === 0 ? "ok" : diff > 0 ? "warn" : "danger";
     const label = diff === 0 ? "Cuadra" : diff > 0 ? "Sobrante" : "Faltante";
     diffEl.className = `arqueo-diff arqueo-${tone}`;
-    diffEl.innerHTML = `${label}: <strong>${clp(Math.abs(diff))}</strong>`;
+    diffEl.innerHTML = `${label}: <strong class="rb-num">${clp(Math.abs(diff))}</strong>`;
     diffEl.hidden = false;
   };
   countedEl.addEventListener("input", recomputeDiff);

@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import "./rutbrand.css";
 
 const PAGE_LIMIT = 60;
 
@@ -101,11 +102,11 @@ function devolucionRow(d: Devolucion): string {
   return `
     <tr>
       <td><span class="muted">${escapeHtml(fmtDate(d.created_at))}</span></td>
-      <td><div class="cell-sub muted">${escapeHtml(orderShort)}</div></td>
+      <td><div class="cell-sub muted rb-num">${escapeHtml(orderShort)}</div></td>
       <td>${tipo}</td>
       <td><div class="cell-main">${escapeHtml(d.motivo)}</div></td>
       <td><span class="muted">${escapeHtml(metodoLabel(d.metodo_reembolso))}</span></td>
-      <td class="num">${clp(d.total_devuelto)}</td>
+      <td class="num rb-num">${clp(d.total_devuelto)}</td>
     </tr>
   `;
 }
@@ -300,7 +301,7 @@ function renderItemRows(host: HTMLElement, receipt: Receipt): void {
       <div class="po-line dev-line">
         <div class="cell-sub">
           <div class="cell-main">${escapeHtml(it.name)}</div>
-          <span class="muted">vendido ${num(it.qty)} · ${clp(it.unit_price)} c/u</span>
+          <span class="muted rb-num">vendido ${num(it.qty)} · ${clp(it.unit_price)} c/u</span>
         </div>
         <input class="po-r-qty dev-l-qty" type="number" min="0" step="1" max="${it.qty}" value="0" />
       </div>`,
@@ -308,7 +309,7 @@ function renderItemRows(host: HTMLElement, receipt: Receipt): void {
     .join("");
   host.innerHTML = `
     <div class="modal-field">
-      <label class="modal-label">Ítems a devolver (boleta ${escapeHtml(receipt.folio_or_number)})</label>
+      <label class="modal-label">Ítems a devolver (boleta <span class="rb-num">${escapeHtml(receipt.folio_or_number)}</span>)</label>
       <div class="po-lines">${rows}</div>
     </div>
   `;
