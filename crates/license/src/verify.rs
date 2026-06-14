@@ -8,7 +8,7 @@ use ed25519_dalek::Signature;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::keys::{lookup_did, LICENSER_KEYS};
+use crate::keys::{self, lookup_did, LICENSER_KEYS};
 use crate::schema::{License, Tier, SCHEMA_VERSION};
 
 #[derive(Debug, Error)]
@@ -19,6 +19,8 @@ pub enum LicenseError {
     UnsupportedSchemaVersion { found: u32 },
     #[error("key_id desconocido: {0} (binario stale o license falsa)")]
     UnknownKeyId(String),
+    #[error("key_id retirada: {0} (clave del licenser rotada y dada de baja)")]
+    RetiredKeyId(String),
     #[error("firma inválida")]
     InvalidSignature,
     #[error("formato inválido: {0}")]
@@ -31,7 +33,15 @@ pub enum LicenseError {
 /// licenser keys embedded in this binary. Does NOT check expiry — caller
 /// applies the grace-period policy from `gate::is_expired` / `is_in_grace`.
 pub fn parse_and_verify(json: &[u8]) -> Result<License, LicenseError> {
-    parse_and_verify_with_keys(json, LICENSER_KEYS)
+    let license = parse_and_verify_with_keys(json, LICENSER_KEYS)?;
+    // ADR-0007: a key retired from the embedded trust store no longer
+    // validates licenses, even though its DID is kept for audit.
+    if !keys::is_accepted(&license.key_id) {
+        return Err(LicenseError::RetiredKeyId(
+            keys::resolve_key_id(&license.key_id).to_string(),
+        ));
+    }
+    Ok(license)
 }
 
 /// Same as [`parse_and_verify`] but with a custom key table. Used by tests
@@ -54,16 +64,18 @@ pub fn parse_and_verify_with_keys(
         ));
     }
 
+    // ADR-0007: empty key_id (legacy license, pre-rotation) resolves to the
+    // legacy key so rotation never invalidates historical licenses.
+    let resolved = keys::resolve_key_id(&license.key_id);
     let did = keys
         .iter()
-        .find(|(k, _)| *k == license.key_id)
+        .find(|(k, _)| *k == resolved)
         .map(|(_, d)| *d)
-        .or_else(|| lookup_did(&license.key_id))
-        .ok_or_else(|| LicenseError::UnknownKeyId(license.key_id.clone()))?;
+        .or_else(|| lookup_did(resolved))
+        .ok_or_else(|| LicenseError::UnknownKeyId(resolved.to_string()))?;
     if did != license.issuer_did {
         return Err(LicenseError::InvalidFormat(format!(
-            "issuer_did no coincide con DID de key_id={}",
-            license.key_id
+            "issuer_did no coincide con DID de key_id={resolved}"
         )));
     }
 

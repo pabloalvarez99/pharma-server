@@ -65,6 +65,11 @@ pub struct License {
     /// `null` legal only when `tier == Free` (perpetuo).
     pub expires_at: Option<DateTime<Utc>>,
     pub issuer_did: String,
+    /// Identifies which licenser key signed this license (ADR-0007 rotation).
+    /// Absent/empty → legacy license, verified against `keys::LEGACY_KEY_ID`
+    /// so a key rotation never invalidates licenses minted before this field
+    /// existed.
+    #[serde(default)]
     pub key_id: String,
     /// Base64 (standard, padded) of the 64-byte Ed25519 signature over the
     /// canonical-JSON encoding of this struct with `signature` removed.
