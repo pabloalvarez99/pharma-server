@@ -193,30 +193,173 @@ export async function goodsReceiptFlow({ tenant, email, password, vertical }) {
   const poLineId = detail?.items?.[0]?.id;
   check(!!poLineId, "PO detail returns a line id");
 
-  // 4. receive the goods — the operator's "Recibir" button --------------------
+  // 4. issue the draft so it can receive — the missing transition -------------
   //    BUG-bob-002: create makes a `draft`, but POST /receive only accepts
   //    sent/approved/partially_received (purchasing service.rs) and NO route
-  //    issues a draft→sent transition (no /approve, no /send, create can't set
-  //    status). So the receipt 409s and on-hand stock NEVER moves — the whole
-  //    goods-receipt pillar is unreachable through the app. xfail until a draft→
-  //    sent transition lands; when it does, receive.ok flips true and the stock
-  //    assertion below runs for real, turning a stale xfail red.
-  const recv = await c.post(
+  //    issues a draft→sent transition. We PROBE for one (POST /send, then
+  //    /approve) so the moment a transition route lands the rest of this flow
+  //    runs for real — no edit to this file needed. Today both 404, so the PO
+  //    stays `draft` and the receive below 409s (xfail).
+  const issued = await issuePurchaseOrder(c, poId);
+
+  // 5. receive HALF the goods (partial) → stock += UNIT_COST*half, WAC recompute,
+  //    PO → partially_received. Then receive the rest → received, stock += rest.
+  //    The whole sub-flow is GUARDED on the PO becoming receivable, so it is
+  //    forward-compatible: it stays an xfail until BUG-bob-002 is fixed, and the
+  //    day it is, these real stock + WAC assertions run and a regression turns
+  //    the gate red (the signal to delete the xfail).
+  const UNIT_COST = 1000;
+  const half = Math.floor(QTY / 2); // 2
+  const rest = QTY - half; // 3
+  const costBefore = parseDecimal(target.cost); // null on a never-received SKU
+
+  const recv1 = await c.post(
     `/purchase-orders/${encodeURIComponent(poId)}/receive`,
-    { lines: [{ po_line_id: poLineId, qty_received: QTY }] },
+    { lines: [{ po_line_id: poLineId, qty_received: half }] },
     { expectOk: false },
   );
-  if (recv.ok) {
-    check(true, "purchase order received");
-    const after = (await c.get(`/products/${encodeURIComponent(target.id)}`)).body;
-    eq(after.stock, stockBefore + QTY, "stock increased by received quantity");
-  } else {
+  if (!recv1.ok) {
     knownBug(
       `BUG-bob-002 compras: draft PO no se puede recibir — POST /receive exige ` +
         `sent/approved/partially_received y no existe transición draft→sent ` +
-        `(sin /approve ni /send) → ${recv.status} ${recv.body?.error?.code ?? ""}`,
+        `(probé /send y /approve: ${issued || "ambas 404"}) → ${recv1.status} ` +
+        `${recv1.body?.error?.code ?? ""}`,
     );
+    return;
   }
+
+  // --- from here on the pillar works; assert the numbers byte-for-byte --------
+  check(true, "partial receipt accepted");
+  eq(recv1.body?.status, "partially_received", "PO is partially_received after partial receipt");
+  const afterHalf = (await c.get(`/products/${encodeURIComponent(target.id)}`)).body;
+  eq(afterHalf.stock, stockBefore + half, "stock += partial qty after first receipt");
+  // WAC after first receipt: a SKU with no prior cost seeds the line average,
+  // otherwise it dilutes the old cost. Matches service.rs receive_purchase_order_lines.
+  const wacHalf = expectedWac(stockBefore, costBefore, half, UNIT_COST);
+  check(
+    closeTo(parseDecimal(afterHalf.cost), wacHalf),
+    `WAC after partial = ${fmtWac(wacHalf)} (got ${afterHalf.cost})`,
+  );
+
+  const recv2 = await c.post(
+    `/purchase-orders/${encodeURIComponent(poId)}/receive`,
+    { lines: [{ po_line_id: poLineId, qty_received: rest }] },
+    { expectOk: true },
+  );
+  eq(recv2.body?.status, "received", "PO is received after the remaining qty");
+  const afterAll = (await c.get(`/products/${encodeURIComponent(target.id)}`)).body;
+  eq(afterAll.stock, stockBefore + QTY, "stock += full ordered qty after both receipts");
+  // Both receipts are at the SAME unit cost, so the final WAC is the same blend
+  // as if received in one shot: (S0·C0 + QTY·U)/(S0+QTY).
+  const wacAll = expectedWac(stockBefore, costBefore, QTY, UNIT_COST);
+  check(
+    closeTo(parseDecimal(afterAll.cost), wacAll),
+    `WAC after full receipt = ${fmtWac(wacAll)} (got ${afterAll.cost})`,
+  );
+
+  // over-receipt must be refused (can't receive more than ordered) ------------
+  const over = await c.post(
+    `/purchase-orders/${encodeURIComponent(poId)}/receive`,
+    { lines: [{ po_line_id: poLineId, qty_received: 1 }] },
+    { expectOk: false },
+  );
+  check(over.status >= 400 && over.status < 500, "over-receipt on a completed PO refused (4xx, no 5xx)");
+}
+
+/** Probe for a draft→issued transition so a fresh PO can be received. Returns a
+ *  short note describing what worked (or "" if neither route exists yet). Best
+ *  effort: a 404/405 means the route isn't there — not an assertion failure. */
+async function issuePurchaseOrder(c, poId) {
+  for (const verb of ["send", "approve"]) {
+    const r = await c.post(
+      `/purchase-orders/${encodeURIComponent(poId)}/${verb}`,
+      {},
+      { expectOk: false },
+    );
+    if (r.ok) return `/${verb} ok`;
+  }
+  return "";
+}
+
+/** Weighted-average cost after receiving `qty` units at `unitCost` into a SKU
+ *  holding `stock0` units at `cost0` (null = never costed → seed the line avg).
+ *  Mirrors service.rs: a first receipt seeds, otherwise blends. */
+function expectedWac(stock0, cost0, qty, unitCost) {
+  if (cost0 == null || stock0 <= 0) return unitCost; // first costing seeds
+  return (stock0 * cost0 + qty * unitCost) / (stock0 + qty);
+}
+
+function parseDecimal(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// rust_decimal keeps more scale than we reconstruct in JS float; compare within
+// a cent so a byte-for-byte expectation doesn't flake on the last digit.
+function closeTo(a, b, eps = 0.01) {
+  return a != null && b != null && Math.abs(a - b) <= eps;
+}
+function fmtWac(n) {
+  return n == null ? "(none)" : n.toFixed(4);
+}
+
+/** Minimarket multi-rubro contract (charter): recetas/controlados are
+ *  PHARMACY-ONLY, but boleta/DTE is UNIVERSAL. Asserts, against the minimarket
+ *  seed, that (1) no catalogued product carries a clinical/controlled marker,
+ *  (2) a plain sale closes with NO prescription step, and (3) a boleta still
+ *  emits cleanly (coded 4xx upsell on Free, never a 5xx). Pharmacy-only: a
+ *  no-op for any other vertical. Runs after goldenPath (tenant already seeded). */
+export async function noRecetaBoletaFlow({ tenant, email, password, vertical }) {
+  if (vertical !== "minimarket") return;
+  section(`minimarket no-receta + boleta vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // 1. catalog carries NO clinical/controlled marker (no pharmacy pack leak) --
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  check(list.length > 0, "minimarket catalog non-empty");
+  const clinical = list.filter((p) => p.active_ingredient);
+  eq(clinical.length, 0, "no product carries active_ingredient (no receta/controlado)");
+
+  // 2. a plain sale needs no prescription line — it just goes through ---------
+  const sellable = list.find((p) => p.stock > 0 && p.active !== false);
+  check(!!sellable, "found a sellable minimarket product");
+  const open = await c.post("/cash-sessions", { register_name: "Caja Mini", opening_cash: "0" });
+  const sessionId = open.body.id;
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [
+        {
+          product: sellable.id,
+          product_name: sellable.name,
+          quantity: 1,
+          unit_price: String(sellable.price),
+        },
+      ],
+      payment_method: "pos_cash",
+      cash_amount: String(sellable.price),
+    },
+    { headers: { "Idempotency-Key": `e2e-mini-noreceta-${Date.now()}` }, expectOk: false },
+  );
+  eq(sale.status, 201, "minimarket sale created (201) with NO receta required");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "sale returns order id");
+
+  // 3. boleta (DTE SII) is universal — must still emit cleanly in a minimarket -
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: "e2e" },
+    { expectOk: false },
+  );
+  check(boleta.status < 500, `minimarket boleta handled cleanly (status ${boleta.status}, no 5xx)`);
+  if (!boleta.ok) {
+    console.log(`    ↳ Free boleta gate (minimarket): ${boleta.status} code=${boleta.body?.error?.code ?? "(none)"}`);
+  }
+
+  await c.post(`/cash-sessions/${sessionId}/close`, { closing_cash_counted: "0" });
 }
 
 /** Compliance + reporting path (charter: boleta/factura/DTE = UNIVERSAL, must

@@ -16,7 +16,12 @@ import {
   summary,
   section,
 } from "./lib/harness.mjs";
-import { goldenPath, goodsReceiptFlow, complianceFlow } from "./flows.mjs";
+import {
+  goldenPath,
+  goodsReceiptFlow,
+  complianceFlow,
+  noRecetaBoletaFlow,
+} from "./flows.mjs";
 
 const PASSWORD = "e2e-pass-1234";
 const EMAIL = "admin@e2e.cl";
@@ -68,6 +73,7 @@ async function main() {
     await goldenPath(ctx);
     await goodsReceiptFlow(ctx);
     await complianceFlow(ctx);
+    await noRecetaBoletaFlow(ctx); // minimarket-only multi-rubro contract
   }
 }
 

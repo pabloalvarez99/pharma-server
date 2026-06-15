@@ -17,7 +17,21 @@ CI is billing-walled, so this is primarily a **LOCAL gate**. The same run is
 reproducible in CI via `.github/workflows/e2e.yml`, which is **`workflow_dispatch`
 only** (manual, opt-in) so it never auto-burns minutes on push/PR.
 
-## Run
+## Gate (one command)
+
+The canonical gate is **local** and a single command — client build + unit tests
++ live e2e, exit-nonzero on any failure:
+
+```bash
+cd client
+npm run gate          # = npm run build && npm run test && npm run e2e
+```
+
+`.github/workflows/e2e.yml` runs this exact script, but is `workflow_dispatch`
+only (billing-wall, CLAUDE.md regla #9) — so **local `npm run gate` is the source
+of truth**, CI is opt-in reproduction.
+
+## Run (e2e only)
 
 ```bash
 cd client
@@ -65,10 +79,33 @@ the binaries. Exit code is non-zero on any failed assertion.
 - **reporte** — the day's sale surfaces in the core (Free) `sales-daily` report,
   closing the operator's daily loop.
 
+## Goods-receipt assertions (`goodsReceiptFlow`)
+
+Mirrors `compras.ts`: supplier → draft PO → receive. The receipt sub-flow is
+**forward-compatible** with BUG-bob-002 (a draft PO can't be received — `POST
+/receive` only accepts `sent/approved/partially_received` and no route issues a
+`draft→sent` transition). The flow first **probes** for a transition route (`POST
+/{id}/send`, then `/{id}/approve`); both 404 today, so it stays an **xfail**. The
+day a transition lands, these real assertions run automatically (no edit needed):
+
+- **partial receipt** → PO `partially_received`, stock `+= partial qty`.
+- **WAC** after each receipt = `(stock0·cost0 + Σqty·unitCost)/(stock0+Σqty)`
+  (a never-costed SKU seeds the line average) — within a cent.
+- **full receipt** → PO `received`, stock `+= full ordered qty`.
+- **over-receipt** on a completed PO refused (4xx, never 5xx).
+
+## Minimarket multi-rubro contract (`noRecetaBoletaFlow`, minimarket-only)
+
+recetas/controlados are PHARMACY-ONLY; boleta/DTE is UNIVERSAL:
+
+- catalog carries **no** `active_ingredient` (no clinical/controlled marker).
+- a plain sale closes **with no prescription step** (`201`).
+- a **boleta still emits cleanly** (coded `4xx` upsell on Free, never `5xx`).
+
 ## Files
 
 | file                 | role                                                    |
 |----------------------|---------------------------------------------------------|
 | `run.mjs`            | orchestrator (`npm run e2e` entrypoint)                 |
-| `flows.mjs`          | the per-vertical golden path                            |
+| `flows.mjs`          | golden path + goods-receipt + compliance + minimarket   |
 | `lib/harness.mjs`    | build/CLI/server lifecycle + HTTP client + assertions   |

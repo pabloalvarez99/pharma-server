@@ -1,13 +1,16 @@
 name: e2e
 
-# Live-stack end-to-end gate: builds a REAL pharma-api + pharma, boots the server
-# on a throwaway SurrealKv DB, and drives the operator's daily loop over real HTTP
-# for BOTH verticals (see client/e2e/README.md). No mocks, no webview.
+# Full client gate: client build (tsc + vite) + unit tests (vitest) + a live
+# stack e2e that builds a REAL pharma-api + pharma, boots the server on a
+# throwaway SurrealKv DB, and drives the operator's daily loop over real HTTP for
+# BOTH verticals (see client/e2e/README.md). No mocks, no webview. The job runs
+# the SAME single command developers run locally: `cd client && npm run gate`.
 #
 # MANUAL on purpose. CI minutes on this repo are billing-walled (CLAUDE.md regla
-# #9 / teamwork_op.txt), so e2e is primarily a LOCAL gate (`cd client && npm run
-# e2e`). This workflow makes that exact gate reproducible in CI when a human opts
-# in — it does NOT run on push/PR, so it never auto-burns minutes.
+# #9 / teamwork_op.txt), so push/PR must NOT auto-burn minutes — the CANONICAL
+# gate is LOCAL (`cd client && npm run gate`, exit-nonzero on any failure). This
+# workflow makes that exact gate reproducible in CI when a human opts in; it is
+# `workflow_dispatch` only, so it never triggers on push/PR.
 on:
   workflow_dispatch:
 
@@ -16,7 +19,7 @@ env:
 
 jobs:
   e2e:
-    name: live-stack e2e (windows)
+    name: client gate (build + test + live-stack e2e) (windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +44,7 @@ jobs:
         working-directory: client
         run: npm ci
 
-      - name: run live-stack e2e
+      # The exact local gate: build (tsc + vite) + unit (vitest) + live e2e.
+      - name: run client gate
         working-directory: client
-        run: npm run e2e
+        run: npm run gate

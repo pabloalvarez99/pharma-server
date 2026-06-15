@@ -2882,3 +2882,32 @@ poblado. Sin CLI. + validación de input (clave corta/correo malo/nombre vacío)
 
 Fricción fileada (≥4) en `docs/strategy/multi-rubro-findings.md` + abajo. GATE:
 cliente `npm run build` + `npm test` verde; workspace `cargo test -p api` verde.
+
+## 2026-06-15 — e2e gate real + cobertura (marvin, lane feat/e2e-gate-coverage)
+
+Lane ola 5: hacer del e2e un GATE real + expandir cobertura. Scope `client/e2e/`
++ `package.json` + `.github/workflows/e2e.yml` (no toqué views ni backend).
+
+GATE único reproducible:
+- `client/package.json`: nuevo script `gate` = `build && test && e2e` (un solo
+  comando = el gate canónico LOCAL). `.github/workflows/e2e.yml` corre ese MISMO
+  `npm run gate`; sigue `workflow_dispatch` only (billing-wall regla #9 — push/PR
+  NO auto-quema minutos). Doc en README: local `npm run gate` = source of truth,
+  CI = reproducción opt-in.
+
+Cobertura nueva (`client/e2e/flows.mjs`):
+- `goodsReceiptFlow` forward-compatible con BUG-bob-002: SONDEA transición
+  draft→issued (`POST /{id}/send`, luego `/{id}/approve`); ambas 404 hoy → queda
+  xfail. El día que aterrice una transición, corren solas: recepción PARCIAL →
+  `partially_received` + stock += parcial + WAC `(s0·c0+Σq·u)/(s0+Σq)` (SKU sin
+  costo previo siembra el promedio de línea); recepción del resto → `received` +
+  stock += total; sobre-recepción rechazada (4xx, no 5xx). Una regresión futura
+  pondrá el gate rojo = señal para borrar el xfail.
+- `noRecetaBoletaFlow` (minimarket-only): contrato multi-rubro de primera clase —
+  catálogo sin `active_ingredient` (sin marcador clínico/controlado), venta plana
+  cierra 201 SIN paso de receta, y boleta SII igual emite limpio (4xx upsell en
+  Free, nunca 5xx). Cableado en `run.mjs` tras complianceFlow.
+
+GATE: cliente `npm run build` + `npm test` verde (184). e2e live-stack verde
+(ambos verticales; xfail BUG-bob-001/002 intactos). api.ts/format.ts/views sin
+tocar.
