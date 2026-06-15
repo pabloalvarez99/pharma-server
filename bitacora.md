@@ -2882,3 +2882,24 @@ poblado. Sin CLI. + validación de input (clave corta/correo malo/nombre vacío)
 
 Fricción fileada (≥4) en `docs/strategy/multi-rubro-findings.md` + abajo. GATE:
 cliente `npm run build` + `npm test` verde; workspace `cargo test -p api` verde.
+
+## 2026-06-15 — first-run en vivo + barrido i18n multi-rubro (ye, ola 5)
+
+Lane `feat/firstrun-vertical-polish` (PR pendiente). Cierre del primer-inicio en
+vivo + sweep de marca farmacia en vistas de onboarding (login/configuración/
+dashboard). El grueso del first-run ya estaba LANDED (setup in-app #203, rubro
+grid + botón datos-demo en Configuración, first-run.ts puro). Hallazgos:
+
+- **Dead-end demo FIJADO**: el CTA de panel vacío (`dashboardCta` `seed-demo`)
+  ruteaba a Importar/CSV, pero el botón "Cargar datos demo" vive en Configuración
+  → ahora el CTA va a `configuracion` con la etiqueta correcta. Loop cerrado:
+  panel vacío → CTA → elegir rubro + datos demo → panel poblado → POS.
+- **i18n FIJADO**: `usuario@farmacia.cl`→`usuario@minegocio.cl`, footer "tu
+  farmacia"→"tu negocio" (login.ts); placeholders emisor DTE genéricos
+  (configuracion.ts).
+- Anotado: el manual `docs/operator/01-primer-inicio.md` aún es marca-farmacia
+  (la app ya migró a defaults genéricos → app adelante del manual; doc fuera de
+  scope de views).
+
+Fricción fileada (#5–7) en `docs/strategy/multi-rubro-findings.md`. GATE cliente:
+`npm run build` + `npm test` verde (184 tests). Sin Rust/migración; api.ts intacto.

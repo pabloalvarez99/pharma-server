@@ -170,7 +170,7 @@ export function renderLogin(
                 autocapitalize="none"
                 autocomplete="username"
                 spellcheck="false"
-                placeholder="usuario@farmacia.cl"
+                placeholder="usuario@minegocio.cl"
                 value="${DEFAULT_EMAIL}"
                 aria-describedby="${FIELDS.email.err}"
                 required
@@ -250,7 +250,7 @@ export function renderLogin(
           </form>
 
           <footer class="login-foot">
-            <span class="foot-line">Funciona sin internet — datos siempre en tu farmacia.</span>
+            <span class="foot-line">Funciona sin internet — datos siempre en tu negocio.</span>
             <span class="foot-meta">El token de sesión vive sólo en memoria.</span>
           </footer>
         </section>

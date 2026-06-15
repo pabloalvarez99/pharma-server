@@ -58,7 +58,10 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
 // a wall of "$0". Maps the readiness CTA to an in-shell nav jump (clicking the
 // existing sidebar button) so there's no dead-end and no new routing surface.
 const CTA_NAV: Record<NonNullable<DashboardCta["cta"]>["action"], { nav: string; label: string }> = {
-  "seed-demo": { nav: "importar", label: "Cargar productos" },
+  // The "Cargar datos demo" button lives in Configuración (rubro grid) — route the
+  // empty-catalog CTA there, NOT to Importar (CSV), so the operator who wants demo
+  // data reaches the button instead of a dead-end import screen.
+  "seed-demo": { nav: "configuracion", label: "Cargar datos demo" },
   "first-sale": { nav: "pos", label: "Abrir POS" },
   config: { nav: "configuracion", label: "Ir a Configuración" },
 };

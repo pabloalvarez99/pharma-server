@@ -110,3 +110,32 @@ app axum sobre una DB kv vacía y corre el viaje completo por HTTP —
 status(needs_setup) → setup → /me(owner) → business.vertical persistido →
 fail-closed(409) → login con las credenciales recién elegidas → seed-demo →
 catálogo poblado (camino de la primera venta alcanzable). Sin CLI en ningún paso.
+
+## Ola 5 — first-run en vivo (ye, `feat/firstrun-vertical-polish`, 2026-06-15)
+
+5. **Dead-end del camino "datos demo"** — el CTA de panel vacío
+   (`dashboardCta` action `seed-demo`) ruteaba a **Importar** (CSV) con la
+   etiqueta "Cargar productos", pero el botón **"Cargar datos demo"** vive en
+   **Configuración** (grilla de rubro). El operador que quería demo aterrizaba
+   en una pantalla de import CSV sin botón demo → dead-end. → **FIJADO**: el CTA
+   `seed-demo` ahora rutea a `configuracion` con etiqueta "Cargar datos demo"
+   (`client/src/views/dashboard.ts` `CTA_NAV`). Cierra el loop: panel vacío →
+   CTA → Configuración (elige rubro + Cargar datos demo) → panel poblado → POS.
+
+6. **Copy marca-farmacia residual (i18n multi-rubro)** — barrido de strings
+   hardcodeados con farmacia en las vistas de onboarding:
+   - `login.ts` placeholder de correo `usuario@farmacia.cl` →
+     `usuario@minegocio.cl` (genérico, alineado con el form de setup que ya usa
+     `dueno@minegocio.cl`).
+   - `login.ts` footer "datos siempre en tu **farmacia**" → "en tu **negocio**".
+   - `configuracion.ts` placeholders del emisor DTE "Farmacia Ejemplo SpA" /
+     "Venta al por menor de productos farmacéuticos" → "Mi Empresa SpA" /
+     "Venta al por menor en comercios especializados" (genérico).
+   → **FIJADO**. Boleta/factura SII es universal CL, el emisor no debe presumir
+   farmacia.
+
+7. **`docs/operator/01-primer-inicio.md` aún dice "Tu Farmacia" / `tufarmacia`**
+   — el manual sigue marca-farmacia (`cajera@tufarmacia.cl`, sucursal por defecto
+   `tufarmacia`), pero la app ya migró a defaults genéricos (`principal`, correo
+   vacío) → la app va ADELANTE del manual. Generalizar el manual es de la lane de
+   docs (fuera de mi scope de views). Anotado.

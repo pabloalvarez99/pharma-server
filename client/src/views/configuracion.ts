@@ -72,8 +72,8 @@ interface EmisorField {
 
 const EMISOR_FIELDS: readonly EmisorField[] = [
   { name: "rut", label: "RUT empresa", placeholder: "76123456-7", required: true },
-  { name: "razon_social", label: "Razón social", placeholder: "Farmacia Ejemplo SpA", required: true },
-  { name: "giro", label: "Giro", placeholder: "Venta al por menor de productos farmacéuticos", required: true },
+  { name: "razon_social", label: "Razón social", placeholder: "Mi Empresa SpA", required: true },
+  { name: "giro", label: "Giro", placeholder: "Venta al por menor en comercios especializados", required: true },
   { name: "direccion", label: "Dirección", placeholder: "Av. Principal 123", required: true },
   { name: "comuna", label: "Comuna", placeholder: "Coquimbo", required: true },
   { name: "ciudad", label: "Ciudad (opcional)", placeholder: "Coquimbo", required: false },
