@@ -2449,3 +2449,53 @@ Branch `feat/client-e2e-compliance` (off `feature/erp-parity` fresco). Goal c (E
 **Guard recetas (MULTI-RUBRO):** `renderRecetas` ahora `loadVertical→hasRecetas`; si `!farmacia` muestra placeholder "Recetas no aplican a este rubro" en vez del módulo de controlados (defense-in-depth; el shell ya dropeaba el nav, esto cubre deep-link/estado).
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `npm test` (vitest 52/52) + `npm run e2e` (25/0/2, exit 0). `format.ts` ya tenía cobertura completa (33 tests) → sin cambios.
+
+
+## 2026-06-14 — MARVIN: stock LANE C — export CSV/JSON + empty/loading/error states (multi-rubro)
+
+Branch `feat/stock-export-emptystates` (off fresh `origin/feature/erp-parity` @b27b3db).
+PHASE 2 goal: el dueño de la farmacia (o cualquier rubro) saca SUS datos sin lock-in
+(pilar producto vendor-agnostic) y nunca ve una pantalla en blanco. Sólo mis vistas
+(`inventory/compras/gastos.ts` + `stock-helpers.ts`); `api.ts` intacto; sin backend.
+
+**Export inventario (vendor-agnostic)** — `stock-helpers.ts` (puro, node-testable):
+- `csvField` (RFC-4180: comilla/coma/CRLF escapados + guard anti formula-injection
+  `=+-@`→tab, porque el nombre de producto es input del operador) + `toCsv`.
+- `buildInventoryExport(products, includePharma, cap?)` → `{csv, json, count, truncated}`.
+  Multi-rubro: `includePharma` agrega columnas `laboratorio`/`principio_activo`; un
+  minimarket las omite (sólo lo que ese rubro usa). Plata = STRING Decimal cruda (sin
+  formato locale) ⇒ re-importa sin pérdida. JSON snake_case estable (round-trip máquina).
+  `truncated` se marca si el fetch llenó el cap de página del server.
+- `exportFilename("inventario")` → `inventario-YYYY-MM-DD` (día local CL).
+- `inventory.ts`: botón "Exportar ▾" (menú CSV/JSON) → `runInventoryExport` baja un Blob
+  (mismo patrón que `boletas.ts downloadXml`; CSV con BOM UTF-8 para Excel es-CL).
+
+**Empty / loading / error states (nunca pantalla en blanco)** — `stock-helpers.ts` puro:
+- `inventoryEmpty/comprasEmpty/gastosEmpty(filtered)`: copy ES + CTA accionable cuando
+  no hay datos ("+ Nuevo producto"/"+ Nueva OC"/"Nuevo gasto"); cuando hay filtro activo
+  → "sin coincidencias" SIN CTA (los datos pueden seguir ahí).
+- `classifyFetchError(err, resource)`: clasifica el string del api layer →
+  `forbidden` (403/denegado/permiso) · `offline` (texto `conn_error` del Tauri / timeout)
+  · `generic` (mensaje crudo, nada real se traga). Retry hint en offline.
+- `inventory.ts` exporta `emptyStateHtml`/`errorStateHtml` (reusan `.caja-empty`/`.view-error`
+  globales) → `compras.ts` y `gastos.ts` los consumen; sus `renderError` locales (que sólo
+  cubrían 403) ahora delegan ⇒ los tres degradan igual: server caído muestra "Sin conexión
+  al servidor … verifica que esté corriendo" en vez de crash/blank. Loading = skeletons ya
+  existentes intactos. CTA de empty cablea el botón existente vía `closest(".view-*")`.
+
+**Tests/journeys**: `stock-helpers.test.ts` +20 (14→34): csvField/toCsv, export pharmacy
+(columnas+plata cruda+escape coma), export minimarket (sin columnas pharma, JSON round-trip),
+edge (catálogo vacío=header-only, truncated en cap, null pharma preservado), empty copy
+(CTA vs filtro, todo ES), classifyFetchError (offline/forbidden/generic/no-throw). GATE
+cliente VERDE: `npm run build` (tsc --noEmit + vite) + `vitest run` 74/74.
+
+**LANE D (paginación/virtualización 50k SKUs) — MEDIDO, NO necesario**: la lista de
+inventario YA está acotada server-side (`PAGE_LIMIT=60` en el fetch; el server clampa
+`/products` a `limit.min(500)`), nunca renderiza 50k filas ⇒ no hay path lento que
+virtualizar. Disciplina anti-framework: no construí virtualización sin problema real.
+FINDING para backend (próxima lane): el export in-app trae UNA página (cap 500) porque
+el comando Tauri `list_products` no expone `offset`; catálogo > 500 queda truncado
+(marcado `truncated` + toast "usa la CLI"). Full-catalog export sin tope = agregar `offset`
+a `list_products` (src-tauri, fuera de mi scope de vistas) o un endpoint export dedicado.
+Sin BUG de producto: la lógica existente estaba correcta; el valor es export nuevo +
+blindar empty/error contra divergencia UI↔test.

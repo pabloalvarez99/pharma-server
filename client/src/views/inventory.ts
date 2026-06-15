@@ -36,9 +36,17 @@ import {
   nearExpiryView,
   reorderSuggestion,
   rotacionRows,
+  buildInventoryExport,
+  exportFilename,
+  classifyFetchError,
+  inventoryEmpty,
+  type EmptyCopy,
 } from "./stock-helpers";
 
 const PAGE_LIMIT = 60;
+// Single-page cap the server enforces on `/products` (`limit.min(500)`). The
+// in-app export pulls one capped page; a fuller catalog uses the CLI export.
+const EXPORT_CAP = 500;
 type Tab = "productos" | "vencimientos" | "rotacion";
 
 export function renderInventory(host: HTMLElement, serverUrl: string): void {
@@ -53,6 +61,13 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
         <div class="inv-head-actions">
           <div class="view-search" id="inv-search-wrap">
             <input id="inv-search" type="search" placeholder="Buscar producto…" autocomplete="off" />
+          </div>
+          <div class="inv-export-wrap" id="inv-export-wrap">
+            <button id="inv-export-btn" class="btn-ghost inv-export-btn" type="button" aria-haspopup="menu" aria-expanded="false">Exportar ▾</button>
+            <div id="inv-export-menu" class="inv-export-menu" role="menu" hidden>
+              <button type="button" role="menuitem" data-fmt="csv">CSV (Excel)</button>
+              <button type="button" role="menuitem" data-fmt="json">JSON</button>
+            </div>
           </div>
           <button id="inv-new-btn" class="btn-primary inv-new-btn">
             <span class="btn-label">+ Nuevo producto</span>
@@ -151,6 +166,31 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
     ),
   );
 
+  // Export menu (CSV / JSON) — vendor-agnostic: the owner can take their data
+  // out at any time, no proprietary format, no lock-in.
+  const exportWrap = host.querySelector<HTMLElement>("#inv-export-wrap")!;
+  const exportBtn = host.querySelector<HTMLButtonElement>("#inv-export-btn")!;
+  const exportMenu = host.querySelector<HTMLElement>("#inv-export-menu")!;
+  const closeExportMenu = (): void => {
+    exportMenu.hidden = true;
+    exportBtn.setAttribute("aria-expanded", "false");
+  };
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = exportMenu.hidden;
+    exportMenu.hidden = !open;
+    exportBtn.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", (e) => {
+    if (!exportWrap.contains(e.target as Node)) closeExportMenu();
+  });
+  exportMenu.querySelectorAll<HTMLButtonElement>("button[data-fmt]").forEach((b) =>
+    b.addEventListener("click", () => {
+      closeExportMenu();
+      void runInventoryExport(serverUrl, b.dataset.fmt === "json" ? "json" : "csv", showPharma, toast);
+    }),
+  );
+
   // Initial paint: KPIs + Productos tab.
   void loadKpis(kpiHost, serverUrl);
   selectTab("productos");
@@ -192,7 +232,12 @@ async function loadProducts(
   try {
     const rows: Product[] = await listProducts(serverUrl, search || undefined, PAGE_LIMIT);
     if (rows.length === 0) {
-      host.innerHTML = `<p class="empty">Sin productos${search ? ` para «${escapeHtml(search)}»` : ""}.</p>`;
+      host.innerHTML = emptyStateHtml(inventoryEmpty(search !== ""), search ? undefined : "inv-empty-new");
+      host
+        .querySelector<HTMLButtonElement>("#inv-empty-new")
+        ?.addEventListener("click", () =>
+          host.closest(".view-inventory")?.querySelector<HTMLButtonElement>("#inv-new-btn")?.click(),
+        );
       return;
     }
     host.innerHTML = `
@@ -212,8 +257,51 @@ async function loadProducts(
       tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
     );
   } catch (err) {
-    host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    host.innerHTML = errorStateHtml(err, "el inventario");
   }
+}
+
+/** Pull the (capped) product catalog and hand the operator a CSV or JSON file.
+ *  No proprietary format, money as the raw Decimal string → re-imports cleanly. */
+async function runInventoryExport(
+  serverUrl: string,
+  fmt: "csv" | "json",
+  includePharma: boolean,
+  toast: (msg: string) => void,
+): Promise<void> {
+  try {
+    const products = await listProducts(serverUrl, undefined, EXPORT_CAP);
+    if (products.length === 0) {
+      toast("No hay productos para exportar.");
+      return;
+    }
+    const bundle = buildInventoryExport(products, includePharma, EXPORT_CAP);
+    const stem = exportFilename("inventario");
+    if (fmt === "json") {
+      downloadExport(`${stem}.json`, "application/json;charset=utf-8", bundle.json);
+    } else {
+      // Prepend a UTF-8 BOM so Excel (es-CL) reads tildes/ñ correctly.
+      downloadExport(`${stem}.csv`, "text/csv;charset=utf-8", `﻿${bundle.csv}`);
+    }
+    toast(
+      bundle.truncated
+        ? `Exportados ${bundle.count} productos (máx. por página). Usa la CLI para el catálogo completo.`
+        : `Exportados ${bundle.count} producto(s).`,
+    );
+  } catch (err) {
+    toast(classifyFetchError(err, "el inventario").title);
+  }
+}
+
+/** Trigger a client-side file download (mirrors boletas.ts `downloadXml`). */
+function downloadExport(filename: string, mime: string, content: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function productRow(p: Product): string {
@@ -394,7 +482,7 @@ async function openProductDetail(
   try {
     p = await productDetail(serverUrl, id);
   } catch (err) {
-    bodyEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    bodyEl.innerHTML = errorStateHtml(err);
     return;
   }
 
@@ -505,7 +593,7 @@ async function openProductDetail(
         </table>
       `;
     } catch (err) {
-      host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+      host.innerHTML = errorStateHtml(err);
     }
   }
 
@@ -659,7 +747,7 @@ function renderVencimientos(
         tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
       );
     } catch (err) {
-      tableHost.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+      tableHost.innerHTML = errorStateHtml(err);
     }
   };
 
@@ -821,6 +909,19 @@ function invStyles(): string {
   return `<style id="inv-styles">
     .view-inventory .inv-head-actions { display: flex; align-items: center; gap: 12px; }
     .view-inventory .inv-new-btn { white-space: nowrap; }
+    .view-inventory .inv-export-wrap { position: relative; }
+    .view-inventory .inv-export-btn { white-space: nowrap; }
+    .view-inventory .inv-export-menu {
+      position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+      background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius-field);
+      box-shadow: var(--shadow, 0 8px 24px rgba(0,0,0,0.35)); padding: 4px; min-width: 160px;
+    }
+    .view-inventory .inv-export-menu button {
+      appearance: none; display: block; width: 100%; text-align: left; background: transparent;
+      border: 0; color: var(--text); font: inherit; padding: 9px 12px; border-radius: 8px; cursor: pointer;
+    }
+    .view-inventory .inv-export-menu button:hover { background: var(--bg-2); }
+    .caja-empty .empty-cta { margin-top: 14px; }
     .view-inventory .inv-tabs { display: flex; gap: 4px; margin: 4px 0 16px; border-bottom: 1px solid var(--line); }
     .view-inventory .inv-tab {
       appearance: none; background: transparent; border: 0; color: var(--muted);
@@ -895,6 +996,42 @@ export function tableSkeleton(rows = 6): string {
 
 export function errorCard(err: unknown): string {
   return `<div class="kpi-card kpi-danger kpi-span"><span class="kpi-label">Error</span><strong class="kpi-value sm">${escapeHtml(asMessage(err))}</strong></div>`;
+}
+
+/** Centered empty-state block (reuses the global `.caja-empty` chrome) — never a
+ *  blank screen. Pass `ctaId` to render the call-to-action button; the caller
+ *  wires its click. Shared by inventory / compras / gastos. */
+export function emptyStateHtml(c: EmptyCopy, ctaId?: string): string {
+  const cta =
+    c.cta && ctaId
+      ? `<button type="button" class="btn-primary empty-cta" id="${escapeHtml(ctaId)}"><span class="btn-label">${escapeHtml(c.cta)}</span></button>`
+      : "";
+  return `
+    <div class="caja-empty">
+      <div class="caja-empty-mark">●</div>
+      <h3>${escapeHtml(c.title)}</h3>
+      <p class="muted">${escapeHtml(c.hint)}</p>
+      ${cta}
+    </div>
+  `;
+}
+
+/** Operator-facing error block. A permission / offline failure gets the friendly
+ *  centered `.caja-empty` treatment with an actionable hint; an unclassified
+ *  error keeps the raw message in the red `.view-error` band so nothing real is
+ *  hidden. `resource` customizes the "sin acceso" line ("las compras"). */
+export function errorStateHtml(err: unknown, resource?: string): string {
+  const c = classifyFetchError(err, resource);
+  if (c.kind === "generic") {
+    return `<div class="view-error">${escapeHtml(c.hint)}</div>`;
+  }
+  return `
+    <div class="caja-empty">
+      <div class="caja-empty-mark">●</div>
+      <h3>${escapeHtml(c.title)}</h3>
+      <p class="muted">${escapeHtml(c.hint)}</p>
+    </div>
+  `;
 }
 
 export function asMessage(err: unknown): string {

@@ -27,7 +27,15 @@ import {
   type PurchasePayment,
 } from "../api";
 import { clp, num, toNumber } from "../format";
-import { kpiSkeleton, tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
+import {
+  kpiSkeleton,
+  tableSkeleton,
+  asMessage,
+  escapeHtml,
+  attachRutAdvisory,
+  emptyStateHtml,
+  errorStateHtml,
+} from "./inventory";
 import {
   poIsReceivable,
   poStatusMeta,
@@ -35,6 +43,7 @@ import {
   poPending,
   parsePoLines,
   validateReceiveQty,
+  comprasEmpty,
   type PoLineDraft,
 } from "./stock-helpers";
 
@@ -101,7 +110,7 @@ export function renderCompras(host: HTMLElement, serverUrl: string): void {
     try {
       const rows = await listPurchaseOrders(serverUrl, status, PAGE_LIMIT);
       renderKpis(kpiHost, rows);
-      renderTable(tableHost, rows);
+      renderTable(tableHost, rows, status !== undefined);
     } catch (err) {
       kpiHost.innerHTML = "";
       tableHost.innerHTML = renderError(err);
@@ -279,9 +288,14 @@ function renderKpis(host: HTMLElement, rows: PurchaseOrder[]): void {
   `;
 }
 
-function renderTable(host: HTMLElement, rows: PurchaseOrder[]): void {
+function renderTable(host: HTMLElement, rows: PurchaseOrder[], filtered: boolean): void {
   if (rows.length === 0) {
-    host.innerHTML = `<p class="empty">Sin órdenes de compra para el filtro seleccionado.</p>`;
+    host.innerHTML = emptyStateHtml(comprasEmpty(filtered), filtered ? undefined : "po-empty-new");
+    host
+      .querySelector<HTMLButtonElement>("#po-empty-new")
+      ?.addEventListener("click", () =>
+        host.closest(".view-compras")?.querySelector<HTMLButtonElement>("#po-new")?.click(),
+      );
     return;
   }
 
@@ -818,18 +832,9 @@ function openReceiveModal(
 }
 
 function renderError(err: unknown): string {
-  const msg = asMessage(err);
-  // 403 = cashier doesn't have access (shouldn't happen but be graceful)
-  if (msg.includes("403") || msg.includes("denegado")) {
-    return `
-      <div class="caja-empty">
-        <div class="caja-empty-mark">●</div>
-        <h3>Sin acceso a compras</h3>
-        <p class="muted">Tu rol no tiene permiso para ver las órdenes de compra. Contacta al administrador.</p>
-      </div>
-    `;
-  }
-  return `<div class="view-error">${escapeHtml(msg)}</div>`;
+  // Permission / offline / generic copy is centralized so compras, gastos and
+  // inventory all degrade the same way (no blank screen, no raw English code).
+  return errorStateHtml(err, "las compras");
 }
 
 function fmtDate(iso: string): string {
