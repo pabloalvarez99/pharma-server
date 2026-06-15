@@ -2617,3 +2617,37 @@ y api/stock_webhook.rs (275/314).
 
 GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` +
 `cargo test --workspace` (0 failed; suite nueva 6/6).
+
+## 2026-06-14 — Onboarding UX hardening (LANE B, ye) — feat/onboarding-ux-hardening
+
+PHASE 2 LANE B: blindar el first-run para que el operador nunca quede trabado ni
+confundido. Módulo nuevo de lógica PURA (sin DOM, single-source, testeable sin
+jsdom) `client/src/views/onboarding-ux.ts` (nombre distinto de first-run.ts de
+#188 → cero colisión con la integración pendiente) + cableado en mis views:
+
+1. **Validación inline del server URL** (login.ts): `validateServerUrl` chequea
+   esquema (http/https; bare host:port → asume http://), host presente, puerto
+   1..65535, URL mal formada → mensaje es preciso. Corre en blur + submit (ya no
+   sólo "no vacío") + antes de "Probar conexión". Normaliza (esquema lower,
+   sin slash final) y usa esa forma canónica para login y persistencia.
+2. **Retry/timeout de conexión** (login.ts "Probar conexión"): `withTimeout`
+   (ceiling duro CONN_TIMEOUT_MS=8s, timer inyectable) + loop con backoff acotado
+   [400,1200,3000]ms cap, MAX_CONN_ATTEMPTS=4 → servidor inalcanzable reintenta con
+   feedback ("Reintentando en Ns…" / al final "Verifica que el servidor…"), nunca
+   spinner infinito.
+3. **Empty-states del dashboard** (dashboard.ts): `dashboardReadiness` clasifica
+   fresh(sin catálogo)→CTA "Cargar productos"(nav Importar) · stock-only(sin
+   ventas)→CTA "Abrir POS" · ready→sin CTA · unknown(stats caída)→sin nag. Banner
+   navega clickeando el nav item existente (sin nueva superficie de routing).
+4. **Persistencia URL** (login.ts): `loadStoredServer`/`saveStoredServer` sobre
+   KeyStore (localStorage), re-valida al leer (valor corrupto no envenena el campo),
+   no-throw en privacy mode, guarda forma canónica → sobrevive reinicio. Rubro ya
+   persiste server-side vía admin_setting (configuracion.ts→loadVertical en shell).
+
+≥5 journeys: 20 tests nuevos en `onboarding-ux.test.ts` (validación URL 7 ·
+retry/timeout 5 · readiness 4 · persistencia 4). Sin bug de prod (la lógica del
+loop estaba bien); el valor = blindar el first-run contra dead-ends + divergencia.
+
+GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 72/72 (+20).
+Sin Rust, sin migración. api.ts intacto. MULTI-RUBRO: copy de CTA es genérico
+(negocio/productos, no farmacia).
