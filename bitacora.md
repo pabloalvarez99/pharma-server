@@ -2882,3 +2882,43 @@ poblado. Sin CLI. + validación de input (clave corta/correo malo/nombre vacío)
 
 Fricción fileada (≥4) en `docs/strategy/multi-rubro-findings.md` + abajo. GATE:
 cliente `npm run build` + `npm test` verde; workspace `cargo test -p api` verde.
+
+## 2026-06-15 — paul · POS payments+fidelidad live QA (ola 5, PR pendiente)
+
+Lane `feat/pos-payments-fidelidad-qa` off `feature/erp-parity` @e84f757.
+Profundiza el cashier-loop EN VIVO más allá de #199 (pos-runtime-qa.sh): nueva
+harness `scripts/qa/pos-payments-fidelidad-qa.sh` contra backend vivo (pharma-api
++ SurrealKv tempdir + seed-demo), AMBOS verticales (pharmacy + minimarket),
+`FAILS=0`.
+
+Escenarios (manejado como cajero real, no unit journeys):
+- S1 multi-tender `pos_mixed` exacto → `cash_amount`/`card_amount`/total/método
+  persisten correctos.
+- S2 multi-tender insuficiente (`cash+card < total`) → 400 limpio.
+- S3 multi-tender SOBREPAGO → `receipt.change=null` (ver FINDING abajo).
+- S4 descuento global → `total == subtotal - descuento`.
+- S5 over-descuento (descuento > subtotal) → total clampeado a 0, NUNCA negativo.
+- S6 descuento por línea (unit_price ajustado por cajero) → subtotal lo refleja.
+- S7 cliente + fidelidad → puntos `== floor(total/1000)`, `customer.loyalty_points`
+  bump exacto, ledger `loyalty_transaction` escrito.
+- S8 devolución parcial + restock + RE-VENTA del ítem devuelto → stock
+  `-3 → -2 → -3` exacto, sin desync FEFO/stock.
+
+Resultado: backend correcto en TODO — multi-tender, descuento (global+línea+clamp),
+fidelidad y restock/re-venta FEFO. CERO bug de plata/stock/FEFO. La harness blinda
+estos edges contra regresión.
+
+FINDINGS (no bug de lógica; gaps cara-cajero → BUG LOG / teamwork_op.txt):
+- F-paul-pay-001 (P3): `pos_mixed` con sobrepago en efectivo → `receipt.change`
+  null (backend `get_receipt` sólo computa vuelto para `pos_cash`). En pago mixto
+  con efectivo sobrante el cajero no ve el vuelto. No se fija en esta lane (toca
+  receipt compartido que renderiza compliance/milton; decisión paxoloop).
+- F-paul-pay-002 (P2, gap de feature): el cliente POS (`pos.ts`/`api.ts posSale`)
+  NO expone multi-tender ni descuento — `METHODS` sólo {efectivo,débito,crédito}
+  (sin "Mixto"), `charge()` es single-tender, y el payload nunca manda `discount`.
+  El backend soporta ambos (`pos_mixed`, `discount` global). Feature faltante en
+  UI, no regresión.
+
+Sólo `scripts/qa/` (additive). Sin tocar client/views ni Rust ni api.ts. GATE:
+harness verde ambos verticales; cliente `npm run build`+`npm test` verde (sin cambios
+de cliente).

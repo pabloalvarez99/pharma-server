@@ -41,6 +41,31 @@ bash scripts/qa/pos-runtime-qa.sh pharmacy
 bash scripts/qa/pos-runtime-qa.sh minimarket
 ```
 
+## `pos-payments-fidelidad-qa.sh` — deepened cashier-loop edges (ola 5)
+
+Companion harness that covers the payment/discount/loyalty edges
+`pos-runtime-qa.sh` does **not**, against the same live stack:
+
+- **Multi-tender** (`pos_mixed`, efectivo + tarjeta): exact split persists
+  `cash_amount`/`card_amount`; underpay (`cash+card < total`) → 4xx; overpay
+  probes `receipt.change`.
+- **Descuento global**: `total == subtotal - discount`; over-discount clamps
+  total to `>= 0` (never negative).
+- **Descuento por línea**: cashier-adjusted `unit_price` flows into the subtotal.
+- **Cliente + fidelidad**: points awarded `== floor(total/regla)`,
+  `customer.loyalty_points` bumped exactly, loyalty ledger row written.
+- **Devolución parcial + restock + RE-VENTA** del ítem devuelto: asserts
+  `stock` after each step (`-3 → -2 → -3`) — catches FEFO/stock desync.
+
+```bash
+bash scripts/qa/pos-payments-fidelidad-qa.sh pharmacy
+bash scripts/qa/pos-payments-fidelidad-qa.sh minimarket
+```
+
+Runs **all** scenarios (no exit-on-first-fail) so multiple bugs surface in one
+run; exits non-zero if any hard assertion failed. Sale POSTs accept `200`/`201`.
+Both verticals must end `FAILS=0`.
+
 Each run uses its own `mktemp` DB dir and kills the server on exit — repeatable,
 no shared `./data/surreal` lock with the dev service.
 
