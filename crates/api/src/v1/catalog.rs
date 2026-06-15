@@ -311,6 +311,9 @@ pub(crate) struct ImportSummary {
     /// Rows that could not be created or updated. See `errors` for detail.
     failed: usize,
     errors: Vec<ImportError>,
+    /// Echo of the `dry_run` flag. When true NOTHING was written — these counts
+    /// are a *preview* the operator confirms before committing the catalog.
+    dry_run: bool,
 }
 
 #[derive(Serialize)]
@@ -319,8 +322,180 @@ pub(crate) struct ImportError {
     message: String,
 }
 
-/// Import CSV de productos (multipart). Requiere admin+.
+#[derive(Deserialize, Default)]
+pub(crate) struct ImportParams {
+    /// When true, validate + count rows WITHOUT writing anything. Powers the
+    /// "preview antes de confirmar" step in the importar view.
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Strips a leading UTF-8 BOM (`EF BB BF`). Excel always prepends one when it
+/// saves "CSV UTF-8", which otherwise glues itself to the first header (`name`
+/// becomes `\u{feff}name`) and breaks column detection for real migrant files.
+fn strip_bom(bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        bytes[3..].to_vec()
+    } else {
+        bytes
+    }
+}
+
+/// Sniffs the field delimiter from the first line. Excel in Chile/LATAM exports
+/// CSV with `;` (because the locale uses `,` as the decimal mark); plain exports
+/// use `,`; some tools use TAB. Picks whichever appears most in the header row,
+/// defaulting to `,`.
+fn sniff_delimiter(bytes: &[u8]) -> u8 {
+    let header_line = bytes.split(|&b| b == b'\n').next().unwrap_or(bytes);
+    let count = |d: u8| header_line.iter().filter(|&&b| b == d).count();
+    [
+        (b';', count(b';')),
+        (b'\t', count(b'\t')),
+        (b',', count(b',')),
+    ]
+    .into_iter()
+    .filter(|&(_, c)| c > 0)
+    .max_by_key(|&(_, c)| c)
+    .map(|(d, _)| d)
+    .unwrap_or(b',')
+}
+
+/// Folds a raw CSV header to a lookup key: lowercased, accents removed, spaces
+/// and dashes collapsed to `_`. So `Código de Barras`, `codigo_barras` and
+/// `CODIGO BARRAS` all land on `codigo_barras`.
+fn norm_key(h: &str) -> String {
+    let mut out = String::with_capacity(h.len());
+    for ch in h.trim().chars() {
+        let c = match ch {
+            'á' | 'à' | 'ä' | 'â' | 'Á' | 'À' | 'Ä' | 'Â' => 'a',
+            'é' | 'è' | 'ë' | 'ê' | 'É' | 'È' | 'Ë' | 'Ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' | 'Í' | 'Ì' | 'Ï' | 'Î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' | 'Ó' | 'Ò' | 'Ö' | 'Ô' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' | 'Ú' | 'Ù' | 'Ü' | 'Û' => 'u',
+            'ñ' | 'Ñ' => 'n',
+            ' ' | '-' | '.' => '_',
+            '\u{feff}' => continue,
+            other => other.to_ascii_lowercase(),
+        };
+        out.push(c);
+    }
+    out
+}
+
+/// Maps a (normalized) header to the canonical column the importer understands,
+/// accepting common Spanish names a migrant's previous system would emit.
+fn canon_header(raw: &str) -> Option<&'static str> {
+    match norm_key(raw).as_str() {
+        "name" | "nombre" | "producto" | "descripcion_producto" => Some("name"),
+        "price" | "precio" | "precio_venta" | "pvp" | "valor" | "valor_venta" => Some("price"),
+        "sale_price" | "precioventa" => Some("sale_price"),
+        "cost_price" | "costo" | "precio_costo" | "costo_unitario" | "precio_compra" => {
+            Some("cost_price")
+        }
+        "stock" | "existencia" | "existencias" | "cantidad" | "inventario" => Some("stock"),
+        "external_id" | "sku" | "codigo" | "codigo_interno" | "cod" | "id_externo"
+        | "codigo_producto" => Some("external_id"),
+        "category" | "categoria" | "rubro" | "familia" => Some("category"),
+        "laboratory" | "laboratorio" | "lab" | "marca" => Some("laboratory"),
+        "active_ingredient" | "principio_activo" | "ingrediente_activo" => {
+            Some("active_ingredient")
+        }
+        "therapeutic_action" | "accion_terapeutica" | "accion" => Some("therapeutic_action"),
+        "prescription_type" | "tipo_receta" | "receta" => Some("prescription_type"),
+        "presentation" | "presentacion" | "formato" => Some("presentation"),
+        "discount_percent" | "descuento" | "descuento_porcentaje" | "dcto" => {
+            Some("discount_percent")
+        }
+        "image_url" | "imagen" | "url_imagen" | "foto" => Some("image_url"),
+        "description" | "descripcion" | "detalle" | "glosa" => Some("description"),
+        "slug" => Some("slug"),
+        "barcode" | "codigo_barra" | "codigo_barras" | "codigo_de_barras" | "codigobarra"
+        | "ean" | "ean13" | "cod_barra" => Some("barcode"),
+        _ => None,
+    }
+}
+
+/// Builds canonical-column → index from the header row. First occurrence wins.
+fn resolve_columns(headers: &csv::StringRecord) -> std::collections::HashMap<&'static str, usize> {
+    let mut map = std::collections::HashMap::new();
+    for (i, h) in headers.iter().enumerate() {
+        if let Some(canon) = canon_header(h) {
+            map.entry(canon).or_insert(i);
+        }
+    }
+    map
+}
+
+/// `true` for dot-grouped thousands like `1.990`, `12.500`, `1.234.567` — i.e.
+/// `^\d{1,3}(\.\d{3})+$`. Used to disambiguate a lone `.` as a thousands mark
+/// (CLP is integer pesos) versus a real decimal point (`12.50`).
+fn is_dot_thousands(s: &str) -> bool {
+    let body = s.strip_prefix('-').unwrap_or(s);
+    let mut parts = body.split('.');
+    let first = parts.next().unwrap_or("");
+    if first.is_empty() || first.len() > 3 || !first.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let mut any = false;
+    for p in parts {
+        any = true;
+        if p.len() != 3 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+    }
+    any
+}
+
+/// Parses a price/cost cell tolerant of Chilean/Excel formatting: strips a
+/// leading `$`, all whitespace, and resolves thousands vs decimal separators.
+/// CLP prices are integer pesos, so `1.990` / `12.500` MUST become 1990 / 12500
+/// (not 1.99 / 12.5). Heuristics:
+///   - both `.` and `,` present → the LAST one is the decimal point, the other
+///     is a thousands separator (handles `1.990,50` and `1,990.50`).
+///   - only `.` and it looks dot-grouped (`1.234.567`) → strip the dots.
+///   - only `,` → comma is the decimal separator (`1990,5` → `1990.5`).
+fn normalize_decimal(raw: &str) -> Option<rust_decimal::Decimal> {
+    let mut s: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    if let Some(rest) = s.strip_prefix('$') {
+        s = rest.to_string();
+    }
+    if s.is_empty() {
+        return None;
+    }
+    let has_dot = s.contains('.');
+    let has_comma = s.contains(',');
+    let cleaned = if has_dot && has_comma {
+        if s.rfind(',') > s.rfind('.') {
+            s.replace('.', "").replace(',', ".")
+        } else {
+            s.replace(',', "")
+        }
+    } else if has_comma {
+        s.replace(',', ".")
+    } else if has_dot && is_dot_thousands(&s) {
+        s.replace('.', "")
+    } else {
+        s
+    };
+    cleaned.parse::<rust_decimal::Decimal>().ok()
+}
+
+/// Parses an integer cell (stock, discount) tolerant of `1.000`/`1 000`/`$`.
+fn normalize_int(raw: &str) -> Option<i64> {
+    let digits: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '-')
+        .collect();
+    if digits.is_empty() || digits == "-" {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// Import CSV de productos (multipart). Requiere admin+. Con `?dry_run=true`
+/// valida y cuenta SIN escribir nada (preview antes de confirmar).
 #[utoipa::path(post, path = "/api/v1/products/import", tag = "Catalog",
+    params(("dry_run" = Option<bool>, Query, description = "Valida sin escribir (preview)")),
     request_body(content = String, content_type = "multipart/form-data"),
     responses((status = 200, body = serde_json::Value), (status = 400, body = crate::error::ErrorEnvelope),
         (status = 401, body = crate::error::ErrorEnvelope), (status = 403, body = crate::error::ErrorEnvelope)),
@@ -328,10 +503,12 @@ pub(crate) struct ImportError {
 pub async fn import_products(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
+    Query(params): Query<ImportParams>,
     mut mp: Multipart,
 ) -> Result<Json<ImportSummary>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
+    let dry_run = params.dry_run;
 
     let field = mp
         .next_field()
@@ -343,25 +520,35 @@ pub async fn import_products(
         .await
         .map_err(|e| ApiError::invalid(format!("lectura de archivo falló: {e}")))?
         .to_vec();
+    let bytes = strip_bom(bytes);
+    let delimiter = sniff_delimiter(&bytes);
 
+    // `flexible` so rows with extra/missing columns don't abort the whole parse;
+    // a row that's short on a required cell is reported per-row instead.
     let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(delimiter)
+        .flexible(true)
         .trim(csv::Trim::All)
         .from_reader(bytes.as_slice());
     let headers = rdr
         .headers()
         .map_err(|e| ApiError::invalid(format!("CSV sin cabecera válida: {e}")))?
         .clone();
-    let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
-    // Accept either `price` or `sale_price` for the price column to match the
-    // catalogo CSV format emitted by `scripts/extract_tufarmacia_full.py`.
-    let i_price = col("price").or_else(|| col("sale_price"));
-    let (Some(i_name), Some(i_price)) = (col("name"), i_price) else {
+    let cols = resolve_columns(&headers);
+    let i_name = cols.get("name").copied();
+    let i_price = cols
+        .get("price")
+        .or_else(|| cols.get("sale_price"))
+        .copied();
+    let (Some(i_name), Some(i_price)) = (i_name, i_price) else {
         return Err(ApiError::invalid(
-            "CSV debe incluir al menos columnas `name` y `price` (o `sale_price`)",
+            "CSV debe incluir al menos columnas `name` y `price` (acepta nombres en \
+             español: `nombre`, `precio`).",
         ));
     };
-    let get = |rec: &csv::StringRecord, idx: Option<usize>| {
-        idx.and_then(|i| rec.get(i))
+    let cell = |rec: &csv::StringRecord, key: &str| {
+        cols.get(key)
+            .and_then(|&i| rec.get(i))
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string)
@@ -372,7 +559,25 @@ pub async fn import_products(
         updated: 0,
         failed: 0,
         errors: Vec::new(),
+        dry_run,
     };
+    // In dry-run we can't read back rows we haven't written, so track external_ids
+    // seen within this file to count within-file repeats as updates (matches the
+    // committed behaviour where the 2nd occurrence updates the 1st).
+    let mut seen_xids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Category column carries free-text names in a migrant's CSV (`Analgésicos`),
+    // not `category:xxx` record ids. Resolve name → id, creating the category on
+    // first sight (find-or-create), so the operator's taxonomy comes across. Seed
+    // the cache with existing categories so re-imports reuse them, never duplicate.
+    let mut cat_cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !dry_run {
+        for c in domain::catalog::repo::list_categories(&db, &t)
+            .await
+            .unwrap_or_default()
+        {
+            cat_cache.insert(c.name.to_lowercase(), c.id);
+        }
+    }
     for (n, rec) in rdr.records().enumerate() {
         let line = n + 2; // +1 header, +1 to 1-based
         let rec = match rec {
@@ -387,40 +592,106 @@ pub async fn import_products(
             }
         };
         let name = rec.get(i_name).unwrap_or("").trim().to_string();
-        let price = match rec.get(i_price).unwrap_or("").trim().parse() {
-            Ok(p) => p,
-            Err(_) => {
+        if name.is_empty() {
+            // Skip fully-empty rows (trailing blank lines from Excel) silently;
+            // a row with data but no name is a real error.
+            if rec.iter().all(|c| c.trim().is_empty()) {
+                continue;
+            }
+            summary.failed += 1;
+            summary.errors.push(ImportError {
+                line,
+                message: "falta el nombre del producto".into(),
+            });
+            continue;
+        }
+        let price_raw = rec.get(i_price).unwrap_or("").trim();
+        let price = match normalize_decimal(price_raw) {
+            Some(p) => p,
+            None => {
                 summary.failed += 1;
                 summary.errors.push(ImportError {
                     line,
-                    message: "precio inválido".into(),
+                    message: format!("precio inválido: «{price_raw}»"),
                 });
                 continue;
             }
         };
-        let external_id = get(&rec, col("external_id"));
-        let cost_price = get(&rec, col("cost_price")).and_then(|v| v.parse().ok());
-        let stock: i64 = get(&rec, col("stock"))
-            .and_then(|v| v.parse().ok())
+        let external_id = cell(&rec, "external_id");
+        let cost_price = cell(&rec, "cost_price").and_then(|v| normalize_decimal(&v));
+        let stock: i64 = cell(&rec, "stock")
+            .and_then(|v| normalize_int(&v))
             .unwrap_or(0);
-        let laboratory = get(&rec, col("laboratory"));
-        let therapeutic_action = get(&rec, col("therapeutic_action"));
-        let active_ingredient = get(&rec, col("active_ingredient"));
-        let prescription_type = get(&rec, col("prescription_type"));
-        let presentation = get(&rec, col("presentation"));
+        let laboratory = cell(&rec, "laboratory");
+        let therapeutic_action = cell(&rec, "therapeutic_action");
+        let active_ingredient = cell(&rec, "active_ingredient");
+        let prescription_type = cell(&rec, "prescription_type");
+        let presentation = cell(&rec, "presentation");
         let discount_percent: Option<i64> =
-            get(&rec, col("discount_percent")).and_then(|v| v.parse().ok());
-        let category = get(&rec, col("category"));
-        let image_url = get(&rec, col("image_url"));
-        let description = get(&rec, col("description"));
-        let slug = get(&rec, col("slug"));
-        let barcode = get(&rec, col("barcode"));
+            cell(&rec, "discount_percent").and_then(|v| normalize_int(&v));
+        let category_raw = cell(&rec, "category");
+        let image_url = cell(&rec, "image_url");
+        let description = cell(&rec, "description");
+        let slug = cell(&rec, "slug");
+        let barcode = cell(&rec, "barcode");
+
+        // Resolve the category name → record id (commit path only — dry-run never
+        // writes, so it skips category resolution entirely).
+        let category = if dry_run {
+            None
+        } else if let Some(craw) = category_raw.as_deref() {
+            if craw.starts_with("category:") {
+                Some(craw.to_string())
+            } else {
+                let key = craw.to_lowercase();
+                match cat_cache.get(&key) {
+                    Some(id) => Some(id.clone()),
+                    None => match service::create_category(
+                        &db,
+                        &t,
+                        domain::catalog::model::NewCategory {
+                            name: craw.to_string(),
+                            slug: None,
+                            description: None,
+                            image_url: None,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(dto) => {
+                            cat_cache.insert(key, dto.id.clone());
+                            Some(dto.id)
+                        }
+                        Err(e) => {
+                            summary.failed += 1;
+                            summary.errors.push(ImportError {
+                                line,
+                                message: format!("categoría: {e}"),
+                            });
+                            continue;
+                        }
+                    },
+                }
+            }
+        } else {
+            None
+        };
 
         // Upsert-by-external_id: re-running the same CSV updates existing
         // rows instead of duplicating them with `-2` slug suffixes.
         if let Some(xid) = external_id.as_deref() {
+            // Within-file repeat (only meaningful in dry-run; committed runs see
+            // the row already persisted via find_id_by_external_id below).
+            if dry_run && !seen_xids.insert(xid.to_string()) {
+                summary.updated += 1;
+                continue;
+            }
             match domain::catalog::repo::find_id_by_external_id(&db, &t, xid).await {
                 Ok(Some(existing)) => {
+                    if dry_run {
+                        summary.updated += 1;
+                        continue;
+                    }
                     let patch = domain::catalog::model::UpdateProduct {
                         name: Some(name.clone()),
                         description: description.clone(),
@@ -472,6 +743,11 @@ pub async fn import_products(
                     continue;
                 }
             }
+        }
+
+        if dry_run {
+            summary.created += 1;
+            continue;
         }
 
         let input = NewProduct {
@@ -598,4 +874,71 @@ pub async fn delete_category(
     let t = tenant_of(&claims)?;
     service::delete_category(&db, &t, &id).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+#[cfg(test)]
+mod import_parsing_tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    fn dec(s: &str) -> Decimal {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn bom_is_stripped() {
+        assert_eq!(strip_bom(vec![0xEF, 0xBB, 0xBF, b'n']), vec![b'n']);
+        assert_eq!(strip_bom(vec![b'n']), vec![b'n']);
+    }
+
+    #[test]
+    fn delimiter_sniff_picks_semicolon_for_excel_cl() {
+        assert_eq!(sniff_delimiter(b"name;price;stock\n"), b';');
+        assert_eq!(sniff_delimiter(b"name,price,stock\n"), b',');
+        assert_eq!(sniff_delimiter(b"name\tprice\tstock\n"), b'\t');
+        assert_eq!(sniff_delimiter(b"name\n"), b',');
+    }
+
+    #[test]
+    fn spanish_headers_resolve() {
+        assert_eq!(canon_header("Nombre"), Some("name"));
+        assert_eq!(canon_header("Precio"), Some("price"));
+        assert_eq!(canon_header("Código"), Some("external_id"));
+        assert_eq!(canon_header("Código de Barras"), Some("barcode"));
+        assert_eq!(canon_header("categoría"), Some("category"));
+        assert_eq!(canon_header("Principio Activo"), Some("active_ingredient"));
+        assert_eq!(canon_header("desconocido"), None);
+    }
+
+    #[test]
+    fn clp_thousands_separator_is_integer_pesos() {
+        assert_eq!(normalize_decimal("1.990"), Some(dec("1990")));
+        assert_eq!(normalize_decimal("12.500"), Some(dec("12500")));
+        assert_eq!(normalize_decimal("1.234.567"), Some(dec("1234567")));
+        assert_eq!(normalize_decimal("$ 2.490"), Some(dec("2490")));
+    }
+
+    #[test]
+    fn real_decimals_survive() {
+        assert_eq!(normalize_decimal("12.50"), Some(dec("12.50")));
+        assert_eq!(normalize_decimal("1990,50"), Some(dec("1990.50")));
+        assert_eq!(normalize_decimal("1.990,50"), Some(dec("1990.50")));
+        assert_eq!(normalize_decimal("1,990.50"), Some(dec("1990.50")));
+        assert_eq!(normalize_decimal("1990"), Some(dec("1990")));
+    }
+
+    #[test]
+    fn garbage_price_rejected() {
+        assert_eq!(normalize_decimal("abc"), None);
+        assert_eq!(normalize_decimal(""), None);
+        assert_eq!(normalize_decimal("$"), None);
+    }
+
+    #[test]
+    fn int_cells_tolerate_formatting() {
+        assert_eq!(normalize_int("1.000"), Some(1000));
+        assert_eq!(normalize_int("40"), Some(40));
+        assert_eq!(normalize_int(""), None);
+        assert_eq!(normalize_int("abc"), None);
+    }
 }
