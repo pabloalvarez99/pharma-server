@@ -16,6 +16,7 @@ mod health;
 mod middleware;
 pub mod openapi;
 mod routes;
+pub mod setup;
 pub mod stock_webhook;
 mod v1;
 
@@ -67,6 +68,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(health::router())
         .merge(openapi::router(&state))
         .merge(routes::router())
+        .merge(setup::router(state.clone()))
         .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
         .with_state(state)

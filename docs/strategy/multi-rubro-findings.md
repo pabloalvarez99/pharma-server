@@ -65,3 +65,48 @@ Hallazgos de la lane onboarding/selección-de-rubro (Session "ye",
 - `recetas.ts`: condicionar visibilidad/entrada con `hasRecetas(vertical)`
   importado de `client/src/vertical.ts`. El nav ya se oculta en `shell.ts`;
   falta el guard dentro de la vista por si se navega por URL/estado.
+
+## First-run LIVE QA (ye, lane feat/firstrun-live-qa) — DB fresca
+
+Manejé el primer-inicio REAL contra una DB vacía (sin tenant ni usuario), el
+escenario del RUT solo que recién instaló el MSI. Fricción hallada + acción:
+
+1. **Chicken-and-egg de cuenta (P0 de onboarding)** — DB fresca no tiene tenant
+   ni usuario → `/login` nunca puede pasar → el operador queda atrapado en la
+   pantalla de login. La única salida hoy es el **CLI** (`pharma tenant-create` +
+   `pharma user-create`), lo que viola "primer-inicio SIN tocar CLI" y el modelo
+   freemium de un dueño solo (no hay admin que le cree la cuenta).
+   → **FIJADO**: endpoint UNAUTENTICADO `GET /api/v1/setup/status` +
+   `POST /api/v1/setup` (`crates/api/src/setup.rs`) que crea el primer
+   tenant+owner cuando la DB no tiene usuarios y deja al operador logueado.
+   **Fail-closed**: en cuanto existe 1 usuario, status→false y un segundo setup
+   da 409 `SETUP_ALREADY_DONE` (no es backdoor). Cableado en cliente:
+   `login.ts` sondea setup al renderizar y, si hace falta, muestra el formulario
+   "Crea tu cuenta" (nombre del negocio + rubro + correo + clave). El rubro
+   elegido se guarda como `business.vertical` en el mismo paso → el dashboard no
+   arranca asumiendo farmacia. Resuelve además el pendiente #2 de arriba
+   (defaults farmacia pre-auth): ahora hay un paso pre-auth multi-rubro real.
+
+2. **Defaults de login engañosos + farmacia-hardcoded** — `login.ts` pre-llenaba
+   `DEFAULT_TENANT="tufarmacia"` y `DEFAULT_EMAIL="admin@tufarmacia.cl"`. En una
+   DB fresca esos valores apuntan a nada → el operador toca ENTRAR y recibe
+   "credenciales no coinciden", confuso porque los campos PARECEN configurados.
+   Además es marca farmacia (multi-rubro). → **FIJADO**: defaults genéricos
+   (`principal` / correo vacío). "principal" coincide con el nombre de sucursal
+   sugerido en `docs/operator/01-primer-inicio.md`.
+
+3. **Login sin salida en instalación fresca** — la pantalla de login no ofrecía
+   ninguna pista de "¿primera vez? crea tu cuenta"; era un dead-end. → **FIJADO**
+   por el sondeo de #1 que intercambia la tarjeta por el formulario de setup.
+
+4. **Doc `docs/operator/01-primer-inicio.md` ↔ app divergen** — el manual asume
+   que "el dueño o el admin" ya registró tu usuario; para el install freemium de
+   un solo RUT NO existe ese admin. Con el setup in-app el operador se auto-crea
+   la cuenta. → Anotado; generalizar la redacción del manual es de la lane de
+   docs (fuera de mi scope de views), pero el flujo real ya no requiere admin.
+
+Prueba REAL contra DB fresca: `crates/api/tests/setup_firstrun.rs` levanta la
+app axum sobre una DB kv vacía y corre el viaje completo por HTTP —
+status(needs_setup) → setup → /me(owner) → business.vertical persistido →
+fail-closed(409) → login con las credenciales recién elegidas → seed-demo →
+catálogo poblado (camino de la primera venta alcanzable). Sin CLI en ningún paso.

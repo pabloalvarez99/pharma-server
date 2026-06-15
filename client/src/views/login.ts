@@ -20,7 +20,14 @@
 //    connectionState so the operator-facing messages stay single-sourced.
 //  - The chosen server is persisted (and re-validated on load) via the storage
 //    helpers in onboarding-ux.ts.
-import { login, serverHealth, type SessionInfo } from "../api";
+import {
+  login,
+  serverHealth,
+  setupStatus,
+  setupAccount,
+  type SessionInfo,
+} from "../api";
+import { RUBRO_CATALOG } from "../vertical";
 import { resolveServerConfig, validateServerUrl, connectionState } from "./first-run";
 import {
   withTimeout,
@@ -33,8 +40,13 @@ import {
   type KeyStore,
 } from "./onboarding-ux";
 
-const DEFAULT_TENANT = "tufarmacia";
-const DEFAULT_EMAIL = "admin@tufarmacia.cl";
+// Generic, multi-rubro defaults. The old `tufarmacia` / `admin@tufarmacia.cl`
+// pre-fills looked "already configured" on a fresh DB and pointed at a tenant
+// that doesn't exist → "credenciales no coinciden" on first ENTRAR. "principal"
+// matches the operator manual's suggested branch name; email is left blank (a
+// guessed address is worse than an empty one).
+const DEFAULT_TENANT = "principal";
+const DEFAULT_EMAIL = "";
 
 /** localStorage as a KeyStore, or undefined if the platform forbids it. */
 function browserStore(): KeyStore | undefined {
@@ -449,4 +461,221 @@ export function renderLogin(
 
   // Sane initial focus: tenant first.
   getInput(FIELDS.tenant.input).focus();
+
+  // First-run probe: on a fresh install (no account in the whole DB) swap the
+  // login card for an in-app account-creation form, so the lone operator never
+  // has to drop to the terminal (`pharma tenant-create` / `user-create`) just to
+  // get past the login screen. Best-effort: if the server is unreachable or too
+  // old to expose /setup, we silently stay on the login form.
+  void (async () => {
+    const probe = validateServerUrl(getInput(FIELDS.server.input).value);
+    if (!probe.ok) return;
+    try {
+      const st = await setupStatus(probe.url);
+      if (st.needs_setup) renderFirstRunSetup(root, probe.url, onSuccess);
+    } catch {
+      /* unreachable / route missing → leave login form as-is */
+    }
+  })();
+}
+
+/** First-run account creation — shown only when the server reports it has no
+ *  account yet. Creates the first tenant + owner and logs straight in, so a
+ *  fresh install goes app → account → dashboard with zero CLI. */
+export function renderFirstRunSetup(
+  root: HTMLElement,
+  serverUrl: string,
+  onSuccess: (session: SessionInfo, serverUrl: string) => void,
+): void {
+  const rubroOptions = RUBRO_CATALOG.map(
+    (r) =>
+      `<option value="${r.value}">${escapeAttr(r.icon)} ${escapeAttr(r.label)}</option>`,
+  ).join("");
+
+  root.innerHTML = `
+    <div class="login-stage" role="main">
+      <div class="login-bg" aria-hidden="true">
+        <div class="login-bg-drift"></div>
+        <div class="login-bg-noise"></div>
+      </div>
+      <div class="login-frame">
+        <aside class="login-brand-panel" aria-hidden="true">
+          <div class="brand-stack">
+            <div class="rb-mark" aria-label="RutBusiness">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"></path>
+                <path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
+                <path d="M9 11h6M9 15h4"></path>
+              </svg>
+              <span class="rb-dv"></span>
+            </div>
+            <div class="brand-wordmark">
+              <span class="wm-main rb-wordmark">Rut<b>Business</b></span>
+              <span class="wm-sub">EL SO DE TU NEGOCIO</span>
+            </div>
+          </div>
+          <div class="brand-tagline">
+            <h2 class="rb-display">Bienvenido.</h2>
+            <p>Es la primera vez que abres este servidor. Crea tu cuenta de dueño y empieza a vender — sin instalar nada más.</p>
+          </div>
+        </aside>
+
+        <section class="login-card" aria-labelledby="setup-title">
+          <header class="login-card-head">
+            <h1 id="setup-title">Crea tu cuenta</h1>
+            <p class="login-card-sub">Primer inicio — esta cuenta será la dueña del negocio.</p>
+          </header>
+
+          <form id="setup-form" autocomplete="off" novalidate>
+            <div class="field">
+              <label for="s-name">Nombre del negocio</label>
+              <input id="s-name" type="text" placeholder="ej: Almacén Don José" aria-describedby="es-name" required />
+              <p id="es-name" class="field-error" role="alert" hidden></p>
+            </div>
+
+            <div class="field">
+              <label for="s-rubro">Rubro</label>
+              <select id="s-rubro" class="rb-input">${rubroOptions}</select>
+              <p class="field-hint">Define qué módulos se muestran (las recetas sólo en Farmacia). Lo puedes cambiar luego en Configuración.</p>
+            </div>
+
+            <div class="field">
+              <label for="s-email">Correo</label>
+              <input id="s-email" type="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="dueno@minegocio.cl" aria-describedby="es-email" required />
+              <p id="es-email" class="field-error" role="alert" hidden></p>
+            </div>
+
+            <div class="field">
+              <label for="s-password">Contraseña</label>
+              <input id="s-password" type="password" autocomplete="new-password" placeholder="mínimo 8 caracteres" aria-describedby="es-password" required />
+              <p id="es-password" class="field-error" role="alert" hidden></p>
+            </div>
+
+            <details class="advanced" id="s-adv-conn">
+              <summary>
+                <span>Conexión avanzada</span>
+                <svg class="chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </summary>
+              <div class="advanced-body">
+                <div class="field">
+                  <label for="s-server">Servidor</label>
+                  <input id="s-server" type="text" spellcheck="false" value="${escapeAttr(serverUrl)}" aria-describedby="es-server" />
+                  <p id="es-server" class="field-error" role="alert" hidden></p>
+                </div>
+              </div>
+            </details>
+
+            <p id="setup-error" class="form-error" role="alert" hidden></p>
+
+            <button id="setup-submit" type="submit" class="btn-primary">
+              <span class="btn-pulse" aria-hidden="true"></span>
+              <span class="btn-label">CREAR CUENTA Y ENTRAR</span>
+            </button>
+          </form>
+
+          <footer class="login-foot">
+            <span class="foot-line">Tus datos viven sólo en este equipo.</span>
+            <span class="foot-meta">¿Ya tienes cuenta? Reinicia la app para iniciar sesión.</span>
+          </footer>
+        </section>
+      </div>
+    </div>
+  `;
+
+  const form = root.querySelector<HTMLFormElement>("#setup-form")!;
+  const btn = root.querySelector<HTMLButtonElement>("#setup-submit")!;
+  const btnLabel = btn.querySelector<HTMLSpanElement>(".btn-label")!;
+  const formErr = root.querySelector<HTMLParagraphElement>("#setup-error")!;
+  const q = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
+
+  function fieldError(id: string, msg: string): void {
+    const el = q<HTMLParagraphElement>(id);
+    el.textContent = msg;
+    el.hidden = false;
+  }
+  function clearErrors(): void {
+    formErr.hidden = true;
+    ["es-name", "es-email", "es-password", "es-server"].forEach((id) => {
+      const el = q<HTMLParagraphElement>(id);
+      el.hidden = true;
+      el.textContent = "";
+    });
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearErrors();
+
+    const name = q<HTMLInputElement>("s-name").value.trim();
+    const rubro = q<HTMLSelectElement>("s-rubro").value;
+    const email = q<HTMLInputElement>("s-email").value.trim();
+    const password = q<HTMLInputElement>("s-password").value;
+    const rawServer = q<HTMLInputElement>("s-server").value;
+
+    let firstBad: string | null = null;
+    if (!name) {
+      fieldError("es-name", "Indica el nombre de tu negocio.");
+      firstBad ??= "s-name";
+    }
+    if (!email) {
+      fieldError("es-email", "Indica tu correo.");
+      firstBad ??= "s-email";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      fieldError("es-email", "El correo no tiene un formato válido.");
+      firstBad ??= "s-email";
+    }
+    if (password.length < 8) {
+      fieldError("es-password", "La contraseña debe tener al menos 8 caracteres.");
+      firstBad ??= "s-password";
+    }
+    const serverCheck = validateServerUrl(rawServer);
+    if (!serverCheck.ok) {
+      fieldError("es-server", serverCheck.error);
+      const adv = root.querySelector<HTMLDetailsElement>("#s-adv-conn");
+      if (adv) adv.open = true;
+      firstBad ??= "s-server";
+    }
+    if (firstBad) {
+      q<HTMLElement>(firstBad).focus();
+      return;
+    }
+    const url = serverCheck.ok ? serverCheck.url : rawServer.trim();
+
+    btn.disabled = true;
+    btn.classList.add("loading");
+    btnLabel.textContent = "CREANDO";
+    try {
+      const session = await setupAccount(url, {
+        businessName: name,
+        email,
+        password,
+        vertical: rubro,
+      });
+      try { sessionStorage.setItem("tenant_slug", session.tenant_slug); } catch { /* noop */ }
+      btn.classList.remove("loading");
+      btn.classList.add("ok");
+      btnLabel.textContent = "LISTO";
+      root.querySelector(".login-card")?.classList.add("launch");
+      root.querySelector(".login-brand-panel")?.classList.add("launch");
+      window.setTimeout(() => onSuccess(session, url), 280);
+    } catch (err) {
+      formErr.textContent =
+        typeof err === "string" ? err : "No se pudo crear la cuenta. Intenta nuevamente.";
+      formErr.hidden = false;
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btnLabel.textContent = "CREAR CUENTA Y ENTRAR";
+    }
+  });
+
+  q<HTMLInputElement>("s-name").focus();
+}
+
+/** Minimal attribute escaper for values interpolated into the setup template. */
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
