@@ -2679,3 +2679,38 @@ es vertical-agnóstico = boleta/reports universal). GATE cliente verde:
 `npm run build` + `npm test` 158/158 (+19). Sin Rust/mig; api.ts intacto
 (solo lectura). NO bug de prod hallado — la lógica de la vista era correcta; el
 valor es blindar presentación + export contra divergencia UI↔test.
+
+## 2026-06-15 — seed-demo realista (farmacia/minimarket creíble al primer arranque) [marvin]
+
+Lane `feat/seed-demo-realism` (Phase 2 goal b). El seed demo dejó de ser un
+catálogo mínimo: una instalación fresca ahora abre a una farmacia (o minimarket)
+chilena verosímil, no a pantallas vacías. Cambios en `crates/domain/src/seed.rs`
+(servicio único que comparten CLI `pharma seed-demo` y endpoint admin):
+
+- **Catálogo creíble**: 12 SKUs farmacia / 10 minimarket con precios CLP
+  plausibles, código de barra EAN-13 (prefijo GS1 Chile 780) sembrado en
+  `product_barcode`, vencimientos escalonados (sanos / próximos a vencer /
+  stock bajo) y, en farmacia, laboratorio + principio activo. Minimarket sin
+  campos clínicos pero con lote/vencimiento (perecibles).
+- **≥3 proveedores** por vertical (droguerías Socofar/Hofmann/Difarma ·
+  distribuidoras Central/Andina/Las Brisas) con RUT + contacto → Compras y
+  comparador de precios tienen con quién operar.
+- **Órdenes de compra demo** en estado `draft` (NO mueven stock) → la vista
+  Compras no sale vacía.
+- **Ventas históricas** (12 ventas repartidas en el último mes vía
+  `sales::historic::import_historic_orders`, que NO descuenta stock ni emite
+  movimientos) → Dashboard, sales-daily, top-products y márgenes con datos.
+
+Idempotencia/wipe ampliados: `force` borra proveedores (lista cerrada de
+nombres), OC (`external_ref` prefijo `DEMO-PO-`), ventas históricas
+(`DEMO-SALE-`) y códigos de barra, además de productos/lotes/movimientos. El
+invariante de stock se mantiene intacto (un lote por producto, stock>0;
+`product.stock == Σ batch.stock == Σ movement.delta`). CLI imprime los nuevos
+conteos (proveedores/ordenes_compra/ventas_historicas).
+
+Tests: +6 unit en `seed.rs` (tamaño creíble + barcodes únicos EAN-13, índice de
+proveedor válido, histórico referencia solo external_ids demo) y +4 integración
+en `tests/seed.rs` (siembra proveedores/OC/histórico/barcodes, histórico no mueve
+stock, force no duplica, minimarket también puebla). GATE workspace verde:
+`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D
+warnings` + `cargo test --workspace` (0 fallidos; 1 ignored preexistente).
