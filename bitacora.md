@@ -2968,3 +2968,32 @@ Lane `feat/e2e-ci-gate-hardening`. Solo `client/e2e/` + `client/package.json` +
 
 GATE verde: `npm run build` + `npm test` (184) + `npm run e2e`
 (60 passed, 0 failed, 4 xfail = BUG-bob-001/002 × 2 verticales).
+
+## 2026-06-15 — Restore guiado: dry-run + round-trip real (milton, ola 5)
+
+Pilar producto #8 (backup). #184/#185 dieron snapshot + CLI `backup create/restore/list`
+con restore *validate-before-wipe* (staging → verifica `surreal/` → swap) + confirm
+(`--yes`) + guard de puerto. HALLAZGO al leer origin: el restore YA estaba completo
+(el brief asumía el checkout local stale). Gaps reales aditivos (sin duplicar):
+
+1. **`pharma backup restore <path> --dry-run`**: validación previa read-only que
+   informa qué restauraría (entradas, archivos `surreal/`, KB descomprimidos, tiene
+   `surreal/`/`agent.key`, restaurable sí/no) SIN tocar los datos ni requerir el
+   servidor detenido ni confirmación. Reusa `jobs::backup::inspect_snapshot` (el mismo
+   validador del path scheduler/API; agregué `jobs` como dep de `cli` en vez de
+   reimplementar). Snapshot sin árbol `surreal/` → error claro ("NO es restaurable…
+   dejaría la base vacía"). Restaurable → imprime el siguiente paso (`sc stop` + restore).
+
+2. **Round-trip REAL kv-surrealkv** (los tests previos usaban bytes falsos y nunca
+   reabrían una DB): `restore_roundtrip_preserves_stock_ledger_invariant` siembra un
+   store SurrealKv file-backed (`db::connect` + migraciones + `seed_demo` pharmacy),
+   captura el ledger, suelta el lock, `backup create` → tar.gz, WIPE del data dir,
+   `restore_archive`, **reabre** y prueba que el invariante de stock
+   (`product.stock == Σ product_batch.stock == Σ stock_movement.delta`) sobrevive
+   byte-a-byte (ledger idéntico antes/después). Es el camino real de disaster-recovery.
+
+Sin migración (no hace falta tabla nueva; `backup_log` ya existe del #184). +5 tests
+(3 dry-run + 1 parse `--dry-run` + 1 round-trip). GATE workspace verde: `cargo fmt
+--all --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace`
+(cli 25/25). Multi-tenant safe: el snapshot cubre todo el store SurrealKv (no
+tenant-scoped, igual que `backup_log`); el invariante se verifica per-tenant.

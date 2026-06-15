@@ -16,6 +16,7 @@ auth = { path = "../auth" }
 agent = { path = "../agent" }
 license = { path = "../license" }
 dte = { path = "../dte" }
+jobs = { path = "../jobs" }
 rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 chrono.workspace = true
 uuid.workspace = true

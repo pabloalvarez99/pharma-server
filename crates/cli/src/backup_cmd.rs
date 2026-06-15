@@ -48,6 +48,11 @@ pub enum BackupCmd {
         /// actuales).  Sin esta opción se solicita confirmación interactiva.
         #[arg(long, short = 'y')]
         yes: bool,
+        /// Inspeccionar el snapshot e informar qué restauraría SIN tocar los
+        /// datos actuales (validación previa).  No requiere el servidor
+        /// detenido ni confirmación.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Listar backups disponibles (más reciente primero).
     List {
@@ -67,7 +72,9 @@ pub async fn run(cmd: BackupCmd) -> anyhow::Result<()> {
 
     match cmd {
         BackupCmd::Create { output } => cmd_create(&db_path, output),
-        BackupCmd::Restore { path, yes } => cmd_restore(&db_path, &path, &cfg.bind, yes),
+        BackupCmd::Restore { path, yes, dry_run } => {
+            cmd_restore(&db_path, &path, &cfg.bind, yes, dry_run)
+        }
         BackupCmd::List { dir } => cmd_list(&db_path, dir),
     }
 }
@@ -135,7 +142,21 @@ fn cmd_create(db_path: &Path, output: Option<PathBuf>) -> anyhow::Result<()> {
 // backup restore
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn cmd_restore(db_path: &Path, archive: &Path, bind_addr: &str, yes: bool) -> anyhow::Result<()> {
+fn cmd_restore(
+    db_path: &Path,
+    archive: &Path,
+    bind_addr: &str,
+    yes: bool,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    // Dry-run is a READ-ONLY validation: inspect the archive and report what a
+    // restore WOULD write, without touching the live data dir. Safe to run
+    // while the server is up and without confirmation — so handle it before any
+    // other check and return.
+    if dry_run {
+        return print_dry_run(db_path, archive);
+    }
+
     // Verify the server is not running by trying to connect to its port.
     if server_is_listening(bind_addr) {
         return Err(anyhow!(
@@ -172,6 +193,49 @@ fn cmd_restore(db_path: &Path, archive: &Path, bind_addr: &str, yes: bool) -> an
 
     println!("✓ Restauración completada.");
     Ok(())
+}
+
+/// Dry-run inspection: reuse `jobs::backup::inspect_snapshot` (the same
+/// validator the scheduler/API path uses) to report what a restore would write
+/// WITHOUT extracting anything. Returns an error for a missing/corrupt archive
+/// or one that carries no SurrealKv tree, so an operator can catch a bad backup
+/// before it is too late to matter.
+fn print_dry_run(db_path: &Path, archive: &Path) -> anyhow::Result<()> {
+    let rep = jobs::inspect_snapshot(archive)
+        .with_context(|| format!("inspeccionar {}", archive.display()))?;
+
+    let kb = rep.total_uncompressed_bytes / 1024;
+    println!("Inspección de snapshot (dry-run, no se modificó nada):");
+    println!("  Archivo:            {}", rep.path.display());
+    println!("  Entradas:           {}", rep.entries);
+    println!("  Archivos surreal/:  {}", rep.surreal_files);
+    println!("  Tamaño descomprimido: {} KB", kb);
+    println!(
+        "  Tiene árbol surreal/: {}",
+        if rep.has_surreal_tree { "sí" } else { "no" }
+    );
+    println!(
+        "  Tiene agent.key:    {}",
+        if rep.has_agent_key { "sí" } else { "no" }
+    );
+
+    if rep.is_restorable() {
+        println!(
+            "✓ Snapshot restaurable. Una restauración SOBRESCRIBIRÍA los datos en {}.",
+            db_path.display()
+        );
+        println!(
+            "  Para restaurar: detén el servidor (`sc stop PharmaServer`) y ejecuta \
+             `pharma backup restore {}`.",
+            archive.display()
+        );
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "El snapshot NO es restaurable: no contiene un árbol `surreal/` con datos. \
+             Una restauración dejaría la base vacía."
+        ))
+    }
 }
 
 /// Reads one line and returns `true` only for an affirmative answer
@@ -473,9 +537,29 @@ mod tests {
         }
 
         let cli = TestCli::parse_from(["pharma", "restore", "/tmp/snap.tar.gz"]);
-        if let BackupCmd::Restore { path, yes } = cli.cmd {
+        if let BackupCmd::Restore { path, yes, dry_run } = cli.cmd {
             assert_eq!(path, PathBuf::from("/tmp/snap.tar.gz"));
             assert!(!yes, "yes defaults to false");
+            assert!(!dry_run, "dry_run defaults to false");
+        } else {
+            panic!("expected Restore");
+        }
+    }
+
+    #[test]
+    fn parse_backup_restore_dry_run() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(subcommand)]
+            cmd: super::BackupCmd,
+        }
+
+        let cli = TestCli::parse_from(["pharma", "restore", "/tmp/snap.tar.gz", "--dry-run"]);
+        if let BackupCmd::Restore { dry_run, yes, .. } = cli.cmd {
+            assert!(dry_run, "--dry-run must set dry_run=true");
+            assert!(!yes, "yes still defaults to false");
         } else {
             panic!("expected Restore");
         }
@@ -492,8 +576,9 @@ mod tests {
         }
 
         let cli = TestCli::parse_from(["pharma", "restore", "/tmp/snap.tar.gz", "--yes"]);
-        if let BackupCmd::Restore { yes, .. } = cli.cmd {
+        if let BackupCmd::Restore { yes, dry_run, .. } = cli.cmd {
             assert!(yes, "--yes must set yes=true");
+            assert!(!dry_run, "dry_run still defaults to false");
         } else {
             panic!("expected Restore");
         }
@@ -609,7 +694,7 @@ mod tests {
 
         // Restore — pass a bind addr that is definitely not listening, --yes
         // to skip the interactive prompt.
-        cmd_restore(&db_path, &archive, "127.0.0.1:19999", true).expect("restore");
+        cmd_restore(&db_path, &archive, "127.0.0.1:19999", true, false).expect("restore");
 
         assert!(db_path.exists(), "surreal dir must be restored");
         assert!(
@@ -654,7 +739,7 @@ mod tests {
         let db_path = tmp.path().join("surreal");
         let missing = tmp.path().join("does-not-exist.tar.gz");
 
-        let err = cmd_restore(&db_path, &missing, "127.0.0.1:19999", true)
+        let err = cmd_restore(&db_path, &missing, "127.0.0.1:19999", true, false)
             .expect_err("should fail on missing archive");
         assert!(
             err.to_string().contains("Archivo no encontrado"),
@@ -768,5 +853,172 @@ mod tests {
             })
             .collect();
         assert!(leftovers.is_empty(), "staging dir must be cleaned up");
+    }
+
+    // ── dry-run inspection ───────────────────────────────────────────────────
+
+    #[test]
+    fn dry_run_on_valid_archive_reports_and_touches_nothing() {
+        let (_tmp, db_path) = make_fake_data_dir();
+        let archive = _tmp.path().join("snap.tar.gz");
+        cmd_create(&db_path, Some(archive.clone())).expect("create");
+
+        // Mutate live data — dry-run must NOT overwrite it.
+        std::fs::write(db_path.join("data.db"), b"LIVE-untouched").unwrap();
+
+        // bind addr irrelevant for dry-run; pass a listening-looking one to prove
+        // the server check is skipped in dry-run mode.
+        cmd_restore(&db_path, &archive, "127.0.0.1:80", false, true).expect("dry-run ok");
+
+        assert_eq!(
+            std::fs::read(db_path.join("data.db")).unwrap(),
+            b"LIVE-untouched",
+            "dry-run must not overwrite live data"
+        );
+    }
+
+    #[test]
+    fn dry_run_missing_archive_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("surreal");
+        let missing = tmp.path().join("nope.tar.gz");
+        let err = cmd_restore(&db_path, &missing, "127.0.0.1:19999", false, true)
+            .expect_err("dry-run on missing archive must error");
+        assert!(err.to_string().contains("inspeccionar"), "got: {err:#}");
+    }
+
+    #[test]
+    fn dry_run_archive_without_surreal_is_not_restorable() {
+        let (_tmp, db_path) = make_fake_data_dir();
+        // Valid tar.gz with ONLY agent.key (no surreal/ tree).
+        let archive = _tmp.path().join("keyonly.tar.gz");
+        {
+            let f = std::fs::File::create(&archive).unwrap();
+            let gz = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            let mut tar = tar::Builder::new(gz);
+            let mut kf = std::fs::File::open(_tmp.path().join("agent.key")).unwrap();
+            tar.append_file("agent.key", &mut kf).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let err = cmd_restore(&db_path, &archive, "127.0.0.1:19999", false, true)
+            .expect_err("non-restorable snapshot must error in dry-run");
+        assert!(
+            err.to_string().contains("NO es restaurable"),
+            "got: {err:#}"
+        );
+    }
+
+    // ── real SurrealKv round-trip: stock-ledger invariant survives restore ────
+
+    /// `(product_id, stock, Σ batch.stock, Σ movement.delta)` for every product
+    /// of `tenant`, sorted by id for a deterministic before/after compare.
+    async fn ledger_snapshot(
+        db: &db::Db,
+        tenant: &surrealdb::sql::Thing,
+    ) -> Vec<(String, i64, i64, i64)> {
+        #[derive(serde::Deserialize)]
+        struct P {
+            id: surrealdb::sql::Thing,
+            stock: i64,
+        }
+        let mut r = db
+            .query("SELECT id, stock FROM product WHERE tenant = $t")
+            .bind(("t", tenant.clone()))
+            .await
+            .unwrap();
+        let products: Vec<P> = r.take(0).unwrap();
+        let mut out = Vec::new();
+        for p in products {
+            let mut br = db
+                .query("SELECT VALUE stock FROM product_batch WHERE tenant = $t AND product = $p")
+                .bind(("t", tenant.clone()))
+                .bind(("p", p.id.clone()))
+                .await
+                .unwrap();
+            let batch_stocks: Vec<i64> = br.take(0).unwrap();
+            let mut mr = db
+                .query("SELECT VALUE delta FROM stock_movement WHERE tenant = $t AND product = $p")
+                .bind(("t", tenant.clone()))
+                .bind(("p", p.id.clone()))
+                .await
+                .unwrap();
+            let deltas: Vec<i64> = mr.take(0).unwrap();
+            out.push((
+                p.id.to_string(),
+                p.stock,
+                batch_stocks.iter().sum(),
+                deltas.iter().sum(),
+            ));
+        }
+        out.sort();
+        out
+    }
+
+    /// End-to-end: seed a real file-backed SurrealKv store, snapshot it, wipe the
+    /// data dir, restore, reopen — and prove the stock ledger invariant
+    /// (`product.stock == Σ batch.stock == Σ movement.delta`) survives byte-for-
+    /// byte. This is the real disaster-recovery path; the other tests use fake
+    /// archive bytes and never reopen a DB.
+    #[tokio::test]
+    async fn restore_roundtrip_preserves_stock_ledger_invariant() {
+        use pharma_core::config::DbConfig;
+        use surrealdb::sql::Thing;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("surreal");
+        let migrations =
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations"));
+        let cfg = DbConfig {
+            path: db_path.to_string_lossy().into_owned(),
+            namespace: "test".into(),
+            database: "test".into(),
+        };
+
+        // 1) Seed a real SurrealKv store, capture the ledger.
+        let tenant_id;
+        let before;
+        {
+            let dbh = db::connect(&cfg).await.expect("connect surrealkv");
+            db::run_migrations(&dbh, migrations).await.expect("migrate");
+            let tenant: Thing = dbh
+                .query("CREATE tenant SET name='T', slug='t' RETURN id")
+                .await
+                .unwrap()
+                .take::<Option<Thing>>((0, "id"))
+                .unwrap()
+                .unwrap();
+            domain::seed::seed_demo(&dbh, &tenant, "pharmacy", false)
+                .await
+                .expect("seed demo");
+            before = ledger_snapshot(&dbh, &tenant).await;
+            assert!(!before.is_empty(), "expected seeded products");
+            tenant_id = tenant;
+            drop(dbh); // release the SurrealKv file lock before snapshotting
+        }
+
+        // 2) Snapshot the data dir → tar.gz.
+        let archive = tmp.path().join("snap.tar.gz");
+        cmd_create(&db_path, Some(archive.clone())).expect("create snapshot");
+
+        // 3) Disaster: wipe the live data dir.
+        std::fs::remove_dir_all(&db_path).unwrap();
+        assert!(!db_path.exists());
+
+        // 4) Restore from the snapshot (validate-before-wipe path).
+        restore_archive(&db_path, &archive).expect("restore");
+        assert!(db_path.exists(), "data dir recreated by restore");
+
+        // 5) Reopen the restored store and prove the ledger is identical and the
+        //    invariant still holds.
+        let dbh = db::connect(&cfg).await.expect("reconnect surrealkv");
+        let after = ledger_snapshot(&dbh, &tenant_id).await;
+        assert_eq!(
+            before, after,
+            "stock ledger must be identical after restore"
+        );
+        for (id, stock, batch_sum, delta_sum) in &after {
+            assert_eq!(stock, batch_sum, "product.stock == Σ batch.stock ({id})");
+            assert_eq!(stock, delta_sum, "product.stock == Σ movement.delta ({id})");
+        }
     }
 }

@@ -1440,6 +1440,7 @@ dependencies = [
  "hex",
  "hmac 0.12.1",
  "httpmock",
+ "jobs",
  "license",
  "pharma-core",
  "pharma-telemetry",
