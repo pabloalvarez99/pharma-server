@@ -936,11 +936,15 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&summary)?);
             } else {
                 println!(
-                    "seed demo ok: vertical={} productos={} lotes={} movimientos={} borrados={}",
+                    "seed demo ok: vertical={} productos={} lotes={} movimientos={} \
+                     proveedores={} ordenes_compra={} ventas_historicas={} borrados={}",
                     summary.vertical,
                     summary.products_created,
                     summary.batches_created,
                     summary.movements_emitted,
+                    summary.suppliers_created,
+                    summary.purchase_orders_created,
+                    summary.historic_orders_created,
                     summary.wiped
                 );
             }

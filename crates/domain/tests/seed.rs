@@ -127,3 +127,109 @@ async fn unknown_vertical_is_rejected() {
     let (db, tenant) = setup().await;
     assert!(seed_demo(&db, &tenant, "casino", false).await.is_err());
 }
+
+/// Cuenta filas de una tabla acotadas al tenant.
+async fn count(db: &Db, tenant: &Thing, table: &str) -> usize {
+    let q = format!("SELECT VALUE id FROM {table} WHERE tenant = $t");
+    let ids: Vec<Thing> = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    ids.len()
+}
+
+#[tokio::test]
+async fn seeds_suppliers_purchase_orders_history_and_barcodes() {
+    let (db, tenant) = setup().await;
+    let s = seed_demo(&db, &tenant, "pharmacy", false).await.unwrap();
+
+    // Proveedores creíbles (≥3) para Compras + comparador.
+    assert!(s.suppliers_created >= 3);
+    assert_eq!(count(&db, &tenant, "supplier").await, s.suppliers_created);
+
+    // Órdenes de compra demo en estado draft (no mueven stock).
+    assert!(s.purchase_orders_created >= 1);
+    assert_eq!(
+        count(&db, &tenant, "purchase_order").await,
+        s.purchase_orders_created
+    );
+
+    // Ventas históricas pueblan reportes/dashboard.
+    assert!(s.historic_orders_created >= 6);
+    assert_eq!(
+        count(&db, &tenant, "order").await,
+        s.historic_orders_created
+    );
+
+    // Cada producto tiene su código de barra.
+    assert_eq!(
+        count(&db, &tenant, "product_barcode").await,
+        s.products_created
+    );
+
+    // El histórico NO descontó stock → el ledger sigue cuadrando.
+    assert_ledger_consistent(&db, &tenant).await;
+}
+
+#[tokio::test]
+async fn historic_orders_do_not_move_stock() {
+    let (db, tenant) = setup().await;
+    seed_demo(&db, &tenant, "pharmacy", false).await.unwrap();
+    // Ningún movimiento de venta: todos los movimientos son recepción de lote.
+    let reasons: Vec<String> = db
+        .query("SELECT VALUE reason FROM stock_movement WHERE tenant = $t")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert!(!reasons.is_empty());
+    assert!(
+        reasons.iter().all(|r| r == "batch_received"),
+        "el seed histórico no debe emitir movimientos de venta"
+    );
+}
+
+#[tokio::test]
+async fn force_reseed_does_not_duplicate_suppliers_or_history() {
+    let (db, tenant) = setup().await;
+    let first = seed_demo(&db, &tenant, "pharmacy", false).await.unwrap();
+    let again = seed_demo(&db, &tenant, "pharmacy", true).await.unwrap();
+
+    // Conteos estables tras force (wipe + reseed, sin duplicar).
+    assert_eq!(
+        count(&db, &tenant, "supplier").await,
+        again.suppliers_created
+    );
+    assert_eq!(again.suppliers_created, first.suppliers_created);
+    assert_eq!(
+        count(&db, &tenant, "purchase_order").await,
+        again.purchase_orders_created
+    );
+    assert_eq!(
+        count(&db, &tenant, "order").await,
+        again.historic_orders_created
+    );
+    assert_eq!(
+        count(&db, &tenant, "product_barcode").await,
+        again.products_created
+    );
+    assert_ledger_consistent(&db, &tenant).await;
+}
+
+#[tokio::test]
+async fn minimarket_seed_populates_suppliers_and_history() {
+    let (db, tenant) = setup().await;
+    let s = seed_demo(&db, &tenant, "minimarket", false).await.unwrap();
+    assert!(s.suppliers_created >= 3);
+    assert!(s.historic_orders_created >= 6);
+    assert!(s.purchase_orders_created >= 1);
+    assert_eq!(count(&db, &tenant, "supplier").await, s.suppliers_created);
+    assert_eq!(
+        count(&db, &tenant, "order").await,
+        s.historic_orders_created
+    );
+}
