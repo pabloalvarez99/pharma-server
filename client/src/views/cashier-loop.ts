@@ -122,6 +122,34 @@ export function deriveTipo(lines: RefundDraftLine[]): "total" | "parcial" {
   return anyReturned && allFull ? "total" : "parcial";
 }
 
+/** The `devolucion.tipo` axis as the server schema defines it
+ *  (migrations/0007_sales.surql): the return MOTIVO, NOT the total/parcial scope.
+ *  A POS counter return is `venta` (a return against a sale). The old client sent
+ *  `total`/`parcial` here, which the schema ASSERT rejected → every return 500'd
+ *  (BUG-paul-001). `deriveTipo` (scope) stays presentational; this is what goes
+ *  on the wire. */
+export type ReturnMotivo = "venta" | "cancelacion" | "garantia" | "error";
+
+/** Default motivo for a normal POS return against a sale. */
+export const DEFAULT_RETURN_MOTIVO: ReturnMotivo = "venta";
+
+/** Spanish label for a persisted `devolucion.tipo` motivo. Unknown values pass
+ *  through capitalized so a future schema value never renders blank. */
+export function returnMotivoLabel(tipo: string): string {
+  switch (tipo.toLowerCase()) {
+    case "venta":
+      return "Venta";
+    case "cancelacion":
+      return "Cancelación";
+    case "garantia":
+      return "Garantía";
+    case "error":
+      return "Error";
+    default:
+      return tipo ? tipo.charAt(0).toUpperCase() + tipo.slice(1) : "—";
+  }
+}
+
 /** What a confirmed refund posts: validated lines + derived tipo + total. */
 export interface RefundResult {
   items: { product_name: string; quantity: number; unit_price: string; restock: boolean }[];

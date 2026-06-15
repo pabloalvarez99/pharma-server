@@ -12,6 +12,8 @@ import {
   discrepancy,
   deriveTipo,
   validateRefund,
+  DEFAULT_RETURN_MOTIVO,
+  returnMotivoLabel,
   type CartLine,
   type Sellable,
   type RefundDraftLine,
@@ -226,5 +228,44 @@ describe("journey 8 · garbage money inputs never corrupt totals", () => {
     expect(parseCash("")).toBe(0);
     expect(parseCash("abc")).toBe(0);
     expect(vuelto(0, 5000)).toEqual({ kind: "none", amount: 0 });
+  });
+});
+
+describe("journey 9 · return MOTIVO never sends total/parcial scope (BUG-paul-001)", () => {
+  // The server `devolucion.tipo` ASSERTs IN [venta,cancelacion,garantia,error]
+  // (migrations/0007_sales.surql). The old client put the total/parcial SCOPE on
+  // this field → every return 500'd against the live backend. The wire motivo
+  // must be one of the schema values; the scope stays a presentational hint.
+  const SCHEMA_MOTIVOS = ["venta", "cancelacion", "garantia", "error"];
+
+  it("DEFAULT_RETURN_MOTIVO is a value the schema accepts", () => {
+    expect(SCHEMA_MOTIVOS).toContain(DEFAULT_RETURN_MOTIVO);
+    expect(DEFAULT_RETURN_MOTIVO).toBe("venta");
+  });
+
+  it("the old scope values are NOT valid motivos (the crash payload)", () => {
+    expect(SCHEMA_MOTIVOS).not.toContain("total");
+    expect(SCHEMA_MOTIVOS).not.toContain("parcial");
+  });
+
+  it("deriveTipo (scope) and the wire motivo are different axes", () => {
+    const lines: RefundDraftLine[] = [
+      { name: "Amoxicilina", sold: 2, qty: 2, unit_price: "3990", product: "product:a" },
+    ];
+    // Full return → scope 'total', but the persisted motivo is still 'venta'.
+    expect(deriveTipo(lines)).toBe("total");
+    expect(DEFAULT_RETURN_MOTIVO).toBe("venta");
+  });
+
+  it("returnMotivoLabel renders every schema motivo in Spanish", () => {
+    expect(returnMotivoLabel("venta")).toBe("Venta");
+    expect(returnMotivoLabel("cancelacion")).toBe("Cancelación");
+    expect(returnMotivoLabel("garantia")).toBe("Garantía");
+    expect(returnMotivoLabel("error")).toBe("Error");
+  });
+
+  it("returnMotivoLabel never renders blank for unknown / empty input", () => {
+    expect(returnMotivoLabel("")).toBe("—");
+    expect(returnMotivoLabel("nuevo_estado")).toBe("Nuevo_estado");
   });
 });

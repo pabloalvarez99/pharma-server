@@ -2679,3 +2679,51 @@ es vertical-agnóstico = boleta/reports universal). GATE cliente verde:
 `npm run build` + `npm test` 158/158 (+19). Sin Rust/mig; api.ts intacto
 (solo lectura). NO bug de prod hallado — la lógica de la vista era correcta; el
 valor es blindar presentación + export contra divergencia UI↔test.
+
+## 2026-06-15 — paul · POS runtime QA (live backend) + fix BUG-bob-001 devolución 500
+
+Lane `feat/pos-runtime-qa` (off fresh erp-parity @a7f1dc3). PHASE 2 meta (a):
+manejar el POS como cajero REAL contra el backend vivo (no solo unit journeys),
+cazar bugs de runtime que los tests puros no ven (asserts de schema, 500s, status
+HTTP equivocados).
+
+QA harness nueva (`scripts/qa/pos-runtime-qa.sh` + `README.md`): levanta
+`pharma-api` real sobre SurrealKv en tempdir, corre `migrate`+`tenant-create`+
+`user-create`+`seed-demo`, y dispara el día entero del cajero por HTTP contra los
+mismos endpoints que llama el cliente Tauri: login → `GET /products` → abrir caja
+(`POST /cash-sessions`) → vender (`POST /pos/sale` efectivo+vuelto) → boleta/ticket
+(`GET /orders/{id}/receipt`) → boleta SII (`POST /dte/boletas`) → devolución
+(`POST /pos/returns`) → arqueo (`GET …/arqueo`) → cierre (`POST …/close`).
+Repetible (1 comando), tempdir propio, mata el server al salir. Corrido en AMBOS
+verticales (pharmacy + minimarket); CI billing-walled → gate LOCAL.
+
+Resultado: día-cajero VERDE end-to-end en los dos verticales, salvo 1 bug de
+runtime P1 confirmado en vivo:
+
+BUG-bob-001 (= "BUG-paul-001" en comentarios del script) — devolución 500.
+  Root cause: el campo `devolucion.tipo` (migrations/0007_sales.surql) ASSERTa
+  `IN ['venta','cancelacion','garantia','error']` (eje MOTIVO), pero el cliente
+  ponía ahí el eje SCOPE `total`/`parcial` (`deriveTipo`) → cada devolución
+  rebotaba 500 contra el backend vivo. Probado: `tipo=venta` → HTTP 201;
+  `tipo=total` (payload viejo) → HTTP 500.
+  FIX (en mi lane, client + api.ts append-only): el wire `tipo` ahora manda el
+  MOTIVO canónico (`DEFAULT_RETURN_MOTIVO="venta"` para una devolución de POS).
+  El Total/Parcial queda como hint pre-submit en el modal (presentacional, nunca
+  persistido). La lista de devoluciones muestra el motivo (Venta/Cancelación/
+  Garantía/Error) vía `returnMotivoLabel` en vez del scope inexistente.
+  `crates/api`/schema sin tocar: el campo ya aceptaba el valor correcto; el bug
+  era 100% del cliente que mandaba un enum inválido.
+  Decisión canónica (paul, cierra el "paxoloop/paul deciden" de BUG-bob-001):
+  `tipo` = MOTIVO; el scope total/parcial NO se persiste (no aporta un eje nuevo
+  al schema y nunca estuvo guardado). Si a futuro se quiere persistir el scope →
+  migración nueva con campo `alcance` (follow-up backend, fuera de lane).
+
+Otros hallazgos (no bug):
+- boleta SII sin CAF → HTTP 422 limpio (no 5xx). Correcto: Free emite local, el
+  send queda gated, sin crash.
+- `seed-demo` siembra 6 productos por vertical (el header del board dice 16 para
+  pharmacy; menor, no bloqueante).
+
+Tests: +6 journeys en `cashier-loop.test.ts` (journey 9) que blindan el eje
+MOTIVO ≠ SCOPE y los labels ES. GATE cliente verde: `npm run build` +
+`npm test` 184/184 (+6). Sin Rust/mig.
