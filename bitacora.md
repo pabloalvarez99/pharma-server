@@ -2715,3 +2715,35 @@ Scope intacto: NO toqué módulo sales (paul) ni stock_stats/catalog::stats (#19
 ya fijo). Sólo `crates/db/tests/`. GATE workspace verde (fmt + clippy -D warnings
 + test). Memory `surrealdb-view-update-gotcha` actualizada (gotcha version-específico,
 fixed en 2.6.5).
+
+## 2026-06-14 — API perf sweep: report aggregates record-id fetch (BUG-perf-002 class)
+
+milton · lane `feat/api-perf-sweep` (off fresh origin/feature/erp-parity @a7f1dc3).
+
+Barrido de la capa API/db de reportes+agregados por el mismo cliff O(n) que dominó
+la sesión (BUG-perf-002). Hallados 3 queries en `crates/domain/src/expenses/service.rs`
+que resuelven productos con `SELECT ... FROM product WHERE tenant=$t AND id IN $ids`:
+SurrealDB NO usa el índice de record-id con `FROM tabla WHERE id IN` → full-scan de
+`product` por CADA llamada de reporte. Afectaba:
+  - `near_expiry`   (resolución de nombres)
+  - `margins_daily` (resolución de cost_price)
+  - `stock_rotation`(resolución de name+stock)
+Y por composición el dashboard ejecutivo (`reports/dashboard`) que fan-outea a esas
+fns. A 50k SKUs cada reporte escaneaba el catálogo entero (viola budget <50ms p99).
+
+FIX (patrón de paul en sales, BUG-perf-002): `SELECT ... FROM $ids WHERE tenant=$t`
+= fetch directo por record-id O(productos del reporte). `WHERE tenant=$t` conserva
+el guard cross-tenant (ids ajenos se descartan). Resultado byte-a-byte idéntico.
+
+Barridos y descartados (ya O(k) / indexados, sin cambio):
+  - `order_item WHERE tenant=$t AND order IN $ids` (margins/top/rotation) → usa
+    índice `order_item_tenant_order` (mig 0007). `order` es campo FK, no record-id.
+  - `catalog::stats` → ya O(1) vía tabla `product_stats` (perf-001/PR #194).
+  - `top_products` → solo toca order/order_item (indexados), sin scan de product.
+
+Tests: nuevo `crates/domain/tests/reports_perf_record_fetch.rs` (4 tests) — el
+shape `FROM $ids` matchea el viejo `IN $ids` y descarta foreign-tenant + ghost ids;
++ near_expiry/margins_daily/stock_rotation devuelven resultado correcto tras el
+cambio. Correctness existente intacta: `expenses.rs` 12/12 sigue verde.
+GATE workspace: fmt + clippy --all-targets -D warnings + test workspace verde.
+Scope: solo `crates/domain/src/expenses/service.rs` + test nuevo. Sin mig, sin api.ts.

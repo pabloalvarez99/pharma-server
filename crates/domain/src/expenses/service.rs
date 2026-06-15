@@ -313,8 +313,12 @@ pub async fn near_expiry(
         id: Thing,
         name: String,
     }
+    // Fetch directly by record-id (`FROM $ids`) = O(distinct products in the
+    // report). `FROM product WHERE id IN $ids` full-scans the product table on
+    // every call (BUG-perf-002 class). `WHERE tenant = $t` keeps the cross-tenant
+    // guard — ids not owned by this tenant are dropped.
     let prods: Vec<P> = db
-        .query("SELECT id, name FROM product WHERE tenant = $t AND id IN $ids")
+        .query("SELECT id, name FROM $ids WHERE tenant = $t")
         .bind(("t", tenant.clone()))
         .bind(("ids", ids))
         .await?
@@ -440,8 +444,11 @@ pub async fn margins_daily(
     let costs: HashMap<String, Option<Decimal>> = if pids.is_empty() {
         HashMap::new()
     } else {
+        // Record-id fetch (`FROM $ids`) = O(distinct products), not a product
+        // table full-scan (BUG-perf-002 class). `WHERE tenant = $t` retains the
+        // cross-tenant guard.
         let rows: Vec<P> = db
-            .query("SELECT id, cost_price FROM product WHERE tenant = $t AND id IN $ids")
+            .query("SELECT id, cost_price FROM $ids WHERE tenant = $t")
             .bind(("t", tenant.clone()))
             .bind(("ids", pids))
             .await?
@@ -725,8 +732,11 @@ pub async fn stock_rotation(
         name: String,
         stock: i64,
     }
+    // Record-id fetch (`FROM $ids`) = O(distinct products sold), not a product
+    // table full-scan (BUG-perf-002 class). `WHERE tenant = $t` retains the
+    // cross-tenant guard.
     let prods: Vec<P> = db
-        .query("SELECT id, name, stock FROM product WHERE tenant = $t AND id IN $ids")
+        .query("SELECT id, name, stock FROM $ids WHERE tenant = $t")
         .bind(("t", tenant.clone()))
         .bind(("ids", pids))
         .await?
