@@ -449,8 +449,8 @@ pub async fn get_order(
 /// self-contained [`ReceiptDto`]. 404 (`DomainError::NotFound`) if the order
 /// is missing or belongs to another tenant.
 ///
-/// `change` = `cash_amount - total` for cash sales (`pos_cash`), else `None`.
-/// `line_total` = `qty * unit_price` per line.
+/// `change` = `cash_amount - total` for `pos_cash`, `(cash + card) - total` for
+/// `pos_mixed`, else `None` (pure card). `line_total` = `qty * unit_price`.
 pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ReceiptDto> {
     let order_thing = parse_tenant_thing(id, "order")?;
     let (order, items) = repo::get_order(db, tenant, &order_thing)
@@ -470,14 +470,21 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
         })
         .collect();
 
-    // Cash change is only meaningful for a pure-cash counter sale. Mixed/card
-    // sales have no "vuelto" to print.
-    let change = if order.payment_method == "pos_cash" {
-        order
+    // Vuelto: the amount tendered over the total. A pure-cash sale's vuelto is
+    // `cash − total`; a MIXED sale's overpayment always falls on the cash side
+    // (a card is never over-charged), so its vuelto is `(cash + card) − total`
+    // — F-paul-pay-001: the cashier must see the vuelto on a mixed sale too, not
+    // just on pos_cash. A pure-card sale settles exactly, so it has no vuelto.
+    let change = match order.payment_method.as_str() {
+        "pos_cash" => order
             .cash_amount
-            .map(|cash| crate::invariants::cash_change(cash, order.total))
-    } else {
-        None
+            .map(|cash| crate::invariants::cash_change(cash, order.total)),
+        "pos_mixed" => {
+            let tendered =
+                order.cash_amount.unwrap_or_default() + order.card_amount.unwrap_or_default();
+            Some(crate::invariants::cash_change(tendered, order.total))
+        }
+        _ => None,
     };
 
     // Prefer the SII folio when the boleta was issued; otherwise the local

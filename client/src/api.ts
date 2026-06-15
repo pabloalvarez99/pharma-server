@@ -75,8 +75,10 @@ export interface PosItem {
   unit_price: string;
 }
 
-/** POS payment methods the server accepts on the counter. */
-export type PaymentMethod = "pos_cash" | "pos_debit" | "pos_credit";
+/** POS payment methods the server accepts on the counter. `pos_mixed` is a
+ *  split tender (cash + card) — for it `posSale` sends both `cashAmount` and
+ *  `cardAmount` and the server only requires their sum to cover the total. */
+export type PaymentMethod = "pos_cash" | "pos_debit" | "pos_credit" | "pos_mixed";
 
 /** POST /api/v1/login + GET /api/v1/me. Throws a Spanish error string on failure. */
 export function login(
@@ -263,6 +265,7 @@ export async function posSale(
   cashAmount?: string,
   cardAmount?: string,
   customer?: string,
+  discount?: string,
 ): Promise<PosSaleResult> {
   const res = await invoke<RawSaleResponse>("pos_sale", {
     serverUrl,
@@ -271,6 +274,7 @@ export async function posSale(
     cashAmount,
     cardAmount,
     customer,
+    discount,
   });
   return {
     orderId: res?.order?.id ?? "",

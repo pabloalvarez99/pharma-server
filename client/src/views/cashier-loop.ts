@@ -21,6 +21,11 @@ export interface CartLine {
   unit_price: string; // original server Decimal string
   qty: number;
   stock: number; // last-known stock, for the +/- guard
+  /** Optional per-line discount in integer pesos. Display-only on the client:
+   *  it is summed (with the global discount) into the SINGLE `discount` amount
+   *  the server applies — `unit_price` is always re-emitted verbatim, never a
+   *  net price (money discipline). Absent/≤0 means no line discount. */
+  discount?: number;
 }
 
 /** Anything sellable the picker can hand the cart (a `Product` satisfies it). */
@@ -59,10 +64,83 @@ export function changeQty(cart: CartLine[], id: string, delta: number): CartLine
   return cart;
 }
 
-/** Running total of the cart in integer pesos. Garbage prices floor to 0 (via
- *  `toNumber`) so the total never reads NaN. */
+/** Running GROSS subtotal of the cart in integer pesos (before any discount).
+ *  Garbage prices floor to 0 (via `toNumber`) so the total never reads NaN. */
 export function cartTotal(cart: CartLine[]): number {
   return cart.reduce((sum, l) => sum + toNumber(l.unit_price) * l.qty, 0);
+}
+
+// --- POS discount (línea + global) -------------------------------------------
+// The server applies ONE global `discount` amount (PosSaleRequest.discount),
+// clamped into [0, subtotal] (crate::domain::invariants::clamp_discount) so the
+// total never goes negative. The POS lets the cashier enter a discount per line
+// AND a global one; both are summed into that single amount. We mirror the
+// server's clamps EXACTLY so the live preview equals what the server will store.
+
+/** Clamp a discount into `[0, subtotal]` — mirrors `clamp_discount`: over the
+ *  subtotal caps at subtotal, negative floors to 0. Truncates to whole pesos. */
+export function clampDiscount(discountIn: number, subtotal: number): number {
+  const d = Math.trunc(Number.isFinite(discountIn) ? discountIn : 0);
+  if (d > subtotal) return Math.max(0, subtotal);
+  if (d < 0) return 0;
+  return d;
+}
+
+/** One line's discount, clamped into `[0, that line's gross]` — a line discount
+ *  can never exceed what the line is worth (so it can't bleed into other lines
+ *  or make a line negative). */
+export function lineDiscount(line: CartLine): number {
+  const gross = toNumber(line.unit_price) * line.qty;
+  return clampDiscount(line.discount ?? 0, gross);
+}
+
+/** Σ of every line's clamped discount. */
+export function lineDiscountsTotal(cart: CartLine[]): number {
+  return cart.reduce((sum, l) => sum + lineDiscount(l), 0);
+}
+
+/** Total order discount the server will apply = (Σ clamped line discounts +
+ *  clamped global), capped at the gross subtotal. This is the single `discount`
+ *  amount sent on the wire. */
+export function orderDiscount(cart: CartLine[], global = 0): number {
+  const subtotal = cartTotal(cart);
+  const raw = lineDiscountsTotal(cart) + clampDiscount(global, subtotal);
+  return raw > subtotal ? subtotal : raw;
+}
+
+/** What the customer actually pays = gross subtotal − order discount (≥ 0).
+ *  Mirrors `order_total(subtotal, clamp_discount(discount, subtotal))`. */
+export function payableTotal(cart: CartLine[], global = 0): number {
+  return cartTotal(cart) - orderDiscount(cart, global);
+}
+
+// --- POS split / mixed payment (multi-tender) --------------------------------
+// The server's pos_mixed accepts cash_amount + card_amount and only requires
+// cash + card ≥ total (crate::domain::sales::service). The overpayment falls on
+// the cash side (you can't over-charge a card), so vuelto = (cash+card) − total.
+
+/** A split payment: how much is tendered in cash and on card (integer pesos). */
+export interface MixedTender {
+  cash: number;
+  card: number;
+}
+
+/** Validate a split payment against the payable total.
+ *  - `ok`     → cash+card covers the total; `change` is the vuelto (≥ 0).
+ *  - `!ok`    → still short by `short` (> 0); `change` is 0.
+ *  `tendered` = cash+card. Negatives floor to 0 so a stray sign can't trick the
+ *  balance check. Mirrors the server's `cash + card < total` rejection. */
+export function splitPayment(
+  tender: MixedTender,
+  total: number,
+): { ok: boolean; tendered: number; change: number; short: number } {
+  const cash = Math.max(0, Math.trunc(Number.isFinite(tender.cash) ? tender.cash : 0));
+  const card = Math.max(0, Math.trunc(Number.isFinite(tender.card) ? tender.card : 0));
+  const tendered = cash + card;
+  if (total <= 0) return { ok: false, tendered, change: 0, short: 0 };
+  return tendered >= total
+    ? { ok: true, tendered, change: tendered - total, short: 0 }
+    : { ok: false, tendered, change: 0, short: total - tendered };
 }
 
 // --- caja arqueo -------------------------------------------------------------

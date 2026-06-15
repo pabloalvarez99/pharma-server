@@ -31,6 +31,10 @@ import {
   addToCart as addCartLine,
   changeQty as changeCartQty,
   cartTotal as cartTotalOf,
+  orderDiscount as orderDiscountOf,
+  payableTotal as payableTotalOf,
+  lineDiscount as lineDiscountOf,
+  splitPayment,
   type CartLine,
 } from "./cashier-loop";
 
@@ -47,6 +51,7 @@ const METHODS: { id: PaymentMethod; label: string }[] = [
   { id: "pos_cash", label: "Efectivo" },
   { id: "pos_debit", label: "Débito" },
   { id: "pos_credit", label: "Crédito" },
+  { id: "pos_mixed", label: "Mixto" },
 ];
 
 const METHOD_LABEL: Record<string, string> = {
@@ -59,6 +64,7 @@ const METHOD_LABEL: Record<string, string> = {
 export function renderPos(host: HTMLElement, serverUrl: string): void {
   const cart: CartLine[] = [];
   let method: PaymentMethod = "pos_cash";
+  let globalDiscount = 0; // flat order-level discount in pesos (cashier-typed)
   let selectedCustomer: PickedCustomer | null = null;
   let customerModuleOk = true;
   let currentResults: Product[] = [];
@@ -79,9 +85,25 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
           <h3 class="section-title">Carrito</h3>
           <div id="pos-lines" class="pos-lines"></div>
 
-          <div class="pos-total">
-            <span>Total</span>
-            <strong id="pos-total-val" class="rb-num">${clp(0)}</strong>
+          <!-- global discount (per-line discount lives on each cart line) -->
+          <div class="pos-discount" id="pos-discount">
+            <label class="pos-disc-label" for="pos-disc-in">Descuento global</label>
+            <input id="pos-disc-in" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+          </div>
+
+          <div class="pos-totals" id="pos-totals">
+            <div class="pos-subtotal" id="pos-subtotal-row" hidden>
+              <span>Subtotal</span>
+              <strong id="pos-subtotal-val" class="rb-num">${clp(0)}</strong>
+            </div>
+            <div class="pos-disc-row" id="pos-disc-row" hidden>
+              <span>Descuento</span>
+              <strong id="pos-disc-val" class="rb-num">− ${clp(0)}</strong>
+            </div>
+            <div class="pos-total">
+              <span>Total</span>
+              <strong id="pos-total-val" class="rb-num">${clp(0)}</strong>
+            </div>
           </div>
 
           <!-- customer (loyalty) -->
@@ -106,6 +128,19 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             <input id="pos-cash-in" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
             <div class="pos-quick" id="pos-quick"></div>
             <div class="pos-vuelto" id="pos-vuelto" hidden></div>
+          </div>
+
+          <!-- split tender: efectivo + tarjeta (only for Mixto) -->
+          <div class="pos-split" id="pos-split" hidden>
+            <div class="pos-split-row">
+              <label class="pos-cash-label" for="pos-split-cash">Efectivo</label>
+              <input id="pos-split-cash" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+            </div>
+            <div class="pos-split-row">
+              <label class="pos-cash-label" for="pos-split-card">Tarjeta</label>
+              <input id="pos-split-card" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+            </div>
+            <div class="pos-split-info" id="pos-split-info" hidden></div>
           </div>
 
           <div id="pos-error" class="pos-error" hidden></div>
@@ -141,8 +176,23 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   const cashIn = host.querySelector<HTMLInputElement>("#pos-cash-in")!;
   const quickEl = host.querySelector<HTMLElement>("#pos-quick")!;
   const vueltoEl = host.querySelector<HTMLElement>("#pos-vuelto")!;
+  // discount els
+  const discIn = host.querySelector<HTMLInputElement>("#pos-disc-in")!;
+  const subtotalRow = host.querySelector<HTMLElement>("#pos-subtotal-row")!;
+  const subtotalVal = host.querySelector<HTMLElement>("#pos-subtotal-val")!;
+  const discRow = host.querySelector<HTMLElement>("#pos-disc-row")!;
+  const discVal = host.querySelector<HTMLElement>("#pos-disc-val")!;
+  // split (mixed) els
+  const splitWrap = host.querySelector<HTMLElement>("#pos-split")!;
+  const splitCashIn = host.querySelector<HTMLInputElement>("#pos-split-cash")!;
+  const splitCardIn = host.querySelector<HTMLInputElement>("#pos-split-card")!;
+  const splitInfo = host.querySelector<HTMLElement>("#pos-split-info")!;
 
-  const cartTotal = (): number => cartTotalOf(cart);
+  // Money model: gross subtotal → order discount (line + global) → payable.
+  // `payable` is the authoritative total for vuelto, quick chips and the split.
+  const subtotal = (): number => cartTotalOf(cart);
+  const discountNow = (): number => orderDiscountOf(cart, globalDiscount);
+  const payable = (): number => payableTotalOf(cart, globalDiscount);
 
   // ---- product search (debounced, server-side) ----
   let timer: number | undefined;
@@ -193,20 +243,49 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       methodsEl.querySelectorAll(".pos-method").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
       method = b.dataset.method as PaymentMethod;
-      syncCash();
+      syncPayment();
     });
   });
 
-  // ---- cash tendered + vuelto ----
-  function syncCash(): void {
+  // ---- tender panels: Efectivo (single) vs Mixto (split) vs card (none) ----
+  function syncPayment(): void {
     const isCash = method === "pos_cash";
+    const isMixed = method === "pos_mixed";
     cashWrap.style.display = isCash ? "" : "none";
+    splitWrap.hidden = !isMixed;
     if (isCash) renderQuickChips();
+    if (isMixed) renderSplit();
     renderVuelto();
+    syncChargeBtn();
+  }
+
+  // ---- global discount ----
+  discIn.addEventListener("input", () => {
+    globalDiscount = parseCash(discIn.value);
+    renderTotals();
+    renderQuickChips();
+    renderVuelto();
+    renderSplit();
+    syncChargeBtn();
+  });
+
+  // Subtotal / descuento / total breakdown. The subtotal + discount rows only
+  // show when a discount is actually applied (clean ticket for the common case).
+  function renderTotals(): void {
+    const sub = subtotal();
+    const disc = discountNow();
+    const showDisc = disc > 0;
+    subtotalRow.hidden = !showDisc;
+    discRow.hidden = !showDisc;
+    if (showDisc) {
+      subtotalVal.textContent = clp(sub);
+      discVal.innerHTML = `− ${clp(disc)}`;
+    }
+    totalEl.textContent = clp(payable());
   }
 
   function renderQuickChips(): void {
-    const amounts = quickCashAmounts(cartTotal());
+    const amounts = quickCashAmounts(payable());
     if (amounts.length === 0) {
       quickEl.innerHTML = "";
       return;
@@ -227,7 +306,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       vueltoEl.hidden = true;
       return;
     }
-    const v = vuelto(parseCash(cashIn.value), cartTotal());
+    const v = vuelto(parseCash(cashIn.value), payable());
     if (v.kind === "none") {
       vueltoEl.hidden = true;
       return;
@@ -242,7 +321,58 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     }
   }
 
+  // Live split-tender feedback: how much is still missing, or the vuelto when
+  // cash+card exceeds the total (the overpayment falls on the cash side).
+  function currentSplit() {
+    return splitPayment(
+      { cash: parseCash(splitCashIn.value), card: parseCash(splitCardIn.value) },
+      payable(),
+    );
+  }
+
+  function renderSplit(): void {
+    if (method !== "pos_mixed") {
+      splitInfo.hidden = true;
+      return;
+    }
+    const s = currentSplit();
+    if (s.tendered <= 0) {
+      splitInfo.hidden = true;
+      return;
+    }
+    splitInfo.hidden = false;
+    if (!s.ok) {
+      splitInfo.className = "pos-split-info short";
+      splitInfo.innerHTML = `Faltan <strong class="rb-num">${clp(s.short)}</strong>`;
+    } else if (s.change > 0) {
+      splitInfo.className = "pos-split-info ok";
+      splitInfo.innerHTML = `Vuelto <strong class="rb-num">${clp(s.change)}</strong>`;
+    } else {
+      splitInfo.className = "pos-split-info ok";
+      splitInfo.innerHTML = `Pago exacto`;
+    }
+  }
+
+  // Charge is blocked on an empty cart, or a Mixto split that doesn't cover the
+  // total yet — so the cashier can't post an underfunded mixed sale.
+  function chargeEnabled(): boolean {
+    if (cart.length === 0) return false;
+    if (method === "pos_mixed") return currentSplit().ok;
+    return true;
+  }
+  function syncChargeBtn(): void {
+    chargeBtn.disabled = !chargeEnabled();
+  }
+
   cashIn.addEventListener("input", renderVuelto);
+  splitCashIn.addEventListener("input", () => {
+    renderSplit();
+    syncChargeBtn();
+  });
+  splitCardIn.addEventListener("input", () => {
+    renderSplit();
+    syncChargeBtn();
+  });
 
   // ---- customer picker (loyalty) ----
   let custTimer: number | undefined;
@@ -372,7 +502,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             <span class="qty-val rb-num">${l.qty}</span>
             <button type="button" class="qty-btn" data-act="inc" aria-label="Agregar uno" ${l.qty >= l.stock ? "disabled" : ""}>+</button>
           </div>
-          <div class="pos-line-sub num rb-num">${clp(toNumber(l.unit_price) * l.qty)}</div>
+          <input class="pos-line-disc" type="text" inputmode="numeric" placeholder="Desc."
+                 value="${lineDiscountOf(l) > 0 ? lineDiscountOf(l) : ""}"
+                 aria-label="Descuento para ${escapeHtml(l.name)}" />
+          <div class="pos-line-sub num rb-num">${clp(toNumber(l.unit_price) * l.qty - lineDiscountOf(l))}</div>
         </div>`,
         )
         .join("");
@@ -404,11 +537,32 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
           }
         });
       });
+      // Per-line discount: editing it updates only the totals/tender previews,
+      // never re-renders the cart (which would steal focus from the input mid-
+      // type). Keystrokes are stopped from bubbling to the row so digits/arrows
+      // here don't trigger the qty/delete handlers above.
+      linesEl.querySelectorAll<HTMLInputElement>(".pos-line-disc").forEach((inp) => {
+        inp.addEventListener("keydown", (e) => e.stopPropagation());
+        inp.addEventListener("input", () => {
+          const id = inp.closest<HTMLElement>(".pos-line")!.dataset.id!;
+          const line = cart.find((l) => l.product === id);
+          if (!line) return;
+          line.discount = parseCash(inp.value);
+          const subEl = inp.parentElement!.querySelector<HTMLElement>(".pos-line-sub");
+          if (subEl) subEl.textContent = clp(toNumber(line.unit_price) * line.qty - lineDiscountOf(line));
+          renderTotals();
+          renderQuickChips();
+          renderVuelto();
+          renderSplit();
+          syncChargeBtn();
+        });
+      });
     }
-    totalEl.textContent = clp(cartTotal());
-    chargeBtn.disabled = cart.length === 0;
+    renderTotals();
     renderQuickChips();
     renderVuelto();
+    renderSplit();
+    syncChargeBtn();
   }
 
   function clearError(): void {
@@ -448,24 +602,49 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       quantity: l.qty,
       unit_price: l.unit_price,
     }));
-    const total = cartTotal();
-    // Single-tender: hand the full total to the chosen rail so server-side
-    // balance checks pass. For cash, prefer the amount the cashier tendered (so
-    // the server computes the right vuelto); fall back to the exact total.
+    const total = payable(); // NET of discounts — the amount actually due
+    const discount = discountNow();
+    // Hand each rail the amount that makes the server-side balance check pass:
+    //  · pos_cash  → the tendered cash (or the exact total) so the server
+    //    computes the vuelto; · card → the exact total; · pos_mixed → the
+    //    cashier's split (cash + card), validated to cover the total here.
     let cash: string | undefined;
     let card: string | undefined;
     if (method === "pos_cash") {
       cash = String(effectiveTender(parseCash(cashIn.value), total));
+    } else if (method === "pos_mixed") {
+      const s = currentSplit();
+      if (!s.ok) {
+        showError(`El pago dividido no cubre el total. Faltan ${clp(s.short)}.`);
+        chargeBtn.classList.remove("loading");
+        syncChargeBtn();
+        return;
+      }
+      cash = String(parseCash(splitCashIn.value));
+      card = String(parseCash(splitCardIn.value));
     } else {
       card = String(total);
     }
+    const discountArg = discount > 0 ? String(discount) : undefined;
 
     try {
-      const result = await posSale(serverUrl, items, method, cash, card, selectedCustomer?.id);
+      const result = await posSale(
+        serverUrl,
+        items,
+        method,
+        cash,
+        card,
+        selectedCustomer?.id,
+        discountArg,
+      );
       const count = cart.reduce((n, l) => n + l.qty, 0);
       cart.length = 0;
-      renderCart();
+      globalDiscount = 0;
+      discIn.value = "";
       cashIn.value = "";
+      splitCashIn.value = "";
+      splitCardIn.value = "";
+      renderCart();
       renderVuelto();
 
       const pts = result.loyaltyPointsAwarded;
@@ -496,17 +675,19 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       );
     } finally {
       chargeBtn.classList.remove("loading");
-      chargeBtn.disabled = cart.length === 0;
+      syncChargeBtn();
     }
   }
 
   chargeBtn.addEventListener("click", () => void charge());
-  // Enter in the cash field closes the sale — the fast path for Efectivo.
-  cashIn.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    void charge();
-  });
+  // Enter in any tender field closes the sale — the fast path (no mouse).
+  for (const el of [cashIn, splitCashIn, splitCardIn]) {
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      void charge();
+    });
+  }
 
   function flashLowStock(alerts: LowStockAlert[]): void {
     if (!alerts || alerts.length === 0) return;
@@ -541,11 +722,17 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       toNumber(r.discount) > 0
         ? `<div class="rcpt-line"><span>Descuento</span><strong class="rb-num">− ${clp(r.discount)}</strong></div>`
         : "";
+    // Cash sale: Recibido + Vuelto. Mixed sale: the two tenders + Vuelto (the
+    // server computes `change` for pos_mixed now too — F-paul-pay-001).
     const cashBlock =
       r.payment_method === "pos_cash" && r.cash_amount
         ? `<div class="rcpt-line"><span>Recibido</span><strong class="rb-num">${clp(r.cash_amount)}</strong></div>
            <div class="rcpt-line"><span>Vuelto</span><strong class="rb-num">${clp(r.change ?? "0")}</strong></div>`
-        : "";
+        : r.payment_method === "pos_mixed"
+          ? `<div class="rcpt-line"><span>Efectivo</span><strong class="rb-num">${clp(r.cash_amount ?? "0")}</strong></div>
+             <div class="rcpt-line"><span>Tarjeta</span><strong class="rb-num">${clp(r.card_amount ?? "0")}</strong></div>
+             <div class="rcpt-line"><span>Vuelto</span><strong class="rb-num">${clp(r.change ?? "0")}</strong></div>`
+          : "";
     const loyaltyBlock =
       r.loyalty_points_awarded > 0
         ? `<div class="rcpt-line accent"><span>Puntos ganados</span><strong class="rb-num">+${num(r.loyalty_points_awarded)}</strong></div>`
@@ -594,7 +781,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // initial paint + scan-ready focus
   renderCart();
   renderCustomer();
-  syncCash();
+  syncPayment();
   searchEl.focus();
 }
 
