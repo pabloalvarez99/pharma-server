@@ -2679,3 +2679,39 @@ es vertical-agnóstico = boleta/reports universal). GATE cliente verde:
 `npm run build` + `npm test` 158/158 (+19). Sin Rust/mig; api.ts intacto
 (solo lectura). NO bug de prod hallado — la lógica de la vista era correcta; el
 valor es blindar presentación + export contra divergencia UI↔test.
+
+## 2026-06-14 — Audit pre-computed views (view-update gotcha) — milton
+
+Lane `feat/audit-view-update-gotcha`: barrer el codebase por el bug de PR #194
+(memory `surrealdb-view-update-gotcha`): vistas pre-computadas SurrealDB
+(`DEFINE TABLE x AS SELECT ... GROUP BY`) mis-mantienen UPDATE/DELETE.
+
+**Inventario (origin/feature/erp-parity @ e4c002f):** CERO vistas pre-computadas
+en todo el repo. `rg "DEFINE TABLE.*AS SELECT"` + `rg "DEFINE EVENT"` → sin
+resultados. Toda agregación es (a) query-time (`catalog::stats` `count()`/
+`math::sum ... GROUP ALL`) o (b) materializada atómicamente en transacción Rust
+(`product.stock = SUM(stock_movement.delta)`, mig 0004). La única vista
+pre-computada del proyecto vive en mi propio PR #194 (`0029_product_stats_view`)
+y ya usa DEFINE EVENT, no AS SELECT. **No hay nada que convertir.**
+
+**Hallazgo (verificado empíricamente):** el gotcha **NO se reproduce en la
+SurrealDB 2.6.5 que usa el workspace**. Re-probado con `GROUP ALL` y `GROUP BY`,
+`count()` y `math::sum`, en ambos backends (`surrealkv` file y `kv-mem`): la
+vista pre-computada sigue ground truth en CREATE / UPDATE (flip de membresía en
+ambos sentidos + cambio de valor) / DELETE, byte-a-byte. SurrealDB arregló la
+mantención de vistas entre la versión que midió #194 y 2.6.5. → No corresponde
+un ban estático de vistas (su premisa de correctitud ya no aplica); #194 sigue
+válido por perf (DEFINE EVENT = O(1) delta vs recompute de la vista).
+
+**Entregable:** `crates/db/tests/maintained_aggregate_pattern.rs` (2 tests, sin
+migración, sin tocar prod):
+- `define_event_aggregate_stays_exact_across_crud` — prueba el patrón sancionado
+  de #194 (agregado por DEFINE EVENT con delta `$after-$before`) exacto en CRUD.
+- `precomputed_view_tracks_crud_on_current_surrealdb` — **regression guard**: si
+  un futuro bump de SurrealDB re-rompe la mantención de vistas, este test cae y
+  avisa que nuevos agregados deben usar el patrón de evento.
+
+Scope intacto: NO toqué módulo sales (paul) ni stock_stats/catalog::stats (#194,
+ya fijo). Sólo `crates/db/tests/`. GATE workspace verde (fmt + clippy -D warnings
++ test). Memory `surrealdb-view-update-gotcha` actualizada (gotcha version-específico,
+fixed en 2.6.5).
