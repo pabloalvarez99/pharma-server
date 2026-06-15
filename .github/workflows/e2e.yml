@@ -1,0 +1,46 @@
+name: e2e
+
+# Live-stack end-to-end gate: builds a REAL pharma-api + pharma, boots the server
+# on a throwaway SurrealKv DB, and drives the operator's daily loop over real HTTP
+# for BOTH verticals (see client/e2e/README.md). No mocks, no webview.
+#
+# MANUAL on purpose. CI minutes on this repo are billing-walled (CLAUDE.md regla
+# #9 / teamwork_op.txt), so e2e is primarily a LOCAL gate (`cd client && npm run
+# e2e`). This workflow makes that exact gate reproducible in CI when a human opts
+# in — it does NOT run on push/PR, so it never auto-burns minutes.
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e:
+    name: live-stack e2e (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Pre-build the binaries through cargo so rust-cache covers them; the
+      # harness then finds them present and skips its own build (E2E_REBUILD unset).
+      - name: build server + cli (release)
+        run: cargo build --release -p api -p cli
+
+      - name: install client deps
+        working-directory: client
+        run: npm ci
+
+      - name: run live-stack e2e
+        working-directory: client
+        run: npm run e2e

@@ -138,6 +138,16 @@ export async function goldenPath({ tenant, email, password, vertical }) {
     closing_cash_counted: "0",
   });
   check(close.ok, "cash session closed");
+
+  // 10. reporte — close the full day: the sale just made must surface in the
+  //     core (Free) sales-daily report. Closes the operator's daily loop
+  //     login → … → cierre → reporte, both verticals. The report is the
+  //     after-action view the operator opens to confirm the day's takings.
+  const salesDaily = await c.get("/reports/sales-daily");
+  check(
+    Array.isArray(salesDaily.body) && salesDaily.body.length > 0,
+    "sales-daily report shows the day's sale",
+  );
 }
 
 /** Goods-receipt path (charter: producto+lote → recepción → stock). Mirrors
