@@ -20,7 +20,13 @@ import {
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 import "./rutbrand.css";
-import { deriveTipo as deriveTipoOf, validateRefund, type RefundDraftLine } from "./cashier-loop";
+import {
+  deriveTipo as deriveTipoOf,
+  validateRefund,
+  DEFAULT_RETURN_MOTIVO,
+  returnMotivoLabel,
+  type RefundDraftLine,
+} from "./cashier-loop";
 
 const PAGE_LIMIT = 60;
 
@@ -97,9 +103,13 @@ function renderTable(host: HTMLElement, rows: Devolucion[]): void {
 
 function devolucionRow(d: Devolucion): string {
   const orderShort = d.order ? d.order.replace(/^order:/, "") : "—";
-  const tipo = d.tipo.toLowerCase() === "total"
-    ? `<span class="pill pill-danger">Total</span>`
-    : `<span class="pill pill-warn">Parcial</span>`;
+  // `d.tipo` is the persisted MOTIVO (venta|cancelacion|garantia|error), not a
+  // total/parcial scope (which is never stored). Render it as a reason badge;
+  // cancelacion/error stand out, a normal return is neutral.
+  const motivoTipo = d.tipo.toLowerCase();
+  const tipoClass =
+    motivoTipo === "cancelacion" || motivoTipo === "error" ? "pill-danger" : "pill-warn";
+  const tipo = `<span class="pill ${tipoClass}">${escapeHtml(returnMotivoLabel(d.tipo))}</span>`;
   return `
     <tr>
       <td><span class="muted">${escapeHtml(fmtDate(d.created_at))}</span></td>
@@ -269,9 +279,13 @@ function openRefundModal(
     saveBtn.classList.add("loading");
     saveBtn.disabled = true;
     try {
+      // `tipo` on the wire is the MOTIVO axis the schema asserts
+      // (venta|cancelacion|garantia|error) — NOT the total/parcial scope. A POS
+      // counter return is `venta`. Sending the scope here 500'd every return
+      // (BUG-paul-001). The Total/Parcial badge stays a pre-submit hint only.
       await createRefund(serverUrl, motivo, items, {
         order: receipt.order_id,
-        tipo: deriveTipo(),
+        tipo: DEFAULT_RETURN_MOTIVO,
         notas: notasEl.value.trim() || undefined,
         metodoReembolso: metodoEl.value,
       });

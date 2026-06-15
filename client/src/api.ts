@@ -1053,8 +1053,13 @@ export interface RefundResult {
   orderMarkedRefunded: boolean;
 }
 
-/** POST /api/v1/pos/returns (Bearer, cashier+) — create a refund. `tipo` defaults
- *  to `parcial`. Rejects with a Spanish string (e.g. over-refund / 403). */
+/** POST /api/v1/pos/returns (Bearer, cashier+) — create a refund. `tipo` is the
+ *  return MOTIVO and must be a value the `devolucion.tipo` schema accepts
+ *  (`venta` | `cancelacion` | `garantia` | `error`); defaults to `venta` (a
+ *  normal return against a sale). It is NOT the total/parcial scope — that is a
+ *  presentational distinction, never persisted on this field. Sending an invalid
+ *  tipo (e.g. `total`/`parcial`) made the server reject every return with a 500
+ *  (BUG-paul-001). Rejects with a Spanish string (e.g. over-refund / 403). */
 export async function createRefund(
   serverUrl: string,
   motivo: string,
@@ -1066,7 +1071,7 @@ export async function createRefund(
     {
       serverUrl,
       order: opts.order,
-      tipo: opts.tipo ?? "parcial",
+      tipo: opts.tipo ?? "venta",
       motivo,
       notas: opts.notas,
       items,
