@@ -193,14 +193,35 @@ export async function goodsReceiptFlow({ tenant, email, password, vertical }) {
   const poLineId = detail?.items?.[0]?.id;
   check(!!poLineId, "PO detail returns a line id");
 
-  // 4. receive the goods — the operator's "Recibir" button --------------------
-  //    BUG-bob-002: create makes a `draft`, but POST /receive only accepts
-  //    sent/approved/partially_received (purchasing service.rs) and NO route
-  //    issues a draft→sent transition (no /approve, no /send, create can't set
-  //    status). So the receipt 409s and on-hand stock NEVER moves — the whole
-  //    goods-receipt pillar is unreachable through the app. xfail until a draft→
-  //    sent transition lands; when it does, receive.ok flips true and the stock
-  //    assertion below runs for real, turning a stale xfail red.
+  // 4. probe for a draft→sent/approved transition (the MISSING link) ----------
+  //    BUG-bob-002: create makes a `draft`, but the wired POST /receive
+  //    (service::receive_purchase_order_lines) only accepts
+  //    sent/approved/partially_received, and NO route issues a draft→sent
+  //    transition (purchasing.rs exposes only create/receive/payments/cancel —
+  //    no /send, /approve, /submit; create can't set status). So the receipt
+  //    409s and on-hand stock NEVER moves — the whole goods-receipt pillar is
+  //    unreachable through the app.
+  //
+  //    This probe is SELF-HEALING: it tries each plausible transition verb. If
+  //    one lands on origin, it advances the PO and the real receive+stock
+  //    assertions below run for keeps; until then it pins the exact gap so the
+  //    xfail flips red the moment a transition ships.
+  const TRANSITION_VERBS = ["send", "approve", "submit"];
+  let advanced = false;
+  for (const verb of TRANSITION_VERBS) {
+    const r = await c.post(
+      `/purchase-orders/${encodeURIComponent(poId)}/${verb}`,
+      {},
+      { expectOk: false },
+    );
+    if (r.ok) {
+      advanced = true;
+      check(true, `draft→sent transition landed via /${verb} (BUG-bob-002 fixed)`);
+      break;
+    }
+  }
+
+  // 5. receive the goods — the operator's "Recibir" button --------------------
   const recv = await c.post(
     `/purchase-orders/${encodeURIComponent(poId)}/receive`,
     { lines: [{ po_line_id: poLineId, qty_received: QTY }] },
@@ -210,11 +231,19 @@ export async function goodsReceiptFlow({ tenant, email, password, vertical }) {
     check(true, "purchase order received");
     const after = (await c.get(`/products/${encodeURIComponent(target.id)}`)).body;
     eq(after.stock, stockBefore + QTY, "stock increased by received quantity");
+  } else if (advanced) {
+    // A transition landed but receive still failed → that's a NEW, real bug.
+    check(false, `receive failed after a successful transition → ${recv.status} ${recv.body?.error?.code ?? ""}`);
   } else {
+    // receive must 409 a draft cleanly (coded conflict, never a 5xx/crash).
+    check(
+      recv.status === 409,
+      `draft receive rejected with a clean 409 (got ${recv.status}, no 5xx)`,
+    );
     knownBug(
-      `BUG-bob-002 compras: draft PO no se puede recibir — POST /receive exige ` +
-        `sent/approved/partially_received y no existe transición draft→sent ` +
-        `(sin /approve ni /send) → ${recv.status} ${recv.body?.error?.code ?? ""}`,
+      `BUG-bob-002 compras: draft PO no se puede recibir — no existe transición ` +
+        `draft→sent (probé /send /approve /submit, ninguna existe) y POST /receive ` +
+        `exige sent/approved/partially_received → ${recv.status} ${recv.body?.error?.code ?? ""}`,
     );
   }
 }
@@ -275,4 +304,72 @@ export async function complianceFlow({ tenant, email, password, vertical }) {
   const period = new Date().toISOString().slice(0, 7); // YYYY-MM
   const libro = await c.get(`/dte/libro-ventas?period=${period}`, { expectOk: false });
   check(libro.status < 500, `libro-ventas handled cleanly (status ${libro.status}, no 5xx)`);
+}
+
+/** Multi-rubro contract for a NON-pharmacy rubro (minimarket): the operator must
+ *  never be forced through prescription / controlled-substance (Ley 20.000)
+ *  machinery, yet boleta (DTE SII) stays UNIVERSAL — every CL business emits.
+ *  Caller runs this for minimarket ONLY (see run.mjs); it is a no-op contract
+ *  for pharmacy, where recetas/controlados legitimately apply. */
+export async function noPrescriptionFlow({ tenant, email, password, vertical }) {
+  section(`no-receta (minimarket) vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // 1. catalog carries NO clinical/controlled product — no pharmacy pack leaked
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  check(list.length > 0, `minimarket catalog non-empty (${list.length} products)`);
+  const clinical = list.filter((p) => p.active_ingredient);
+  eq(clinical.length, 0, "no product carries active_ingredient (no clinical pack)");
+  // prescription_type defaults to 'direct' (OTC / venta directa, migration
+  // 0003_catalog.surql). A minimarket catalog must be all OTC — nothing that
+  // demands a receta (anything other than 'direct' would force one).
+  const needsReceta = list.filter(
+    (p) => p.prescription_type && p.prescription_type !== "direct",
+  );
+  eq(needsReceta.length, 0, "every product is OTC (prescription_type 'direct', no receta required)");
+
+  // 2. a plain sale closes with NO receta field — the POS must not demand one.
+  const sellable = list.find((p) => p.stock > 0 && p.active !== false);
+  check(!!sellable, "found a sellable minimarket product");
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [
+        {
+          product: sellable.id,
+          product_name: sellable.name,
+          quantity: 1,
+          unit_price: String(sellable.price),
+        },
+      ],
+      payment_method: "pos_cash",
+      cash_amount: String(sellable.price),
+    },
+    { headers: { "Idempotency-Key": `e2e-noreceta-${Date.now()}` } },
+  );
+  eq(sale.status, 201, "minimarket sale created (201) with NO prescription attached");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "sale returns order id");
+
+  // 3. the receta libro endpoint is UNIVERSAL but stays empty in a minimarket —
+  //    reachable (no crash) and carries no dispensed controlados.
+  const recetas = await c.get("/prescriptions", { expectOk: false });
+  check(recetas.status < 500, `prescriptions list handled cleanly (status ${recetas.status})`);
+  if (recetas.status === 200 && Array.isArray(recetas.body)) {
+    eq(recetas.body.length, 0, "no recetas/controlados dispensed in minimarket");
+  }
+
+  // 4. boleta (DTE SII) is UNIVERSAL — a minimarket emits too. Free with no
+  //    CAF/cert → coded 4xx upsell, NEVER a 5xx/crash (boleta-gate contract).
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: "e2e" },
+    { expectOk: false },
+  );
+  check(
+    boleta.status < 500,
+    `minimarket boleta still emits/gates cleanly (status ${boleta.status}, no 5xx)`,
+  );
 }
