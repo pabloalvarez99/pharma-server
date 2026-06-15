@@ -2533,3 +2533,31 @@ GATE cliente verde: `npm run build` (tsc + vite) + `npm test` (vitest 52/52) +
 `npm run e2e` → **47 passed / 0 failed / 4 xfail** (BUG-bob-001 ×2 + BUG-bob-002 ×2,
 ambos verticales), exit 0. Sólo toqué `client/e2e/` (flows.mjs + run.mjs); sin
 ediciones de vistas ni Rust.
+
+## 2026-06-14 — bob · Reportes views journeys + export (PHASE 2)
+
+Lane `feat/reports-views-journeys` (off fresh erp-parity @e4c002f). Extraje la
+lógica pura de la vista Reportes a `client/src/views/reports-helpers.ts`
+(single-source, sin DOM) y apunté `reports.ts` a ella:
+- `pickTodayRow` (selección fila de hoy + fallback última, borde TZ).
+- `classifyMarginError` (Pro-gate: FEATURE_REQUIRES_UPGRADE → upsell calmo, no
+  crash; error real ≠ gating).
+- `abcToken` (normaliza clase ABC A/B/C, desconocida→C).
+- `rotationDisplay` (turnover `N×` / días redondeado; nulos → `—`).
+- Export vendor-agnostic CSV+JSON reusando `toCsv`/`csvField`/`exportFilename`
+  de stock-helpers (RFC-4180 + guard CSV-injection): `buildSalesExport`,
+  `buildTopExport`, `buildRotationExport` + `buildReportsJson` (bundle combinado
+  de paneles cargados; márgenes Pro-locked se marca `{gated:true}`, no error).
+
+UI: botones CSV/JSON por tabla (Top productos, Rotación) + "Exportar todo (JSON)"
+en el head; data cacheada en closure a medida que cada panel resuelve. CSS
+aditiva (`card-head`/`card-actions`/`btn-sm`/`view-actions`) — selectores netos,
+sin override.
+
+5 reportes cubiertos (ventas-hoy, márgenes Pro-gated, top ABC, inventario,
+rotación), gating Pro verificado, export OK, estados vacíos. 19 journeys nuevos
+(`reports-journeys.test.ts`), ambos verticales (farmacia + minimarket; el shaping
+es vertical-agnóstico = boleta/reports universal). GATE cliente verde:
+`npm run build` + `npm test` 158/158 (+19). Sin Rust/mig; api.ts intacto
+(solo lectura). NO bug de prod hallado — la lógica de la vista era correcta; el
+valor es blindar presentación + export contra divergencia UI↔test.

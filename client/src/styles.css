@@ -2565,3 +2565,28 @@ button {
   width: 16px;
   height: 16px;
 }
+
+/* Reportes — export actions (view-level + per-table). Additive; reuses .btn-ghost. */
+.view-head .view-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.card-head .section-title {
+  margin: 0;
+}
+.card-actions {
+  display: flex;
+  gap: 6px;
+}
+.btn-sm {
+  padding: 3px 9px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}

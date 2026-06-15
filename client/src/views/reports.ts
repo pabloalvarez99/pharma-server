@@ -8,13 +8,14 @@
 //   • Rotación     → /reports/stock-rotation (turnover + días de inventario)
 // Every panel loads independently with its own skeleton so one slow/failed/gated
 // call never blanks the others. Spanish throughout, CLP via ../format.
+// Vendor-agnostic export: each table exports CSV+JSON, and "Exportar todo" dumps
+// a combined JSON of every loaded panel — pure shaping lives in reports-helpers.
 import {
   salesDaily,
   topProducts,
   inventorySummary,
   marginsDaily,
   stockRotation,
-  parseSaleError,
   type DailySalesRow,
   type TopProductRow,
   type DailyMarginRow,
@@ -28,17 +29,35 @@ import {
   asMessage,
   escapeHtml,
 } from "./inventory";
+import { exportFilename, type ExportBundle } from "./stock-helpers";
+import {
+  pickTodayRow,
+  classifyMarginError,
+  abcToken,
+  rotationDisplay,
+  buildTopExport,
+  buildRotationExport,
+  buildReportsJson,
+  type LoadedReports,
+} from "./reports-helpers";
 
 const TOP_LIMIT = 5;
 const ROTATION_LIMIT = 15;
 
 export function renderReports(host: HTMLElement, serverUrl: string): void {
+  // Accumulates each panel's data as it resolves so the export actions can
+  // serialize whatever has loaded (a still-loading/gated panel is just omitted).
+  const loaded: LoadedReports = {};
+
   host.innerHTML = `
     <section class="view view-reports">
       <div class="view-head">
         <div>
           <h2 class="rb-display">Reportes</h2>
           <p class="muted">Ventas, ranking, inventario, márgenes y rotación.</p>
+        </div>
+        <div class="view-actions">
+          <button id="rep-export-all" class="btn btn-ghost" type="button">Exportar todo (JSON)</button>
         </div>
       </div>
 
@@ -50,7 +69,13 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
 
       <div class="report-cols">
         <div class="table-card rb-card">
-          <h3 class="section-title rb-display">Top ${TOP_LIMIT} productos</h3>
+          <div class="card-head">
+            <h3 class="section-title rb-display">Top ${TOP_LIMIT} productos</h3>
+            <div class="card-actions" id="rep-top-actions" hidden>
+              <button class="btn btn-ghost btn-sm" type="button" data-export="top" data-fmt="csv">CSV</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-export="top" data-fmt="json">JSON</button>
+            </div>
+          </div>
           <div id="rep-top">${tableSkeleton(5)}</div>
         </div>
         <div class="table-card rb-card">
@@ -60,23 +85,54 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
       </div>
 
       <div class="table-card rb-card">
-        <h3 class="section-title rb-display">Rotación de stock</h3>
+        <div class="card-head">
+          <h3 class="section-title rb-display">Rotación de stock</h3>
+          <div class="card-actions" id="rep-rotation-actions" hidden>
+            <button class="btn btn-ghost btn-sm" type="button" data-export="rotation" data-fmt="csv">CSV</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-export="rotation" data-fmt="json">JSON</button>
+          </div>
+        </div>
         <div id="rep-rotation">${tableSkeleton(6)}</div>
       </div>
     </section>
   `;
 
-  void loadSales(host.querySelector<HTMLElement>("#rep-sales")!, serverUrl);
-  void loadMargins(host.querySelector<HTMLElement>("#rep-margins")!, serverUrl);
-  void loadTop(host.querySelector<HTMLElement>("#rep-top")!, serverUrl);
-  void loadInventory(host.querySelector<HTMLElement>("#rep-inv")!, serverUrl);
-  void loadRotation(host.querySelector<HTMLElement>("#rep-rotation")!, serverUrl);
+  host.querySelector<HTMLButtonElement>("#rep-export-all")!.addEventListener(
+    "click",
+    () => {
+      const stem = exportFilename("reportes");
+      downloadExport(`${stem}.json`, "application/json;charset=utf-8", buildReportsJson(loaded));
+    },
+  );
+
+  host.querySelectorAll<HTMLButtonElement>("[data-export]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const which = btn.dataset.export;
+      const fmt = btn.dataset.fmt === "json" ? "json" : "csv";
+      const bundle =
+        which === "top"
+          ? loaded.top && buildTopExport(loaded.top)
+          : loaded.rotation && buildRotationExport(loaded.rotation);
+      if (bundle) downloadBundle(which!, fmt, bundle);
+    });
+  });
+
+  void loadSales(host.querySelector<HTMLElement>("#rep-sales")!, serverUrl, loaded);
+  void loadMargins(host.querySelector<HTMLElement>("#rep-margins")!, serverUrl, loaded);
+  void loadTop(host, serverUrl, loaded);
+  void loadInventory(host.querySelector<HTMLElement>("#rep-inv")!, serverUrl, loaded);
+  void loadRotation(host, serverUrl, loaded);
 }
 
-async function loadSales(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadSales(
+  host: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
   try {
     const rows: DailySalesRow[] = await salesDaily(serverUrl);
-    const today = pickToday(rows);
+    loaded.sales = rows;
+    const today = pickTodayRow(rows);
     if (!today) {
       host.innerHTML = kpiCard("Ventas hoy", "$0", "sin ventas registradas");
       return;
@@ -92,21 +148,18 @@ async function loadSales(host: HTMLElement, serverUrl: string): Promise<void> {
   }
 }
 
-/** Pick the most recent row whose date matches today (UTC, YYYY-MM-DD); fall
- *  back to the last row the server returned so a TZ edge never blanks the card. */
-function pickToday<T extends { date: string }>(rows: T[]): T | undefined {
-  if (rows.length === 0) return undefined;
-  const today = new Date().toISOString().slice(0, 10);
-  return rows.find((r) => r.date === today) ?? rows[rows.length - 1];
-}
-
 /** Margins are Pro-gated. On Free the command rejects with the coded string
  *  `FEATURE_REQUIRES_UPGRADE|message`; show a soft upgrade note (no hard error,
  *  no dark pattern — one calm card) instead of blanking the panel. */
-async function loadMargins(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadMargins(
+  host: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
   try {
     const rows: DailyMarginRow[] = await marginsDaily(serverUrl);
-    const today = pickToday(rows);
+    loaded.margins = rows;
+    const today = pickTodayRow(rows);
     if (!today) {
       host.innerHTML = kpiCard("Margen hoy", "$0", "sin ventas registradas");
       return;
@@ -122,8 +175,9 @@ async function loadMargins(host: HTMLElement, serverUrl: string): Promise<void> 
       kpiCard("Sin costo", num(today.items_without_cost), noCost, today.items_without_cost > 0 ? "warn" : ""),
     ].join("");
   } catch (err) {
-    const { code, message } = parseSaleError(err);
-    if (code === "FEATURE_REQUIRES_UPGRADE") {
+    const { gated, message } = classifyMarginError(err);
+    if (gated) {
+      loaded.margins_gated = true;
       host.innerHTML = `
         <div class="rep-upsell kpi-span">
           <span class="pill pill-warn">Plan Pro</span>
@@ -135,13 +189,20 @@ async function loadMargins(host: HTMLElement, serverUrl: string): Promise<void> 
   }
 }
 
-async function loadTop(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadTop(
+  root: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
+  const host = root.querySelector<HTMLElement>("#rep-top")!;
   try {
     const rows: TopProductRow[] = await topProducts(serverUrl, TOP_LIMIT);
     if (rows.length === 0) {
       host.innerHTML = `<p class="empty">Aún no hay ventas para rankear.</p>`;
       return;
     }
+    loaded.top = rows;
+    root.querySelector<HTMLElement>("#rep-top-actions")!.hidden = false;
     host.innerHTML = `
       <table class="data-table rb-table">
         <thead>
@@ -156,8 +217,8 @@ async function loadTop(host: HTMLElement, serverUrl: string): Promise<void> {
 }
 
 function topRow(r: TopProductRow): string {
-  const cls = r.abc_class.toUpperCase();
-  const badge = `<span class="abc abc-${cls.toLowerCase()}" title="Clase ${cls} · ${escapeHtml(r.revenue_pct)}%">${cls}</span>`;
+  const cls = abcToken(r.abc_class);
+  const badge = `<span class="abc abc-${cls}" title="Clase ${cls.toUpperCase()} · ${escapeHtml(r.revenue_pct)}%">${cls.toUpperCase()}</span>`;
   return `
     <tr>
       <td class="rank">${r.rank}</td>
@@ -169,9 +230,14 @@ function topRow(r: TopProductRow): string {
   `;
 }
 
-async function loadInventory(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadInventory(
+  host: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
   try {
     const s = await inventorySummary(serverUrl);
+    loaded.inventory = s;
     host.innerHTML = [
       kpiCard("Valorización", clp(s.inventory_value), `${num(s.total)} productos`),
       kpiCard("Stock bajo", num(s.low_stock), "bajo el mínimo", s.low_stock > 0 ? "warn" : ""),
@@ -182,13 +248,20 @@ async function loadInventory(host: HTMLElement, serverUrl: string): Promise<void
   }
 }
 
-async function loadRotation(host: HTMLElement, serverUrl: string): Promise<void> {
+async function loadRotation(
+  root: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
+  const host = root.querySelector<HTMLElement>("#rep-rotation")!;
   try {
     const rows: StockRotationRow[] = await stockRotation(serverUrl);
     if (rows.length === 0) {
       host.innerHTML = `<p class="empty">Sin datos de rotación todavía.</p>`;
       return;
     }
+    loaded.rotation = rows;
+    root.querySelector<HTMLElement>("#rep-rotation-actions")!.hidden = false;
     host.innerHTML = `
       <table class="data-table rb-table">
         <thead>
@@ -203,15 +276,37 @@ async function loadRotation(host: HTMLElement, serverUrl: string): Promise<void>
 }
 
 function rotationRow(r: StockRotationRow): string {
-  const turnover = r.turnover ? `${escapeHtml(r.turnover)}×` : "—";
-  const days = r.days_of_inventory ? num(Math.round(Number(r.days_of_inventory))) : "—";
+  const { turnover, days } = rotationDisplay(r);
+  const daysCell = days === "—" ? "—" : num(Number(days));
   return `
     <tr>
       <td><div class="cell-main">${escapeHtml(r.product_name)}</div></td>
       <td class="num">${num(r.qty_sold)}</td>
       <td class="num">${num(r.current_stock)}</td>
       <td class="num">${turnover}</td>
-      <td class="num">${days}</td>
+      <td class="num">${daysCell}</td>
     </tr>
   `;
+}
+
+/** Download one report's bundle in the chosen format (CSV gets a UTF-8 BOM so
+ *  Excel es-CL reads tildes/ñ; mirrors inventory.ts). */
+function downloadBundle(which: string, fmt: "csv" | "json", bundle: ExportBundle): void {
+  const stem = exportFilename(which === "top" ? "top-productos" : "rotacion");
+  if (fmt === "json") {
+    downloadExport(`${stem}.json`, "application/json;charset=utf-8", bundle.json);
+  } else {
+    downloadExport(`${stem}.csv`, "text/csv;charset=utf-8", `﻿${bundle.csv}`);
+  }
+}
+
+/** Trigger a client-side file download (mirrors inventory.ts `downloadExport`). */
+function downloadExport(filename: string, mime: string, content: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
