@@ -37,30 +37,30 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
     <section class="view view-reports">
       <div class="view-head">
         <div>
-          <h2>Reportes</h2>
+          <h2 class="rb-display">Reportes</h2>
           <p class="muted">Ventas, ranking, inventario, márgenes y rotación.</p>
         </div>
       </div>
 
-      <h3 class="section-title">Ventas de hoy</h3>
+      <h3 class="section-title rb-display">Ventas de hoy</h3>
       <div id="rep-sales" class="kpi-grid">${kpiSkeleton(4)}</div>
 
-      <h3 class="section-title">Márgenes (hoy)</h3>
+      <h3 class="section-title rb-display">Márgenes (hoy)</h3>
       <div id="rep-margins" class="kpi-grid">${kpiSkeleton(4)}</div>
 
       <div class="report-cols">
-        <div class="table-card">
-          <h3 class="section-title">Top ${TOP_LIMIT} productos</h3>
+        <div class="table-card rb-card">
+          <h3 class="section-title rb-display">Top ${TOP_LIMIT} productos</h3>
           <div id="rep-top">${tableSkeleton(5)}</div>
         </div>
-        <div class="table-card">
-          <h3 class="section-title">Inventario</h3>
+        <div class="table-card rb-card">
+          <h3 class="section-title rb-display">Inventario</h3>
           <div id="rep-inv" class="kpi-grid kpi-grid-tight">${kpiSkeleton(3)}</div>
         </div>
       </div>
 
-      <div class="table-card">
-        <h3 class="section-title">Rotación de stock</h3>
+      <div class="table-card rb-card">
+        <h3 class="section-title rb-display">Rotación de stock</h3>
         <div id="rep-rotation">${tableSkeleton(6)}</div>
       </div>
     </section>
@@ -143,7 +143,7 @@ async function loadTop(host: HTMLElement, serverUrl: string): Promise<void> {
       return;
     }
     host.innerHTML = `
-      <table class="data-table">
+      <table class="data-table rb-table">
         <thead>
           <tr><th>#</th><th>Producto</th><th class="num">Unid.</th><th class="num">Ingresos</th><th>ABC</th></tr>
         </thead>
@@ -190,7 +190,7 @@ async function loadRotation(host: HTMLElement, serverUrl: string): Promise<void>
       return;
     }
     host.innerHTML = `
-      <table class="data-table">
+      <table class="data-table rb-table">
         <thead>
           <tr><th>Producto</th><th class="num">Vendidas</th><th class="num">Stock</th><th class="num">Rotación</th><th class="num">Días inv.</th></tr>
         </thead>

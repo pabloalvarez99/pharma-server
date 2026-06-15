@@ -18,40 +18,78 @@ import {
   type NewPrescriptionInput,
 } from "../api";
 import { isValidRut, canonicalRut, formatRut } from "../format";
+import { loadVertical, hasRecetas, verticalLabel } from "../vertical";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 const PAGE_LIMIT = 100;
 
+// Recetas/controlados (Ley 20.000) are PHARMACY-ONLY. The shell already drops
+// the nav item for non-farmacia rubros (shell.ts hydrateBranding), but we guard
+// the view itself too — defense in depth so a minimarket never lands on the
+// controlled-drug ledger via deep-link/stale state. Generic rubros get a clear
+// "no aplica" placeholder instead of a pharmacy module they can't use.
 export function renderRecetas(host: HTMLElement, serverUrl: string): void {
+  host.innerHTML = `
+    <section class="view view-recetas">
+      <div class="table-card rb-card"><p class="empty rb-muted">Cargando…</p></div>
+    </section>`;
+  void loadVertical(serverUrl).then((vertical) => {
+    if (!hasRecetas(vertical)) {
+      host.innerHTML = recetasNoAplica(vertical);
+      return;
+    }
+    renderRecetasModule(host, serverUrl);
+  });
+}
+
+/** Placeholder shown when the rubro isn't farmacia: Recetas/controlados don't
+ *  apply, but say so plainly rather than 404-ing the operator. */
+function recetasNoAplica(vertical: Parameters<typeof verticalLabel>[0]): string {
+  return `
+    <section class="view view-recetas">
+      <div class="caja-empty">
+        <div class="caja-empty-mark">●</div>
+        <h3 class="rb-display">Recetas no aplican a este rubro</h3>
+        <p class="muted rb-muted">
+          El módulo de Recetas y el Libro de controlados (Ley 20.000) son
+          exclusivos de farmacias. Tu negocio está configurado como
+          <strong>${escapeHtml(verticalLabel(vertical))}</strong>. Cámbialo en
+          Configuración si corresponde.
+        </p>
+      </div>
+    </section>`;
+}
+
+function renderRecetasModule(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
     <section class="view view-recetas">
       <div class="view-head">
         <div>
-          <h2>Recetas</h2>
-          <p class="muted">Registro de recetas y libro de controlados (Ley 20.000).</p>
+          <h2 class="rb-display">Recetas</h2>
+          <p class="muted rb-muted">Registro de recetas y libro de controlados (Ley 20.000).</p>
         </div>
         <div class="cli-head-actions">
           <div class="view-search">
-            <input id="rec-search" type="search" placeholder="Filtrar por RUT del paciente…" autocomplete="off" />
+            <input id="rec-search" type="search" class="rb-input" placeholder="Filtrar por RUT del paciente…" autocomplete="off" />
           </div>
           <label class="rec-toggle">
             <input id="rec-controlled" type="checkbox" /> Solo controlados
           </label>
-          <button id="rec-new" type="button" class="btn-ghost">+ Nueva receta</button>
+          <button id="rec-new" type="button" class="btn-ghost rb-btn ghost">+ Nueva receta</button>
         </div>
       </div>
 
       <div id="rec-modal-host"></div>
 
-      <div class="table-card">
-        <h3 class="section-title">Recetas</h3>
+      <div class="table-card rb-card">
+        <h3 class="section-title rb-display">Recetas</h3>
         <div id="rec-table">${tableSkeleton()}</div>
       </div>
 
-      <div class="table-card">
+      <div class="table-card rb-card">
         <div class="view-head">
-          <h3 class="section-title">Libro de recetas · controlados</h3>
-          <button id="rec-export" type="button" class="btn-ghost">Exportar CSV</button>
+          <h3 class="section-title rb-display">Libro de recetas · controlados</h3>
+          <button id="rec-export" type="button" class="btn-ghost rb-btn ghost">Exportar CSV</button>
         </div>
         <div id="rec-libro">${tableSkeleton(5)}</div>
       </div>
@@ -124,7 +162,7 @@ function renderTable(host: HTMLElement, rows: Prescription[], ledger: boolean): 
   // The ledger is controlled-only, so the "Tipo" column is redundant there.
   const tipoHead = ledger ? "" : "<th>Tipo</th>";
   host.innerHTML = `
-    <table class="data-table">
+    <table class="data-table rb-table">
       <thead>
         <tr>
           <th>Fecha</th>
@@ -146,8 +184,8 @@ function renderTable(host: HTMLElement, rows: Prescription[], ledger: boolean): 
 function prescriptionRow(r: Prescription, ledger: boolean): string {
   const doctor = [r.doctor_name, r.doctor_rut].filter(Boolean).join(" · ") || "—";
   const tipo = r.controlled
-    ? `<span class="pill pill-danger">Controlado</span>`
-    : `<span class="pill pill-ok">Normal</span>`;
+    ? `<span class="pill pill-danger rb-pill ctrl">Controlado</span>`
+    : `<span class="pill pill-ok rb-pill ok">Normal</span>`;
   const tipoCell = ledger ? "" : `<td>${tipo}</td>`;
   return `
     <tr>
@@ -200,8 +238,8 @@ function openPrescriptionModal(
         </div>
         <div id="rec-f-error" class="form-error" hidden></div>
         <div class="modal-actions">
-          <button type="button" class="btn-ghost" id="rec-f-cancel">Cancelar</button>
-          <button type="button" class="btn-primary modal-confirm" id="rec-f-save">
+          <button type="button" class="btn-ghost rb-btn ghost" id="rec-f-cancel">Cancelar</button>
+          <button type="button" class="btn-primary modal-confirm rb-btn" id="rec-f-save">
             <span class="btn-label">Crear</span>
           </button>
         </div>
