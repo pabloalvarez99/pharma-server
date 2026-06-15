@@ -139,3 +139,47 @@ catálogo poblado (camino de la primera venta alcanzable). Sin CLI en ningún pa
    `tufarmacia`), pero la app ya migró a defaults genéricos (`principal`, correo
    vacío) → la app va ADELANTE del manual. Generalizar el manual es de la lane de
    docs (fuera de mi scope de views). Anotado.
+
+## Migración de catálogo CSV (ye, lane feat/import-csv-migration-qa)
+
+Blocker #1 de onboarding: el operador llega con su catálogo de miles de SKU
+exportado de **otro sistema** (o de Excel CL) y debe migrarlo sin perder datos.
+El importador asumía un CSV "limpio" estilo `scripts/extract_tufarmacia_full.py`
+(inglés, `,`, sin BOM, precios enteros). Contra archivos reales fallaba silencioso
+o **corrompía datos**. Cazado contra backend vivo (`crates/api/tests/import_endpoint.rs`,
+13 tests) + unit tests de parsing (`v1::catalog::import_parsing_tests`):
+
+1. **Separador `;` (Excel Chile) → archivo entero rechazado** — Excel en locale CL
+   exporta con `;` (porque `,` es la coma decimal). El lector usaba `,` fijo → toda
+   la fila de cabecera era una sola columna → "falta name/price". → **FIJADO**:
+   `sniff_delimiter` detecta `;`/`,`/TAB de la primera línea.
+
+2. **BOM UTF-8 → cabecera rota** — "Guardar como CSV UTF-8" de Excel antepone
+   `EF BB BF`, que se pega a la primera cabecera (`name` → `\u{feff}name`) y rompe la
+   detección de columnas. → **FIJADO**: `strip_bom`.
+
+3. **Punto de miles CLP = CORRUPCIÓN SILENCIOSA** — `1.990` (1990 pesos) parseaba
+   como `Decimal` 1.99; `12.500` → 12.5. El peor bug de import: no error, dato malo
+   guardado. → **FIJADO**: `normalize_decimal` resuelve miles vs decimal (`1.990`→1990,
+   `1.990,50`→1990.50, `12.50`→12.50 intacto). `normalize_int` para stock/descuento.
+
+4. **Cabeceras en español ignoradas** — el sistema previo del migrante emite
+   `nombre`/`precio`/`código`/`existencia`/`categoría`… El importador sólo conocía
+   inglés. → **FIJADO**: `canon_header` mapea alias ES→canónico (folding de acentos).
+
+5. **Columna `category` inusable para CSV reales (rechazo por fila)** — `category`
+   exigía un id de registro `category:xxx`; un CSV de migrante trae NOMBRES de
+   categoría → `id inválido: Analgésicos`. → **FIJADO**: el handler resuelve
+   nombre→id con **find-or-create** (cachea + reusa existentes; re-import no duplica).
+
+6. **Sin preview antes de commit** — el operador importaba a ciegas; un CSV malo
+   escribía basura sin chance de revisar. → **FIJADO**: paso `?dry_run=true` (valida
+   + cuenta SIN escribir) cableado como **Previsualizar → Confirmar** en `importar.ts`.
+   Import parcial: filas buenas entran, malas se reportan por línea (en español),
+   no aborta todo. Idempotencia por `external_id` ya existía; preview respeta dedup
+   within-file. Filas vacías de relleno (Excel) se ignoran, no cuentan como error.
+
+Nota de scope: (1)-(5) tocaron `crates/api/src/v1/catalog.rs` (backend roto en caso
+real → GATE workspace, no sólo cliente, por charter). Cliente: `importar.ts` (flujo
+2 pasos) + `api.ts` append-only (`importProductsPreview`) + `import_products_preview`
+Tauri cmd. Pendiente lane hermana: `docs/operator` no documenta migración CSV todavía.

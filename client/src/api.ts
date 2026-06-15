@@ -840,6 +840,16 @@ export function importProducts(
   return invoke<ImportSummary>("import_products", { serverUrl, csv });
 }
 
+/** POST /api/v1/products/import?dry_run=true (Bearer, admin+). Validates + counts
+ *  the CSV WITHOUT writing anything — powers the preview shown before the operator
+ *  confirms a catalog migration. Same {@link ImportSummary} shape as a real run. */
+export function importProductsPreview(
+  serverUrl: string,
+  csv: string,
+): Promise<ImportSummary> {
+  return invoke<ImportSummary>("import_products_preview", { serverUrl, csv });
+}
+
 /** GET /api/v1/products/export (Bearer) — full catalog as CSV text. The webview
  *  wraps it in a Blob for download. Columns round-trip with {@link importProducts}. */
 export function exportProducts(serverUrl: string): Promise<string> {

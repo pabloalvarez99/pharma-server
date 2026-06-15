@@ -1060,6 +1060,39 @@ async fn import_products(
         .map_err(|e| format!("Respuesta de importación inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/products/import?dry_run=true` (Bearer, admin+) — validates and
+/// counts the CSV WITHOUT writing anything. Backs the "preview antes de
+/// confirmar" step: the operator sees how many rows are OK / rejected (and why)
+/// before committing the catalog migration.
+#[tauri::command]
+async fn import_products_preview(
+    state: State<'_, SessionState>,
+    server_url: String,
+    csv: String,
+) -> Result<ImportSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let part = reqwest::multipart::Part::text(csv)
+        .file_name("import.csv")
+        .mime_str("text/csv")
+        .map_err(|e| format!("No se pudo preparar el archivo CSV: {e}"))?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let resp = http
+        .post(format!("{base}/api/v1/products/import?dry_run=true"))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de previsualización inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/products/export` (Bearer) — full catalog as CSV text so the
 /// webview can wrap it in a Blob download. Columns match the `import_products`
 /// format (export → edit → re-import round-trip). No-lock-in pillar (ADR-0005 #4).
@@ -3046,6 +3079,7 @@ pub fn run() {
             get_receipt,
             create_product,
             import_products,
+            import_products_preview,
             export_products,
             product_detail,
             adjust_product_stock,
