@@ -2830,3 +2830,22 @@ Otros hallazgos (no bug):
 Tests: +6 journeys en `cashier-loop.test.ts` (journey 9) que blindan el eje
 MOTIVO ≠ SCOPE y los labels ES. GATE cliente verde: `npm run build` +
 `npm test` 184/184 (+6). Sin Rust/mig.
+
+## 2026-06-14 — bob · E2E live-stack CI + reporte step (lane feat/e2e-live-stack)
+PHASE 2 goal (c) cierre. El harness `npm run e2e` ya corría contra el STACK VIVO
+(build real pharma-api + CLI → temp SurrealKv → migrate/tenant/user vía CLI con
+server abajo → boot pharma-api → golden path sobre HTTP real, ambos verticales),
+no mocks. Delta de este lane:
+- **Reproducible en CI**: `.github/workflows/e2e.yml` nuevo — `workflow_dispatch`
+  ONLY (manual/opt-in). Build api+cli release (rust-cache) → `npm ci` → `npm run
+  e2e`. NO corre en push/PR → respeta el billing-wall (regla #9): el e2e sigue
+  siendo gate LOCAL por defecto, pero ahora es reproducible en CI cuando un humano
+  lo dispara, sin quemar minutos automáticamente.
+- **Día-completo cerrado con reporte**: goldenPath ganó paso 10 — tras cierre,
+  `/reports/sales-daily` debe mostrar la venta del día. Cierra el loop del operador
+  login→venta→boleta→devolución→cierre→reporte, ambos verticales (core/Free).
+- README actualizado (flujo + nota CI workflow_dispatch).
+xfail intactos (BUG-bob-001 devolución schema, BUG-bob-002 recepción draft→sent).
+GATE cliente: build verde + vitest 179 (1 flake conocido en inventory-view.test.ts
+50k bajo carga concurrente del cargo build — pasa aislado, marvin scope, no mío).
+Scope: SOLO client/e2e/ + .github/workflows/. Sin view edits, sin api.ts.

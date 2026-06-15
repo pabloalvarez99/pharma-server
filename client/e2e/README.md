@@ -13,7 +13,9 @@ sale created, caja closed). This is the lightest shape that runs on a plain
 Windows box — no `tauri-driver`/WebDriver, no display. If we later want true UI
 E2E it can sit alongside; the golden-path assertions here are the contract.
 
-CI is billing-walled, so this is a **LOCAL gate**, not a CI job.
+CI is billing-walled, so this is primarily a **LOCAL gate**. The same run is
+reproducible in CI via `.github/workflows/e2e.yml`, which is **`workflow_dispatch`
+only** (manual, opt-in) so it never auto-burns minutes on push/PR.
 
 ## Run
 
@@ -43,7 +45,8 @@ the binaries. Exit code is non-zero on any failed assertion.
 5. For **each vertical** (`pharmacy`, `minimarket`) seed demo data via
    `POST /admin/seed-demo` (same service as the in-app "datos demo" button) and
    run the golden path:
-   `login -> open caja -> sale -> receipt -> boleta -> devolución -> cierre`.
+   `login -> open caja -> sale -> receipt -> boleta -> devolución -> cierre ->
+   reporte`.
 6. Tear down server + temp DB.
 
 ## Golden-path assertions
@@ -59,6 +62,8 @@ the binaries. Exit code is non-zero on any failed assertion.
   status/code is logged.
 - **devolución** with `restock=true` restores stock to the pre-sale level.
 - **arqueo** preview returns; **cierre** closes the session.
+- **reporte** — the day's sale surfaces in the core (Free) `sales-daily` report,
+  closing the operator's daily loop.
 
 ## Files
 
