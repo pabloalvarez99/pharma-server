@@ -769,6 +769,120 @@ async fn login(
     })
 }
 
+// --- first-run setup (no account yet) --------------------------------------
+
+/// Server `SetupStatus` (`crates/api/src/setup.rs`): `{ needs_setup }`.
+#[derive(Serialize, Deserialize)]
+pub struct SetupStatusInfo {
+    pub needs_setup: bool,
+}
+
+/// Server `SetupResponse`: a login token plus the assigned tenant slug.
+#[derive(Deserialize)]
+struct SetupResponse {
+    token: String,
+    #[allow(dead_code)]
+    token_type: String,
+    expires_in: u64,
+    tenant_slug: String,
+}
+
+/// What the webview receives after first-run setup: a live session plus the
+/// slug the server assigned (to pre-fill "Sucursal" on later logins).
+#[derive(Serialize)]
+pub struct SetupInfo {
+    pub user_id: String,
+    pub tenant_id: String,
+    pub roles: Vec<String>,
+    pub expires_in: u64,
+    pub tenant_slug: String,
+}
+
+/// GET `/api/v1/setup/status` — UNAUTHENTICATED. `needs_setup = true` when the
+/// install has no account yet, so the login screen can offer in-app account
+/// creation instead of a dead end.
+#[tauri::command]
+async fn setup_status(server_url: String) -> Result<SetupStatusInfo, String> {
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/setup/status"))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de estado de instalación inválida: {e}"))
+}
+
+/// POST `/api/v1/setup` — UNAUTHENTICATED first-run bootstrap. Creates the first
+/// tenant + owner, stores the issued token, then GET `/me` to return identity —
+/// so the operator is logged straight in. 409 if the install already has an
+/// account (surfaces the server's Spanish message).
+#[tauri::command]
+async fn setup_account(
+    state: State<'_, SessionState>,
+    server_url: String,
+    business_name: String,
+    tenant_slug: Option<String>,
+    email: String,
+    password: String,
+    vertical: Option<String>,
+) -> Result<SetupInfo, String> {
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/setup"))
+        .json(&serde_json::json!({
+            "business_name": business_name,
+            "tenant_slug": tenant_slug,
+            "email": email,
+            "password": password,
+            "vertical": vertical,
+        }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    let setup: SetupResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Respuesta de instalación inválida del servidor: {e}"))?;
+
+    let me_resp = http
+        .get(format!("{base}/api/v1/me"))
+        .bearer_auth(&setup.token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !me_resp.status().is_success() {
+        return Err(error_message(me_resp).await);
+    }
+    let me: MeResponse = me_resp
+        .json()
+        .await
+        .map_err(|e| format!("Respuesta de sesión inválida del servidor: {e}"))?;
+
+    *state
+        .inner
+        .lock()
+        .map_err(|_| "Estado de sesión corrupto.".to_string())? =
+        Some(Session { token: setup.token });
+
+    Ok(SetupInfo {
+        user_id: me.sub,
+        tenant_id: me.tenant_id,
+        roles: me.roles,
+        expires_in: setup.expires_in,
+        tenant_slug: setup.tenant_slug,
+    })
+}
+
 /// GET `/api/v1/admin/license/status` (Bearer). Requires a prior `login`.
 /// Admin/owner only on the server side — a 403 surfaces as Spanish copy.
 #[tauri::command]
@@ -2887,6 +3001,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             login,
+            setup_status,
+            setup_account,
             license_status,
             server_health,
             logout,

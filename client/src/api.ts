@@ -93,6 +93,44 @@ export function login(
   });
 }
 
+/** GET /api/v1/setup/status — UNAUTHENTICATED. `needs_setup=true` on a fresh
+ *  install with no account yet (login screen offers in-app account creation). */
+export interface SetupStatusInfo {
+  needs_setup: boolean;
+}
+export function setupStatus(serverUrl: string): Promise<SetupStatusInfo> {
+  return invoke<SetupStatusInfo>("setup_status", { serverUrl });
+}
+
+/** Input for the first-run account-creation form. */
+export interface SetupInput {
+  businessName: string;
+  /** Optional branch slug; server derives one from the name when omitted. */
+  tenantSlug?: string;
+  email: string;
+  password: string;
+  /** Chosen rubro (e.g. "farmacia" | "minimarket" | "otro"). */
+  vertical?: string;
+}
+
+/** A live session plus the slug the server assigned (for "Sucursal" pre-fill). */
+export interface SetupSession extends SessionInfo {
+  tenant_slug: string;
+}
+
+/** POST /api/v1/setup — create the first tenant+owner, then log straight in.
+ *  Throws a Spanish error string on failure (e.g. 409 if already configured). */
+export function setupAccount(serverUrl: string, input: SetupInput): Promise<SetupSession> {
+  return invoke<SetupSession>("setup_account", {
+    serverUrl,
+    businessName: input.businessName,
+    tenantSlug: input.tenantSlug ?? null,
+    email: input.email,
+    password: input.password,
+    vertical: input.vertical ?? null,
+  });
+}
+
 /** GET /api/v1/admin/license/status (Bearer, in-memory token). */
 export function licenseStatus(serverUrl: string): Promise<LicenseSummary> {
   return invoke<LicenseSummary>("license_status", { serverUrl });

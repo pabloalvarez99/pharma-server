@@ -2849,3 +2849,36 @@ xfail intactos (BUG-bob-001 devolución schema, BUG-bob-002 recepción draft→s
 GATE cliente: build verde + vitest 179 (1 flake conocido en inventory-view.test.ts
 50k bajo carga concurrente del cargo build — pasa aislado, marvin scope, no mío).
 Scope: SOLO client/e2e/ + .github/workflows/. Sin view edits, sin api.ts.
+
+## 2026-06-14 — first-run LIVE QA: setup in-app sin CLT (ye · feat/firstrun-live-qa)
+
+Manejé el primer-inicio REAL contra una DB fresca (vacía): el RUT solo que recién
+instaló el MSI. Hallazgo raíz: **chicken-and-egg** — DB sin tenant ni usuario →
+`/login` nunca pasa → única salida hoy = CLI (`pharma tenant-create` +
+`user-create`). Viola "primer-inicio SIN tocar CLI" y el freemium de un dueño solo.
+
+FIX (marquee): endpoint UNAUTENTICADO de setup de primer-inicio —
+`crates/api/src/setup.rs`:
+- `GET /api/v1/setup/status` → `{ needs_setup }` (true si la DB no tiene usuarios).
+- `POST /api/v1/setup` → crea el primer tenant + owner, guarda `business.vertical`
+  + `business.name`, emite JWT y deja al operador logueado (misma forma que /login).
+- **Fail-closed**: ambos gateados a DB sin usuarios (install-wide, no tenant-scoped);
+  con ≥1 usuario, status→false y POST→409 `SETUP_ALREADY_DONE`. No es backdoor.
+Montado en `build_router` (additive: `pub mod setup;` + 1 línea `.merge`).
+
+Cableado cliente (mi scope):
+- `client/src-tauri/src/lib.rs`: comandos `setup_status` + `setup_account`
+  (additive en invoke_handler).
+- `client/src/api.ts` (append-only): `setupStatus` + `setupAccount` + tipos.
+- `client/src/views/login.ts`: sondea setup al render; si `needs_setup`,
+  intercambia la tarjeta por el formulario "Crea tu cuenta" (nombre+rubro+correo
+  +clave, valida 8+ chars/correo, server avanzado). Defaults de login degenerizados
+  (`tufarmacia`/`admin@tufarmacia.cl` → `principal`/vacío; multi-rubro).
+
+Prueba REAL DB fresca: `crates/api/tests/setup_firstrun.rs` (2 tests) — app axum
+sobre DB kv vacía, viaje completo por HTTP: status→setup→/me(owner)→vertical
+persistido→409 fail-closed→login con credenciales elegidas→seed-demo→catálogo
+poblado. Sin CLI. + validación de input (clave corta/correo malo/nombre vacío).
+
+Fricción fileada (≥4) en `docs/strategy/multi-rubro-findings.md` + abajo. GATE:
+cliente `npm run build` + `npm test` verde; workspace `cargo test -p api` verde.
