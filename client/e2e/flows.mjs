@@ -139,3 +139,130 @@ export async function goldenPath({ tenant, email, password, vertical }) {
   });
   check(close.ok, "cash session closed");
 }
+
+/** Goods-receipt path (charter: producto+lote → recepción → stock). Mirrors
+ *  compras.ts verbatim: create a supplier, create a draft PO, then try to receive
+ *  goods against it. A receipt must bump on-hand stock by the quantity received.
+ *
+ *  Assumes goldenPath already seeded this tenant (run order in run.mjs). */
+export async function goodsReceiptFlow({ tenant, email, password, vertical }) {
+  section(`goods-receipt vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Target a real catalogued product so the receipt recomputes WAC + stock.
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  const target = list[0];
+  check(!!target, "have a catalogued product to receive against");
+  const stockBefore = target.stock;
+
+  // 1. supplier (compras.ts createSupplier — only `name` is required) ---------
+  const supplier = await c.post("/suppliers", { name: "Proveedor E2E" });
+  const supplierId = supplier.body?.id;
+  check(!!supplierId, "supplier created");
+
+  // 2. draft PO with one catalogued line (compras.ts createPurchaseOrder) -----
+  const QTY = 5;
+  const po = await c.post("/purchase-orders", {
+    supplier: supplierId,
+    items: [
+      {
+        product: target.id,
+        product_name: target.name,
+        quantity: QTY,
+        unit_cost: "1000",
+      },
+    ],
+  });
+  const poId = po.body?.id;
+  check(!!poId, "purchase order created (draft)");
+
+  // 3. read back the PO line id the receipt addresses (compras.ts getPO) ------
+  const detail = (await c.get(`/purchase-orders/${encodeURIComponent(poId)}`)).body;
+  const poLineId = detail?.items?.[0]?.id;
+  check(!!poLineId, "PO detail returns a line id");
+
+  // 4. receive the goods — the operator's "Recibir" button --------------------
+  //    BUG-bob-002: create makes a `draft`, but POST /receive only accepts
+  //    sent/approved/partially_received (purchasing service.rs) and NO route
+  //    issues a draft→sent transition (no /approve, no /send, create can't set
+  //    status). So the receipt 409s and on-hand stock NEVER moves — the whole
+  //    goods-receipt pillar is unreachable through the app. xfail until a draft→
+  //    sent transition lands; when it does, receive.ok flips true and the stock
+  //    assertion below runs for real, turning a stale xfail red.
+  const recv = await c.post(
+    `/purchase-orders/${encodeURIComponent(poId)}/receive`,
+    { lines: [{ po_line_id: poLineId, qty_received: QTY }] },
+    { expectOk: false },
+  );
+  if (recv.ok) {
+    check(true, "purchase order received");
+    const after = (await c.get(`/products/${encodeURIComponent(target.id)}`)).body;
+    eq(after.stock, stockBefore + QTY, "stock increased by received quantity");
+  } else {
+    knownBug(
+      `BUG-bob-002 compras: draft PO no se puede recibir — POST /receive exige ` +
+        `sent/approved/partially_received y no existe transición draft→sent ` +
+        `(sin /approve ni /send) → ${recv.status} ${recv.body?.error?.code ?? ""}`,
+    );
+  }
+}
+
+/** Compliance + reporting path (charter: boleta/factura/DTE = UNIVERSAL, must
+ *  work in minimarket too; reports must not crash). Free tier: paid surfaces
+ *  (margins-daily Pro-gate, factura/libro without CAF/cert) must fail CLEANLY
+ *  with a coded 4xx upsell — NEVER a 5xx/crash. Runs after goldenPath so a sale
+ *  already exists for sales-daily/top-products to report on. */
+export async function complianceFlow({ tenant, email, password, vertical }) {
+  section(`compliance vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Core/free reports — must return a JSON array, both verticals -------------
+  for (const path of [
+    "/reports/sales-daily",
+    "/reports/top-products",
+    "/reports/stock-rotation",
+    "/reports/near-expiry",
+  ]) {
+    const r = await c.get(path, { expectOk: false });
+    check(r.status === 200 && Array.isArray(r.body), `${path} → 200 array`);
+  }
+
+  // margins-daily is Pro-gated — Free = clean 402 upsell, never a 5xx --------
+  const margins = await c.get("/reports/margins-daily", { expectOk: false });
+  check(margins.status < 500, `margins-daily handled cleanly (status ${margins.status})`);
+  if (!margins.ok) {
+    console.log(`    ↳ Pro-gate: ${margins.status} code=${margins.body?.error?.code ?? "(none)"}`);
+  }
+
+  // factura (DTE 33) is UNIVERSAL — every CL business emits, incl. minimarket.
+  // Free with no CAF/cert/emisor → coded 4xx, NEVER 5xx/crash (boleta-gate
+  // contract for the full document path).
+  const factura = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 33,
+      cert_passphrase: "e2e",
+      receptor: {
+        rut: "76086428-5",
+        razon_social: "Cliente E2E SpA",
+        giro: "Comercio",
+        direccion: "Av Siempre Viva 742",
+        comuna: "Coquimbo",
+      },
+      items: [{ nombre: "Item E2E", cantidad: "1", precio_unitario: "1190" }],
+    },
+    { expectOk: false },
+  );
+  check(factura.status < 500, `factura emit handled cleanly (status ${factura.status}, no 5xx)`);
+  if (!factura.ok) {
+    console.log(`    ↳ Free factura gate: ${factura.status} code=${factura.body?.error?.code ?? "(none)"}`);
+  }
+
+  // libro de ventas (monthly sales book) — admin read, clean handling --------
+  const period = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const libro = await c.get(`/dte/libro-ventas?period=${period}`, { expectOk: false });
+  check(libro.status < 500, `libro-ventas handled cleanly (status ${libro.status}, no 5xx)`);
+}

@@ -16,7 +16,7 @@ import {
   summary,
   section,
 } from "./lib/harness.mjs";
-import { goldenPath } from "./flows.mjs";
+import { goldenPath, goodsReceiptFlow, complianceFlow } from "./flows.mjs";
 
 const PASSWORD = "e2e-pass-1234";
 const EMAIL = "admin@e2e.cl";
@@ -64,12 +64,10 @@ async function main() {
   console.log("  ✓ server ready");
 
   for (const t of TENANTS) {
-    await goldenPath({
-      tenant: t.slug,
-      email: EMAIL,
-      password: PASSWORD,
-      vertical: t.vertical,
-    });
+    const ctx = { tenant: t.slug, email: EMAIL, password: PASSWORD, vertical: t.vertical };
+    await goldenPath(ctx);
+    await goodsReceiptFlow(ctx);
+    await complianceFlow(ctx);
   }
 }
 
