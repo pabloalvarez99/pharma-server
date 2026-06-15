@@ -651,6 +651,83 @@ async fn po_receive_refuses_when_not_draft() {
     assert_eq!(err.code(), "CONFLICT");
 }
 
+#[tokio::test]
+async fn po_send_moves_draft_to_sent_and_enables_line_receive() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("Ibu", "1990", Some("80")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "Ibu", 12, "120")],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(po.status, "draft");
+    let line_id = po.items[0].id.clone();
+
+    // draft → sent unblocks the goods-receipt path (BUG-bob-002).
+    let sent = service::send_purchase_order(&db, &t, &po.id).await.unwrap();
+    assert_eq!(sent.status, "sent");
+
+    let recv = service::receive_purchase_order_lines(
+        &db,
+        &t,
+        &po.id,
+        ReceivePurchaseOrder {
+            lines: vec![ReceivePurchaseOrderLine {
+                po_line_id: line_id,
+                qty_received: 12,
+                lot: None,
+                expiry_date: None,
+            }],
+            notes: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(recv.status, "received");
+    assert_eq!(recv.items[0].qty_received, 12);
+}
+
+#[tokio::test]
+async fn po_send_refuses_non_draft() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(None, "flete", 1, "5000")],
+        },
+    )
+    .await
+    .unwrap();
+    service::send_purchase_order(&db, &t, &po.id).await.unwrap();
+    // Re-sending a non-draft PO is a conflict.
+    let err = service::send_purchase_order(&db, &t, &po.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}
+
 // --- accounts payable (Fase 5-full, BACKLOG #8 slice 3) --------------------
 
 async fn seed_po_with_total(db: &Db, t: &Thing, total: &str) -> String {

@@ -530,3 +530,74 @@ async fn over_receipt_beyond_ordered_qty_is_conflict() {
     let (count, _) = movement_sum(&t.db, &tenant, "purchase_receive").await;
     assert_eq!(count, 0);
 }
+
+async fn http_send(app: axum::Router, po_id: &str, token: &str) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/purchase-orders/{po_id}/send"))
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+/// BUG-bob-002 regression: a freshly created PO is `draft`; goods receipt only
+/// accepts `sent`/`approved`/`partially_received`. `POST /send` is the missing
+/// transition that makes the whole create→issue→receive lifecycle reachable
+/// over HTTP. Here: send a draft → `sent`, then receive succeeds.
+#[tokio::test]
+async fn send_moves_draft_to_sent_then_receivable() {
+    let t = spawn_test_db().await;
+    let tenant = create_tenant(&t.db, "acme").await;
+    let (po_id, line_id, pid) =
+        seed_po_single_line(&t.db, &tenant, "Ibuprofeno", Some("80"), 12, "120").await;
+    // seed helper leaves the PO `sent`; force back to `draft` to model a fresh
+    // create and exercise the real `/send` route.
+    set_po_status(&t.db, &po_id, "draft").await;
+    set_stock(&t.db, &pid, 0).await;
+
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = token_for(&tenant, "admin");
+
+    let (status, json) = http_send(app, &po_id, &token).await;
+    assert_eq!(status, StatusCode::OK, "body={json}");
+    assert_eq!(json["status"], "sent");
+
+    // Now receivable.
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let (rstatus, rjson) = http_receive(
+        app,
+        &po_id,
+        &token,
+        serde_json::json!({ "lines": [{ "po_line_id": line_id, "qty_received": 12 }] }),
+    )
+    .await;
+    assert_eq!(rstatus, StatusCode::OK, "body={rjson}");
+    assert_eq!(rjson["status"], "received");
+    let (stock, _cost) = product_stock_cost(&t.db, &pid).await;
+    assert_eq!(stock, 12);
+}
+
+#[tokio::test]
+async fn send_refuses_non_draft_po() {
+    let t = spawn_test_db().await;
+    let tenant = create_tenant(&t.db, "acme").await;
+    // seed helper leaves the PO already `sent`.
+    let (po_id, _line_id, _pid) =
+        seed_po_single_line(&t.db, &tenant, "Loratadina", Some("50"), 5, "70").await;
+
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = token_for(&tenant, "admin");
+    let (status, json) = http_send(app, &po_id, &token).await;
+    assert_eq!(status, StatusCode::CONFLICT, "body={json}");
+    assert_eq!(json["error"]["code"], "CONFLICT");
+}

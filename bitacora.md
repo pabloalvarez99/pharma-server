@@ -2882,3 +2882,39 @@ poblado. Sin CLI. + validación de input (clave corta/correo malo/nombre vacío)
 
 Fricción fileada (≥4) en `docs/strategy/multi-rubro-findings.md` + abajo. GATE:
 cliente `npm run build` + `npm test` verde; workspace `cargo test -p api` verde.
+
+## 2026-06-15 — marvin: stock/compras LIVE QA + fix BUG-bob-002 + gasto→caja (lane feat/stock-compras-live-qa)
+
+QA de números de stock/compras EN VIVO (server real pharma-api + SurrealKv tempdir
++ seed-demo, ambos verticales) vía nueva harness `scripts/qa/stock-compras-live-qa.sh`
+(patrón pos-runtime-qa.sh). FAILS=0 en pharmacy y minimarket. Cazó + fijó 2 bugs
+backend, ambos en scope marvin (compras/gastos):
+
+**BUG-bob-002 (P1) FIJADO** — recepción de mercadería inalcanzable. `create_purchase_order`
+deja la OC en `draft`, pero la única ruta de recepción cableada a HTTP
+(`POST /purchase-orders/{id}/receive` → `receive_purchase_order_lines`) sólo acepta
+`sent`/`approved`/`partially_received`. NO existía transición `draft→sent` → el operador
+creaba una OC y nunca podía recibir. FIX: nueva ruta `POST /api/v1/purchase-orders/{id}/send`
+(admin+) + `service::send_purchase_order` (draft→sent, Conflict si no-draft). Reusa
+`repo::set_purchase_order_status`. EN VIVO confirmado: recibir draft→409, /send→sent,
+recepción→200. +2 tests HTTP (po_receiving.rs) +2 domain (purchasing.rs).
+
+**Gasto efectivo → caja (P2) FIJADO** — un gasto `payment_method=cash` con `cash_session`
+NO creaba `cash_movement(retiro)` → el arqueo/cierre (expected = opening + cash_sales +
+ingresos − retiros) no bajaba → faltante fantasma al cerrar. FIX: `create_expense` ahora,
+cuando es cash + sesión abierta, crea expense + `cash_movement(tipo='retiro')` en un solo
+BEGIN/COMMIT (atómico). bank/card/transfer NO tocan caja; sesión cerrada → Conflict.
+Sin migración (tabla cash_movement ya existe). +2 domain tests (expenses.rs) cruzando
+con cash_register::arqueo. EN VIVO: gasto $2500 → arqueo baja exactamente 2500.
+
+Validado además EN VIVO (byte-a-byte vs cálculo a mano):
+- WAC: 10u@$100 + 5u@$160 → cost_price=$120 (recepción con lote/vencimiento).
+- Reconcilia invariante product.stock == Σ product_batch.stock == Σ stock_movement.delta
+  antes y después de venta FEFO (consume lote de menor vencimiento primero).
+- Sobre-recepción (6 de 5) → 409; recepción parcial→partially_received→completar→received.
+- near-expiry / reorder-suggestions devuelven arrays sanos sobre seed realista.
+
+GATE workspace verde: fmt + clippy --all-targets -D warnings + test --workspace (0 fail).
+Sin migración. api.ts/cliente sin tocar. No pisa sales (paul). Nota harness: jq.exe en
+Windows emite CRLF → todo valor jq pasa por `tr -d '\r'` (helper J) para no contaminar
+record-ids; status HTTP vía archivo (gp corre en $() subshell, una var no propaga).
