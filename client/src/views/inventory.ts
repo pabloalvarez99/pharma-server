@@ -40,6 +40,8 @@ import {
   exportFilename,
   classifyFetchError,
   inventoryEmpty,
+  capRows,
+  LIST_RENDER_CAP,
   type EmptyCopy,
 } from "./stock-helpers";
 
@@ -732,7 +734,11 @@ function renderVencimientos(
       }
       // FEFO surface order: the operator must see the most urgent lote first
       // (caducados, luego el que vence antes), no matter how the feed arrives.
-      const rows = nearExpiryView(raw);
+      // The feed is UNBOUNDED (no server limit) → cap the rendered rows so a
+      // 50k-SKU catalog can't paint tens of thousands of <tr> in one frame.
+      // Top-N after FEFO ordering = exactly the lotes the operator must act on.
+      const ordered = nearExpiryView(raw);
+      const { rows, total, truncated } = capRows(ordered);
       tableHost.innerHTML = `
         <table class="data-table inv-venc">
           <thead><tr>
@@ -741,7 +747,11 @@ function renderVencimientos(
           </tr></thead>
           <tbody>${rows.map(nearRow).join("")}</tbody>
         </table>
-        <p class="table-foot muted">${rows.length} lote(s) · toca una fila para ver el producto</p>
+        <p class="table-foot muted">${
+          truncated
+            ? `${rows.length} de ${total} lotes · mostrando los ${LIST_RENDER_CAP} más urgentes`
+            : `${total} lote(s)`
+        } · toca una fila para ver el producto</p>
       `;
       tableHost.querySelectorAll<HTMLElement>("tr[data-id]").forEach((tr) =>
         tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
@@ -797,7 +807,11 @@ function renderRotacion(
         tableHost.innerHTML = `<p class="empty">Sin ventas en el período para calcular rotación.</p>`;
         return;
       }
-      const rows = rotacionRows(raw);
+      // Unbounded feed (no server limit): at 50k SKUs this is the worst DOM
+      // cliff. Rows are ABC-ranked (qty_sold desc) → the head is the A-class
+      // movers the operator cares about; cap the render so the tail of C-class
+      // dead stock can't jank the frame. Long tail still reachable via export.
+      const { rows, total, truncated } = capRows(rotacionRows(raw));
       tableHost.innerHTML = `
         <table class="data-table inv-rot">
           <thead><tr>
@@ -806,7 +820,11 @@ function renderRotacion(
           </tr></thead>
           <tbody>${rows.map(rotacionRow).join("")}</tbody>
         </table>
-        <p class="table-foot muted">${rows.length} producto(s) · toca una fila para ver el detalle</p>
+        <p class="table-foot muted">${
+          truncated
+            ? `${rows.length} de ${total} productos · mostrando el top ${LIST_RENDER_CAP} por rotación`
+            : `${total} producto(s)`
+        } · toca una fila para ver el detalle</p>
       `;
       tableHost.querySelectorAll<HTMLElement>("tr[data-id]").forEach((tr) =>
         tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
