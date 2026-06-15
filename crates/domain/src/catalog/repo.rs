@@ -471,15 +471,64 @@ pub async fn soft_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainR
 // `inventory::service::add_movement` so the audit trail and the
 // materialized counter cannot diverge.
 
-pub async fn stats(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductStats> {
-    #[derive(Deserialize)]
-    struct Agg {
-        total: i64,
-        active: i64,
-        low_stock: i64,
-        out_of_stock: i64,
-        inventory_value: Option<Decimal>,
+#[derive(Deserialize)]
+struct StatsAgg {
+    total: i64,
+    active: i64,
+    low_stock: i64,
+    out_of_stock: i64,
+    inventory_value: Option<Decimal>,
+}
+
+impl From<StatsAgg> for ProductStats {
+    fn from(a: StatsAgg) -> Self {
+        ProductStats {
+            total: a.total,
+            active: a.active,
+            low_stock: a.low_stock,
+            out_of_stock: a.out_of_stock,
+            inventory_value: a.inventory_value.unwrap_or_default(),
+            expired: 0,
+        }
     }
+}
+
+/// Per-tenant catalog aggregate (total / active / low-stock / out-of-stock /
+/// inventory value).
+///
+/// Fast path: the `product_stats` pre-computed view (migration 0029) holds the
+/// aggregate, refreshed incrementally by the engine on every `product` write —
+/// an O(1) read that replaced the O(n) `GROUP ALL` full scan this used to run
+/// (BUG-perf-001: 2.7s p99 @50k SKUs, over the <50ms POS budget). The view
+/// bakes the default low-stock threshold, so a non-default `low` falls back to
+/// the live scan; a tenant with no view row (no products yet) also falls back —
+/// that scan is trivially O(0). Either way the result is identical to the scan.
+pub async fn stats(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductStats> {
+    if low == LOW_STOCK_DEFAULT {
+        if let Some(agg) = stats_from_view(db, tenant).await? {
+            return Ok(agg.into());
+        }
+    }
+    stats_scan(db, tenant, low).await
+}
+
+/// O(1) read of the maintained `product_stats` view. `None` when the tenant has
+/// no products (no view row), so the caller can fall back to the (empty) scan.
+async fn stats_from_view(db: &Db, tenant: &Thing) -> DomainResult<Option<StatsAgg>> {
+    let mut r = db
+        .query(
+            "SELECT total, active, low_stock, out_of_stock, inventory_value \
+             FROM product_stats WHERE tenant = $t LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .await?;
+    Ok(r.take(0)?)
+}
+
+/// Live O(n) full scan — the original aggregate. Kept as the correctness
+/// fallback (non-default threshold, or no view row) and as the reference the
+/// view tests compare against.
+async fn stats_scan(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductStats> {
     let mut r = db
         .query(
             "SELECT \
@@ -493,22 +542,22 @@ pub async fn stats(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductSta
         .bind(("t", tenant.clone()))
         .bind(("low", low))
         .await?;
-    let agg: Option<Agg> = r.take(0)?;
-    let agg = agg.unwrap_or(Agg {
+    let agg: Option<StatsAgg> = r.take(0)?;
+    Ok(agg.map(ProductStats::from).unwrap_or_else(|| ProductStats {
         total: 0,
         active: 0,
         low_stock: 0,
         out_of_stock: 0,
-        inventory_value: None,
-    });
-    Ok(ProductStats {
-        total: agg.total,
-        active: agg.active,
-        low_stock: agg.low_stock,
-        out_of_stock: agg.out_of_stock,
-        inventory_value: agg.inventory_value.unwrap_or_default(),
+        inventory_value: Decimal::ZERO,
         expired: 0,
-    })
+    }))
+}
+
+/// Test-only accessor so the view fast path can be diffed against the scan
+/// reference without re-implementing the query in the test crate.
+#[doc(hidden)]
+pub async fn stats_scan_for_test(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductStats> {
+    stats_scan(db, tenant, low).await
 }
 
 // --- bulk price update (safe, type-driven) ---------------------------------

@@ -2533,3 +2533,55 @@ GATE cliente verde: `npm run build` (tsc + vite) + `npm test` (vitest 52/52) +
 `npm run e2e` → **47 passed / 0 failed / 4 xfail** (BUG-bob-001 ×2 + BUG-bob-002 ×2,
 ambos verticales), exit 0. Sólo toqué `client/e2e/` (flows.mjs + run.mjs); sin
 ediciones de vistas ni Rust.
+
+
+## 2026-06-14 — MILTON: fix BUG-perf-001 — stock_stats_agg O(n) → O(1) (mig 0029 product_stats)
+
+Branch `feat/fix-stock-stats-agg-perf` (off `feature/erp-parity`). Cierra el cliff de
+performance que halló bob en el bench: `catalog::service::stats` (handler
+`/api/v1/products/stats` + dashboard) corría una agregación full-scan `GROUP ALL`
+sobre `product WHERE tenant` — O(n). Bob midió p99 = 2.7s @50k SKUs (42ms @800),
+violando el budget <50ms. El término irreducible es `inventory_value =
+math::sum(stock*(cost_price ?? 0))`: ningún índice responde una suma de un producto
+de dos columnas → hay que MANTENER el agregado, no recalcularlo en cada lectura.
+
+**Root cause (systematic-debugging Fase 1)**: la query en
+`crates/domain/src/catalog/repo.rs::stats` escanea todas las filas del tenant por
+llamada; count()/sum sobre expresiones por-fila no usan índice.
+
+**Intento descartado (hipótesis 1)**: pre-computed table view (`DEFINE TABLE … AS
+SELECT … GROUP BY`). SurrealDB 2.x **mantiene mal el UPDATE**: al flipear `active=false`
+la fila DESAPARECÍA de `total` (2→1) y `inventory_value` divergía. Verificado por los
+tests (`stats_view_matches_scan` / `…_active_and_delete` fallaron). View → descartado.
+
+**Fix (hipótesis 2, verde)**: `migrations/0029_product_stats_view.surql` —
+- Tabla `product_stats` SCHEMAFULL tenant-scoped (1 fila/tenant, índice UNIQUE en tenant).
+- `DEFINE EVENT product_stats_maint ON TABLE product` (CREATE/UPDATE/DELETE) que aplica
+  el **delta exacto** vía `$before`/`$after` (after − before) → el UPDATE es correcto
+  (a diferencia del view). O(1) por escritura; dispara también en INSERT crudo y en el
+  write-path de stock (post_sale), dentro del lock per-tenant existente.
+- Backfill en la misma migración (FOR sobre el agregado por tenant) → el upgrade de un
+  install con catálogo ya poblado lee bien a la primera. No-op en install fresco.
+- Umbral low-stock horneado = 5 == `LOW_STOCK_DEFAULT` (test lo asegura). `repo::stats`
+  lee la fila O(1) cuando `low==default`; cae al scan vivo para `low` no-default o tenant
+  sin fila (scan entonces O(0)).
+- Semántica byte-a-byte idéntica al scan viejo; `stats_scan` se conserva como fallback
+  + referencia de comparación.
+
+**Perf medido (mismo bench-shape de bob, kv-mem, debug, @50k SKUs)**: OLD scan p99 =
+18118 ms → NEW view p99 = **1.675 ms** (~10.800×; budget <50ms = OK). Test `#[ignore]`
+`stats_perf_50k_view_vs_scan` reproduce el número (`-- --ignored --nocapture stats_perf`).
+
+**Tests (crates/domain/tests/catalog.rs, +8, kv-mem)**: matches-scan en dataset mixto,
+incremental en stock-update (cruces low/out), incremental en active-toggle+soft-delete,
+aislamiento multi-tenant, tenant vacío = ceros (fallback), backfill on define (upgrade),
+correctness @3000, threshold==const, + perf @50k (ignored). 15/15 verde.
+
+GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` +
+`cargo test --workspace` (35 suites ok, 0 failed). Sin cambio de handler (el fix vive
+en el repo de dominio; api/dashboard ya delegan en `service::stats`).
+
+NOTA paxoloop: mig **0029** (libre tras 0024 landed; 0025–0028 en PRs abiertos). Si
+colisiona en integración, renumerar (append-only). FRONTERA con bob respetada: no toqué
+`benches/`; usé su bench como prueba antes/después. BUG-perf-002 (post_sale O(catálogo))
+sigue OPEN — lane separada.
