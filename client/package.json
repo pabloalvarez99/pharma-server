@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "e2e": "node e2e/run.mjs",
+    "gate": "npm run build && npm run test && npm run e2e",
     "preview": "vite preview",
     "tauri": "tauri"
   },

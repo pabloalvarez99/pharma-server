@@ -2943,3 +2943,28 @@ FINDINGS (no bug de lógica; gaps cara-cajero → BUG LOG / teamwork_op.txt):
 Sólo `scripts/qa/` (additive). Sin tocar client/views ni Rust ni api.ts. GATE:
 harness verde ambos verticales; cliente `npm run build`+`npm test` verde (sin cambios
 de cliente).
+
+## 2026-06-15 — E2E CI gate hardening + coverage (bob, ola 5)
+
+Lane `feat/e2e-ci-gate-hardening`. Solo `client/e2e/` + `client/package.json` +
+`.github/workflows/e2e.yml` (no edité views ni backend).
+
+- **Gate único reproducible**: `npm run gate` = build + test + e2e (un comando).
+  CI sigue billing-walled → `e2e.yml` queda `workflow_dispatch` (opt-in, no quema
+  minutos en push/PR) pero ahora corre el gate canónico completo (`npm run gate`),
+  no solo `npm run e2e`; comentario documenta cómo activarlo (flip `on:`) cuando
+  se desbloquee el billing. El gate canónico vive LOCAL (README actualizado).
+- **BUG-bob-002 endurecido (self-healing)**: `goodsReceiptFlow` ahora sondea
+  `/send` `/approve` `/submit` buscando la transición draft→sent faltante. Si
+  alguna aterriza, avanza la OC y corren de verdad las asserts de receive+stock;
+  mientras no exista, exige un 409 limpio (sin 5xx) y marca xfail con el gap
+  exacto. El día que llegue la transición, el xfail se pone rojo solo.
+- **Flow minimarket NO-receta** (`noPrescriptionFlow`, corre solo en minimarket):
+  catálogo sin `active_ingredient` ni `prescription_type`≠'direct' (todo OTC),
+  venta 201 sin receta adjunta, `/prescriptions` 200 vacío (sin controlados),
+  boleta (DTE SII) UNIVERSAL igual emite/gatea limpio (400, no 5xx). Confirma el
+  contrato multi-rubro: un rubro no-farmacia nunca se fuerza por la maquinaria de
+  recetas/controlados (Ley 20.000), pero la boleta sigue siendo universal.
+
+GATE verde: `npm run build` + `npm test` (184) + `npm run e2e`
+(60 passed, 0 failed, 4 xfail = BUG-bob-001/002 × 2 verticales).

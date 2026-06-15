@@ -16,7 +16,12 @@ import {
   summary,
   section,
 } from "./lib/harness.mjs";
-import { goldenPath, goodsReceiptFlow, complianceFlow } from "./flows.mjs";
+import {
+  goldenPath,
+  goodsReceiptFlow,
+  complianceFlow,
+  noPrescriptionFlow,
+} from "./flows.mjs";
 
 const PASSWORD = "e2e-pass-1234";
 const EMAIL = "admin@e2e.cl";
@@ -68,6 +73,9 @@ async function main() {
     await goldenPath(ctx);
     await goodsReceiptFlow(ctx);
     await complianceFlow(ctx);
+    // Multi-rubro: a non-pharmacy rubro must never be forced through
+    // receta/controlados machinery, yet boleta stays universal.
+    if (t.vertical === "minimarket") await noPrescriptionFlow(ctx);
   }
 }
 
