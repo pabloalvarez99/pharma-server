@@ -2118,3 +2118,37 @@ Branch `feat/client-e2e-compliance` (off `feature/erp-parity` fresco). Goal c (E
 **Guard recetas (MULTI-RUBRO):** `renderRecetas` ahora `loadVertical→hasRecetas`; si `!farmacia` muestra placeholder "Recetas no aplican a este rubro" en vez del módulo de controlados (defense-in-depth; el shell ya dropeaba el nav, esto cubre deep-link/estado).
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `npm test` (vitest 52/52) + `npm run e2e` (25/0/2, exit 0). `format.ts` ya tenía cobertura completa (33 tests) → sin cambios.
+
+## 2026-06-14 — BOB: E2E día-completo (recepción + compliance) sobre el stack vivo
+
+Cascada off `feat/client-e2e-compliance` (#177). Extiende la harness `npm run e2e`
+con dos flows nuevos, corridos por tenant tras `goldenPath`, ambos verticales
+(pharmacy + minimarket):
+
+**`goodsReceiptFlow` (charter: producto+lote→recepción→stock):** espeja `compras.ts`
+verbatim — crea proveedor (`POST /suppliers`), crea OC draft (`POST /purchase-orders`
+con línea cataloga­da), lee el `po_line_id` (`GET /purchase-orders/{id}`), intenta
+recibir mercadería (`POST /purchase-orders/{id}/receive`). Si recibe → asserta que
+el stock sube por la cantidad recibida. **Encontró BUG-bob-002 (P1):** el create deja
+la OC en `draft`, pero `/receive` (service `receive_purchase_order_lines`) sólo acepta
+`sent/approved/partially_received` y **NO existe transición draft→sent** (sin `/approve`,
+sin `/send`, create no setea status). El operador crea una OC y nunca puede recibir
+contra ella: el pilar de recepción de mercadería es inalcanzable vía la app. Dejado
+como **xfail** (no debilita el assert: cuando aterrice una transición draft→sent,
+`recv.ok` vuelve true y corre la aserción real de stock → la harness se pone roja =
+señal para borrar el xfail). Causa probable: refactor a recepción multi-línea
+(`receive_purchase_order_lines`) dejó la antigua `receive_purchase_order` (one-shot
+desde draft) sin ruta, y nunca se agregó el paso de emisión draft→sent.
+
+**`complianceFlow` (charter: boleta/factura/DTE = UNIVERSAL; reports sin crash):**
+reports core/free (`sales-daily`, `top-products`, `stock-rotation`, `near-expiry`)
+→ 200 + array en ambos verticales; `margins-daily` Pro-gated → 402
+`FEATURE_REQUIRES_UPGRADE` limpio (no 5xx); factura tipo 33 (`POST /dte/documentos`)
+sin CAF/cert → 400 `INVALID_INPUT` limpio (no 5xx/crash); `libro-ventas` → 400 limpio.
+Confirma el contrato Free-tier: superficies pagas/sin-config fallan con 4xx codeado
+(upsell), nunca caen el server. Factura UNIVERSAL probada en minimarket también.
+
+GATE cliente verde: `npm run build` (tsc + vite) + `npm test` (vitest 52/52) +
+`npm run e2e` → **47 passed / 0 failed / 4 xfail** (BUG-bob-001 ×2 + BUG-bob-002 ×2,
+ambos verticales), exit 0. Sólo toqué `client/e2e/` (flows.mjs + run.mjs); sin
+ediciones de vistas ni Rust.
