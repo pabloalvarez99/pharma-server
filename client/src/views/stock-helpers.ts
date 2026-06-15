@@ -650,3 +650,28 @@ export function rotacionRows(
     };
   });
 }
+
+/** Per-frame render budget for the two UNBOUNDED inventory lists. The product
+ *  (`/products`), purchase-order and expense feeds are already server-capped
+ *  (PAGE_LIMIT 60/100); the near-expiry and rotation feeds are NOT — at 50k SKUs
+ *  they return tens of thousands of rows, and `host.innerHTML = rows.map(...).
+ *  join("")` then forces the browser to parse + lay out every <tr> in a single
+ *  frame → multi-hundred-ms jank that violates the POS/UX budget. Both feeds
+ *  arrive PRE-ORDERED by what the operator acts on (FEFO urgency / ABC share),
+ *  so only the head is ever clinically relevant: cap to the top N, show the
+ *  total, and point at export for the long tail. 200 keeps the DOM node count
+ *  bounded while still showing far more than a screen-full. */
+export const LIST_RENDER_CAP = 200;
+
+/** Top-N window over an already-ordered list. Returns the original array
+ *  untouched when it's within budget; otherwise the head slice plus the true
+ *  total so the footer can say "mostrando los N de M". Pure: never mutates. */
+export interface CappedRows<T> {
+  rows: T[];
+  total: number;
+  truncated: boolean;
+}
+export function capRows<T>(rows: T[], limit = LIST_RENDER_CAP): CappedRows<T> {
+  if (rows.length <= limit) return { rows, total: rows.length, truncated: false };
+  return { rows: rows.slice(0, limit), total: rows.length, truncated: true };
+}
