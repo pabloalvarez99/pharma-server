@@ -8,6 +8,12 @@ import {
   addToCart,
   changeQty,
   cartTotal,
+  clampDiscount,
+  lineDiscount,
+  lineDiscountsTotal,
+  orderDiscount,
+  payableTotal,
+  splitPayment,
   expectedCash,
   discrepancy,
   deriveTipo,
@@ -267,5 +273,103 @@ describe("journey 9 · return MOTIVO never sends total/parcial scope (BUG-paul-0
   it("returnMotivoLabel never renders blank for unknown / empty input", () => {
     expect(returnMotivoLabel("")).toBe("—");
     expect(returnMotivoLabel("nuevo_estado")).toBe("Nuevo_estado");
+  });
+});
+
+describe("journey 10 · descuento línea + global (clamp ≥0, ≤ subtotal)", () => {
+  it("a per-line discount clamps into [0, line gross] and lowers the total", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, PHARMACY.paracetamol); // 1290
+    addToCart(cart, PHARMACY.paracetamol); // → qty 2, gross 2580
+    cart[0].discount = 500;
+    expect(cartTotal(cart)).toBe(2580); // gross unchanged
+    expect(lineDiscount(cart[0])).toBe(500);
+    expect(payableTotal(cart)).toBe(2080);
+  });
+
+  it("a line discount over the line's gross caps at the gross (line never negative)", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, MINIMARKET.pan); // 1500
+    cart[0].discount = 9999;
+    expect(lineDiscount(cart[0])).toBe(1500);
+    expect(payableTotal(cart)).toBe(0);
+  });
+
+  it("a negative discount floors to 0 (a discount can't add money)", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, MINIMARKET.leche); // 1190
+    cart[0].discount = -300;
+    expect(lineDiscount(cart[0])).toBe(0);
+    expect(clampDiscount(-300, 1190)).toBe(0);
+    expect(payableTotal(cart)).toBe(1190);
+  });
+
+  it("line + global discounts sum, then cap at the subtotal", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, PHARMACY.paracetamol); // 1290
+    addToCart(cart, PHARMACY.ibuprofeno); // 2490 → subtotal 3780
+    cart[0].discount = 290; // line discount
+    expect(lineDiscountsTotal(cart)).toBe(290);
+    // global 500 on top → total discount 790, payable 2990.
+    expect(orderDiscount(cart, 500)).toBe(790);
+    expect(payableTotal(cart, 500)).toBe(2990);
+    // An absurd global is capped so the payable total never goes negative.
+    expect(orderDiscount(cart, 999999)).toBe(3780);
+    expect(payableTotal(cart, 999999)).toBe(0);
+  });
+
+  it("minimarket: same discount math with no pharmacy assumptions", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, MINIMARKET.pan); // 1500
+    addToCart(cart, MINIMARKET.leche); // 1190 → subtotal 2690
+    expect(orderDiscount(cart, 0)).toBe(0);
+    expect(payableTotal(cart, 690)).toBe(2000);
+  });
+});
+
+describe("journey 11 · pago dividido efectivo + tarjeta (multi-tender)", () => {
+  it("exact split (cash + card == total) settles with no vuelto", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, PHARMACY.paracetamol); // 1290
+    addToCart(cart, PHARMACY.ibuprofeno); // 2490 → 3780
+    const total = payableTotal(cart);
+    expect(total).toBe(3780);
+    const s = splitPayment({ cash: 1780, card: 2000 }, total);
+    expect(s).toEqual({ ok: true, tendered: 3780, change: 0, short: 0 });
+  });
+
+  it("insufficient split (cash + card < total) is rejected with the shortfall", () => {
+    const total = 3780;
+    const s = splitPayment({ cash: 1000, card: 2000 }, total);
+    expect(s.ok).toBe(false);
+    expect(s.short).toBe(780);
+    expect(s.change).toBe(0);
+  });
+
+  it("cash overpayment in a split → vuelto = (cash+card) − total (F-paul-pay-001)", () => {
+    const total = 3780;
+    // Cashier takes 2000 on card, customer hands 5000 cash → vuelto 3220.
+    const s = splitPayment({ cash: 5000, card: 2000 }, total);
+    expect(s.ok).toBe(true);
+    expect(s.tendered).toBe(7000);
+    expect(s.change).toBe(3220);
+    expect(clp(s.change)).toBe("$3.220");
+  });
+
+  it("stray negative tenders floor to 0 (can't trick the balance check)", () => {
+    const s = splitPayment({ cash: -5000, card: 2000 }, 3780);
+    expect(s.tendered).toBe(2000);
+    expect(s.ok).toBe(false);
+    expect(s.short).toBe(1780);
+  });
+
+  it("discounted total drives the split: pay the NET, not the gross", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, PHARMACY.paracetamol); // 1290
+    addToCart(cart, PHARMACY.ibuprofeno); // 2490 → subtotal 3780
+    const net = payableTotal(cart, 780); // global discount 780 → net 3000
+    expect(net).toBe(3000);
+    const s = splitPayment({ cash: 1000, card: 2000 }, net);
+    expect(s).toEqual({ ok: true, tendered: 3000, change: 0, short: 0 });
   });
 });

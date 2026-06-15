@@ -1446,6 +1446,7 @@ async fn dashboard_report(
 /// optional STRINGS forwarded verbatim. On a non-2xx, the error is returned as
 /// `"CODE|message"` (see [`coded_error`]) so the UI can special-case
 /// `INSUFFICIENT_STOCK`. Returns the raw server JSON (order + items + alerts).
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn pos_sale(
     state: State<'_, SessionState>,
@@ -1455,6 +1456,7 @@ async fn pos_sale(
     cash_amount: Option<String>,
     card_amount: Option<String>,
     customer: Option<String>,
+    discount: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if items.is_empty() {
         return Err("|El carrito está vacío.".to_string());
@@ -1472,6 +1474,11 @@ async fn pos_sale(
     }
     if let Some(c) = card_amount.filter(|s| !s.is_empty()) {
         body["card_amount"] = serde_json::Value::String(c);
+    }
+    // Single global discount amount (sum of the POS's per-line + global
+    // discounts). The server clamps it into [0, subtotal].
+    if let Some(d) = discount.filter(|s| !s.is_empty()) {
+        body["discount"] = serde_json::Value::String(d);
     }
     // Attach the customer record id so the server awards loyalty for the sale.
     if let Some(c) = customer.filter(|s| !s.is_empty()) {

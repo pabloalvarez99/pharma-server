@@ -129,7 +129,9 @@ pub struct ReceiptDto {
     #[serde(with = "rust_decimal::serde::str_option")]
     #[schema(value_type = String)]
     pub card_amount: Option<Decimal>,
-    /// `cash_amount - total` for cash sales (`pos_cash`); `null` otherwise.
+    /// Vuelto: `cash_amount - total` for `pos_cash`, `(cash + card) - total`
+    /// for `pos_mixed` (overpayment falls on the cash side); `null` for a pure
+    /// card sale (no vuelto). See `get_receipt`.
     #[serde(with = "rust_decimal::serde::str_option")]
     #[schema(value_type = String)]
     pub change: Option<Decimal>,
