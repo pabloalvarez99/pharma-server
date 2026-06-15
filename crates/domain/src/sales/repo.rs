@@ -163,8 +163,10 @@ pub async fn load_products_for_sale(
     }
     let mut r = db
         .query(
-            "SELECT id, stock, name FROM product \
-             WHERE tenant = $t AND active = true AND id IN $ids",
+            // Fetch directly by record-id (`FROM $ids`) = O(cart). `FROM product
+            // WHERE id IN $ids` scans the whole product table per sale (BUG-perf-002).
+            "SELECT id, stock, name FROM $ids \
+             WHERE tenant = $t AND active = true",
         )
         .bind(("t", tenant.clone()))
         .bind(("ids", products.to_vec()))
@@ -251,8 +253,8 @@ pub async fn apply_sale(
                 product_name=$pn{i}, quantity=$qty{i}, unit_price=$up{i}, \
                 subtotal=$st{i}, batch=$bt{i}, batches_json=$bts{i} \
                 RETURN AFTER; \
-             UPDATE product SET stock = stock - $qty{i} \
-                WHERE id = $p{i} AND tenant = $t; \
+             UPDATE $p{i} SET stock = stock - $qty{i} \
+                WHERE tenant = $t; \
              CREATE stock_movement SET tenant=$t, product=$p{i}, \
                 delta = 0 - $qty{i}, reason='sale', \
                 admin=$sb, ref=$ref RETURN AFTER; ",
@@ -264,8 +266,8 @@ pub async fn apply_sale(
     for allocs in fefo_plans.iter().flatten() {
         for _ in allocs {
             q.push_str(&format!(
-                "UPDATE product_batch SET stock = stock - $ba{alloc_idx} \
-                 WHERE id = $bid{alloc_idx} AND tenant = $t; ",
+                "UPDATE $bid{alloc_idx} SET stock = stock - $ba{alloc_idx} \
+                 WHERE tenant = $t; ",
             ));
             alloc_idx += 1;
         }

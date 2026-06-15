@@ -410,8 +410,10 @@ pub async fn load_active_ingredients(
     }
     let rows: Vec<R> = db
         .query(
-            "SELECT active_ingredient FROM product \
-             WHERE tenant = $t AND id IN $ids",
+            // Direct record-id fetch (`FROM $ids`) = O(cart); `FROM product
+            // WHERE id IN $ids` full-scans the table per sale (BUG-perf-002).
+            "SELECT active_ingredient FROM $ids \
+             WHERE tenant = $t",
         )
         .bind(("t", tenant.clone()))
         .bind(("ids", products.to_vec()))

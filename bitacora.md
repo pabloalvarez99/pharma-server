@@ -2096,3 +2096,35 @@ Branch `feat/client-pos-polish` (off `feat/client-test-pos-loop`). Cierra los ga
 **Verificación viva (respondiendo "¿qué corro?": ambos)**: levantado `pharma-api` sobre DB temp sembrada (`demo` pharmacy + `mini` minimarket). Confirmado por API: `/health/ready` db:ok, login 200 ambos tenants, y el **split multi-rubro real** — productos pharmacy con principio activo/receta, minimarket con `active_ingredient:null`. Cliente Tauri compila + lanza `pharma-client.exe` (la ventana GUI la corre el humano; el harness mata el process-group en background). Nada rompió → sin BUG LOG nuevo.
 
 GATE cliente verde: `npm run build` (tsc --noEmit + vite) + `vitest run` 33/33. GATE cli verde: `fmt --check` + `clippy -p cli -D warnings` + `cargo test -p cli` 11/11.
+
+## 2026-06-14 — paul — BUG-perf-002: post_sale O(catálogo) → O(carro) (record-id fetch)
+
+**Lane** `feat/fix-post-sale-perf` (off `feature/erp-parity`). Scope: SOLO módulo sales.
+
+**Bug** (medido por bob @50k SKUs): `post_sale` (POS write hot path) era O(catálogo).
+`SELECT ... FROM product WHERE id IN $ids` **y** `UPDATE product/product_batch WHERE
+id = $x` full-scanean la tabla product por cada venta → p50 3144ms @50k (carro 1 ítem).
+Viola budget <50ms p99 catastróficamente.
+
+**Fix**: reescrito a fetch/update directo por record-id (O(carro)), manteniendo filtros:
+- `crates/domain/src/sales/repo.rs`: `load_products_for_sale` → `SELECT ... FROM $ids
+  WHERE tenant=$t AND active=true`. `apply_sale` tx → `UPDATE $p{i} SET stock -= ...
+  WHERE tenant=$t` y `UPDATE $bid{n} ... WHERE tenant=$t` (antes `UPDATE product/
+  product_batch WHERE id = $x AND tenant`).
+- `crates/domain/src/sales/service.rs`: `load_active_ingredients` → `SELECT ... FROM
+  $ids WHERE tenant=$t`.
+
+**Re-bench** (bench de bob `pos_hotpath`, op `post_sale_insert`, kv-mem @50k): p50
+**3144ms → 1.928ms**, p99 **6.193ms** (budget <50ms p99 = OK). lookups 0.2-0.4ms (ya OK).
+
+**Tests** (`crates/domain/tests/sales_perf_record_fetch.rs`, 6, kv-mem): resultado
+idéntico al método viejo `IN $ids`; tenant-aislado (no trae productos de otro tenant);
+producto inactivo excluido; ids inexistentes/empty no rompen; active_ingredients
+tenant-aislado + missing-safe.
+
+**Filed (fuera de lane, BUG LOG)**: BUG-perf-003 cierre_caja_agg p99 121ms @50k (caja
+backend); BUG-perf-004 mismo antipatrón `id IN $ids` en expenses::service (317/444/729)
+y api/stock_webhook.rs (275/314).
+
+GATE workspace verde: `fmt --check` + `clippy --workspace --all-targets -D warnings` +
+`cargo test --workspace` (0 failed; suite nueva 6/6).
