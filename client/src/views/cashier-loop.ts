@@ -143,6 +143,30 @@ export function splitPayment(
     : { ok: false, tendered, change: 0, short: total - tendered };
 }
 
+// --- caja drawer naming ------------------------------------------------------
+// The Business tier runs N drawers per tenant (one per cashier). The open-caja
+// modal defaulted to a hard-coded "caja-1" every time, so opening a second
+// drawer proposed a name that collided with the first — confusing at arqueo
+// ("¿cuál caja-1 cerré?"). Suggest the next free `caja-N` instead.
+
+/** Suggest the next drawer name given the names already open. Picks
+ *  `caja-(max numeric suffix + 1)`; with no `caja-N` names open it falls back to
+ *  `caja-(count + 1)` so a custom-named drawer still bumps the number. Always
+ *  `caja-1` when nothing is open. */
+export function nextDrawerName(existing: string[]): string {
+  if (existing.length === 0) return "caja-1";
+  let maxN = 0;
+  for (const name of existing) {
+    const m = /^caja-(\d+)$/.exec(name.trim());
+    if (m) {
+      const n = Number(m[1]);
+      if (n > maxN) maxN = n;
+    }
+  }
+  const next = maxN > 0 ? maxN + 1 : existing.length + 1;
+  return `caja-${next}`;
+}
+
 // --- caja arqueo -------------------------------------------------------------
 
 /** The four cash flows that make up an expected drawer at close. Each may be a

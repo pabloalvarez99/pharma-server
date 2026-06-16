@@ -27,6 +27,7 @@ import {
   returnMotivoLabel,
   type RefundDraftLine,
 } from "./cashier-loop";
+import { bindModalKeys } from "./modal-keys";
 
 const PAGE_LIMIT = 60;
 
@@ -179,7 +180,13 @@ function openRefundModal(
     </div>
   `;
 
-  const close = () => (modalHost.innerHTML = "");
+  // Escape closes the modal (Enter is contextual: it loads the boleta from the
+  // order field), so a mouseless operator can always back out.
+  const detachKeys = bindModalKeys(() => close());
+  const close = () => {
+    detachKeys();
+    modalHost.innerHTML = "";
+  };
   const orderEl = modalHost.querySelector<HTMLInputElement>("#dev-f-order")!;
   const loadBtn = modalHost.querySelector<HTMLButtonElement>("#dev-f-load")!;
   const itemsHost = modalHost.querySelector<HTMLElement>("#dev-f-items")!;

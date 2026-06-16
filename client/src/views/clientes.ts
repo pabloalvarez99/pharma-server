@@ -23,6 +23,7 @@ import {
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
+import { bindModalKeys } from "./modal-keys";
 import "./rutbrand.css";
 
 const HISTORY_LIMIT = 20;
@@ -158,7 +159,13 @@ function openCustomerModal(
     </div>
   `;
 
-  const close = () => (modalHost.innerHTML = "");
+  // Escape closes the form so a mouseless operator can back out (Enter is left
+  // free — a multi-field form shouldn't submit on a stray Enter mid-typing).
+  const detachKeys = bindModalKeys(() => close());
+  const close = () => {
+    detachKeys();
+    modalHost.innerHTML = "";
+  };
   const nameEl = modalHost.querySelector<HTMLInputElement>("#cli-f-name")!;
   const rutEl = modalHost.querySelector<HTMLInputElement>("#cli-f-rut")!;
   const phoneEl = modalHost.querySelector<HTMLInputElement>("#cli-f-phone")!;

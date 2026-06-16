@@ -18,6 +18,7 @@ import {
   discrepancy,
   deriveTipo,
   validateRefund,
+  nextDrawerName,
   DEFAULT_RETURN_MOTIVO,
   returnMotivoLabel,
   type CartLine,
@@ -324,6 +325,31 @@ describe("journey 10 · descuento línea + global (clamp ≥0, ≤ subtotal)", (
     addToCart(cart, MINIMARKET.leche); // 1190 → subtotal 2690
     expect(orderDiscount(cart, 0)).toBe(0);
     expect(payableTotal(cart, 690)).toBe(2000);
+  });
+});
+
+describe("journey 12 · multi-caja drawer naming (Business tier, N drawers)", () => {
+  it("first drawer of the shift is caja-1", () => {
+    expect(nextDrawerName([])).toBe("caja-1");
+  });
+
+  it("opening another drawer suggests the next free number, never a dup", () => {
+    expect(nextDrawerName(["caja-1"])).toBe("caja-2");
+    expect(nextDrawerName(["caja-1", "caja-2"])).toBe("caja-3");
+  });
+
+  it("fills past a gap by the max suffix, not the count", () => {
+    // caja-2 was closed; the open ones are caja-1 and caja-3 → next is caja-4.
+    expect(nextDrawerName(["caja-1", "caja-3"])).toBe("caja-4");
+  });
+
+  it("custom-named drawers still bump the number (count fallback)", () => {
+    expect(nextDrawerName(["Mostrador"])).toBe("caja-2");
+    expect(nextDrawerName(["Mostrador", "Farmacia"])).toBe("caja-3");
+  });
+
+  it("mixes custom + caja-N: the numeric max wins", () => {
+    expect(nextDrawerName(["Mostrador", "caja-5"])).toBe("caja-6");
   });
 });
 
