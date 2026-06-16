@@ -6,6 +6,7 @@ import {
   firstRunStep,
   dashboardReadiness,
   visibleModules,
+  visibleModulesForRubro,
   FALLBACK_SERVER,
   type FirstRunState,
 } from "./first-run";
@@ -100,6 +101,44 @@ describe("Journey 5 — minimarket onboarding (no pharmacy modules)", () => {
 
   it("'otro' (generic ERP) also hides Recetas", () => {
     expect(visibleModules("otro")).not.toContain("recetas");
+  });
+});
+
+describe("Journey 5b — per-rubro module gate (both extremes)", () => {
+  it("farmacia = full: recetas + physical-stock modules all present", () => {
+    const mods = visibleModulesForRubro("farmacia");
+    expect(mods).toContain("recetas");
+    expect(mods).toContain("inventory");
+    expect(mods).toContain("compras");
+    expect(mods).toContain("pos");
+  });
+
+  it("servicios = minimal: no recetas, no inventario/compras (sells without stock)", () => {
+    const mods = visibleModulesForRubro("servicios");
+    expect(mods).not.toContain("recetas");
+    expect(mods).not.toContain("inventory");
+    expect(mods).not.toContain("compras");
+    // but it still SELLS and emits DTE — the agnostic core stays
+    expect(mods).toContain("pos");
+    expect(mods).toContain("boletas");
+    expect(mods).toContain("caja");
+  });
+
+  it("belleza mirrors servicios (service rubro, no physical stock)", () => {
+    expect(visibleModulesForRubro("belleza")).toEqual(visibleModulesForRubro("servicios"));
+  });
+
+  it("café keeps inventario (perecibles) but drops recetas", () => {
+    const mods = visibleModulesForRubro("cafe");
+    expect(mods).toContain("inventory");
+    expect(mods).not.toContain("recetas");
+  });
+
+  it("tienda keeps physical stock, drops recetas", () => {
+    const mods = visibleModulesForRubro("tienda");
+    expect(mods).toContain("inventory");
+    expect(mods).toContain("compras");
+    expect(mods).not.toContain("recetas");
   });
 });
 

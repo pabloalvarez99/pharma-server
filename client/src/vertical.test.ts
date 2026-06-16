@@ -6,7 +6,12 @@ import {
   verticalLabel,
   DEFAULT_VERTICAL,
   VERTICAL_OPTIONS,
+  parseRubro,
+  featuresForRubro,
+  DEFAULT_RUBRO,
+  RUBRO_CATALOG,
   type Vertical,
+  type Rubro,
 } from "./vertical";
 
 describe("parseVertical", () => {
@@ -60,5 +65,70 @@ describe("catalog integrity", () => {
       "minimarket",
       "otro",
     ]);
+  });
+});
+
+describe("parseRubro — full 8-rubro catalog (does NOT collapse extras)", () => {
+  it("preserves every catalog value, unlike parseVertical", () => {
+    RUBRO_CATALOG.forEach((r) => expect(parseRubro(r.value)).toBe(r.value));
+    // parseVertical would fold these to 'otro'; parseRubro keeps them.
+    expect(parseRubro("cafe")).toBe("cafe");
+    expect(parseRubro("servicios")).toBe("servicios");
+    expect(parseVertical("cafe")).toBe("otro");
+  });
+
+  it("is case/space tolerant and defaults unknown to the generic default", () => {
+    expect(parseRubro("  Belleza ")).toBe("belleza");
+    expect(parseRubro(null)).toBe(DEFAULT_RUBRO);
+    expect(parseRubro("kiosko")).toBe(DEFAULT_RUBRO);
+    expect(DEFAULT_RUBRO).not.toBe("farmacia");
+  });
+});
+
+describe("featuresForRubro — per-rubro capability gate", () => {
+  it("farmacia = everything on (the maximal rubro)", () => {
+    expect(featuresForRubro("farmacia")).toEqual({
+      recetas: true,
+      lotes: true,
+      physicalStock: true,
+      clinical: true,
+    });
+  });
+
+  it("recetas + clinical are farmacia-exclusive", () => {
+    RUBRO_CATALOG.filter((r) => r.value !== "farmacia").forEach((r) => {
+      const f = featuresForRubro(r.value);
+      expect(f.recetas).toBe(false);
+      expect(f.clinical).toBe(false);
+    });
+  });
+
+  it("lotes/vencimiento only for perishables (farmacia, minimarket, cafe)", () => {
+    expect(featuresForRubro("farmacia").lotes).toBe(true);
+    expect(featuresForRubro("minimarket").lotes).toBe(true);
+    expect(featuresForRubro("cafe").lotes).toBe(true);
+    expect(featuresForRubro("tienda").lotes).toBe(false);
+    expect(featuresForRubro("servicios").lotes).toBe(false);
+  });
+
+  it("service rubros (belleza/servicios) sell WITHOUT physical stock", () => {
+    expect(featuresForRubro("belleza").physicalStock).toBe(false);
+    expect(featuresForRubro("servicios").physicalStock).toBe(false);
+    // retail/generic still track stock
+    expect(featuresForRubro("tienda").physicalStock).toBe(true);
+    expect(featuresForRubro("otro").physicalStock).toBe(true);
+  });
+
+  it("coerces unknown / null to the generic default profile", () => {
+    expect(featuresForRubro(null)).toEqual(featuresForRubro("otro"));
+    expect(featuresForRubro("kiosko")).toEqual(featuresForRubro(DEFAULT_RUBRO));
+  });
+
+  it("every catalog rubro has a defined feature set", () => {
+    (RUBRO_CATALOG.map((r) => r.value) as Rubro[]).forEach((v) => {
+      const f = featuresForRubro(v);
+      expect(typeof f.recetas).toBe("boolean");
+      expect(typeof f.physicalStock).toBe("boolean");
+    });
   });
 });

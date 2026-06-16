@@ -20,7 +20,9 @@ import {
   BUSINESS_NAME_KEY,
   RUBRO_CATALOG,
   seedVerticalFor,
+  parseRubro,
 } from "../vertical";
+import { visibleModulesForRubro, MODULE_LABELS } from "./first-run";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 type SettingKind = "boolean" | "number";
@@ -402,6 +404,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
             </button>`,
           ).join("")}
         </div>
+        <div class="rubro-modules" id="cfg-vert-modules"></div>
         <div class="cfg-emisor-form">
           <div class="field">
             <label for="cfg-vert-name">Nombre del negocio (opcional)</label>
@@ -446,10 +449,12 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         c.classList.toggle("selected", on);
         c.setAttribute("aria-pressed", String(on));
       });
+      refreshModulePreview();
       refreshDemoHelp();
     };
 
     cards.forEach((c) => c.addEventListener("click", () => select(c.dataset.vertical!)));
+    refreshModulePreview();
 
     saveBtn.addEventListener("click", async () => {
       statusEl.hidden = true;
@@ -469,6 +474,28 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         saveBtn.disabled = false;
       }
     });
+  }
+
+  // Live preview of which menu sections the chosen rubro turns on, so the
+  // operator sees the effect immediately (before saving + restarting). Reads the
+  // same gate shell.ts applies, so preview and real nav can't drift.
+  function refreshModulePreview(): void {
+    const box = verticalEl.querySelector<HTMLElement>("#cfg-vert-modules");
+    if (!box) return;
+    const rubro = parseRubro(selectedVertical);
+    const visible = new Set<string>(visibleModulesForRubro(rubro));
+    // Highlight the vertical-specific modules so the difference is legible.
+    const notable: Array<keyof typeof MODULE_LABELS> = ["recetas", "inventory", "compras"];
+    const on = notable.filter((m) => visible.has(m)).map((m) => MODULE_LABELS[m]);
+    const off = notable.filter((m) => !visible.has(m)).map((m) => MODULE_LABELS[m]);
+    const total = visible.size;
+    const chips = (items: string[], cls: string): string =>
+      items.map((t) => `<span class="rubro-chip ${cls}">${escapeHtml(t)}</span>`).join("");
+    box.innerHTML = `
+      <p class="muted cfg-help">Este rubro muestra <strong>${total}</strong> secciones en el menú.</p>
+      ${on.length ? `<div class="rubro-chips">${chips(on, "on")}</div>` : ""}
+      ${off.length ? `<p class="muted cfg-help">Ocultas para este rubro:</p><div class="rubro-chips">${chips(off, "off")}</div>` : ""}
+    `;
   }
 
   // --- Datos demo ------------------------------------------------------------

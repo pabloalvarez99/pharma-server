@@ -2672,6 +2672,31 @@ button {
   padding: 2px 7px;
 }
 
+/* --- rubro module preview ------------------------------------------------- */
+.rubro-modules {
+  margin: 12px 0 4px;
+}
+.rubro-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+.rubro-chip {
+  font-size: 12px;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+}
+.rubro-chip.on {
+  color: var(--accent);
+  border-color: var(--accent-2);
+}
+.rubro-chip.off {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 /* --- datos demo block ----------------------------------------------------- */
 .cfg-demo {
   display: flex;

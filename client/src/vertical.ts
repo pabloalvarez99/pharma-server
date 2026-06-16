@@ -208,3 +208,85 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
 export function seedVerticalFor(value: string | null | undefined): SeedVertical {
   return RUBRO_CATALOG.find((r) => r.value === (value ?? "").trim())?.seedVertical ?? null;
 }
+
+// --- per-rubro feature gating ------------------------------------------------
+//
+// `Vertical` (above) is the COARSE signal: it collapses every catalog extra to
+// `otro`, so it cannot tell a café (perishables → lotes/vencimiento) apart from
+// a peluquería (a service → no physical stock). The onboarding grid persists the
+// full 8-rubro catalog key, so the gate must key off THAT, not the coarse trio.
+//
+// `Rubro` is the full catalog key; `featuresForRubro` is the single source of
+// truth mapping a rubro to the capabilities its UI turns on. Every lane that
+// shows/hides a vertical-specific module routes through here so the rules live in
+// exactly one tested place (docs/strategy/rubro-catalog.md §"features gated").
+
+/** Full rubro key — every value in {@link RUBRO_CATALOG}. Distinct from the
+ *  coarse {@link Vertical}, which collapses extras to `otro`. */
+export type Rubro =
+  | "farmacia"
+  | "minimarket"
+  | "restaurant"
+  | "cafe"
+  | "tienda"
+  | "belleza"
+  | "servicios"
+  | "otro";
+
+/** Default rubro when unset/unknown — generic ERP, never farmacia (pivot rule). */
+export const DEFAULT_RUBRO: Rubro = "otro";
+
+/** Coerce an arbitrary stored string into a known {@link Rubro}, defaulting to
+ *  [`DEFAULT_RUBRO`] for unset/unknown values. Unlike {@link parseVertical} this
+ *  preserves catalog extras (cafe/belleza/…) instead of folding them to `otro`. */
+export function parseRubro(raw: string | null | undefined): Rubro {
+  const v = (raw ?? "").trim().toLowerCase();
+  return (RUBRO_CATALOG.find((r) => r.value === v)?.value as Rubro | undefined) ?? DEFAULT_RUBRO;
+}
+
+/** Capabilities a rubro turns on. Pure data — the UI gate reads these flags so
+ *  the per-rubro rules are defined once and unit-tested. */
+export interface RubroFeatures {
+  /** Recetas + libro de controlados (Ley 20.000). Farmacia only. */
+  recetas: boolean;
+  /** Lotes + vencimiento (perecibles). Drugs, abarrotes and pastelería track
+   *  expiry; a retail/service rubro does not. */
+  lotes: boolean;
+  /** Tracks physical stock at all (inventario + compras). Service rubros
+   *  (belleza, servicios) sell without inventory — the core stays agnóstico. */
+  physicalStock: boolean;
+  /** Clinical product fields (principio activo, laboratorio, interacciones).
+   *  Farmacia only. */
+  clinical: boolean;
+}
+
+// Per-rubro flags. Kept literal (not derived) so the table reads like the spec.
+// Rubros without their own row fall back to the generic ERP profile below.
+const RUBRO_FEATURES: Readonly<Record<Rubro, RubroFeatures>> = {
+  farmacia: { recetas: true, lotes: true, physicalStock: true, clinical: true },
+  minimarket: { recetas: false, lotes: true, physicalStock: true, clinical: false },
+  cafe: { recetas: false, lotes: true, physicalStock: true, clinical: false },
+  restaurant: { recetas: false, lotes: false, physicalStock: true, clinical: false },
+  tienda: { recetas: false, lotes: false, physicalStock: true, clinical: false },
+  otro: { recetas: false, lotes: false, physicalStock: true, clinical: false },
+  // Service rubros: sales without physical stock — exercises the agnostic core.
+  belleza: { recetas: false, lotes: false, physicalStock: false, clinical: false },
+  servicios: { recetas: false, lotes: false, physicalStock: false, clinical: false },
+};
+
+/** The capability flags for a rubro (or any stored string, coerced). Single
+ *  source of truth for per-rubro UI gating. */
+export function featuresForRubro(rubro: Rubro | string | null | undefined): RubroFeatures {
+  return RUBRO_FEATURES[parseRubro(rubro as string)];
+}
+
+/** Load the persisted rubro (full catalog key) from the server, defaulting on
+ *  any miss. Never throws — onboarding must not dead-end on a settings hiccup. */
+export async function loadRubro(serverUrl: string): Promise<Rubro> {
+  try {
+    const s = await getSetting(serverUrl, VERTICAL_KEY);
+    return parseRubro(s?.value ?? null);
+  } catch {
+    return DEFAULT_RUBRO;
+  }
+}

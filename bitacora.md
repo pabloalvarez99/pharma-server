@@ -3106,3 +3106,30 @@ sin Rust, sin migración, `api.ts`/`format.ts` intactos.
   cubre todo el store SurrealKv (no tenant-scoped, igual que `backup_log`).
 - GATE workspace verde: `cargo fmt --all --check` + `clippy --workspace
   --all-targets -D warnings` + `cargo test --workspace` (0 failed).
+
+## 2026-06-16 — Gating de módulos por rubro (ola 6b) — ye
+
+Profundicé el MULTI-RUBRO del vertical-select: el gate de UI era binario (solo
+Recetas) pero el catálogo lista 8 rubros. Modelo de capacidades por rubro,
+centralizado y testeado:
+- `client/src/vertical.ts`: `Rubro` (8 claves del catálogo) + `parseRubro`
+  (preserva extras, NO colapsa a `otro` como `parseVertical`) + `RubroFeatures`
+  (`recetas`/`lotes`/`physicalStock`/`clinical`) + tabla literal `featuresForRubro`
+  + `loadRubro`. Fuente única de las reglas (docs/strategy/rubro-catalog.md).
+- `client/src/views/first-run.ts`: `visibleModulesForRubro(rubro)` deriva el menú
+  de las flags (recetas←recetas; inventario/compras←physicalStock) + `MODULE_LABELS`
+  para el preview. `visibleModules(Vertical)` se mantiene por back-compat.
+- `client/src/views/shell.ts`: `hydrateBranding` carga el rubro completo y quita del
+  nav TODO módulo no visible (antes solo Recetas) → servicios/belleza pierden
+  Inventario+Compras.
+- `client/src/views/configuracion.ts`: preview en vivo bajo el grid — al elegir un
+  rubro la UI muestra al instante qué secciones aparecen/ocultan (lee el MISMO gate).
+- `styles.css`: chips `.rubro-chip on/off`.
+
+Reglas: recetas/clínico = solo farmacia; lotes/vencimiento = farmacia+minimarket+
+café (perecibles); servicios/belleza = ventas sin stock físico (ocultan inventario/
+compras, conservan POS/caja/boletas → prueba el core agnóstico). `restaurant` quedó
+sin lotes por brief literal → nota en multi-rubro-findings (#8, revisar al validar).
+
+GATE cliente verde: `npm run build` (tsc+vite) + `npm test` (vitest 207, +new:
+vertical 15, first-run 26). Sin Rust/migración; `api.ts` intacto.
