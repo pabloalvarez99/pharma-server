@@ -577,6 +577,14 @@ export function createPurchaseOrder(
   });
 }
 
+/** POST /api/v1/purchase-orders/{id}/send (Bearer, admin+) — issue a draft PO to
+ *  the supplier (draft → sent). Only legal from `draft` (any other status → 409).
+ *  Sending is the bridge that makes a PO receivable: a draft cannot be received
+ *  directly (409), so the operator must send it first. Returns the updated PO. */
+export function sendPurchaseOrder(serverUrl: string, id: string): Promise<PurchaseOrder> {
+  return invoke<PurchaseOrder>("send_purchase_order", { serverUrl, id });
+}
+
 /** POST /api/v1/purchase-orders/{id}/receive (Bearer, admin+) — goods receipt.
  *  Bumps stock, recomputes weighted-average cost, advances each line's
  *  `qty_received`. Only legal from `sent`/`approved`/`partial` (a draft → 409). */

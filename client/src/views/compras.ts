@@ -14,6 +14,7 @@ import {
   createSupplier,
   getPurchaseOrder,
   createPurchaseOrder,
+  sendPurchaseOrder,
   receivePurchaseOrder,
   getPoPayments,
   createPoPayment,
@@ -38,6 +39,7 @@ import {
 } from "./inventory";
 import {
   poIsReceivable,
+  poIsSendable,
   poStatusMeta,
   poKpis,
   poPending,
@@ -523,15 +525,42 @@ function openPoDetailModal(
 
     const pending = poPending(po.items);
     const canReceive = poIsReceivable(po.status) && pending > 0;
+    // A draft has not been issued yet — the server refuses to receive it (409).
+    // Surface an "Enviar al proveedor" action so the operator can complete the
+    // draft → sent → recibir flow without leaving the app (BUG-bob-002 bridge).
+    const canSend = poIsSendable(po.status);
     body.innerHTML = `
       ${renderPoDetail(po)}
       <div id="po-d-ap" class="po-ap">${tableSkeleton(2)}</div>
+      <div id="po-d-error" class="form-error" hidden></div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" id="po-d-close">Cerrar</button>
+        ${canSend ? `<button type="button" class="btn-primary modal-confirm" id="po-d-send">Enviar al proveedor</button>` : ""}
         ${canReceive ? `<button type="button" class="btn-primary modal-confirm" id="po-d-receive">Recibir mercadería</button>` : ""}
       </div>
     `;
     body.querySelector<HTMLButtonElement>("#po-d-close")!.addEventListener("click", close);
+    const errEl = body.querySelector<HTMLElement>("#po-d-error")!;
+    if (canSend) {
+      const sendBtn = body.querySelector<HTMLButtonElement>("#po-d-send")!;
+      sendBtn.addEventListener("click", async () => {
+        errEl.hidden = true;
+        sendBtn.classList.add("loading");
+        sendBtn.disabled = true;
+        try {
+          await sendPurchaseOrder(serverUrl, po.id);
+          // Reload the list (estado now «Enviada») and re-open the drawer so the
+          // freshly-sent PO shows the "Recibir mercadería" action in place.
+          onChanged();
+          openPoDetailModal(modalHost, serverUrl, po.id, onChanged);
+        } catch (err) {
+          sendBtn.classList.remove("loading");
+          sendBtn.disabled = false;
+          errEl.hidden = false;
+          errEl.textContent = asMessage(err);
+        }
+      });
+    }
     if (canReceive) {
       body.querySelector<HTMLButtonElement>("#po-d-receive")!.addEventListener("click", () => {
         openReceiveModal(modalHost, serverUrl, po, onChanged);

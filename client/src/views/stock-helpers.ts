@@ -315,6 +315,15 @@ export function poIsReceivable(status: string): boolean {
   return PO_RECEIVABLE.has(status.trim().toLowerCase());
 }
 
+/** May a PO be ISSUED to the supplier (draft → sent) in this status? Only a
+ *  `draft` can be sent. The server enforces the same guard (409 otherwise) —
+ *  this gates the "Enviar al proveedor" action so the operator can walk
+ *  draft → sent → recibir without leaving the app. Receiving a draft directly
+ *  is a 409 (BUG-bob-002), so the send step is the bridge to a receivable PO. */
+export function poIsSendable(status: string): boolean {
+  return status.trim().toLowerCase() === "draft";
+}
+
 /** Spanish label + pill tone for a PO status. Unknown → raw value, ok tone
  *  (defensive — server data always hits a known case, so no English leaks). */
 export interface PoStatusMeta {
