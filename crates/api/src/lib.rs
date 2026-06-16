@@ -255,9 +255,30 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     // purge. Spawned even if the backup schedule is empty, so the TTL purge
     // still runs.
     let sched_db = state.db.clone();
-    let sched_data = state.data_dir.clone();
-    let backup_sched = cfg.backup.schedule.clone();
-    let retention = cfg.backup.retention_days;
+    // Nightly backup job (opt-out via `backup.enabled = false`). Empty schedule
+    // ⇒ sensible default cron. Carries the DB handle so each run records a
+    // `backup_log` audit row + count/age retention.
+    let backup_job_cfg = if cfg.backup.enabled {
+        state.data_dir.clone().map(|db_path| {
+            let schedule = cfg
+                .backup
+                .schedule
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| jobs::BACKUP_DEFAULT_CRON.to_string());
+            BackupJobCfg {
+                schedule,
+                db_path,
+                db: state.db.clone(),
+                retention_count: cfg.backup.retention_count as usize,
+                retention_days: cfg.backup.retention_days,
+                log_retention: cfg.backup.log_retention as usize,
+            }
+        })
+    } else {
+        tracing::info!("backup scheduler disabled (backup.enabled = false)");
+        None
+    };
     // CRL refresh (opt-in, ADR-0006). Sin `url` ⇒ `None` ⇒ el hub no agenda
     // nada (cero red). El cache CRL vive junto al `license.json`
     // (= `license_path.parent()`), que NO es `data_dir` (subdir surreal) — por
@@ -283,9 +304,7 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         }
     });
     tokio::spawn(async move {
-        if let Err(e) =
-            spawn_scheduler_hub(backup_sched, sched_data, retention, sched_db, crl_refresh).await
-        {
+        if let Err(e) = spawn_scheduler_hub(backup_job_cfg, sched_db, crl_refresh).await {
             tracing::error!(error = %e, "scheduler hub failed to start");
         }
     });
@@ -299,26 +318,45 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Scheduler hub. One `JobScheduler` hosts every cron-driven job:
-/// * backup (`backup_schedule`, if non-empty) + retention prune,
-/// * idempotency_key TTL purge (hourly, always on when a DB is present).
-async fn spawn_scheduler_hub(
-    backup_schedule: Option<String>,
-    db_path: Option<std::path::PathBuf>,
+/// Parameters for the nightly backup job. Built in [`run`] only when
+/// `backup.enabled`; carries the DB handle so each run records a `backup_log`
+/// audit row, plus both retention knobs.
+struct BackupJobCfg {
+    schedule: String,
+    db_path: std::path::PathBuf,
+    db: Option<Arc<db::Db>>,
+    /// Keep the N newest snapshot archives (count-based). `0` = keep all.
+    retention_count: usize,
+    /// Also prune archives older than N days. `0` = disabled.
     retention_days: u32,
+    /// Keep the N newest `backup_log` rows. `0` = keep all.
+    log_retention: usize,
+}
+
+/// Scheduler hub. One `JobScheduler` hosts every cron-driven job:
+/// * backup (when `backup.enabled`) — snapshot + audit row + retention,
+/// * idempotency_key TTL purge (hourly, always on when a DB is present),
+/// * CRL refresh (opt-in, ADR-0006).
+async fn spawn_scheduler_hub(
+    backup: Option<BackupJobCfg>,
     db: Option<Arc<db::Db>>,
     crl_refresh: Option<CrlRefresh>,
 ) -> anyhow::Result<()> {
     let sched = tokio_cron_scheduler::JobScheduler::new().await?;
 
     // Backup job (optional).
-    if let (Some(schedule), Some(db_path)) = (
-        backup_schedule.as_ref().filter(|s| !s.is_empty()).cloned(),
-        db_path.clone(),
-    ) {
-        let job = backup_job(&schedule, db_path, retention_days)?;
+    if let Some(backup) = backup {
+        let schedule = backup.schedule.clone();
+        let retention_count = backup.retention_count;
+        let retention_days = backup.retention_days;
+        let job = backup_job(backup)?;
         sched.add(job).await?;
-        tracing::info!(%schedule, retention_days, "backup scheduler started");
+        tracing::info!(
+            %schedule,
+            retention_count,
+            retention_days,
+            "backup scheduler started"
+        );
     }
 
     // Idempotency TTL purge (fixed cadence; hourly is plenty given the 24h
@@ -345,42 +383,122 @@ async fn spawn_scheduler_hub(
     }
 }
 
-fn backup_job(
-    schedule: &str,
-    db_path: std::path::PathBuf,
-    retention_days: u32,
-) -> anyhow::Result<tokio_cron_scheduler::Job> {
-    let job_path = db_path.clone();
-    let job = tokio_cron_scheduler::Job::new_async(schedule, move |_uuid, _l| {
-        let p = job_path.clone();
-        Box::pin(async move {
-            let p_run = p.clone();
-            let result = tokio::task::spawn_blocking(move || v1::backup_now(&p_run)).await;
-            match result {
-                Ok(Ok(rep)) => {
-                    tracing::info!(
-                        path = %rep.path, bytes = rep.bytes, sha256 = %rep.sha256,
-                        duration_ms = rep.duration_ms,
-                        "scheduled backup completed"
-                    );
-                }
-                Ok(Err(e)) => tracing::error!(error = %e, "scheduled backup failed"),
-                Err(e) => tracing::error!(error = %e, "scheduled backup task panicked"),
-            }
-            if retention_days > 0 {
-                let p_prune = p.clone();
-                if let Ok(Ok(removed)) =
-                    tokio::task::spawn_blocking(move || v1::prune_backups(&p_prune, retention_days))
-                        .await
-                {
-                    if removed > 0 {
-                        tracing::info!(removed, "pruned old backups");
-                    }
-                }
-            }
-        })
+fn backup_job(cfg: BackupJobCfg) -> anyhow::Result<tokio_cron_scheduler::Job> {
+    let BackupJobCfg {
+        schedule,
+        db_path,
+        db,
+        retention_count,
+        retention_days,
+        log_retention,
+    } = cfg;
+    let job = tokio_cron_scheduler::Job::new_async(schedule.as_str(), move |_uuid, _l| {
+        Box::pin(run_scheduled_backup(
+            db_path.clone(),
+            db.clone(),
+            retention_count,
+            retention_days,
+            log_retention,
+        ))
     })?;
     Ok(job)
+}
+
+/// One nightly backup pass: snapshot the data dir → record a `backup_log` audit
+/// row (ok/failed + path + size) → retain the N newest archives (count) and
+/// prune by age → bound the audit log. **Best-effort + offline-first**: every
+/// step's failure is logged, never propagated, so one bad night (disk full,
+/// etc.) records a `failed` row and retries on the next window instead of
+/// killing the scheduler thread.
+async fn run_scheduled_backup(
+    db_path: std::path::PathBuf,
+    db: Option<Arc<db::Db>>,
+    retention_count: usize,
+    retention_days: u32,
+    log_retention: usize,
+) {
+    // 1. Snapshot (blocking I/O off the async runtime).
+    let p_run = db_path.clone();
+    let report: anyhow::Result<v1::BackupReport> =
+        match tokio::task::spawn_blocking(move || v1::backup_now(&p_run)).await {
+            Ok(r) => r,
+            Err(join) => Err(anyhow::anyhow!("backup task panicked: {join}")),
+        };
+    match &report {
+        Ok(rep) => tracing::info!(
+            path = %rep.path, bytes = rep.bytes, sha256 = %rep.sha256,
+            duration_ms = rep.duration_ms, "scheduled backup completed"
+        ),
+        Err(e) => tracing::error!(error = %e, "scheduled backup failed"),
+    }
+
+    // 2. Audit row — one per attempt, whether the snapshot succeeded or not.
+    if let Some(db) = db.as_ref() {
+        record_backup_outcome(db.as_ref(), &report).await;
+    }
+
+    // 3. Count-based retention: keep the N newest archives.
+    if retention_count > 0 {
+        let backups_dir = db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("backups");
+        match tokio::task::spawn_blocking(move || {
+            jobs::retain_recent(&backups_dir, retention_count)
+        })
+        .await
+        {
+            Ok(Ok(removed)) if removed > 0 => {
+                tracing::info!(
+                    removed,
+                    keep = retention_count,
+                    "retención: snapshots viejos podados"
+                )
+            }
+            Ok(Err(e)) => tracing::warn!(error = %e, "retención por conteo falló"),
+            _ => {}
+        }
+    }
+
+    // 4. Age-based retention (optional extra bound).
+    if retention_days > 0 {
+        let p_prune = db_path.clone();
+        if let Ok(Ok(removed)) =
+            tokio::task::spawn_blocking(move || v1::prune_backups(&p_prune, retention_days)).await
+        {
+            if removed > 0 {
+                tracing::info!(removed, "pruned backups older than retention_days");
+            }
+        }
+    }
+
+    // 5. Bound the audit log (rows outlive archives, so prune them too).
+    if let Some(db) = db.as_ref() {
+        if log_retention > 0 {
+            if let Err(e) = db::backup_log::prune_log(db.as_ref(), log_retention).await {
+                tracing::warn!(error = %e, "no se pudo podar backup_log");
+            }
+        }
+    }
+}
+
+/// Map a backup attempt to a `backup_log` row and persist it. Best-effort: a
+/// logging failure must not abort the backup pass.
+async fn record_backup_outcome(db: &db::Db, report: &anyhow::Result<v1::BackupReport>) {
+    use db::backup_log::{BackupSource, NewBackupLog};
+    let entry = match report {
+        Ok(rep) => NewBackupLog::ok(
+            BackupSource::Scheduled,
+            rep.path.clone(),
+            rep.bytes,
+            rep.sha256.clone(),
+            rep.duration_ms,
+        ),
+        Err(e) => NewBackupLog::failed(BackupSource::Scheduled, e.to_string()),
+    };
+    if let Err(e) = db::backup_log::record(db, entry).await {
+        tracing::warn!(error = %e, "no se pudo registrar backup_log");
+    }
 }
 
 /// Hourly job that drops `idempotency_key` rows whose `expires_at` has passed.
@@ -912,5 +1030,135 @@ mod crl_refresh_tests {
         assert!(!state.is_revoked("lic_z"));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod backup_sched_tests {
+    use super::*;
+    use surrealdb::engine::local::Mem;
+
+    /// kv-mem DB with the 0028 `backup_log` schema applied. Same shape as
+    /// `db::backup_log` tests — `db::Db` is `Surreal<local::Db>`, which `Mem`
+    /// also produces, so the prod helpers work unchanged.
+    async fn mem_db() -> db::Db {
+        let db = surrealdb::Surreal::new::<Mem>(()).await.unwrap();
+        db.use_ns("test").use_db("test").await.unwrap();
+        db.query(include_str!("../../../migrations/0028_backup_log.surql"))
+            .await
+            .unwrap()
+            .check()
+            .unwrap();
+        db
+    }
+
+    /// Build a data dir with a non-empty SurrealKv subdir so `backup_now` has
+    /// something to tar. Returns `(tempdir, db_path, backups_dir)`.
+    fn data_dir() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("surreal");
+        std::fs::create_dir_all(&db_path).unwrap();
+        std::fs::write(db_path.join("data.db"), b"fake-surreal-data").unwrap();
+        let backups = tmp.path().join("backups");
+        (tmp, db_path, backups)
+    }
+
+    #[tokio::test]
+    async fn scheduled_run_creates_archive_and_records_ok_row() {
+        let (_tmp, db_path, backups) = data_dir();
+        let db = Arc::new(mem_db().await);
+
+        run_scheduled_backup(db_path.clone(), Some(db.clone()), 14, 0, 90).await;
+
+        // An archive landed.
+        let archives: Vec<_> = std::fs::read_dir(&backups)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("pharma-backup-")
+            })
+            .collect();
+        assert_eq!(archives.len(), 1, "exactly one snapshot created");
+
+        // And a single 'ok' audit row with artifact metadata + scheduled source.
+        let rows = db::backup_log::list(db.as_ref(), 10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "ok");
+        assert_eq!(rows[0].source, "scheduled");
+        assert!(rows[0].path.as_deref().unwrap().contains("pharma-backup-"));
+        assert!(rows[0].bytes.unwrap() > 0);
+        assert!(rows[0].error.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_backup_records_failed_row() {
+        // No db handle for backup target, but feed record_backup_outcome an
+        // error directly — the nightly contract is "every attempt logs a row".
+        let db = mem_db().await;
+        let report: anyhow::Result<v1::BackupReport> = Err(anyhow::anyhow!("disco lleno"));
+        record_backup_outcome(&db, &report).await;
+
+        let rows = db::backup_log::list(&db, 10).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "failed");
+        assert_eq!(rows[0].source, "scheduled");
+        assert_eq!(rows[0].error.as_deref(), Some("disco lleno"));
+        assert!(rows[0].path.is_none());
+    }
+
+    #[tokio::test]
+    async fn retention_keeps_n_newest_archives() {
+        let (_tmp, db_path, backups) = data_dir();
+        std::fs::create_dir_all(&backups).unwrap();
+        // Four pre-existing archives, all older than the run we're about to do.
+        for i in 0..4 {
+            let p = backups.join(format!("pharma-backup-2025010{i}-000000.tar.gz"));
+            std::fs::write(&p, b"old").unwrap();
+            let t = std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(1_000_000 + i as u64 * 86_400);
+            filetime::set_file_mtime(&p, filetime::FileTime::from(t)).unwrap();
+        }
+        let db = Arc::new(mem_db().await);
+
+        // Keep 2 newest. The run adds 1 fresh (newest) archive → 5 total → 3 pruned.
+        run_scheduled_backup(db_path, Some(db), 2, 0, 90).await;
+
+        let left = std::fs::read_dir(&backups)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("pharma-backup-")
+            })
+            .count();
+        assert_eq!(left, 2, "only the 2 newest snapshots survive");
+    }
+
+    #[tokio::test]
+    async fn log_retention_bounds_audit_rows() {
+        let db = mem_db().await;
+        // Seed 5 rows, then a run that prunes the log to keep 3.
+        for i in 0..5 {
+            let report: anyhow::Result<v1::BackupReport> =
+                Err(anyhow::anyhow!(format!("attempt {i}")));
+            record_backup_outcome(&db, &report).await;
+        }
+        // log_retention applies inside run_scheduled_backup; exercise prune_log
+        // directly with the same keep to assert the bound (run path uses it).
+        let removed = db::backup_log::prune_log(&db, 3).await.unwrap();
+        assert_eq!(removed, 2);
+        assert_eq!(db::backup_log::list(&db, 100).await.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn default_backup_config_is_enabled_with_sensible_retention() {
+        let c = pharma_core::config::BackupConfig::default();
+        assert!(c.enabled, "nightly backup ships ON (ADR-0005 data safety)");
+        assert_eq!(c.retention_count, 14);
+        assert_eq!(c.log_retention, 90);
+        assert_eq!(c.retention_days, 0);
     }
 }

@@ -41,6 +41,11 @@ impl From<surrealdb::Error> for JobError {
 /// `tokio-cron-scheduler` format used by the existing backup/purge jobs.
 pub const NEAR_EXPIRY_DEFAULT_CRON: &str = "0 0 6 * * *";
 
+/// Default cron for the nightly backup snapshot: `0 0 3 * * *` = 03:00:00 daily
+/// (UTC). Used when `backup.enabled` is set but `backup.schedule` is empty —
+/// the operator gets a sensible nightly snapshot without configuring cron.
+pub const BACKUP_DEFAULT_CRON: &str = "0 0 3 * * *";
+
 /// Build an empty [`JobScheduler`]. Thin wrapper retained for callers that
 /// only need a scheduler handle.
 pub async fn scheduler() -> anyhow::Result<JobScheduler> {

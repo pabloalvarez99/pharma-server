@@ -253,16 +253,54 @@ impl Default for RetryConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_backup_enabled() -> bool {
+    true
+}
+fn default_backup_retention_count() -> u32 {
+    14
+}
+fn default_backup_log_retention() -> u32 {
+    90
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupConfig {
-    /// Cron expression (`sec min hour day month weekday`, UTC). Empty/None
-    /// disables the scheduler. Recommended: `"0 0 3 * * *"` (every day 03:00).
+    /// Master switch for the nightly snapshot job. `true` (default) runs it on
+    /// a sensible default schedule unless `schedule` overrides it; `false`
+    /// disables it entirely. Offline-first data safety is a Free-tier pillar
+    /// (ADR-0005), so it ships ON.
+    #[serde(default = "default_backup_enabled")]
+    pub enabled: bool,
+    /// Cron expression (`sec min hour day month weekday`, UTC). Empty/None ⇒
+    /// the job runs on the default `"0 0 3 * * *"` (every day 03:00) when
+    /// `enabled`. Ignored when `enabled = false`.
     #[serde(default)]
     pub schedule: Option<String>,
-    /// Retention in days. Backups older than this are pruned after each run.
-    /// `0` = keep forever.
+    /// Age-based retention in days. Backups older than this are pruned after
+    /// each run. `0` = disabled (count-based `retention_count` governs).
     #[serde(default)]
     pub retention_days: u32,
+    /// Count-based retention: keep the N newest snapshot archives, prune the
+    /// rest after each run. `0` = keep all. The primary knob (a fresh install
+    /// has no notion of "days"); `retention_days` is an optional extra bound.
+    #[serde(default = "default_backup_retention_count")]
+    pub retention_count: u32,
+    /// Keep the N newest `backup_log` audit rows (independent of the archives
+    /// on disk). `0` = keep all.
+    #[serde(default = "default_backup_log_retention")]
+    pub log_retention: u32,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_backup_enabled(),
+            schedule: None,
+            retention_days: 0,
+            retention_count: default_backup_retention_count(),
+            log_retention: default_backup_log_retention(),
+        }
+    }
 }
 
 /// CRL refresh (ADR-0006). Opt-in: deshabilitado salvo que se configure `url`.

@@ -19,10 +19,17 @@ service_name = "pharma-api"
 token = ""
 
 [backup]
-# Empty schedule disables the cron job. Recommended: "0 0 3 * * *" (daily 03:00).
+# Master switch for the nightly snapshot. true = runs on a sensible default
+# schedule (03:00 daily) unless `schedule` overrides it; false = disabled.
+enabled = true
+# Cron (sec min hour day month weekday, UTC). Empty -> default "0 0 3 * * *".
 schedule = ""
-# 0 = keep forever. Prune older snapshots after each run when > 0.
+# Count-based retention: keep the N newest snapshot archives. 0 = keep all.
+retention_count = 14
+# Age-based retention: also prune archives older than N days. 0 = disabled.
 retention_days = 0
+# Keep the N newest backup_log audit rows. 0 = keep all.
+log_retention = 90
 
 [rate_limit]
 # Token-bucket per tenant + per IP (governor). Defaults are production-safe.
