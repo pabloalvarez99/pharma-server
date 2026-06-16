@@ -3339,3 +3339,49 @@ solo, sin técnico y sin CLI, llegue desde el MSI a su primera venta.
 
 GATE cliente verde: `npm run build` (tsc+vite, 33 módulos) + `npm test` 213/213 (+4).
 Sin Rust, sin migración, `api.ts` intacto. ESTADO ACTUAL no tocado.
+
+## 2026-06-16 — Integridad/concurrencia ola 2 (milton, feat/quality-integrity-deep-2)
+
+Continuación de #232 (3 races del ciclo de caja). Barrido de check-then-act en
+ventas/devoluciones/recepciones + mapeo de conflicto DB transitorio a 503.
+
+1. **Devolución (`sales::service::create_refund`)** — el guard acumulativo de
+   sobre-devolución (`sum_prior_refunds` → `refund_exceeds_sold` → `apply_refund`)
+   era TOCTOU sin lock: dos devoluciones concurrentes de la misma orden leen el
+   mismo `prior`, ambas pasan el guard y ambas COMMIT → se devuelve más de lo
+   vendido (vector de fraude, BUG-005) + el restock FEFO doble-llena los mismos
+   lotes (rompe `product.stock == Σ product_batch.stock`). Fix: toma el MISMO
+   `SALE_LOCKS` per-tenant que `post_sale` alrededor de read-prior→plan→apply →
+   serializa devolución-vs-devolución (el guard se sostiene) y devolución-vs-venta
+   (la UPDATE de `product.stock` ya no pierde un COMMIT MVCC → sin 5xx espurio).
+
+2. **Compras (`purchasing::service`)** — `receive_purchase_order`,
+   `receive_purchase_order_lines`, `send_purchase_order`, `create_purchase_payment`
+   y `cancel_purchase_order` eran todas check-then-act sin lock ni CAS en la UPDATE
+   `WHERE id=$po`. Nuevo `PO_LOCKS` per-(tenant,po) serializa todo el lifecycle de
+   la OC: cierra doble-recepción (stock x2 + WAC sobre base stale + movimiento
+   duplicado = inventario fantasma), recibe-vs-cancela (stock movido en OC
+   cancelada), doble-pago (`Σ pagos` pasa `≤ total` dos veces → sobrepago) y
+   pago-vs-cancela (rompe `cancelled ⇒ Σ pagos = 0`). POs distintas no comparten
+   lock → sin pérdida de throughput.
+
+3. **Error mapping (`DomainError::is_retryable_db_conflict` + `api::error`)** — un
+   conflicto MVCC write-write / "db busy" de SurrealKv es transitorio y reintentar
+   lo resuelve; antes caía en `DB_ERROR` → 500 opaco "Error interno del servidor."
+   Ahora se clasifica y se mapea a **503 SERVICE_UNAVAILABLE** con copy accionable
+   en español ("El servicio está ocupado…, reintente en unos segundos."). Reusa el
+   mismo string-match que ya usa el retry loop de ventas (DRY).
+
+Tests (+4 concurrencia, todos kv-mem + join_all):
+- `sales::concurrent_refunds_never_exceed_sold_quantity` — 8 devoluciones de 6
+  sobre vendido=10 → exactamente 1 OK, Σ restock=6, stock final=6.
+- `purchasing::concurrent_receive_same_po_applies_once` — 8 recepciones → 1 OK +
+  7 CONFLICT, stock=40 (no doble), WAC=175, 1 solo movimiento.
+- `purchasing::concurrent_payments_never_overpay` — 8 pagos de 6000 sobre total
+  10000 → 1 OK, paid=6000, balance ≥ 0.
+- `purchasing::receive_racing_cancel_keeps_status_and_stock_consistent` — estado
+  terminal coherente: received⇒stock movido+1 mov, cancelled⇒stock intacto+0 mov.
+
+GATE: `cargo fmt --all -- --check` ✓ · `cargo clippy --workspace --all-targets -D warnings` ✓ ·
+`cargo test --workspace` ✓ (purchasing 26/26, sales 18/18, 0 fail). Sin migración.
+Sin api.ts. ESTADO ACTUAL no tocado.
