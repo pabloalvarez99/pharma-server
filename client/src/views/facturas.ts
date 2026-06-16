@@ -20,8 +20,9 @@ import {
   type DocItem,
   type DocReferencia,
 } from "../api";
-import { clp, num, isValidRut, canonicalRut, formatRut, desgloseIva } from "../format";
+import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { facturaTotals } from "./facturas-helpers";
 
 const LIST_LIMIT = 100;
 const LOW_FOLIOS = 20;
@@ -232,27 +233,8 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     renderTotals();
   }
 
-  /** Neto/IVA/exento/total mirroring the server's `desglose_iva`: line amounts
-   *  truncate to integer CLP, the IVA split comes from {@link desgloseIva} (same
-   *  math as `crates/dte/src/emit.rs`) so the cashier sees the totals the server
-   *  will stamp. */
-  function computeTotals(): { neto: number; iva: number; exento: number; total: number } {
-    let afecto = 0;
-    let exento = 0;
-    for (const it of items) {
-      const qty = Number(it.cantidad);
-      const price = Number(it.precio);
-      if (!Number.isFinite(qty) || !Number.isFinite(price) || qty <= 0 || price < 0) continue;
-      const monto = Math.trunc(qty * price);
-      if (it.exento) exento += monto;
-      else afecto += monto;
-    }
-    const { neto, iva } = desgloseIva(afecto);
-    return { neto, iva, exento, total: afecto + exento };
-  }
-
   function renderTotals(): void {
-    const t = computeTotals();
+    const t = facturaTotals(items);
     if (t.total <= 0) {
       totalsEl.hidden = true;
       totalsEl.innerHTML = "";
