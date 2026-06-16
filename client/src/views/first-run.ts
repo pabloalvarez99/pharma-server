@@ -16,7 +16,13 @@
 //  - whether the dashboard looks "poblado" after loading demo data;
 //  - which ERP modules a rubro shows (the gate shell.ts applies, single-sourced).
 import type { HealthInfo, InventorySummary, DailySalesRow } from "../api";
-import { type Vertical, type Rubro, hasRecetas, featuresForRubro } from "../vertical";
+import {
+  type Vertical,
+  type Rubro,
+  hasRecetas,
+  featuresForRubro,
+  seedVerticalFor,
+} from "../vertical";
 
 // --- Server URL resolution + first-launch detection -------------------------
 
@@ -287,4 +293,77 @@ export function visibleModulesForRubro(rubro: Rubro): ModuleId[] {
     if (m === "inventory" || m === "compras") return f.physicalStock;
     return true;
   });
+}
+
+// --- Live ERP preview per rubro (the "mostrar, no contar" of rubro select) ---
+//
+// The onboarding rubro selector shows a live preview of the EXACT ERP a rubro
+// gives you (docs/strategy/rubro-select-experience.md). This is the pure model
+// behind that panel: it derives — from the SAME gate the nav uses
+// (`visibleModulesForRubro`) plus `featuresForRubro` — the high-level category
+// summary, the rubro-native bullets, and which sections get hidden. Kept pure +
+// single-sourced so Configuración and first-run render identical previews and so
+// it's unit-testable without a DOM.
+
+/** One "Qué incluye" category line in the preview (on/off per rubro). */
+export interface PreviewCategory {
+  /** Operator-facing category label (Spanish). */
+  label: string;
+  /** Whether the rubro turns this category on. */
+  on: boolean;
+}
+
+/** Pure preview model for a rubro — everything the panel needs to render. */
+export interface RubroPreview {
+  /** High-level "Qué incluye" categories (Ventas / Inventario / Compliance / Reportes). */
+  categories: PreviewCategory[];
+  /** Rubro-native bullets ("Específico de tu rubro"). Empty for the generic ERP. */
+  native: string[];
+  /** Labels of notable sections HIDDEN for this rubro (recetas/inventario/compras). */
+  hidden: string[];
+  /** Count of menu sections this rubro shows. */
+  visibleCount: number;
+  /** Total catalog sections (the maximal rubro). */
+  totalCount: number;
+  /** Whether a demo data pack exists for the rubro today. */
+  hasDemo: boolean;
+}
+
+/** Build the pure preview model for a rubro. Reads `visibleModulesForRubro`
+ *  (the nav gate) + `featuresForRubro` so the preview can never drift from the
+ *  real ERP the operator gets. */
+export function rubroPreview(rubro: Rubro): RubroPreview {
+  const f = featuresForRubro(rubro);
+  const visible = new Set<ModuleId>(visibleModulesForRubro(rubro));
+
+  // Categories: Ventas + Compliance + Reportes are universal (every CL business
+  // sells and emits boleta/factura); only Inventario toggles (service rubros
+  // sell without physical stock). That single toggle is the agnostic-core proof.
+  const categories: PreviewCategory[] = [
+    { label: "Ventas y caja", on: visible.has("pos") },
+    { label: "Inventario y compras", on: f.physicalStock },
+    { label: "Boletas y facturas (SII)", on: visible.has("boletas") },
+    { label: "Reportes", on: visible.has("reports") },
+  ];
+
+  // Native bullets — the "se siente hecho para mi rubro" copy, derived from the
+  // capability flags so it stays honest (no feature we don't actually turn on).
+  const native: string[] = [];
+  if (f.recetas) native.push("Recetas y Libro de controlados (Ley 20.000)");
+  if (f.clinical) native.push("Ficha clínica: principio activo, laboratorio, interacciones");
+  if (f.lotes) native.push("Lotes y vencimiento para productos perecibles");
+  if (!f.physicalStock) native.push("Venta de servicios sin inventario ni lotes");
+
+  // Hidden notable sections (so the operator sees what's intentionally absent).
+  const notableHidden: ModuleId[] = ["recetas", "inventory", "compras"];
+  const hidden = notableHidden.filter((m) => !visible.has(m)).map((m) => MODULE_LABELS[m]);
+
+  return {
+    categories,
+    native,
+    hidden,
+    visibleCount: visible.size,
+    totalCount: ALL_MODULES.length,
+    hasDemo: seedVerticalFor(rubro) != null,
+  };
 }

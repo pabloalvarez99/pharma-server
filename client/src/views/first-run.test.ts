@@ -7,6 +7,7 @@ import {
   dashboardReadiness,
   visibleModules,
   visibleModulesForRubro,
+  rubroPreview,
   FALLBACK_SERVER,
   type FirstRunState,
 } from "./first-run";
@@ -139,6 +140,48 @@ describe("Journey 5b — per-rubro module gate (both extremes)", () => {
     expect(mods).toContain("inventory");
     expect(mods).toContain("compras");
     expect(mods).not.toContain("recetas");
+  });
+});
+
+describe("Journey 5c — live ERP preview per rubro (rubro select 'mostrar, no contar')", () => {
+  it("farmacia preview surfaces its native pharmacy capabilities + demo pack", () => {
+    const p = rubroPreview("farmacia");
+    expect(p.native.join(" ")).toMatch(/Recetas/i);
+    expect(p.native.join(" ")).toMatch(/Ley 20\.000/);
+    expect(p.native.join(" ")).toMatch(/clínica/i);
+    expect(p.hasDemo).toBe(true);
+    // categories all on for the maximal rubro
+    expect(p.categories.every((c) => c.on)).toBe(true);
+    // nothing notable hidden
+    expect(p.hidden).toEqual([]);
+    expect(p.visibleCount).toBe(p.totalCount);
+  });
+
+  it("minimarket shows lotes (perecibles), hides Recetas, has a demo pack", () => {
+    const p = rubroPreview("minimarket");
+    expect(p.native.join(" ")).toMatch(/Lotes/i);
+    expect(p.native.join(" ")).not.toMatch(/Recetas/i);
+    expect(p.hidden).toContain("Recetas");
+    expect(p.hasDemo).toBe(true);
+    // still tracks physical stock
+    expect(p.categories.find((c) => c.label === "Inventario y compras")?.on).toBe(true);
+  });
+
+  it("belleza (service rubro) honestly shows NO inventory and no demo yet", () => {
+    const p = rubroPreview("belleza");
+    expect(p.native.join(" ")).toMatch(/sin inventario/i);
+    expect(p.categories.find((c) => c.label === "Inventario y compras")?.on).toBe(false);
+    expect(p.hidden).toContain("Inventario");
+    expect(p.hidden).toContain("Compras");
+    expect(p.hasDemo).toBe(false);
+    expect(p.visibleCount).toBeLessThan(p.totalCount);
+  });
+
+  it("otro (generic ERP) has no rubro-native bullets but still sells + emits", () => {
+    const p = rubroPreview("otro");
+    expect(p.native).toEqual([]);
+    expect(p.categories.find((c) => c.label === "Ventas y caja")?.on).toBe(true);
+    expect(p.categories.find((c) => c.label === "Boletas y facturas (SII)")?.on).toBe(true);
   });
 });
 

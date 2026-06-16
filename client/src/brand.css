@@ -111,3 +111,66 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
 /* reveal escalonado (carga de pantalla) */
 .rb-rv{opacity:0;transform:translateY(10px);animation:rb-rv .6s cubic-bezier(.2,.7,.2,1) forwards}
 @keyframes rb-rv{to{opacity:1;transform:none}}
+
+/* ── Rubro select — configurador 2-paneles + vista previa en vivo del ERP ──
+ * Lane feat/rubro-showcase-p1 (docs/strategy/rubro-select-experience.md FASE P1).
+ * Eleva el selector de rubro a "vitrina": grid de rubros + panel preview sticky
+ * que muestra el ERP exacto por rubro. Usa los tokens globales de styles.css
+ * (--bg-N, --line, --text, --muted, --accent) para cohesion con .rubro-card.
+ * Append-only; NO toca styles.css/main.ts. */
+.rubro-config{display:grid;grid-template-columns:1fr minmax(300px,360px);gap:20px;
+  align-items:start;margin-bottom:18px}
+.rubro-config .rubro-grid{margin-bottom:0}
+
+/* card como radio accesible: focus ring visible + el ✓ de selección */
+.rubro-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rubro-card.selected::after{content:"✓";position:absolute;bottom:12px;right:12px;
+  width:20px;height:20px;display:grid;place-items:center;border-radius:50%;
+  font-size:12px;font-weight:700;color:var(--bg-0);background:var(--accent)}
+.rubro-card .rubro-tag{top:auto;bottom:12px}
+.rubro-card.selected .rubro-tag{display:none}
+
+/* panel preview (sticky a la derecha) */
+.rubro-preview{position:sticky;top:16px;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:var(--radius-card);padding:18px}
+.rubro-pv-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.rubro-pv-icon{font-size:30px;line-height:1}
+.rubro-pv-name{margin:0;font-size:17px;font-weight:650}
+.rubro-pv-tag{margin:2px 0 0;font-size:13px;color:var(--accent)}
+.rubro-pv-count{font-size:12.5px;margin:0 0 14px}
+.rubro-pv-block{margin:0 0 14px}
+.rubro-pv-title{margin:0 0 7px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);font-weight:600}
+.rubro-pv-muted{font-size:12.5px;margin:0}
+
+/* "Qué incluye" — categorías on/off */
+.rubro-cats,.rubro-native{list-style:none;margin:0;padding:0;display:flex;
+  flex-direction:column;gap:6px}
+.rubro-cat{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)}
+.rubro-cat.off{color:var(--muted)}
+.rubro-cat-mark{width:18px;height:18px;display:grid;place-items:center;border-radius:50%;
+  font-size:11px;font-weight:700;flex:0 0 auto}
+.rubro-cat.on .rubro-cat-mark{color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.rubro-cat.off .rubro-cat-mark{color:var(--muted);border:1px solid var(--line)}
+.rubro-native li{position:relative;padding-left:16px;font-size:13px;color:var(--text)}
+.rubro-native li::before{content:"▸";position:absolute;left:0;color:var(--accent)}
+
+/* demo + nota compliance */
+.rubro-pv-demo{display:inline-block;font-size:11.5px;letter-spacing:.03em;
+  padding:4px 10px;border-radius:var(--radius-pill);border:1px solid var(--line);
+  color:var(--muted)}
+.rubro-pv-demo.on{color:var(--accent);border-color:var(--accent-2);
+  background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.rubro-pv-note{font-size:11.5px;line-height:1.5;margin:14px 0 0;
+  padding-top:12px;border-top:1px solid var(--line-soft,var(--line))}
+
+/* responsive: el preview pasa de panel lateral a bloque inferior */
+@media (max-width:900px){
+  .rubro-config{grid-template-columns:1fr}
+  .rubro-preview{position:static}
+}
+/* respeta prefers-reduced-motion (las cards ya animan vía styles.css) */
+@media (prefers-reduced-motion:reduce){
+  .rubro-card{transition:none}
+}

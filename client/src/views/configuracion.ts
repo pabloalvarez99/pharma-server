@@ -22,7 +22,7 @@ import {
   seedVerticalFor,
   parseRubro,
 } from "../vertical";
-import { visibleModulesForRubro, MODULE_LABELS } from "./first-run";
+import { rubroPreview } from "./first-run";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 type SettingKind = "boolean" | "number";
@@ -392,19 +392,22 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       selectedVertical = RUBRO_CATALOG.some((r) => r.value === stored) ? stored : "otro";
       const name = nameSetting?.value ?? "";
       verticalEl.innerHTML = `
-        <div class="rubro-grid">
-          ${RUBRO_CATALOG.map(
-            (r) => `
-            <button type="button" class="rubro-card${r.value === selectedVertical ? " selected" : ""}"
-                    data-vertical="${r.value}" aria-pressed="${r.value === selectedVertical}">
-              <span class="rubro-icon" aria-hidden="true">${r.icon}</span>
-              <span class="rubro-label">${escapeHtml(r.label)}</span>
-              <span class="rubro-help">${escapeHtml(r.help)}</span>
-              ${r.seedVertical ? `<span class="rubro-tag">datos demo</span>` : ""}
-            </button>`,
-          ).join("")}
+        <div class="rubro-config">
+          <div class="rubro-grid" role="radiogroup" aria-label="Rubro del negocio">
+            ${RUBRO_CATALOG.map((r) => {
+              const on = r.value === selectedVertical;
+              return `
+              <button type="button" role="radio" class="rubro-card${on ? " selected" : ""}"
+                      data-vertical="${r.value}" aria-checked="${on}" tabindex="${on ? 0 : -1}">
+                <span class="rubro-icon" aria-hidden="true">${r.icon}</span>
+                <span class="rubro-label">${escapeHtml(r.label)}</span>
+                <span class="rubro-help">${escapeHtml(r.help)}</span>
+                ${r.seedVertical ? `<span class="rubro-tag">datos demo</span>` : ""}
+              </button>`;
+            }).join("")}
+          </div>
+          <aside class="rubro-preview" id="cfg-vert-preview" aria-live="polite"></aside>
         </div>
-        <div class="rubro-modules" id="cfg-vert-modules"></div>
         <div class="cfg-emisor-form">
           <div class="field">
             <label for="cfg-vert-name">Nombre del negocio (opcional)</label>
@@ -416,6 +419,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
             <button class="btn-primary" id="cfg-vert-save">Guardar rubro</button>
             <span class="cfg-status" id="cfg-vert-status" hidden></span>
           </div>
+          <p class="muted cfg-help">Podés cambiar tu rubro cuando quieras. Tus datos no se borran; sólo cambia qué secciones ves en el menú.</p>
         </div>
 
         <div class="cfg-demo">
@@ -442,19 +446,55 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     const saveBtn = verticalEl.querySelector<HTMLButtonElement>("#cfg-vert-save")!;
     const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-vert-status")!;
 
-    const select = (value: string): void => {
+    // Pin = the operator's confirmed choice (drives save + demo). Peek = the card
+    // they're hovering/focusing — the preview shows peek if any, else the pin, so
+    // they can browse the ERP of each rubro before committing ("mostrar, no contar").
+    const pin = (value: string): void => {
       selectedVertical = value;
       cards.forEach((c) => {
         const on = c.dataset.vertical === value;
         c.classList.toggle("selected", on);
-        c.setAttribute("aria-pressed", String(on));
+        c.setAttribute("aria-checked", String(on));
+        c.tabIndex = on ? 0 : -1; // roving tabindex: only the selected card is tab-reachable
       });
-      refreshModulePreview();
+      renderPreview(value);
       refreshDemoHelp();
     };
+    const peek = (value: string): void => renderPreview(value);
+    const unpeek = (): void => renderPreview(selectedVertical);
 
-    cards.forEach((c) => c.addEventListener("click", () => select(c.dataset.vertical!)));
-    refreshModulePreview();
+    cards.forEach((c, i) => {
+      const value = c.dataset.vertical!;
+      c.addEventListener("click", () => pin(value));
+      c.addEventListener("mouseenter", () => peek(value));
+      c.addEventListener("focus", () => peek(value));
+      c.addEventListener("blur", unpeek);
+      c.addEventListener("keydown", (ev) => {
+        // Grid keyboard model: arrows move focus (roving), Enter/Espacio selects.
+        const cols = 4; // visual grid width; arrow Down/Up jump a row, Left/Right one card
+        let next = -1;
+        switch (ev.key) {
+          case "ArrowRight": next = (i + 1) % cards.length; break;
+          case "ArrowLeft": next = (i - 1 + cards.length) % cards.length; break;
+          case "ArrowDown": next = Math.min(i + cols, cards.length - 1); break;
+          case "ArrowUp": next = Math.max(i - cols, 0); break;
+          case "Home": next = 0; break;
+          case "End": next = cards.length - 1; break;
+          case "Enter":
+          case " ":
+            ev.preventDefault();
+            pin(value);
+            return;
+          default:
+            return;
+        }
+        ev.preventDefault();
+        cards[next].focus();
+      });
+    });
+    // Grid leaves → snap preview back to the pinned rubro.
+    verticalEl.querySelector<HTMLElement>(".rubro-grid")?.addEventListener("mouseleave", unpeek);
+    renderPreview(selectedVertical);
 
     saveBtn.addEventListener("click", async () => {
       statusEl.hidden = true;
@@ -476,25 +516,66 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
-  // Live preview of which menu sections the chosen rubro turns on, so the
-  // operator sees the effect immediately (before saving + restarting). Reads the
-  // same gate shell.ts applies, so preview and real nav can't drift.
-  function refreshModulePreview(): void {
-    const box = verticalEl.querySelector<HTMLElement>("#cfg-vert-modules");
+  // Live "Vista previa de tu ERP": renders the EXACT ERP a rubro gives — section
+  // categories on/off, rubro-native capabilities, hidden sections, demo + SII
+  // compliance notes. Reads the pure `rubroPreview` model (same nav gate shell.ts
+  // applies), so preview and real ERP can never drift. `value` is the peeked or
+  // pinned card; the panel updates <100ms with no layout shift.
+  function renderPreview(value: string): void {
+    const box = verticalEl.querySelector<HTMLElement>("#cfg-vert-preview");
     if (!box) return;
-    const rubro = parseRubro(selectedVertical);
-    const visible = new Set<string>(visibleModulesForRubro(rubro));
-    // Highlight the vertical-specific modules so the difference is legible.
-    const notable: Array<keyof typeof MODULE_LABELS> = ["recetas", "inventory", "compras"];
-    const on = notable.filter((m) => visible.has(m)).map((m) => MODULE_LABELS[m]);
-    const off = notable.filter((m) => !visible.has(m)).map((m) => MODULE_LABELS[m]);
-    const total = visible.size;
-    const chips = (items: string[], cls: string): string =>
-      items.map((t) => `<span class="rubro-chip ${cls}">${escapeHtml(t)}</span>`).join("");
+    const rubro = parseRubro(value);
+    const card = RUBRO_CATALOG.find((r) => r.value === value);
+    const p = rubroPreview(rubro);
+
+    const catRow = (label: string, on: boolean): string =>
+      `<li class="rubro-cat ${on ? "on" : "off"}">
+         <span class="rubro-cat-mark" aria-hidden="true">${on ? "✓" : "—"}</span>
+         <span>${escapeHtml(label)}</span>
+       </li>`;
+
+    const nativeBlock = p.native.length
+      ? `<div class="rubro-pv-block">
+           <h5 class="rubro-pv-title">Específico de tu rubro</h5>
+           <ul class="rubro-native">${p.native
+             .map((t) => `<li>${escapeHtml(t)}</li>`)
+             .join("")}</ul>
+         </div>`
+      : `<div class="rubro-pv-block">
+           <h5 class="rubro-pv-title">Específico de tu rubro</h5>
+           <p class="muted rubro-pv-muted">ERP genérico: ventas, inventario y reportes, sin secciones propias de un rubro.</p>
+         </div>`;
+
+    const hiddenBlock = p.hidden.length
+      ? `<div class="rubro-pv-block">
+           <h5 class="rubro-pv-title">Secciones que se ocultan</h5>
+           <div class="rubro-chips">${p.hidden
+             .map((t) => `<span class="rubro-chip off">${escapeHtml(t)}</span>`)
+             .join("")}</div>
+         </div>`
+      : "";
+
+    const demoBlock = p.hasDemo
+      ? `<span class="rubro-pv-demo on">Datos de ejemplo disponibles</span>`
+      : `<span class="rubro-pv-demo">Pack de datos demo próximamente</span>`;
+
     box.innerHTML = `
-      <p class="muted cfg-help">Este rubro muestra <strong>${total}</strong> secciones en el menú.</p>
-      ${on.length ? `<div class="rubro-chips">${chips(on, "on")}</div>` : ""}
-      ${off.length ? `<p class="muted cfg-help">Ocultas para este rubro:</p><div class="rubro-chips">${chips(off, "off")}</div>` : ""}
+      <header class="rubro-pv-head">
+        <span class="rubro-pv-icon" aria-hidden="true">${card?.icon ?? "➕"}</span>
+        <div>
+          <h4 class="rubro-pv-name">${escapeHtml(card?.label ?? "Otro")}</h4>
+          <p class="rubro-pv-tag">${escapeHtml(card?.tagline ?? "")}</p>
+        </div>
+      </header>
+      <p class="rubro-pv-count muted">Muestra <strong>${p.visibleCount}</strong> de ${p.totalCount} secciones del menú.</p>
+      <div class="rubro-pv-block">
+        <h5 class="rubro-pv-title">Qué incluye</h5>
+        <ul class="rubro-cats">${p.categories.map((c) => catRow(c.label, c.on)).join("")}</ul>
+      </div>
+      ${nativeBlock}
+      ${hiddenBlock}
+      ${demoBlock}
+      <p class="rubro-pv-note muted">Boleta y factura electrónica (SII): en todos los rubros. Recetas y Libro de controlados (Ley 20.000): sólo Farmacia.</p>
     `;
   }
 
