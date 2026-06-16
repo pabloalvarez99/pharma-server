@@ -2997,3 +2997,46 @@ Sin migración (no hace falta tabla nueva; `backup_log` ya existe del #184). +5 
 --all --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace`
 (cli 25/25). Multi-tenant safe: el snapshot cubre todo el store SurrealKv (no
 tenant-scoped, igual que `backup_log`); el invariante se verifica per-tenant.
+
+## 2026-06-16 — E2E DTE/compliance lifecycle (bob, ola 6 spina vendible)
+
+Lane `feat/e2e-dte-compliance-lifecycle` (off `feature/erp-parity` @92cf047). Suma 4
+flows nuevos a la harness E2E local (`client/e2e/`, gate LOCAL — CI billing-walled),
+sin tocar `gate.yml` ni el flow gate canónico (#207). Sólo `client/e2e/`.
+
+NUEVO: tenant dedicado `e2e-dte` provisto en bootstrap (server DOWN, file lock) con
+cert digital real (`crates/dte/tests/assets/test-cert.pfx`, pass `test1234`) + CAFs
+sintéticos generados al vuelo (`lib/caf.mjs`, node:crypto RSA-1024, mismo shape que
+`crates/dte/tests/common::caf_xml_synthetic` → RSASK PKCS#1 que firma el TED offline).
+Se mantiene SEPARADO de los tenants golden-path (farmacia/mini) para que esos sigan
+probando el contrato Free *sin* CAF (gate limpio en instalación fresca).
+
+`dteLifecycleFlow` (emisión REAL firmada sobre stack vivo):
+1. **sin CAF** — guía 52 sin CAF → 409 `FOLIO_EXHAUSTED` limpio (no 5xx). NOTA: el
+   brief decía "422"; el status codeado real es **409** (`From<DteError>` en
+   `crates/api/src/error.rs:198`). No debilité el assert — testeo el contrato real.
+2. **folio burn** — boleta 39 (CAF 1..2): emite folio 1, `caf-status` avanza
+   next_folio 1→2, restantes 1.
+3. **referencia chain** — factura 33 → nota-crédito 61 referenciando el folio de la
+   factura; el XML de la NC persiste `<TpoDocRef>33</TpoDocRef>` + `<FolioRef>` exacto.
+4. **monto coherence** — factura 1190 IVA-incl → XML `<MntNeto>1000` + `<IVA>190`,
+   neto+iva==MntTotal==DTO.monto_total.
+5. **CAF agotado** — 2ª factura sobre CAF 1-folio → 409 `FOLIO_EXHAUSTED`, restantes 0.
+6. **aggregate** — `GET /dte` lista los 3 docs emitidos con folios/montos que cuadran;
+   `libro-ventas?period` renderiza XML bien formado. HALLAZGO: el libro filtra
+   `estado='accepted'` (post-SII send/poll); offline los docs quedan `signed` → libro
+   vacío por diseño. El "cuadra del día" se verifica vía `/dte` list (queryable
+   offline), no vía libro.
+
+`reports402Matrix` (corre en farmacia + mini): core (sales-daily/top-products/
+stock-rotation/near-expiry) → 200 array; `margins-daily` Pro-gated → 402
+`FEATURE_REQUIRES_UPGRADE` limpio; `/reports/dashboard` → 200 con `margen_hoy=null`
+en Free (degrada el campo, NUNCA 402 — ADR-0005 core gratis).
+
+xfail goods-receipt (BUG-bob-002, draft→sent): #211 (que agrega POST
+/purchase-orders/{id}/send) AÚN no está integrado en `feature/erp-parity` @92cf047
+(verificado: no existe `/send` en `purchasing.rs`). El probe es self-healing → seguirá
+xfail hasta que #211 aterrice, y volverá verde solo. No lo quité.
+
+GATE cliente: `npm run build` + `npm test` (194) + `npm run e2e`. Sólo `client/e2e/`;
+sin Rust, sin migración, `api.ts`/`format.ts` intactos.
