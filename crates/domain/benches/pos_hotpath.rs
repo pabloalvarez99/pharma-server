@@ -42,7 +42,6 @@
 
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use criterion::{criterion_group, criterion_main, Criterion};
 use rust_decimal::Decimal;
 use surrealdb::engine::local::Mem;
@@ -306,7 +305,7 @@ async fn op_stock_stats(h: &Harness) {
 }
 
 async fn op_cierre_caja(h: &Harness) {
-    let _ = cash::compute_summary(&h.db, &h.tenant, &h.session_id, Utc::now())
+    let _ = cash::compute_summary(&h.db, &h.tenant, &h.session_id)
         .await
         .expect("compute_summary");
 }

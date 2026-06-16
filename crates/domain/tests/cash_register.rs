@@ -314,6 +314,182 @@ async fn invalid_movement_type_or_amount_rejected() {
     assert_eq!(err.code(), "INVALID_INPUT");
 }
 
+fn cash_sale(product_id: &str, name: &str, price: &str) -> PosSaleRequest {
+    PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: product_id.into(),
+            product_name: name.into(),
+            quantity: 1,
+            unit_price: dec(price),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec(price)),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    }
+}
+
+/// The maintained `cash_sales_running` aggregate (migration 0030) must equal the
+/// old live `math::sum(cash_amount)` scan — including after a sale is refunded,
+/// the case a pre-computed view would get wrong (`surrealdb-view-update-gotcha`).
+#[tokio::test]
+async fn cash_sales_running_matches_scan_after_refund() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "c1".into(),
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Para 500", "1500", 50))
+        .await
+        .unwrap();
+    // Three cash sales (CREATE events) → 4500.
+    for _ in 0..3 {
+        sales::post_sale(
+            &db,
+            &tenant,
+            Some(&user),
+            Some("admin"),
+            None,
+            cash_sale(&p.id, &p.name, "1500"),
+        )
+        .await
+        .unwrap();
+    }
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(live.cash_sales, dec("4500"));
+
+    // Refund one order — sales repo does `UPDATE order SET status='refunded'`,
+    // which the event must subtract (UPDATE branch).
+    let mut r = db
+        .query("SELECT VALUE id FROM order WHERE tenant=$t LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let ids: Vec<Thing> = r.take(0).unwrap();
+    db.query("UPDATE $o SET status='refunded'")
+        .bind(("o", ids[0].clone()))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    // Maintained drops to 3000 and equals an independent live scan byte-for-byte.
+    let live2 = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(live2.cash_sales, dec("3000"));
+
+    #[derive(serde::Deserialize)]
+    struct S {
+        sum: Option<Decimal>,
+    }
+    let mut r = db
+        .query(
+            "SELECT math::sum(cash_amount) AS sum FROM order \
+             WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] \
+               AND status NOT IN ['refunded','cancelled'] \
+               AND created_at >= $a GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("a", surrealdb::sql::Datetime::from(live2.session.opened_at)))
+        .await
+        .unwrap();
+    let scan: Option<S> = r.take(0).unwrap();
+    let scan_val = scan.and_then(|x| x.sum).unwrap_or(dec("0"));
+    assert_eq!(
+        live2.cash_sales, scan_val,
+        "maintained running total must equal the live scan"
+    );
+}
+
+/// An order in tenant A must not bump tenant B's session running total.
+#[tokio::test]
+async fn cash_sales_running_is_tenant_isolated() {
+    let (db, tenant_a, user_a) = setup().await;
+    let tenant_b: Thing = db
+        .query("CREATE tenant SET name='B', slug='b' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let user_b: Thing = db
+        .query("CREATE user SET tenant=$t, email='b@t.l', password='x', roles=['admin'] RETURN id")
+        .bind(("t", tenant_b.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    // Both sessions open BEFORE the sale (so the window guard would let either
+    // accrue if the tenant filter were missing).
+    let sb = service::open_session(
+        &db,
+        &tenant_b,
+        &user_b,
+        OpenSessionInput {
+            register_name: "cb".into(),
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let sa = service::open_session(
+        &db,
+        &tenant_a,
+        &user_a,
+        OpenSessionInput {
+            register_name: "ca".into(),
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let p = catalog::create_product(&db, &tenant_a, new_product("Para", "1500", 50))
+        .await
+        .unwrap();
+    sales::post_sale(
+        &db,
+        &tenant_a,
+        Some(&user_a),
+        Some("admin"),
+        None,
+        cash_sale(&p.id, &p.name, "1500"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        service::arqueo(&db, &tenant_a, &sa.id)
+            .await
+            .unwrap()
+            .cash_sales,
+        dec("1500")
+    );
+    assert_eq!(
+        service::arqueo(&db, &tenant_b, &sb.id)
+            .await
+            .unwrap()
+            .cash_sales,
+        dec("0")
+    );
+}
+
 #[tokio::test]
 async fn cross_tenant_isolation_for_sessions() {
     let (db, tenant, user) = setup().await;
