@@ -308,10 +308,14 @@ async fn collect_payloads(
         #[serde(default)]
         publish_to_web: bool,
     }
+    // Record-id fetch (`FROM $ids`) instead of `FROM product WHERE id IN $ids`,
+    // which full-scans the catalog (O(SKUs)) per webhook batch — BUG-perf-006.
+    // The `WHERE tenant = $t` guard stays: it drops any id that resolves to
+    // another tenant's product, so a forged cross-tenant id can't leak stock.
     let rows: Vec<Row> = db
         .query(
             "SELECT stock, external_id, publish_to_web \
-             FROM product WHERE tenant = $t AND id IN $ids",
+             FROM $ids WHERE tenant = $t",
         )
         .bind(("t", tenant.clone()))
         .bind(("ids", things))
@@ -528,6 +532,70 @@ mod tests {
         assert!(!publishable(None, true)); // no commercial id
         assert!(!publishable(Some(""), true)); // empty id
         assert!(!publishable(None, false));
+    }
+
+    /// `collect_payloads` resolves the passed record-ids directly (`FROM $ids`,
+    /// BUG-perf-006) and the `WHERE tenant = $t` guard drops any id that belongs
+    /// to another tenant — a forged cross-tenant product id can't leak stock.
+    #[tokio::test]
+    async fn collect_payloads_resolves_ids_and_blocks_cross_tenant() {
+        use surrealdb::engine::local::Mem;
+        use surrealdb::Surreal;
+
+        let db: db::Db = Surreal::new::<Mem>(()).await.unwrap();
+        db.use_ns("t").use_db("t").await.unwrap();
+        db::run_embedded(&db).await.unwrap();
+
+        let new_tenant = |slug: &str| {
+            let db = &db;
+            let slug = slug.to_string();
+            async move {
+                let mut r = db
+                    .query("CREATE tenant SET name=$n, slug=$s RETURN id")
+                    .bind(("n", slug.clone()))
+                    .bind(("s", slug))
+                    .await
+                    .unwrap();
+                r.take::<Option<surrealdb::sql::Thing>>((0, "id"))
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+        let tenant_a = new_tenant("farmacia-a").await;
+        let tenant_b = new_tenant("farmacia-b").await;
+
+        let new_product = |tenant: &surrealdb::sql::Thing, slug: &str, sku: &str, stock: i64| {
+            let db = &db;
+            let (tenant, slug, sku) = (tenant.clone(), slug.to_string(), sku.to_string());
+            async move {
+                let mut r = db
+                    .query(
+                        "CREATE product SET tenant=$t, name=$s, slug=$s, price=1000dec, \
+                         stock=$st, external_id=$x, publish_to_web=true RETURN id",
+                    )
+                    .bind(("t", tenant))
+                    .bind(("s", slug))
+                    .bind(("x", sku))
+                    .bind(("st", stock))
+                    .await
+                    .unwrap();
+                r.take::<Option<surrealdb::sql::Thing>>((0, "id"))
+                    .unwrap()
+                    .unwrap()
+                    .to_string()
+            }
+        };
+        let prod_a = new_product(&tenant_a, "para-500", "SKU-A", 42).await;
+        let prod_b = new_product(&tenant_b, "ibu-400", "SKU-B", 7).await;
+
+        // Ask as tenant A, passing BOTH ids. B's id must be dropped by the guard.
+        let payloads = collect_payloads(&db, "farmacia-a", &tenant_a, &[prod_a, prod_b])
+            .await
+            .unwrap();
+
+        assert_eq!(payloads.len(), 1, "only tenant A's product should resolve");
+        assert_eq!(payloads[0].external_id, "SKU-A");
+        assert_eq!(payloads[0].new_stock, 42);
     }
 
     #[test]

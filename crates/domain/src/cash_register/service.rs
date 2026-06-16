@@ -254,33 +254,35 @@ pub async fn list_movements(
         .collect())
 }
 
-/// Compute the cash side of orders that hit this session: `cash_amount` for
-/// `payment_method IN ('pos_cash','pos_mixed')` between `opened_at` and the
-/// session's close time (or `now` if still open). Refunded/cancelled excluded.
-async fn sum_cash_sales(
-    db: &Db,
-    tenant: &Thing,
-    opened: DateTime<Utc>,
-    closed: DateTime<Utc>,
-) -> DomainResult<Decimal> {
+/// Read the cash side of orders that hit this session: the running total of
+/// `cash_amount` for `payment_method IN ('pos_cash','pos_mixed')` with
+/// `status NOT IN ('refunded','cancelled')` and `created_at >= opened_at`.
+///
+/// O(1) field load of the maintained `cash_sales_running` aggregate (migration
+/// 0030). Replaces the previous `math::sum(cash_amount)` scan over `order`,
+/// which the planner served as a range scan over the whole shift window +
+/// per-row doc fetch — O(orders in the shift), the cierre p99 budget violation
+/// (BUG-perf-005). The field is kept exact by the `cash_sales_running_maint`
+/// event on every order CREATE/UPDATE/DELETE, so this read is byte-identical to
+/// the old scan for an open session evaluated at `now`.
+async fn read_cash_running(db: &Db, tenant: &Thing, session: &Thing) -> DomainResult<Decimal> {
     #[derive(Deserialize)]
     struct S {
-        sum: Option<Decimal>,
+        cash_sales_running: Option<Decimal>,
     }
     let mut r = db
         .query(
-            "SELECT math::sum(cash_amount) AS sum FROM order \
-             WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] \
-               AND status NOT IN ['refunded','cancelled'] \
-               AND created_at >= $a AND created_at <= $b GROUP ALL",
+            "SELECT cash_sales_running FROM cash_register_session \
+             WHERE id=$i AND tenant=$t LIMIT 1",
         )
+        .bind(("i", session.clone()))
         .bind(("t", tenant.clone()))
-        .bind(("a", surrealdb::sql::Datetime::from(opened)))
-        .bind(("b", surrealdb::sql::Datetime::from(closed)))
         .await?
         .check()?;
     let row: Option<S> = r.take(0)?;
-    Ok(row.and_then(|r| r.sum).unwrap_or(Decimal::ZERO))
+    Ok(row
+        .and_then(|r| r.cash_sales_running)
+        .unwrap_or(Decimal::ZERO))
 }
 
 async fn sum_movements(
@@ -307,19 +309,20 @@ async fn sum_movements(
     Ok(row.and_then(|r| r.sum).unwrap_or(Decimal::ZERO))
 }
 
-/// Compute the expected drawer cash for an open session at instant `at`.
-/// Helper that powers both the close path and the live `/arqueo` peek.
+/// Compute the expected drawer cash for an open session as of now.
+/// Helper that powers both the close path and the live `/arqueo` peek. The
+/// cash-sales side is the maintained `cash_sales_running` aggregate (migration
+/// 0030), so this no longer scans `order`.
 pub async fn compute_summary(
     db: &Db,
     tenant: &Thing,
     session_id: &str,
-    at: DateTime<Utc>,
 ) -> DomainResult<(CashSessionDto, Decimal, Decimal, Decimal, Decimal)> {
     let session = get_session(db, tenant, session_id).await?;
     let sid = thing(session_id).unwrap();
     let movements_in = sum_movements(db, tenant, &sid, "ingreso").await?;
     let movements_out = sum_movements(db, tenant, &sid, "retiro").await?;
-    let cash_sales = sum_cash_sales(db, tenant, session.opened_at, at).await?;
+    let cash_sales = read_cash_running(db, tenant, &sid).await?;
     let expected = crate::invariants::expected_drawer(
         session.opening_cash,
         cash_sales,
@@ -339,7 +342,7 @@ pub async fn close_session(
 ) -> DomainResult<CloseSummary> {
     let now = Utc::now();
     let (session, cash_sales, movements_in, movements_out, expected) =
-        compute_summary(db, tenant, session_id, now).await?;
+        compute_summary(db, tenant, session_id).await?;
     if session.status != "open" {
         return Err(DomainError::Conflict("la caja ya está cerrada".into()));
     }
@@ -377,7 +380,7 @@ pub async fn close_session(
 /// Live arqueo: same numbers a close would compute, without freezing.
 pub async fn arqueo(db: &Db, tenant: &Thing, session_id: &str) -> DomainResult<CloseSummary> {
     let (session, cash_sales, movements_in, movements_out, expected) =
-        compute_summary(db, tenant, session_id, Utc::now()).await?;
+        compute_summary(db, tenant, session_id).await?;
     // For an open session, surface the expected cash on the dto's
     // `closing_cash_expected` so the operator app can render it without a
     // separate field. Counted/discrepancia remain None.
