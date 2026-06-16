@@ -3179,3 +3179,17 @@ GATE cliente verde: `npm run build` (33 módulos) + `npm test` 194/194. Sin toca
 código de vistas (doc + script de QA). Sin bugs de server en mi scope (todos los
 contratos IPC requeridos presentes en vivo). PR cascada vs #214 (paxoloop rebasa
 a erp-parity al integrar).
+
+## MSI local dry-run (unsigned) — de-risk piloto — 2026-06-16
+
+Branch `feat/msi-local-dryrun` (WT `pharma-wt-p7-msi`). NO release: sin firma, sin promover a Latest, sin mirror (acción fundador, reglas #9/#10).
+
+- **Build verificado**: `pharma-server-0.1.24-x86_64.msi` (12.35 MB), WiX v3.14.1.8722 + cargo-wix 0.3.9, Windows 11 Pro. candle/light limpios.
+- **Smoke full verde** (PowerShell elevado): install `/qn` EXIT 0 → service `PharmaServer` Running/Automatic + firewall "Pharma Server API" Inbound/Allow + `pharma-service.exe` en `C:\Program Files\PharmaServer` + `/health/live` y `/health/ready` ambos **200** + data dir `C:\ProgramData\PharmaServer\data` creado. Uninstall `/qn` EXIT 0 → service/firewall/exe removidos, **datos retenidos** (`CreateFolder` sin remoción = sin lock-in, invariante continuidad). Reinstall sobre datos retenidos → SurrealKv reabre BD existente sin lock, `/health/ready` 200.
+- **Bloqueante M3 RESUELTO**: `installer/wix/main.wxs` ya tiene `ServiceComponents` con `<Component>` completo (ServiceInstall + ServiceControl + FirewallException). La nota "ServiceComponents vacío" en CLAUDE.md/README está stale.
+- **Gotchas documentados** en `docs/operator/msi-local-dryrun.md`:
+  1. `cargo wix` debe correr desde `crates/service` (no raíz): el `include = ../../installer/wix/main.wxs` se resuelve relativo al cwd. README está desactualizado.
+  2. Usar `--no-build` tras `cargo build --release -p service`: el rebuild interno de cargo-wix regenera `utoipa-swagger-ui/out/embed.rs` stale → `SwaggerUiDist::get not found` (mismatch rust-embed 8.11 / swagger-ui 8.1). Build directo compila limpio (EXIT 0).
+  3. Target stale entre rutas de checkout: `#[folder]` absolutos embebidos apuntan al clone viejo; `cargo build` los regenera.
+- **Residuales (NO bloqueantes piloto)**: (a) MajorUpgrade real no probado — requiere MSI de versión mayor (0.1.25 sobre 0.1.24); el reinstall same-version solo verifica reapertura de BD. (b) Sin firma Authenticode → SmartScreen (gate de release, Fase 9). (c) README desactualizado (gotcha #1).
+- **GATE**: solo docs tocados; `cargo build --release -p service` EXIT 0 verificado.
