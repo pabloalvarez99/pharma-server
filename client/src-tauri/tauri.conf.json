@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pharma Client",
+  "productName": "RutBusiness",
   "version": "0.1.0",
   "identifier": "cl.pharmaserver.client",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Pharma Client",
+        "title": "RutBusiness",
         "width": 1100,
         "height": 720,
         "minWidth": 900,

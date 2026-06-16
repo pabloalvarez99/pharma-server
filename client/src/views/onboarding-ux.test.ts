@@ -8,7 +8,11 @@ import {
   dashboardCta,
   loadStoredServer,
   saveStoredServer,
+  loadStoredTenant,
+  saveStoredTenant,
   SERVER_STORE_KEY,
+  TENANT_STORE_KEY,
+  DEFAULT_TENANT_SLUG,
   MAX_CONN_ATTEMPTS,
   type KeyStore,
 } from "./onboarding-ux";
@@ -127,5 +131,42 @@ describe("server URL persistence (survives restart)", () => {
     };
     expect(loadStoredServer(boom)).toBeUndefined();
     expect(saveStoredServer(boom, "http://127.0.0.1:8080")).toBe(false);
+  });
+});
+
+describe("branch slug persistence (no lock-out on second launch)", () => {
+  it("round-trips a server-derived slug so Sucursal pre-fills it next launch", () => {
+    const store = memStore();
+    // First-run setup derived "almacen-don-jose" from the business name.
+    saveStoredTenant(store, "almacen-don-jose");
+    expect(store.dump()[TENANT_STORE_KEY]).toBe("almacen-don-jose");
+    // A fresh launch reading the same store gets it back — NOT "principal".
+    expect(loadStoredTenant(store)).toBe("almacen-don-jose");
+  });
+
+  it("falls back to the generic default when nothing is stored", () => {
+    expect(loadStoredTenant(memStore())).toBe(DEFAULT_TENANT_SLUG);
+    expect(loadStoredTenant(memStore({ [TENANT_STORE_KEY]: "   " }))).toBe(DEFAULT_TENANT_SLUG);
+  });
+
+  it("trims the slug and never overwrites a good value with a blank one", () => {
+    const store = memStore({ [TENANT_STORE_KEY]: "minimarket-la-esquina" });
+    saveStoredTenant(store, "   ");
+    expect(loadStoredTenant(store)).toBe("minimarket-la-esquina");
+    saveStoredTenant(store, "  nueva-sucursal  ");
+    expect(store.dump()[TENANT_STORE_KEY]).toBe("nueva-sucursal");
+  });
+
+  it("survives a storage that throws (privacy mode) without crashing", () => {
+    const boom: KeyStore = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+      setItem: () => {
+        throw new Error("denied");
+      },
+    };
+    expect(loadStoredTenant(boom)).toBe(DEFAULT_TENANT_SLUG);
+    expect(() => saveStoredTenant(boom, "x")).not.toThrow();
   });
 });

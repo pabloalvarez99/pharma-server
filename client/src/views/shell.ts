@@ -151,10 +151,10 @@ export function renderShell(
       <aside class="sidebar">
         <div class="sidebar-brand">
           <span class="rb-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"></path>
-              <path d="M4 7h16v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path>
-              <path d="M9 11h6M9 15h4"></path>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3.6V20.4"></path>
+              <path d="M8 3.6h4.4a4.2 4.2 0 0 1 0 8.4H8"></path>
+              <path d="M9.2 12 17 20.4"></path>
             </svg>
             <span class="rb-dv"></span>
           </span>
