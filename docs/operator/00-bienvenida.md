@@ -3,16 +3,22 @@ title: 00 · Bienvenida y vista general
 audience: todos los operadores
 ---
 
-# Bienvenida a Tu Farmacia
+# Bienvenida a RutBusiness
 
-Tu Farmacia es la aplicación que vas a usar todos los días para **atender al
-público, registrar las ventas, revisar el stock y mirar cómo va la farmacia**.
+**RutBusiness** es la aplicación que vas a usar todos los días para **atender al
+público, registrar las ventas, revisar el stock y mirar cómo va el negocio**. Su
+lema lo resume: *el sistema operativo de tu negocio — tu RUT es la llave*.
+
+Sirve para **cualquier rubro**: farmacia, minimarket o almacén, restaurant, café,
+tienda, servicios. Al crear tu cuenta elegís tu rubro y la aplicación muestra
+sólo las secciones que te sirven (por ejemplo, las **Recetas** sólo aparecen en
+farmacia).
 
 Se instala una sola vez en el computador del local. Una vez instalada, aparece
-un icono en el escritorio que dice **Tu Farmacia**. Hacés doble click sobre ese
+un icono en el escritorio que dice **RutBusiness**. Hacés doble click sobre ese
 icono y se abre la aplicación.
 
-> (ver captura: icono de Tu Farmacia en el escritorio)
+> (ver captura: icono de RutBusiness en el escritorio)
 
 ## Qué hace este sistema
 
@@ -24,10 +30,10 @@ icono y se abre la aplicación.
 - **Compras** — pedir mercadería a proveedores, recibirla (sube el stock) y
   llevar lo que les debés.
 - **Boletas y facturas** — emitir boletas y facturas electrónicas al SII, con
-  notas de crédito/débito y guías.
+  notas de crédito/débito y guías. Esto sirve para **todos los rubros**.
 - **Devoluciones** — reembolsar una venta cuando el cliente devuelve algo.
 - **Recetas** — registrar recetas magistrales y el libro de productos
-  controlados (Ley 20.000).
+  controlados (Ley 20.000). **(solo rubro farmacia)**
 - **Reportes** — cuánto vendiste hoy, tus productos estrella y tus márgenes.
 - **Respaldo** — cada noche se guarda una copia completa de la información,
   automáticamente.
@@ -36,29 +42,33 @@ No hace falta que aprendas todo de una vez: cada parte tiene su capítulo en est
 manual (mirá el [índice](./README.md)). Empezá por **vender** y **mirar el
 inventario**; el resto lo vas usando a medida que lo necesitás.
 
-Todo eso pasa **adentro del computador de la farmacia**. No hay nube, no hay
+Todo eso pasa **adentro del computador del local**. No hay nube, no hay
 servidores afuera. Si te cortan internet podés seguir trabajando sin ningún
 problema.
 
 ## Cómo se ve la aplicación
 
-Cuando abrís Tu Farmacia vas a ver, en orden, **dos pantallas**.
+La **primera vez** que abrís RutBusiness en un servidor recién instalado vas a
+ver una pantalla para **crear tu cuenta** (ver
+[Tu primer inicio de sesión](./01-primer-inicio.md)). Después de eso, cada vez
+que abrís la aplicación vas a ver, en orden, **dos pantallas**.
 
 ### Pantalla 1 — el inicio de sesión
 
 > (ver captura: pantalla de login con dos columnas)
 
-A la **izquierda** hay un panel con el logo de Tu Farmacia, el nombre de la
-ciudad y una frase corta que dice **Tu farmacia, lista.** Más abajo aparecen
-tres puntos que te recuerdan las virtudes del sistema: **Funciona sin
-internet**, **Boleta SII · ISP · recetas**, **POS en menos de 50 ms**.
+A la **izquierda** hay un panel con el logo de RutBusiness, el wordmark
+**RutBusiness** y la frase corta **Tu negocio, listo.** Debajo, una línea que
+dice *Tu catálogo, tus ventas y tu caja — siempre en tu local. Tu RUT es la
+llave.* Y tres puntos que te recuerdan las virtudes del sistema: **Funciona sin
+internet**, **Boleta y factura SII**, **POS en menos de 50 ms**.
 
 A la **derecha** hay un formulario con tres campos para que ingreses:
 
 - **Sucursal** — el nombre corto de tu local (por ejemplo `principal`).
 - **Correo** — tu dirección de correo registrada en el sistema (por ejemplo
-  `cajera@tufarmacia.cl`).
-- **Contraseña** — tu clave personal.
+  `usuario@minegocio.cl`).
+- **Contraseña** — tu clave personal (con un ícono de ojo para mostrarla).
 
 Y abajo de todo, un botón grande que dice **ENTRAR**.
 
@@ -75,7 +85,7 @@ Cuando entrás correctamente, la pantalla de login se desvanece y aparece el
 
 **Columna izquierda — el menú**
 
-Es una barra angosta a la izquierda. Arriba aparece el logo de Tu Farmacia
+Es una barra angosta a la izquierda. Arriba aparece el wordmark **RutBusiness**
 chiquito, y debajo la lista de **módulos**. Los que más vas a usar en el
 mostrador:
 
@@ -85,10 +95,11 @@ mostrador:
 - **Inventario** (Stock y lotes) — para ver qué tenés.
 - **Caja** — apertura y arqueo del turno.
 
-Y los que usa más quien administra la farmacia: **Clientes**, **Compras**,
-**Recetas**, **Boletas**, **Facturas**, **Gastos**, **Reportes**, **Auditoría**,
-**Importar** y **Configuración**. No te asustes por la cantidad: cada uno tiene
-su capítulo y los vas conociendo de a poco.
+Y los que usa más quien administra el negocio: **Clientes**, **Compras**,
+**Boletas**, **Facturas**, **Gastos**, **Reportes**, **Auditoría**,
+**Importar** y **Configuración**. En el rubro **Farmacia** además aparece
+**Recetas**. No te asustes por la cantidad: cada uno tiene su capítulo y los vas
+conociendo de a poco.
 
 Al final del menú hay un botón gris que dice **Cerrar sesión**. Lo usás cuando
 terminás tu turno.
@@ -98,7 +109,7 @@ terminás tu turno.
 Te dice, de izquierda a derecha:
 - A qué **Sucursal** estás conectada/o.
 - Con qué usuario entraste.
-- En qué **plan** está tu farmacia (Free, Pro, Business o Enterprise — son las
+- En qué **plan** está tu negocio (Free, Pro, Business o Enterprise — son las
   versiones del producto).
 - Y el **estado del servidor**, que puede decir **Operativo**, **Degradado** o
   **Sin conexión**. Si dice algo distinto a **Operativo**, mirá la sección

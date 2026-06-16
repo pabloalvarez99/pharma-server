@@ -139,6 +139,19 @@ catálogo poblado (camino de la primera venta alcanzable). Sin CLI en ningún pa
    `tufarmacia`), pero la app ya migró a defaults genéricos (`principal`, correo
    vacío) → la app va ADELANTE del manual. Generalizar el manual es de la lane de
    docs (fuera de mi scope de views). Anotado.
+   → **FIJADO** (lane `feat/operator-manual-multirubro`, ye): barrido completo de
+   `docs/operator/00–13`. Marca `Tu Farmacia`→`RutBusiness`, tagline/pilares/
+   correos/sucursal genéricos (`usuario@minegocio.cl`, `dueno@minegocio.cl`,
+   `principal`), rol `químico`→`encargado de stock` salvo donde es pharmacy-real.
+   Secciones pharmacy-only (recetas/controlados Ley 20.000, principio activo/
+   laboratorio) marcadas explícito **(solo rubro farmacia)** — NO borradas, válidas
+   para ese vertical. `01-primer-inicio.md` reescrito al flujo REAL: pantalla
+   "Crea tu cuenta" (nombre+rubro select+correo+contraseña ≥8) en primer arranque
+   + login normal después. `00-bienvenida.md` actualizado a la UI actual
+   (wordmark RutBusiness, pilares "Funciona sin internet · Boleta y factura SII ·
+   POS <50ms", módulos condicionados por rubro). Nuevo cap **`13-importar-datos.md`**
+   documenta migración CSV (preview→confirmar) + datos demo + export — cierra la
+   "Pendiente lane hermana" de abajo. Sin código → sin GATE de build (prosa).
 
 ## Migración de catálogo CSV (ye, lane feat/import-csv-migration-qa)
 
@@ -182,4 +195,7 @@ o **corrompía datos**. Cazado contra backend vivo (`crates/api/tests/import_end
 Nota de scope: (1)-(5) tocaron `crates/api/src/v1/catalog.rs` (backend roto en caso
 real → GATE workspace, no sólo cliente, por charter). Cliente: `importar.ts` (flujo
 2 pasos) + `api.ts` append-only (`importProductsPreview`) + `import_products_preview`
-Tauri cmd. Pendiente lane hermana: `docs/operator` no documenta migración CSV todavía.
+Tauri cmd. → **DOCUMENTADO** en `docs/operator/13-importar-datos.md` (lane
+`feat/operator-manual-multirubro`): el operador ahora tiene paso a paso de
+Previsualizar→Confirmar, columnas obligatorias/opcionales (con alias ES),
+reimport sin duplicar por `external_id`, export, y el bloque "datos demo".

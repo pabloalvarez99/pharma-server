@@ -1,11 +1,15 @@
 ---
 title: 08 · Boletas electrónicas SII
-audience: dueños y administradores de farmacia
+audience: dueños y administradores
 ---
 
 # Boletas electrónicas (SII) — paso a paso
 
-Este capítulo explica cómo dejar tu farmacia emitiendo **boletas electrónicas**
+> Las boletas y facturas electrónicas SII son **universales**: las emite
+> cualquier negocio en Chile, sea farmacia, minimarket, restaurant o servicios.
+> Este capítulo aplica a **todos los rubros**.
+
+Este capítulo explica cómo dejar tu negocio emitiendo **boletas electrónicas**
 válidas ante el SII, cómo emitirlas desde la aplicación, y cómo descargar el
 **libro de ventas** del mes para tu contador.
 
@@ -23,8 +27,8 @@ Para emitir boletas electrónicas el SII exige tres cosas:
 2. **CAF** (Código de Autorización de Folios). Es un archivo XML que el SII
    te entrega gratis desde su sitio web y que autoriza un rango de números
    de boleta (folios). Cuando se acaban, pedís otro.
-3. **Datos del emisor**: RUT, razón social, giro, dirección y comuna de la
-   farmacia, tal como están registrados en el SII.
+3. **Datos del emisor**: RUT, razón social, giro, dirección y comuna del
+   negocio, tal como están registrados en el SII.
 
 ## Configuración inicial
 

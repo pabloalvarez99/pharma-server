@@ -1,6 +1,6 @@
 ---
 title: 12 · Devoluciones y reembolsos
-audience: cajeros, dueños y administradores de farmacia
+audience: cajeros, dueños y administradores
 ---
 
 # Devoluciones y reembolsos

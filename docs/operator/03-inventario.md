@@ -1,6 +1,6 @@
 ---
 title: 03 · Revisar el inventario
-audience: cajeros, químicos, admin
+audience: cajeros, encargados de stock, admin
 ---
 
 # Revisar el inventario
@@ -94,13 +94,15 @@ El badge es la palabrita de colores al final de cada fila. Hay tres posibles:
 
 ### El subtítulo debajo del nombre
 
-Debajo del nombre del producto, en gris chiquito, aparece el **laboratorio**
-o el **principio activo**. Te sirve para distinguir, por ejemplo, dos
-paracetamoles de marcas distintas.
+Debajo del nombre del producto, en gris chiquito, aparece la **categoría** o la
+**presentación** del producto. En el rubro **Farmacia** ahí se muestra el
+**laboratorio** o el **principio activo** — te sirve para distinguir, por
+ejemplo, dos paracetamoles de marcas distintas. En otros rubros esos campos no
+se usan y simplemente no aparecen.
 
 ## Lo que NO podés hacer desde acá (todavía)
 
-Esta pantalla es **sólo de consulta**. Desde el cajero o el químico:
+Esta pantalla es **sólo de consulta**. Desde el cajero o el encargado de stock:
 
 - **No** podés cambiar el precio.
 - **No** podés cargar mercadería nueva.
