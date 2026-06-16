@@ -26,7 +26,7 @@ import {
   type NearExpiryRow,
   type NewProductInput,
 } from "../api";
-import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
+import { clp, num, fecha, isValidRut, canonicalRut, formatRut } from "../format";
 import {
   toRfc3339Noon,
   stockLevel,
@@ -704,7 +704,7 @@ function loteRow(b: Batch): string {
       <td>${escapeHtml(b.batch_code)}${
         b.notes ? `<div class="cell-sub muted">${escapeHtml(b.notes)}</div>` : ""
       }</td>
-      <td>${fmtDate(b.expiry_date)}</td>
+      <td>${fecha(b.expiry_date)}</td>
       <td class="num">${num(b.stock)}</td>
       <td>${expiryPill(b.expiry_date)}</td>
     </tr>
@@ -786,7 +786,7 @@ function nearRow(r: NearExpiryRow & { tone: "danger" | "warn" | "ok"; label: str
     <tr data-id="${escapeHtml(r.product_id)}" class="inv-row" tabindex="0">
       <td>${escapeHtml(r.product_name)}</td>
       <td>${escapeHtml(r.batch_code)}</td>
-      <td>${fmtDate(r.expiry_date)}</td>
+      <td>${fecha(r.expiry_date)}</td>
       <td class="num">${num(r.stock)}</td>
       <td class="num">${r.days_to_expiry}</td>
       <td><span class="pill pill-${r.tone}">${r.label}</span></td>
@@ -949,12 +949,6 @@ function pdStat(label: string, value: string): string {
       <strong class="pd-stat-value">${value}</strong>
     </div>
   `;
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function detailSkeleton(): string {

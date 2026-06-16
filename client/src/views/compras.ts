@@ -27,7 +27,7 @@ import {
   type PurchasePaymentSummary,
   type PurchasePayment,
 } from "../api";
-import { clp, num, toNumber } from "../format";
+import { clp, num, toNumber, fecha } from "../format";
 import {
   kpiSkeleton,
   tableSkeleton,
@@ -325,7 +325,7 @@ function renderTable(host: HTMLElement, rows: PurchaseOrder[], filtered: boolean
 
 function poRow(po: PurchaseOrder): string {
   const statusBadge = statusPill(po.status);
-  const date = fmtDate(po.created_at);
+  const date = fecha(po.created_at);
   const ref = po.external_ref || po.notes?.slice(0, 28) || "—";
   const supplierShort = po.supplier.replace(/^supplier:/, "");
   return `
@@ -695,7 +695,7 @@ function renderApSection(s: PurchasePaymentSummary, po: PurchaseOrderDetail): st
 function payRow(p: PurchasePayment): string {
   return `
     <tr>
-      <td>${escapeHtml(fmtDate(p.paid_at))}</td>
+      <td>${escapeHtml(fecha(p.paid_at))}</td>
       <td>${escapeHtml(methodLabel(p.payment_method))}</td>
       <td><span class="muted">${escapeHtml(p.reference || "—")}</span></td>
       <td class="num">${clp(p.amount)}</td>
@@ -735,7 +735,7 @@ function renderPoDetail(po: PurchaseOrderDetail): string {
       <div class="po-detail-meta">
         ${po.external_ref ? `<span>Ref: ${escapeHtml(po.external_ref)}</span>` : ""}
         <span>Moneda: ${escapeHtml(po.currency)}</span>
-        <span>Fecha: ${escapeHtml(fmtDate(po.created_at))}</span>
+        <span>Fecha: ${escapeHtml(fecha(po.created_at))}</span>
         <span>Total: ${clp(po.total)}</span>
       </div>
       ${po.notes ? `<div class="cell-sub muted">${escapeHtml(po.notes)}</div>` : ""}
@@ -864,14 +864,4 @@ function renderError(err: unknown): string {
   // Permission / offline / generic copy is centralized so compras, gastos and
   // inventory all degrade the same way (no blank screen, no raw English code).
   return errorStateHtml(err, "las compras");
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-  });
 }

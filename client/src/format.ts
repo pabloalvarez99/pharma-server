@@ -30,6 +30,26 @@ export function num(value: number): string {
   return NUM.format(value);
 }
 
+// --- dates -------------------------------------------------------------------
+// Server timestamps arrive as RFC3339 strings (`DateTime<Utc>`). Every list/row
+// that shows a date — inventory lotes, compras OC + pagos, gastos egresos —
+// renders through ONE formatter so the operator never sees `16-06-2026` in one
+// view and `16-06-26` in the next. es-CL with a full 4-digit year (`dd-mm-yyyy`):
+// unambiguous on compliance-adjacent docs and matches the CL convention.
+const FECHA = new Intl.DateTimeFormat("es-CL", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+/** Canonical operator-facing date (`dd-mm-yyyy`, es-CL) from an RFC3339/parseable
+ *  string. Unparseable input is echoed verbatim rather than rendering "Invalid
+ *  Date" — never hide a real value behind a formatter failure. */
+export function fecha(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : FECHA.format(d);
+}
+
 // --- POS cash math -----------------------------------------------------------
 // Pure helpers behind the POS checkout. Extracted so the vuelto/quick-cash logic
 // (the cashier-loop money path) is regression-tested without a DOM. CLP has no
