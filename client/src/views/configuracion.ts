@@ -21,6 +21,7 @@ import {
   RUBRO_CATALOG,
   seedVerticalFor,
   parseRubro,
+  type SeedVertical,
 } from "../vertical";
 import { visibleModulesForRubro, MODULE_LABELS } from "./first-run";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
@@ -520,7 +521,10 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-demo-status")!;
     refreshDemoHelp();
 
-    const run = async (pack: "pharmacy" | "minimarket", force: boolean): Promise<void> => {
+    const run = async (
+      pack: NonNullable<SeedVertical>,
+      force: boolean,
+    ): Promise<void> => {
       statusEl.hidden = true;
       btn.disabled = true;
       const prev = btn.textContent;

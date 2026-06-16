@@ -8,6 +8,7 @@ import {
   VERTICAL_OPTIONS,
   parseRubro,
   featuresForRubro,
+  seedVerticalFor,
   DEFAULT_RUBRO,
   RUBRO_CATALOG,
   type Vertical,
@@ -130,5 +131,32 @@ describe("featuresForRubro — per-rubro capability gate", () => {
       expect(typeof f.recetas).toBe("boolean");
       expect(typeof f.physicalStock).toBe("boolean");
     });
+  });
+});
+
+describe("seedVerticalFor — rubro → demo seed pack (es→en)", () => {
+  it("maps the four rubros that have a demo pack today", () => {
+    expect(seedVerticalFor("farmacia")).toBe("pharmacy");
+    expect(seedVerticalFor("minimarket")).toBe("minimarket");
+    expect(seedVerticalFor("cafe")).toBe("cafe");
+    expect(seedVerticalFor("tienda")).toBe("tienda");
+  });
+
+  it("returns null for rubros without a pack yet", () => {
+    expect(seedVerticalFor("restaurant")).toBeNull();
+    expect(seedVerticalFor("belleza")).toBeNull();
+    expect(seedVerticalFor("servicios")).toBeNull();
+    expect(seedVerticalFor("otro")).toBeNull();
+  });
+
+  it("returns null for unknown / empty values", () => {
+    expect(seedVerticalFor("kiosko")).toBeNull();
+    expect(seedVerticalFor(null)).toBeNull();
+    expect(seedVerticalFor(undefined)).toBeNull();
+  });
+
+  it("every catalog seedVertical is a valid backend pack name or null", () => {
+    const valid = new Set(["pharmacy", "minimarket", "cafe", "tienda", null]);
+    RUBRO_CATALOG.forEach((r) => expect(valid.has(r.seedVertical)).toBe(true));
   });
 });
