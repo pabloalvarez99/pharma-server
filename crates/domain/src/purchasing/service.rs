@@ -281,6 +281,34 @@ pub async fn list_purchase_orders(
     repo::list_purchase_orders(db, tenant, &filters).await
 }
 
+/// Issue a `draft` purchase order to the supplier (`draft → sent`). This is
+/// the lifecycle transition that makes goods receipt reachable end-to-end:
+/// `create_purchase_order` leaves the PO in `draft`, but
+/// `receive_purchase_order_lines` (the only receive path wired to HTTP) only
+/// accepts `sent`/`approved`/`partially_received`. Without a way to leave
+/// `draft` the operator could create an OC and never receive against it
+/// (BUG-bob-002). Refuses any status other than `draft` with `Conflict` (a PO
+/// already sent/received/cancelled can't be re-issued).
+pub async fn send_purchase_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &str,
+) -> DomainResult<PurchaseOrderDto> {
+    let po = parse_typed(id, "purchase_order")?;
+    let (status, _total, _currency) = repo::purchase_order_belongs(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if status != "draft" {
+        return Err(DomainError::Conflict(format!(
+            "orden en estado '{status}' no puede pasar a 'sent' (solo desde 'draft')"
+        )));
+    }
+    repo::set_purchase_order_status(db, tenant, &po, "sent").await?;
+    repo::get_purchase_order(db, tenant, &po)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
 pub async fn get_purchase_order(
     db: &Db,
     tenant: &Thing,

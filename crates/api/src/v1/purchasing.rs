@@ -49,6 +49,10 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/suppliers", post(create_supplier))
         .route("/api/v1/purchase-orders", post(create_purchase_order))
         .route(
+            "/api/v1/purchase-orders/{id}/send",
+            post(send_purchase_order),
+        )
+        .route(
             "/api/v1/purchase-orders/{id}/receive",
             post(receive_purchase_order),
         )
@@ -322,6 +326,28 @@ pub async fn create_purchase_order(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::create_purchase_order(&db, &t, input).await?))
+}
+
+/// Emite una OC al proveedor (status draft → sent). Habilita la recepción de
+/// mercadería contra la OC. Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/purchase-orders/{id}/send", tag = "Purchasing",
+    params(("id" = String, Path)),
+    responses(
+        (status = 200, description = "OC emitida (sent)", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, description = "Sólo OC en draft se pueden emitir", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn send_purchase_order(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<PurchaseOrderDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::send_purchase_order(&db, &t, &id).await?))
 }
 
 /// Recibe una orden de compra (status → received) + crea stock_movement +

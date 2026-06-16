@@ -99,7 +99,7 @@ pub async fn create_expense(
             input.payment_method
         )));
     }
-    let session_thing: surrealdb::sql::Value = match input.cash_session.as_deref() {
+    let session_opt: Option<Thing> = match input.cash_session.as_deref() {
         Some(s) if !s.is_empty() => {
             let t = thing(s)
                 .map_err(|_| DomainError::Invalid(format!("cash_session id inválido: {s}")))?;
@@ -108,9 +108,50 @@ pub async fn create_expense(
                     "cash_session no es record<cash_register_session>".into(),
                 ));
             }
-            t.into()
+            Some(t)
         }
-        _ => surrealdb::sql::Value::None,
+        _ => None,
+    };
+    // A cash expense tied to a cash session is a real drawer withdrawal: post a
+    // matching `cash_movement(tipo='retiro')` so arqueo/cierre reflect it.
+    // Without this the expected drawer stays too high → phantom faltante at
+    // cierre (the operator pays petty cash but the count never drops). Only
+    // `cash` touches the drawer; bank/card/transfer do not. The session must
+    // be open (mirrors `cash_register::add_movement`).
+    let post_retiro = input.payment_method == "cash" && session_opt.is_some();
+    if post_retiro {
+        let sid = session_opt.clone().unwrap();
+        let mut sr = db
+            .query(
+                "SELECT status FROM cash_register_session WHERE id = $id AND tenant = $t LIMIT 1",
+            )
+            .bind(("id", sid))
+            .bind(("t", tenant.clone()))
+            .await?
+            .check()?;
+        let status: Option<String> = sr.take((0, "status"))?;
+        match status.as_deref() {
+            Some("open") => {}
+            Some(_) => {
+                return Err(DomainError::Conflict(
+                    "no se puede cargar un gasto en efectivo a una caja cerrada".into(),
+                ))
+            }
+            None => {
+                return Err(DomainError::Invalid(
+                    "la sesión de caja no existe en este tenant".into(),
+                ))
+            }
+        }
+    }
+    let retiro_reason = format!(
+        "Gasto: {} — {}",
+        input.category.trim(),
+        input.description.trim()
+    );
+    let session_thing: surrealdb::sql::Value = match &session_opt {
+        Some(t) => t.clone().into(),
+        None => surrealdb::sql::Value::None,
     };
     let supplier_thing: surrealdb::sql::Value = match input.supplier.as_deref() {
         Some(s) if !s.is_empty() => {
@@ -129,12 +170,25 @@ pub async fn create_expense(
         Some(dt) => surrealdb::sql::Datetime::from(dt).into(),
         None => surrealdb::sql::Datetime::from(Utc::now()).into(),
     };
+    // When the expense draws cash from an open session, create the expense and
+    // its `retiro` cash_movement in one BEGIN/COMMIT so a crash can't leave the
+    // expense recorded without the drawer effect (or vice-versa). The expense
+    // is always statement 0, so `r.take(0)` reads it back in both branches.
+    let sql = if post_retiro {
+        "BEGIN; \
+         CREATE expense SET tenant=$t, category=$c, description=$d, \
+            amount=$a, payment_method=$pm, cash_session=$cs, supplier=$su, \
+            note=$nt, created_by=$cb, incurred_at=$ia RETURN AFTER; \
+         CREATE cash_movement SET tenant=$t, session=$cs, tipo='retiro', \
+            amount=$a, reason=$rsn, admin=$cb; \
+         COMMIT;"
+    } else {
+        "CREATE expense SET tenant=$t, category=$c, description=$d, \
+            amount=$a, payment_method=$pm, cash_session=$cs, supplier=$su, \
+            note=$nt, created_by=$cb, incurred_at=$ia RETURN AFTER"
+    };
     let mut r = db
-        .query(
-            "CREATE expense SET tenant=$t, category=$c, description=$d, \
-             amount=$a, payment_method=$pm, cash_session=$cs, supplier=$su, \
-             note=$nt, created_by=$cb, incurred_at=$ia RETURN AFTER",
-        )
+        .query(sql)
         .bind(("t", tenant.clone()))
         .bind(("c", input.category))
         .bind(("d", input.description))
@@ -145,6 +199,7 @@ pub async fn create_expense(
         .bind(("nt", input.note))
         .bind(("cb", created_by.cloned()))
         .bind(("ia", incurred_at))
+        .bind(("rsn", retiro_reason))
         .await?
         .check()?;
     let row: Option<Row> = r.take(0)?;

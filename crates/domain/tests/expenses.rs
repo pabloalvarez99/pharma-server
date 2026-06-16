@@ -109,6 +109,112 @@ async fn create_then_list_filters_by_category_and_payment_method() {
 }
 
 #[tokio::test]
+async fn cash_expense_with_open_session_posts_retiro_reflected_in_arqueo() {
+    use domain::cash_register::{model as cmodel, service as cash};
+
+    let (db, tenant, user) = setup().await;
+    let session = cash::open_session(
+        &db,
+        &tenant,
+        &user,
+        cmodel::OpenSessionInput {
+            register_name: "Caja 1".into(),
+            opening_cash: dec("10000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Cash expense tied to the open session = drawer withdrawal.
+    service::create_expense(
+        &db,
+        &tenant,
+        Some(&user),
+        NewExpense {
+            category: "varios".into(),
+            description: "café para el local".into(),
+            amount: dec("3000"),
+            payment_method: "cash".into(),
+            cash_session: Some(session.id.clone()),
+            supplier: None,
+            note: None,
+            incurred_at: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // A bank expense tied to the session must NOT touch the drawer.
+    service::create_expense(
+        &db,
+        &tenant,
+        Some(&user),
+        NewExpense {
+            category: "arriendo".into(),
+            description: "transferencia".into(),
+            amount: dec("500000"),
+            payment_method: "bank".into(),
+            cash_session: Some(session.id.clone()),
+            supplier: None,
+            note: None,
+            incurred_at: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let summary = cash::arqueo(&db, &tenant, &session.id).await.unwrap();
+    // Only the cash expense became a retiro; bank one did not.
+    assert_eq!(summary.movements_out, dec("3000"));
+    assert_eq!(summary.movements_in, dec("0"));
+    // Expected drawer = opening − retiros (no sales) = 10000 − 3000 = 7000.
+    assert_eq!(summary.session.closing_cash_expected, Some(dec("7000")));
+}
+
+#[tokio::test]
+async fn cash_expense_without_session_does_not_move_a_drawer() {
+    use domain::cash_register::{model as cmodel, service as cash};
+
+    let (db, tenant, user) = setup().await;
+    let session = cash::open_session(
+        &db,
+        &tenant,
+        &user,
+        cmodel::OpenSessionInput {
+            register_name: "Caja 1".into(),
+            opening_cash: dec("5000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // No cash_session → no retiro on any drawer.
+    service::create_expense(
+        &db,
+        &tenant,
+        Some(&user),
+        NewExpense {
+            category: "varios".into(),
+            description: "compra menor".into(),
+            amount: dec("1000"),
+            payment_method: "cash".into(),
+            cash_session: None,
+            supplier: None,
+            note: None,
+            incurred_at: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let summary = cash::arqueo(&db, &tenant, &session.id).await.unwrap();
+    assert_eq!(summary.movements_out, dec("0"));
+    assert_eq!(summary.session.closing_cash_expected, Some(dec("5000")));
+}
+
+#[tokio::test]
 async fn invalid_amount_or_payment_method_rejected() {
     let (db, tenant, user) = setup().await;
     let err = service::create_expense(

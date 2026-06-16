@@ -182,6 +182,7 @@ impl Modify for SecurityAddon {
         crate::v1::purchasing::list_purchase_orders,
         crate::v1::purchasing::get_purchase_order,
         crate::v1::purchasing::create_purchase_order,
+        crate::v1::purchasing::send_purchase_order,
         crate::v1::purchasing::receive_purchase_order,
         crate::v1::purchasing::get_po_payments,
         crate::v1::purchasing::create_po_payment,
