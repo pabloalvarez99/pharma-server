@@ -3219,3 +3219,30 @@ GATE: cargo fmt --all --check ✓ · cargo clippy -p domain --all-targets -D war
 bench compila + corre (--test, dataset chico, 5/5 ops Success) + gate happy-path
 exit 0 ✓ · npm run e2e: 132 passed / 0 failed / 2 known-bug xfail, exit 0 ✓.
 Sin tocar vistas, sin api.ts, sin migración, sin código lib.
+
+## 2026-06-16 — milton (ola 8 reliability): fix race TOCTOU al abrir caja
+
+Lane: feat/quality-reliability (WT pharma-wt-p8-reliability), off origin/feature/erp-parity @37c6966.
+Tema ola 8 = quality/reliability (garantías de confianza: plata/stock inquebrantables,
+multi-caja concurrente seguro).
+
+BUG-milton-rel-001 (P1, integridad de plata) | cash_register::service::open_session |
+  El abrir caja era CHECK-THEN-ACT sin lock: `SELECT count() ... status='open'` y luego,
+  en un await separado, `CREATE cash_register_session`. Dos aperturas concurrentes del
+  MISMO cajero (doble-click "Abrir caja", dos pestañas POS) leen ambas count=0 y ambas
+  CREAN → el cajero queda con DOS cajas abiertas. Las dos sesiones se reparten
+  `cash_sales_running` + movimientos, así que arqueo/cierre calculan un `expected`
+  erróneo y una `discrepancia` fantasma — quiebre de integridad de plata. El índice
+  `crs_tenant_user_st` (mig 0011) NO es UNIQUE y SurrealDB no soporta unique parcial
+  ("único donde status=open"), así que el guard correcto es a nivel app.
+  FIX: lock async por-(tenant,user) `OPEN_LOCKS` que serializa el check + CREATE — mismo
+  patrón ya probado en `sales::service::SALE_LOCKS` (BUG-003/004) y `dte::caf::ASSIGN_LOCK`.
+  Cajeros distintos nunca comparten lock → throughput multi-cajero intacto. El lock se
+  toma sólo sobre el count + CREATE y se suelta al retornar.
+  TEST (rojo determinista sin el lock bajo el runtime current_thread): 8 aperturas
+  concurrentes (join_all) para el mismo cajero → exactamente 1 Ok, 7 CONFLICT, y la DB
+  conserva 1 sola sesión abierta. Las 9 pruebas de cash_register verdes.
+
+GATE: cargo fmt --all --check ✓ · cargo clippy --workspace --all-targets -D warnings ✓ ·
+cargo test --workspace ✓ (exit 0, 0 fallas). Sin migración, sin api.ts, sin vistas.
+Scope disjunto: sólo crates/domain/src/cash_register/service.rs + tests + dev-dep futures.

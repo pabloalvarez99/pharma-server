@@ -1,15 +1,40 @@
 //! Cash register service. All operations tenant-scoped + audited.
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use surrealdb::sql::{thing, Thing};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::errors::{DomainError, DomainResult};
 
 use super::model::*;
 
 type Db = surrealdb::Surreal<surrealdb::engine::local::Db>;
+
+/// Per-(tenant,user) serialization of the cash-session OPEN critical section
+/// (count-open-sessions check + CREATE). Without it `open_session` is a
+/// check-then-act TOCTOU race: two concurrent opens for the same cashier
+/// (a double-clicked "Abrir caja", two POS tabs) both read count=0 and both
+/// CREATE, leaving the cashier with TWO open drawers. The two sessions then
+/// split `cash_sales_running` and movements, so arqueo/cierre compute a bogus
+/// `expected` and a phantom `discrepancia` — a money-integrity break. Same
+/// approach as `sales::service::SALE_LOCKS` and `dte::caf::ASSIGN_LOCK`.
+/// Different cashiers never share a lock, so throughput is unaffected.
+static OPEN_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    OnceLock::new();
+
+fn open_session_lock(tenant: &Thing, user: &Thing) -> Arc<AsyncMutex<()>> {
+    let locks = OPEN_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = locks.lock().expect("OPEN_LOCKS mutex poisoned");
+    guard
+        .entry(format!("{tenant}|{user}"))
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
 
 fn dec_val(d: Decimal) -> surrealdb::sql::Value {
     surrealdb::sql::Number::from(d).into()
@@ -68,6 +93,11 @@ pub async fn open_session(
     if input.opening_cash.is_sign_negative() {
         return Err(DomainError::Invalid("opening_cash debe ser >= 0".into()));
     }
+    // Serialize the check-then-create per cashier so two concurrent opens can't
+    // both pass the "no open session" check and create a second drawer. Held
+    // only across the count + CREATE below; dropped at function return.
+    let open_lock = open_session_lock(tenant, user);
+    let _open_guard = open_lock.lock().await;
     // Check for an existing open session (per user).
     #[derive(Deserialize)]
     struct C {
