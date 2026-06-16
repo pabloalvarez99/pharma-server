@@ -177,11 +177,37 @@ describe("Journey 5c — live ERP preview per rubro (rubro select 'mostrar, no c
     expect(p.visibleCount).toBeLessThan(p.totalCount);
   });
 
-  it("otro (generic ERP) has no rubro-native bullets but still sells + emits", () => {
+  it("otro (generic ERP) has no rubro-native bullets nor roadmap, still sells + emits", () => {
     const p = rubroPreview("otro");
     expect(p.native).toEqual([]);
+    expect(p.comingSoon).toEqual([]);
     expect(p.categories.find((c) => c.label === "Ventas y caja")?.on).toBe(true);
     expect(p.categories.find((c) => c.label === "Boletas y facturas (SII)")?.on).toBe(true);
+  });
+
+  it("restaurant (not-yet-validated) reads native + a graceful roadmap, no demo yet", () => {
+    const p = rubroPreview("restaurant");
+    expect(p.native.length).toBeGreaterThan(0);
+    expect(p.native.join(" ")).toMatch(/insumos|cocina/i);
+    expect(p.comingSoon.join(" ")).toMatch(/mesas|comandas/i);
+    expect(p.hasDemo).toBe(false);
+  });
+
+  it("café surfaces perishable lotes natively + a production roadmap", () => {
+    const p = rubroPreview("cafe");
+    expect(p.native.join(" ")).toMatch(/pasteler|lotes/i);
+    expect(p.comingSoon.join(" ")).toMatch(/producci/i);
+  });
+
+  it("servicios sells without inventory and shows a work-order roadmap (no dead-end)", () => {
+    const p = rubroPreview("servicios");
+    expect(p.native.join(" ")).toMatch(/sin inventario/i);
+    expect(p.comingSoon.length).toBeGreaterThan(0);
+  });
+
+  it("fully-built rubros (farmacia/minimarket) carry NO 'próximamente' roadmap", () => {
+    expect(rubroPreview("farmacia").comingSoon).toEqual([]);
+    expect(rubroPreview("minimarket").comingSoon).toEqual([]);
   });
 });
 

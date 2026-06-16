@@ -22,6 +22,7 @@ import {
   hasRecetas,
   featuresForRubro,
   seedVerticalFor,
+  rubroCard,
 } from "../vertical";
 
 // --- Server URL resolution + first-launch detection -------------------------
@@ -319,6 +320,9 @@ export interface RubroPreview {
   categories: PreviewCategory[];
   /** Rubro-native bullets ("Específico de tu rubro"). Empty for the generic ERP. */
   native: string[];
+  /** Roadmap items for the rubro, shown with grace as "Próximamente" — direction
+   *  not yet built. Empty for fully-built rubros + the generic ERP. */
+  comingSoon: string[];
   /** Labels of notable sections HIDDEN for this rubro (recetas/inventario/compras). */
   hidden: string[];
   /** Count of menu sections this rubro shows. */
@@ -346,13 +350,14 @@ export function rubroPreview(rubro: Rubro): RubroPreview {
     { label: "Reportes", on: visible.has("reports") },
   ];
 
-  // Native bullets — the "se siente hecho para mi rubro" copy, derived from the
-  // capability flags so it stays honest (no feature we don't actually turn on).
-  const native: string[] = [];
-  if (f.recetas) native.push("Recetas y Libro de controlados (Ley 20.000)");
-  if (f.clinical) native.push("Ficha clínica: principio activo, laboratorio, interacciones");
-  if (f.lotes) native.push("Lotes y vencimiento para productos perecibles");
-  if (!f.physicalStock) native.push("Venta de servicios sin inventario ni lotes");
+  // Native bullets + roadmap come from the catalog card so the copy lives in one
+  // place (docs/strategy/rubro-select-experience.md §3): each card's `valueLines`
+  // describe ONLY what the rubro turns on (kept honest vs `featuresForRubro`),
+  // and `comingSoon` is documented direction shown as "Próximamente" — never a
+  // dead-end (the rubro is a working ERP today regardless).
+  const card = rubroCard(rubro);
+  const native = card ? [...card.valueLines] : [];
+  const comingSoon = card ? [...card.comingSoon] : [];
 
   // Hidden notable sections (so the operator sees what's intentionally absent).
   const notableHidden: ModuleId[] = ["recetas", "inventory", "compras"];
@@ -361,6 +366,7 @@ export function rubroPreview(rubro: Rubro): RubroPreview {
   return {
     categories,
     native,
+    comingSoon,
     hidden,
     visibleCount: visible.size,
     totalCount: ALL_MODULES.length,

@@ -569,6 +569,19 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
          </div>`
       : "";
 
+    // Roadmap "Próximamente": documented direction per rubro, shown sober (muted,
+    // dashed) so it reads as where the rubro is headed — NOT a feature claim and
+    // never a dead-end (the rubro already gives a working ERP today).
+    const comingBlock = p.comingSoon.length
+      ? `<div class="rubro-pv-block rubro-pv-soon">
+           <h5 class="rubro-pv-title">Próximamente para tu rubro</h5>
+           <ul class="rubro-coming">${p.comingSoon
+             .map((t) => `<li>${escapeHtml(t)}</li>`)
+             .join("")}</ul>
+           <p class="muted rubro-pv-muted">Hoy ya funciona como ERP completo; esto llega más adelante.</p>
+         </div>`
+      : "";
+
     const demoBlock = p.hasDemo
       ? `<span class="rubro-pv-demo on">Datos de ejemplo disponibles</span>`
       : `<span class="rubro-pv-demo">Pack de datos demo próximamente</span>`;
@@ -587,6 +600,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         <ul class="rubro-cats">${p.categories.map((c) => catRow(c.label, c.on)).join("")}</ul>
       </div>
       ${nativeBlock}
+      ${comingBlock}
       ${hiddenBlock}
       ${demoBlock}
       <p class="rubro-pv-note muted">Boleta y factura electrónica (SII): en todos los rubros. Recetas y Libro de controlados (Ley 20.000): sólo Farmacia.</p>
@@ -603,10 +617,15 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     if (pack) {
       help.textContent =
         "Llena el negocio con un catálogo de ejemplo (productos, lotes y ventas) para probar la app. Idempotente; puedes regenerarlo.";
+      btn.hidden = false;
       btn.disabled = false;
     } else {
-      help.textContent = "Este rubro aún no tiene pack de datos demo.";
-      btn.disabled = true;
+      // No demo pack for this rubro yet — never a dead button: the operator still
+      // gets a working empty ERP, so point them at the real paths forward instead
+      // of leaving a greyed, inert control (ULTRA-PLAN §8: "no dead-end").
+      help.textContent =
+        "Aún no hay datos demo para este rubro. Podés empezar igual: importá tu catálogo (CSV) o créalo a mano en Inventario.";
+      btn.hidden = true;
     }
   }
 

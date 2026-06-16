@@ -149,6 +149,17 @@ export interface RubroCard {
    *  border, icon, ✓) and the preview, so each rubro reads as its own identity
    *  instead of the single brand teal. Set as `--rubro-accent` on the card. */
   accent: string;
+  /** Rubro-native value bullets ("Específico de tu rubro" in the live preview).
+   *  Present-tense, in the rubro's own language, describing ONLY what the rubro
+   *  actually turns on — must stay honest vs {@link featuresForRubro} (e.g. only
+   *  farmacia claims recetas/Ley 20.000; service rubros say "sin inventario").
+   *  Empty for the generic `otro`. Pure copy; building features is separate. */
+  valueLines: string[];
+  /** Roadmap items shown with grace as "Próximamente" — direction documented per
+   *  rubro-catalog §Disciplina, NOT yet built. Never a dead-end: the rubro still
+   *  gives a working ERP today; this only signals where it's headed. Empty for
+   *  fully-built rubros (farmacia/minimarket) and the generic `otro`. */
+  comingSoon: string[];
   /** Seed pack to request (es→en), or `null` if none yet. */
   seedVertical: SeedVertical;
 }
@@ -165,6 +176,12 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu farmacia, en regla.",
     iconId: "farmacia",
     accent: "#1fd3a3",
+    valueLines: [
+      "Recetas retenidas y Libro de controlados (Ley 20.000)",
+      "Ficha clínica: principio activo, laboratorio e interacciones",
+      "Lotes y vencimiento con alertas de caducidad",
+    ],
+    comingSoon: [],
     seedVertical: "pharmacy",
   },
   {
@@ -175,6 +192,12 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu almacén, al día.",
     iconId: "minimarket",
     accent: "#f5b53d",
+    valueLines: [
+      "Lotes y vencimiento para perecibles, con alertas",
+      "Proveedores y reposición por código de barras",
+      "POS rápido para alto volumen de tickets",
+    ],
+    comingSoon: [],
     seedVertical: "minimarket",
   },
   {
@@ -185,6 +208,11 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu cocina, bajo control.",
     iconId: "restaurant",
     accent: "#ff6b5d",
+    valueLines: [
+      "Insumos y stock de cocina",
+      "Boletas y facturas SII, sin ficha clínica",
+    ],
+    comingSoon: ["Comandas y gestión de mesas"],
     seedVertical: null,
   },
   {
@@ -195,6 +223,11 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu café, listo cada mañana.",
     iconId: "cafe",
     accent: "#c98a4b",
+    valueLines: [
+      "Lotes y vencimiento de pastelería perecible",
+      "POS rápido para el turno de la mañana",
+    ],
+    comingSoon: ["Producción y recetas de elaboración"],
     seedVertical: null,
   },
   {
@@ -205,6 +238,11 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu tienda, ordenada.",
     iconId: "tienda",
     accent: "#5aa9ff",
+    valueLines: [
+      "POS e inventario por producto",
+      "Compras y costo promedio ponderado",
+    ],
+    comingSoon: ["Variantes y tallas (un producto, varios SKU)"],
     seedVertical: null,
   },
   {
@@ -215,6 +253,11 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu salón, agendado.",
     iconId: "belleza",
     accent: "#e879c7",
+    valueLines: [
+      "Venta de servicios sin inventario ni lotes",
+      "Boletas y facturas SII por cada servicio",
+    ],
+    comingSoon: ["Agenda de horas y profesionales"],
     seedVertical: null,
   },
   {
@@ -225,6 +268,11 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu oficio, facturado.",
     iconId: "servicios",
     accent: "#94a3c4",
+    valueLines: [
+      "Servicios sin inventario: cobrás por el trabajo, no por stock",
+      "Boletas y facturas SII por trabajo realizado",
+    ],
+    comingSoon: ["Órdenes de trabajo y presupuestos"],
     seedVertical: null,
   },
   {
@@ -235,6 +283,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     tagline: "Tu negocio, a tu manera.",
     iconId: "otro",
     accent: "#8b97ad",
+    valueLines: [],
+    comingSoon: [],
     seedVertical: null,
   },
 ] as const;
@@ -242,6 +292,12 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
 /** The seed pack (en) for a stored rubro value, or `null` when none exists. */
 export function seedVerticalFor(value: string | null | undefined): SeedVertical {
   return RUBRO_CATALOG.find((r) => r.value === (value ?? "").trim())?.seedVertical ?? null;
+}
+
+/** The catalog card for a stored rubro value, or `undefined` when unknown. Lets
+ *  the preview pull a rubro's native copy/icon/accent from the single source. */
+export function rubroCard(value: string | null | undefined): RubroCard | undefined {
+  return RUBRO_CATALOG.find((r) => r.value === (value ?? "").trim());
 }
 
 // --- per-rubro feature gating ------------------------------------------------

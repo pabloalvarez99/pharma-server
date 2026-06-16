@@ -156,3 +156,48 @@ describe("rubro visual identity (P2 showcase: accent + custom icon)", () => {
     RUBRO_CATALOG.forEach((r) => expect(r.icon.length).toBeGreaterThan(0));
   });
 });
+
+describe("rubro depth (P3 showcase: native value copy + graceful roadmap)", () => {
+  it("every card declares valueLines + comingSoon arrays", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(Array.isArray(r.valueLines)).toBe(true);
+      expect(Array.isArray(r.comingSoon)).toBe(true);
+    });
+  });
+
+  it("the generic 'otro' carries no rubro-native copy nor roadmap", () => {
+    const otro = RUBRO_CATALOG.find((r) => r.value === "otro")!;
+    expect(otro.valueLines).toEqual([]);
+    expect(otro.comingSoon).toEqual([]);
+  });
+
+  it("regulatory claims (Ley 20.000 / controlados) appear ONLY for farmacia", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      const copy = r.valueLines.join(" ");
+      if (r.value === "farmacia") {
+        expect(copy).toMatch(/Ley 20\.000/);
+      } else {
+        expect(copy).not.toMatch(/Ley 20\.000|controlados/i);
+      }
+    });
+  });
+
+  it("service rubros (no physical stock) state 'sin inventario' honestly", () => {
+    ["belleza", "servicios"].forEach((v) => {
+      const r = RUBRO_CATALOG.find((c) => c.value === v)!;
+      expect(featuresForRubro(v).physicalStock).toBe(false);
+      expect(r.valueLines.join(" ")).toMatch(/sin inventario/i);
+    });
+  });
+
+  it("fully-built rubros have no roadmap; not-yet-built rubros document direction", () => {
+    const built = ["farmacia", "minimarket", "otro"];
+    RUBRO_CATALOG.forEach((r) => {
+      if (built.includes(r.value)) {
+        expect(r.comingSoon).toEqual([]);
+      } else {
+        expect(r.comingSoon.length).toBeGreaterThan(0);
+      }
+    });
+  });
+});

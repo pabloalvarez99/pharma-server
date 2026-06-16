@@ -237,3 +237,16 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .rubro-config .rubro-preview{transition:none}
   .rubro-config .rubro-card:hover{transform:none}
 }
+
+/* ── Rubro select — P3: profundidad por rubro (value copy nativo + roadmap
+ * "Próximamente" con gracia). Lane feat/rubro-showcase-p3 (ULTRA-PLAN §3/§8).
+ * El bloque roadmap es deliberadamente sobrio (muted, separado por una línea
+ * punteada, ícono de reloj) para leerse como DIRECCIÓN futura — nunca como una
+ * feature activa ni un dead-end. */
+.rubro-config .rubro-pv-soon{border-top:1px dashed var(--line);padding-top:12px}
+.rubro-config .rubro-coming{list-style:none;margin:0 0 6px;padding:0;display:flex;
+  flex-direction:column;gap:5px}
+.rubro-config .rubro-coming li{position:relative;padding-left:16px;font-size:12.5px;
+  color:var(--muted)}
+.rubro-config .rubro-coming li::before{content:"\25F7";position:absolute;left:0;
+  color:color-mix(in srgb,var(--rubro-accent,var(--accent)) 60%,var(--muted))}
