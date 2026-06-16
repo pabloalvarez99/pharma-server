@@ -3246,3 +3246,43 @@ BUG-milton-rel-001 (P1, integridad de plata) | cash_register::service::open_sess
 GATE: cargo fmt --all --check ✓ · cargo clippy --workspace --all-targets -D warnings ✓ ·
 cargo test --workspace ✓ (exit 0, 0 fallas). Sin migración, sin api.ts, sin vistas.
 Scope disjunto: sólo crates/domain/src/cash_register/service.rs + tests + dev-dep futures.
+
+## 2026-06-16 — MARVIN ola 8 (quality-stock) — BUG-perf-007 confirmado NO real + guard
+
+Lane feat/quality-stock (WT pharma-wt-p8-stock, off origin/feature/erp-parity @37c6966).
+Misión: que el dueño confíe en sus números. Tarea cabeza = confirmar BUG-perf-007
+(order_item) con el bench de bob y fijar si real.
+
+VEREDICTO: BUG-perf-007 NO es bug. Las agregaciones de reportes (top_products,
+margins_daily, stock_rotation, conteo de compras por cliente) resuelven líneas con
+`SELECT ... FROM order_item WHERE tenant = $t AND order IN $ids`. `order` es campo
+secundario cubierto por el índice compuesto `order_item_tenant_order`
+(migrations/0007_sales.surql). El planner de SurrealDB expande `order IN $ids` en una
+UNIÓN de lookups de índice — EXPLAIN: `operation: 'Iterate Index'` con una clave
+`[tenant, order]` por id, NO `Iterate Table`. Costo O(líneas que matchean), no
+O(tabla order_item). Esto NO es la clase BUG-perf-002 (esa era `id IN $ids` por
+record-id, que sí escanea). La evaluación de milton en #202 (order_item descartado
+por ya-indexado) era correcta.
+
+EVIDENCIA (probe EXPLAIN + timing, descartada tras medir):
+  - EXPLAIN `order IN $ids` → Iterate Index (20 claves [tenant,order]).
+  - Timing plano vs tamaño de tabla: 18.5ms/q @10k filas, 11.8ms/q @40k filas
+    (no crece con N = índice, no scan); single `order = $o` indexado ~2-6ms.
+    Ambos muy bajo el budget <50ms. (kv-mem debug.)
+
+ENTREGABLE: en vez de un fix inexistente, BLINDO el hallazgo. Nuevo guard
+crates/domain/tests/order_item_report_index_guard.rs: EXPLAIN de la query canónica de
+reporte + del conteo por cliente, assert `Iterate Index` y NO `Iterate Table`. Si una
+migración futura dropea el índice o un refactor reescribe a scan, el plan vira a
+`Iterate Table` y el guard falla → protege los números de reporte que el dueño mira de
+una regresión silenciosa a O(catálogo). 1 test, dataset chico (EXPLAIN no depende de N).
+
+FLAG a paxoloop/paul (NO mi lane): BUG-perf-006 sólo queda VIVO en
+crates/api/src/stock_webhook.rs:275 (`FROM purchase_order_item WHERE tenant=$t AND
+id IN $ids` = record-id scan, clase perf-002). Es lane sync (paul), no lo toqué. La
+parte de expenses de perf-006 YA está fijada en origin (#202: `FROM $ids WHERE
+tenant=$t`). Recomiendo asignar el remanente stock_webhook a paul/sync.
+
+GATE workspace VERDE: cargo fmt --all --check ✓ · clippy --workspace --all-targets
+-D warnings ✓ · test --workspace exit 0 (30 suites ok, 0 failed). Sin migración, sin
+api.ts, sin vistas, sin código de producción (solo +1 test).
