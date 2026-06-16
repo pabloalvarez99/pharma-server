@@ -3193,3 +3193,29 @@ Branch `feat/msi-local-dryrun` (WT `pharma-wt-p7-msi`). NO release: sin firma, s
   3. Target stale entre rutas de checkout: `#[folder]` absolutos embebidos apuntan al clone viejo; `cargo build` los regenera.
 - **Residuales (NO bloqueantes piloto)**: (a) MajorUpgrade real no probado — requiere MSI de versión mayor (0.1.25 sobre 0.1.24); el reinstall same-version solo verifica reapertura de BD. (b) Sin firma Authenticode → SmartScreen (gate de release, Fase 9). (c) README desactualizado (gotcha #1).
 - **GATE**: solo docs tocados; `cargo build --release -p service` EXIT 0 verificado.
+
+## 2026-06-16 — bob: e2e multi-tender + bench guard cierre_caja_agg (perf-005)
+Lane feat/e2e-multitender-perf-guard (off origin/feature/erp-parity).
+Dos guardas de regresión, scope estricto client/e2e/ + crates/domain/benches/.
+
+1) E2E multi-tender (split pago). Nuevo flow multiTenderFlow en client/e2e/flows.mjs,
+   cableado en run.mjs tras goldenPath, AMBOS verticales (pharmacy + minimarket).
+   Venta pos_mixed (parte efectivo + parte tarjeta, efectivo sobre-tenderizado) →
+   boleta (universal, gate limpio <500) → recibo. Pin de F-paul-pay-001: el vuelto
+   de una venta MIXTA = (cash + card) − total, el sobrepago cae en el lado efectivo
+   (la tarjeta nunca se sobre-cobra). Asserts: status 201, payment_method pos_mixed,
+   cash/card amounts, total, y change == overpay. Abre+cierra su propia caja.
+
+2) Bench guard cierre_caja_agg (BUG-perf-005). El op ya existía en pos_hotpath.rs
+   (op_cierre_caja → cash::compute_summary); el pase de percentiles imprimía el
+   verdict pero NUNCA fallaba. Reestructuré el pase para capturar pass/fail por op
+   y añadí un gate OPT-IN PHARMA_BENCH_GATE: default OFF (sólo imprime → marvin puede
+   MEDIR perf-005 antes/después de su fix sin que el harness panic), y con
+   PHARMA_BENCH_GATE=cierre_caja_agg (o =1/all, o comma-list) el budget <50ms p99 se
+   vuelve fallo duro = el guard contra regresión post-fix/CI. Nombre de op coordinado
+   con marvin = cierre_caja_agg.
+
+GATE: cargo fmt --all --check ✓ · cargo clippy -p domain --all-targets -D warnings ✓ ·
+bench compila + corre (--test, dataset chico, 5/5 ops Success) + gate happy-path
+exit 0 ✓ · npm run e2e: 132 passed / 0 failed / 2 known-bug xfail, exit 0 ✓.
+Sin tocar vistas, sin api.ts, sin migración, sin código lib.
