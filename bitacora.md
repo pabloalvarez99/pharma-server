@@ -3339,3 +3339,30 @@ solo, sin técnico y sin CLI, llegue desde el MSI a su primera venta.
 
 GATE cliente verde: `npm run build` (tsc+vite, 33 módulos) + `npm test` 213/213 (+4).
 Sin Rust, sin migración, `api.ts` intacto. ESTADO ACTUAL no tocado.
+
+## 2026-06-16 — paul · cashier-loop edge-case lock (feat/quality-pos-deep)
+
+Profundización EN VIVO del cashier daily loop (pos/devoluciones/clientes/caja) en
+ambos verticales. Tracé las 4 vistas + format.ts + cashier-loop.ts contra escenarios
+de mostrador reales y verifiqué la matemática de dinero/stock — confirmado: la lógica
+del loop está correcta (sin bug de plata/stock), consistente con el hallazgo previo
+(PR #187/#199). El valor de esta lane = **blindar contra regresión** los bordes que un
+cajero real puede tocar y que aún no estaban aseverados.
+
+`client/src/views/cashier-loop-edge.test.ts` (NUEVO, +23 journeys):
+- quick-cash en totales raros: monto redondo (chip exacto dedup), sub-1000, distinto/
+  positivo/ascendente para 10 totales, no-positivo → sin chips. Verifiqué por fuerza
+  bruta 1..200000 que los chips siempre son ascendentes (0 violaciones).
+- tender basura/hostil: dots CL + signo (`-5.000`→5000), vacío/abc→0, exacto→vuelto 0
+  (no "none"), 1 peso corto→short + effectiveTender sube al total, fat-finger ~1e9.
+- split Mixto: carro vacío (total 0) nunca cobra, split exacto al peso, overpay cae
+  100% al lado efectivo como vuelto, ambos tenders basura→short por el total entero.
+- descuento→devolución: el refund se computa sobre precio de LÍNEA (gross), no el neto
+  con descuento; descuento global topado → payable nunca negativo.
+- restock FEFO-style: sólo pega si la línea identifica producto (boleta no) y el toggle
+  manda; qty no-entera/negativa rechazada en español; Total vs Parcial deriva bien.
+- stock cap bajo martilleo de teclado (hold +/−), arqueo con float 0 + movimientos,
+  arqueo con strings basura→0 (no NaN), naming multi-caja con hueco/espacios/custom.
+
+GATE cliente verde: `npm run build` (tsc+vite, 35 módulos) + `npm test` 250/250 (+23).
+Sin Rust, sin migración, `api.ts`/`format.ts` intactos. ESTADO ACTUAL no tocado.
