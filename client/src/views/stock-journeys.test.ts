@@ -14,6 +14,7 @@ import {
   poKpis,
   poPending,
   poIsReceivable,
+  poIsSendable,
   poStatusMeta,
   validateReceiveQty,
   weightedAverageCost,
@@ -262,6 +263,27 @@ describe("journey · estados de OC traducidos + KPIs correctos (BUG-marvin-001)"
     expect(poIsReceivable("received")).toBe(false);
     expect(poIsReceivable("cancelled")).toBe(false);
     expect(poIsReceivable("draft")).toBe(false); // hay que emitirla primero
+  });
+
+  // BUG-bob-002 bridge: a draft is NOT receivable, but it IS sendable. The UI
+  // gates the "Enviar al proveedor" button on poIsSendable so the operator can
+  // walk draft → sent → recibir without the server 409 dead-end.
+  it("solo el draft es enviable (draft → sent); el resto ya fue emitido", () => {
+    expect(poIsSendable("draft")).toBe(true);
+    expect(poIsSendable("sent")).toBe(false);
+    expect(poIsSendable("approved")).toBe(false);
+    expect(poIsSendable("partially_received")).toBe(false);
+    expect(poIsSendable("received")).toBe(false);
+    expect(poIsSendable("cancelled")).toBe(false);
+  });
+
+  it("enviable y recibible son disjuntos — la OC pasa de uno al otro al emitir", () => {
+    // Un draft: enviable, NO recibible (hay que emitir primero).
+    expect(poIsSendable("draft")).toBe(true);
+    expect(poIsReceivable("draft")).toBe(false);
+    // Tras /send queda sent: recibible, ya no enviable.
+    expect(poIsSendable("sent")).toBe(false);
+    expect(poIsReceivable("sent")).toBe(true);
   });
 });
 

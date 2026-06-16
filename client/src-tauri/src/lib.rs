@@ -2585,6 +2585,34 @@ async fn receive_purchase_order(
         .map_err(|e| format!("Respuesta de recepción inválida del servidor: {e}"))
 }
 
+/// POST `/api/v1/purchase-orders/{id}/send` (Bearer, admin+) — issue a draft PO
+/// to the supplier (status `draft → sent`). This is the bridge that makes a PO
+/// receivable: the server refuses to receive a `draft` (409, BUG-bob-002), so
+/// the operator must send it first. No body. Only legal from `draft` — any other
+/// status comes back 409 (server message surfaced as-is). Returns the PO header.
+#[tauri::command]
+async fn send_purchase_order(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<PurchaseOrder, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/purchase-orders/{id}/send"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de emisión de OC inválida del servidor: {e}"))
+}
+
 // --- receipt / boleta ------------------------------------------------------
 
 /// GET `/api/v1/orders/{id}/receipt` (Bearer) — printable boleta for a completed
@@ -3030,6 +3058,7 @@ pub fn run() {
             list_suppliers,
             create_supplier,
             create_purchase_order,
+            send_purchase_order,
             receive_purchase_order,
             get_po_payments,
             create_po_payment,
