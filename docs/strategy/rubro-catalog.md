@@ -64,8 +64,14 @@ importa el código de DSS al server on-prem.
 
 ## Próximos pasos
 
+> **Foco activo (founder 2026-06-16)**: elevar la pantalla de selección de rubro a
+> nivel **muy profesional/producido/profundo** — ULTRA-PLAN en
+> [`rubro-select-experience.md`](./rubro-select-experience.md). Es la vitrina de
+> RutBusiness. Lo de abajo es el estado base ya entregado.
+
 - **ye**: vista de selección de rubro (grid desde este catálogo) + persistir
-  `business.vertical` + mapear es→en al llamar `seed-demo`.
+  `business.vertical` + mapear es→en al llamar `seed-demo`. ✅ base entregada →
+  ahora ejecutar el ULTRA-PLAN (`rubro-select-experience.md`).
 - **marvin**: `seed-demo` ya soporta pharmacy/minimarket; agregar packs nuevos = un
   array por rubro en `domain::seed` (cuando se valide el rubro).
 - **Fase 14**: evaluar plantillas DSS como storefront por tenant (no ahora).

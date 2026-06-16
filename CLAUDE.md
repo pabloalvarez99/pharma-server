@@ -18,6 +18,17 @@
 > generalizar o condicionar al rubro (catálogo: [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md)).
 > Las secciones "para farmacias" más abajo son **histórico** — leer con este lente.
 > (RutAgentIA = nombre de la visión agéntica previa; mismo norte, capa más profunda.)
+>
+> ## 🎬 FOCO DE PRODUCTO ACTIVO (founder, 2026-06-16) — "hacer un buen producto"
+> Prioridad = **calidad de producto** (no rename ni cert, diferidos como no-primordiales).
+> **Pantalla vitrina = selección de rubro del onboarding** (`configuracion.ts` grid +
+> `vertical.ts`): elevarla a **muy profesional / muy producida / detallada / profunda** —
+> es la primera prueba tangible de "un ERP, todos los rubros". ULTRA-PLAN detallado en
+> [`docs/strategy/rubro-select-experience.md`](./docs/strategy/rubro-select-experience.md).
+> Bar de calidad para TODO el equipo: cero dead-ends, cero crash con input basura, feel
+> instantáneo (<100ms; POS <50ms p99), keyboard-first, estados empty/error claros en
+> español, formato consistente (CLP/RUT/fechas), idéntico en ambos verticales. Manejar
+> el binario/stack REAL (tauri dev, `scripts/qa/*.sh`, `npm run e2e`), no solo vitest.
 
 Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
