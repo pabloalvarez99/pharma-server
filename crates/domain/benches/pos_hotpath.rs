@@ -39,6 +39,13 @@
 //!
 //! Real run (writes target/criterion/ + prints the percentile table):
 //!   cargo bench -p domain --bench pos_hotpath
+//!
+//! Regression gate (opt-in, default OFF so a known-OVER op can be measured
+//! before/after a fix without the harness panicking):
+//!   PHARMA_BENCH_GATE=1                 fail if ANY op breaks the <50ms p99 budget
+//!   PHARMA_BENCH_GATE=cierre_caja_agg   fail only if that op does (comma-list for >1)
+//! e.g. guard BUG-perf-005 post-fix:
+//!   PHARMA_BENCH_GATE=cierre_caja_agg cargo bench -p domain --bench pos_hotpath
 
 use std::time::{Duration, Instant};
 
@@ -357,33 +364,51 @@ fn bench_pos_hotpath(c: &mut Criterion) {
     eprintln!("\n=== POS DB hot-path percentiles (catalog = {n} products, kv-mem) ===");
 
     // Manual percentile pass — reads first, the single write op LAST so its row
-    // growth can't inflate the cierre/stats scans above it.
-    let mut all_ok = true;
-    all_ok &= percentiles("lookup_by_barcode", samples, || {
-        let s = Instant::now();
-        rt.block_on(op_lookup_barcode(&h));
-        s.elapsed()
-    });
-    all_ok &= percentiles("lookup_by_sku", samples, || {
-        let s = Instant::now();
-        rt.block_on(op_lookup_sku(&h));
-        s.elapsed()
-    });
-    all_ok &= percentiles("stock_stats_agg", samples, || {
-        let s = Instant::now();
-        rt.block_on(op_stock_stats(&h));
-        s.elapsed()
-    });
-    all_ok &= percentiles("cierre_caja_agg", samples, || {
-        let s = Instant::now();
-        rt.block_on(op_cierre_caja(&h));
-        s.elapsed()
-    });
-    all_ok &= percentiles("post_sale_insert", samples, || {
-        let s = Instant::now();
-        rt.block_on(op_post_sale(&h));
-        s.elapsed()
-    });
+    // growth can't inflate the cierre/stats scans above it. Capture each op's
+    // pass/fail by name so the opt-in regression gate below can name the breacher.
+    let results: Vec<(&str, bool)> = vec![
+        (
+            "lookup_by_barcode",
+            percentiles("lookup_by_barcode", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_lookup_barcode(&h));
+                s.elapsed()
+            }),
+        ),
+        (
+            "lookup_by_sku",
+            percentiles("lookup_by_sku", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_lookup_sku(&h));
+                s.elapsed()
+            }),
+        ),
+        (
+            "stock_stats_agg",
+            percentiles("stock_stats_agg", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_stock_stats(&h));
+                s.elapsed()
+            }),
+        ),
+        (
+            "cierre_caja_agg",
+            percentiles("cierre_caja_agg", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_cierre_caja(&h));
+                s.elapsed()
+            }),
+        ),
+        (
+            "post_sale_insert",
+            percentiles("post_sale_insert", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_post_sale(&h));
+                s.elapsed()
+            }),
+        ),
+    ];
+    let all_ok = results.iter().all(|(_, ok)| *ok);
     eprintln!(
         "=== budget verdict: {} ===\n",
         if all_ok {
@@ -392,6 +417,30 @@ fn bench_pos_hotpath(c: &mut Criterion) {
             "FAIL — see *** OVER *** above (file in BUG LOG)"
         }
     );
+
+    // Opt-in regression gate. By default the bench only PRINTS the verdict and
+    // exits 0, so a known-OVER op (e.g. BUG-perf-005 cierre_caja_agg pre-fix) can
+    // still be MEASURED before/after a fix without the harness panicking. Set
+    // PHARMA_BENCH_GATE to turn the budget into a HARD failure — the post-fix /
+    // CI regression guard:
+    //   PHARMA_BENCH_GATE=1                 gate every op
+    //   PHARMA_BENCH_GATE=all               same as 1
+    //   PHARMA_BENCH_GATE=cierre_caja_agg   gate only that op (comma-list for >1)
+    // The op names match the table above (and the Criterion group below).
+    if let Ok(gate) = std::env::var("PHARMA_BENCH_GATE") {
+        let gate = gate.trim();
+        let gate_all = gate == "1" || gate.eq_ignore_ascii_case("all");
+        let gated: Vec<&str> = results
+            .iter()
+            .filter(|(name, ok)| !*ok && (gate_all || gate.split(',').any(|g| g.trim() == *name)))
+            .map(|(name, _)| *name)
+            .collect();
+        assert!(
+            gated.is_empty(),
+            "PHARMA_BENCH_GATE regression guard: op(s) over the <50ms p99 budget: {gated:?} \
+             (see the *** OVER *** rows above; file in teamwork_op.txt BUG LOG)"
+        );
+    }
 
     // Criterion measurement (for `--save-baseline` regression diffs). Same
     // order: reads, then the write.

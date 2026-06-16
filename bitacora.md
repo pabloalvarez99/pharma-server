@@ -3179,3 +3179,29 @@ GATE cliente verde: `npm run build` (33 módulos) + `npm test` 194/194. Sin toca
 código de vistas (doc + script de QA). Sin bugs de server en mi scope (todos los
 contratos IPC requeridos presentes en vivo). PR cascada vs #214 (paxoloop rebasa
 a erp-parity al integrar).
+
+## 2026-06-16 — bob: e2e multi-tender + bench guard cierre_caja_agg (perf-005)
+Lane feat/e2e-multitender-perf-guard (off origin/feature/erp-parity).
+Dos guardas de regresión, scope estricto client/e2e/ + crates/domain/benches/.
+
+1) E2E multi-tender (split pago). Nuevo flow multiTenderFlow en client/e2e/flows.mjs,
+   cableado en run.mjs tras goldenPath, AMBOS verticales (pharmacy + minimarket).
+   Venta pos_mixed (parte efectivo + parte tarjeta, efectivo sobre-tenderizado) →
+   boleta (universal, gate limpio <500) → recibo. Pin de F-paul-pay-001: el vuelto
+   de una venta MIXTA = (cash + card) − total, el sobrepago cae en el lado efectivo
+   (la tarjeta nunca se sobre-cobra). Asserts: status 201, payment_method pos_mixed,
+   cash/card amounts, total, y change == overpay. Abre+cierra su propia caja.
+
+2) Bench guard cierre_caja_agg (BUG-perf-005). El op ya existía en pos_hotpath.rs
+   (op_cierre_caja → cash::compute_summary); el pase de percentiles imprimía el
+   verdict pero NUNCA fallaba. Reestructuré el pase para capturar pass/fail por op
+   y añadí un gate OPT-IN PHARMA_BENCH_GATE: default OFF (sólo imprime → marvin puede
+   MEDIR perf-005 antes/después de su fix sin que el harness panic), y con
+   PHARMA_BENCH_GATE=cierre_caja_agg (o =1/all, o comma-list) el budget <50ms p99 se
+   vuelve fallo duro = el guard contra regresión post-fix/CI. Nombre de op coordinado
+   con marvin = cierre_caja_agg.
+
+GATE: cargo fmt --all --check ✓ · cargo clippy -p domain --all-targets -D warnings ✓ ·
+bench compila + corre (--test, dataset chico, 5/5 ops Success) + gate happy-path
+exit 0 ✓ · npm run e2e: 132 passed / 0 failed / 2 known-bug xfail, exit 0 ✓.
+Sin tocar vistas, sin api.ts, sin migración, sin código lib.

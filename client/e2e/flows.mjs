@@ -156,6 +156,93 @@ export async function goldenPath({ tenant, email, password, vertical }) {
   );
 }
 
+/** Multi-tender (split-payment) flow — the cashier splits one sale across cash
+ *  AND card, over-tendering the cash side, then prints the receipt and emits a
+ *  boleta. Pins the regression that F-paul-pay-001 closed: the vuelto on a MIXED
+ *  sale is `(cash + card) − total`, the overpayment falling on the cash side (a
+ *  card is never over-charged) — the cashier must see the vuelto on a mixed sale,
+ *  not just on pos_cash. Universal across verticals (split pago + boleta both
+ *  apply to pharmacy AND minimarket). Assumes goldenPath already seeded the
+ *  tenant; runs against a fresh caja it opens + closes itself. */
+export async function multiTenderFlow({ tenant, email, password, vertical }) {
+  section(`multi-tender (split pago) vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  const sellable = list.find((p) => p.stock > 0 && p.active !== false);
+  check(!!sellable, "multi-tender: found a sellable product");
+
+  // Fresh caja so the mixed sale lands in an open session (goldenPath closed its
+  // own). Closed at the end so the run leaves nothing open behind it.
+  const open = await c.post("/cash-sessions", {
+    register_name: "Caja Mixto E2E",
+    opening_cash: "0",
+  });
+  const sessionId = open.body.id;
+  check(!!sessionId, "multi-tender: cash session opened");
+
+  // total = unit price (qty 1, no discount). Split it: the card settles EXACTLY
+  // for part of it (cards are never over-charged), cash covers the remainder PLUS
+  // an overpayment, so the cashier owes vuelto on the cash side.
+  const total = Math.round(Number(sellable.price));
+  const card = Math.floor(total / 2); // exact card portion
+  const OVERPAY = 500; // cash over-tender → expected vuelto
+  const cash = total - card + OVERPAY; // remainder + overpay
+
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [
+        {
+          product: sellable.id,
+          product_name: sellable.name,
+          quantity: 1,
+          unit_price: String(total),
+        },
+      ],
+      payment_method: "pos_mixed",
+      cash_amount: String(cash),
+      card_amount: String(card),
+    },
+    { headers: { "Idempotency-Key": `e2e-mixed-${vertical}-${Date.now()}` } },
+  );
+  eq(sale.status, 201, "multi-tender: pos_mixed sale created (201)");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "multi-tender: sale returns order id");
+
+  // boleta (SII) is UNIVERSAL — Free no-CAF/cert → coded 4xx upsell, never 5xx.
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: "e2e" },
+    { expectOk: false },
+  );
+  check(
+    boleta.status < 500,
+    `multi-tender: boleta handled cleanly (status ${boleta.status}, no 5xx)`,
+  );
+
+  // Receipt: the mixed sale records both tenders and the correct vuelto.
+  const receipt = (await c.get(`/orders/${encodeURIComponent(orderId)}/receipt`)).body;
+  eq(receipt.payment_method, "pos_mixed", "receipt records pos_mixed");
+  eq(Number(receipt.total), total, "receipt total == unit price (qty 1, no discount)");
+  eq(Number(receipt.cash_amount), cash, "receipt cash_amount == cash tendered");
+  eq(Number(receipt.card_amount), card, "receipt card_amount == card tendered");
+  // F-paul-pay-001: vuelto on a mixed sale = (cash + card) − total = the overpay.
+  eq(
+    Number(receipt.change),
+    OVERPAY,
+    "receipt vuelto = (cash + card) − total (overpay on the cash side)",
+  );
+
+  // Close the caja so the run leaves no open session.
+  const close = await c.post(`/cash-sessions/${sessionId}/close`, {
+    closing_cash_counted: "0",
+  });
+  check(close.ok, "multi-tender: cash session closed");
+}
+
 /** Goods-receipt path (charter: producto+lote → recepción → stock). Mirrors
  *  compras.ts verbatim: create a supplier, create a draft PO, then try to receive
  *  goods against it. A receipt must bump on-hand stock by the quantity received.

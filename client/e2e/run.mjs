@@ -19,6 +19,7 @@ import {
 } from "./lib/harness.mjs";
 import {
   goldenPath,
+  multiTenderFlow,
   goodsReceiptFlow,
   complianceFlow,
   noPrescriptionFlow,
@@ -113,6 +114,7 @@ async function main() {
   for (const t of TENANTS) {
     const ctx = { tenant: t.slug, email: EMAIL, password: PASSWORD, vertical: t.vertical };
     await goldenPath(ctx);
+    await multiTenderFlow(ctx);
     await goodsReceiptFlow(ctx);
     await complianceFlow(ctx);
     await reports402Matrix(ctx);
