@@ -35,6 +35,8 @@ import {
   validateStockAdjust,
   nearExpiryView,
   reorderSuggestion,
+  reorderList,
+  REORDER_TARGET,
   rotacionRows,
   buildInventoryExport,
   exportFilename,
@@ -49,7 +51,10 @@ const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
 // in-app export pulls one capped page; a fuller catalog uses the CLI export.
 const EXPORT_CAP = 500;
-type Tab = "productos" | "vencimientos" | "rotacion";
+// Reposición scans the whole (server-capped) catalog so a low/out SKU on page 2
+// isn't missed — the per-page PAGE_LIMIT 60 would hide it. Same 500 server cap.
+const REORDER_SCAN = 500;
+type Tab = "productos" | "vencimientos" | "reposicion" | "rotacion";
 
 export function renderInventory(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -81,6 +86,7 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
       <div class="inv-tabs" role="tablist">
         <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true">Productos</button>
         <button class="inv-tab" data-tab="vencimientos" role="tab" aria-selected="false">Próximos a vencer</button>
+        <button class="inv-tab" data-tab="reposicion" role="tab" aria-selected="false">Reposición</button>
         <button class="inv-tab" data-tab="rotacion" role="tab" aria-selected="false">Rotación</button>
       </div>
 
@@ -147,6 +153,8 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
       );
     } else if (next === "vencimientos") {
       renderVencimientos(panel, serverUrl, openDetail);
+    } else if (next === "reposicion") {
+      renderReposicion(panel, serverUrl, openDetail);
     } else {
       renderRotacion(panel, serverUrl, openDetail);
     }
@@ -782,6 +790,77 @@ function nearRow(r: NearExpiryRow & { tone: "danger" | "warn" | "ok"; label: str
       <td class="num">${num(r.stock)}</td>
       <td class="num">${r.days_to_expiry}</td>
       <td><span class="pill pill-${r.tone}">${r.label}</span></td>
+    </tr>
+  `;
+}
+
+// --- "Reposición" tab (min-stock reorder worklist) --------------------------
+
+/** Actionable buy-back worklist: every SKU at/below the low-stock threshold,
+ *  ordered by urgency (agotado first, then lowest stock), each with the units to
+ *  buy to reach the target. Healthy SKUs are excluded — zero false alarms. The
+ *  Productos tab shows the per-row "Reponer N" hint inline; THIS tab pulls them
+ *  all into one prioritised list the operator works top-down. Vertical-agnostic:
+ *  fármacos bajo mínimo y abarrotes agotados (pan, bebidas) salen igual. */
+function renderReposicion(
+  panel: HTMLElement,
+  serverUrl: string,
+  onOpen: (id: string) => void,
+): void {
+  panel.innerHTML = `
+    <div class="inv-venc-head">
+      <span class="muted">Productos bajo el mínimo, ordenados por urgencia (agotados primero). "Reponer N u." = cuánto comprar para volver al objetivo (${REORDER_TARGET} u.).</span>
+    </div>
+    <div class="table-card"><div id="inv-repos-table">${tableSkeleton()}</div></div>
+  `;
+  const tableHost = panel.querySelector<HTMLElement>("#inv-repos-table")!;
+  void (async (): Promise<void> => {
+    try {
+      // Scan the full (server-capped) catalog, not just one PAGE_LIMIT page, so a
+      // low/out SKU isn't missed. reorderList drops the healthy ones and orders
+      // agotado→menor; the worklist is short by construction, but cap defensively
+      // (a catalog that's mostly out of stock could still be large).
+      const products = await listProducts(serverUrl, undefined, REORDER_SCAN);
+      const work = reorderList(products);
+      if (work.length === 0) {
+        tableHost.innerHTML = `<p class="empty">Todo el catálogo está sobre el mínimo. Nada por reponer. 👍</p>`;
+        return;
+      }
+      const { rows, total, truncated } = capRows(work);
+      tableHost.innerHTML = `
+        <table class="data-table inv-repos">
+          <thead><tr>
+            <th>Producto</th><th class="num">Stock</th><th>Estado</th><th class="num">Reponer</th>
+          </tr></thead>
+          <tbody>${rows.map(reposRow).join("")}</tbody>
+        </table>
+        <p class="table-foot muted">${
+          truncated
+            ? `${rows.length} de ${total} por reponer · mostrando los ${LIST_RENDER_CAP} más urgentes`
+            : `${total} producto(s) por reponer`
+        } · toca una fila para ajustar stock</p>
+      `;
+      tableHost.querySelectorAll<HTMLElement>("tr[data-id]").forEach((tr) =>
+        tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
+      );
+    } catch (err) {
+      tableHost.innerHTML = errorStateHtml(err, "el inventario");
+    }
+  })();
+}
+
+function reposRow(w: ReturnType<typeof reorderList<Product>>[number]): string {
+  const p = w.item;
+  const sub = p.laboratory || p.active_ingredient || "";
+  return `
+    <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0">
+      <td>
+        <div class="cell-main">${escapeHtml(p.name)}</div>
+        ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
+      </td>
+      <td class="num">${num(w.stock)}</td>
+      <td>${stockPill(w.stock)}</td>
+      <td class="num inv-reorder">${num(w.suggest)} u.</td>
     </tr>
   `;
 }
