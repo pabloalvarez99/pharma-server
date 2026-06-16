@@ -16,7 +16,7 @@
 //  - whether the dashboard looks "poblado" after loading demo data;
 //  - which ERP modules a rubro shows (the gate shell.ts applies, single-sourced).
 import type { HealthInfo, InventorySummary, DailySalesRow } from "../api";
-import { type Vertical, hasRecetas } from "../vertical";
+import { type Vertical, type Rubro, hasRecetas, featuresForRubro } from "../vertical";
 
 // --- Server URL resolution + first-launch detection -------------------------
 
@@ -249,8 +249,42 @@ export const ALL_MODULES = [
 
 export type ModuleId = (typeof ALL_MODULES)[number];
 
+/** Operator-facing label per module (Spanish), for the onboarding preview that
+ *  shows which sections a rubro turns on. */
+export const MODULE_LABELS: Readonly<Record<ModuleId, string>> = {
+  dashboard: "Panel",
+  pos: "Punto de venta",
+  devoluciones: "Devoluciones",
+  inventory: "Inventario",
+  importar: "Importar",
+  caja: "Caja",
+  clientes: "Clientes",
+  compras: "Compras",
+  recetas: "Recetas",
+  boletas: "Boletas",
+  facturas: "Facturas",
+  gastos: "Gastos",
+  reports: "Reportes",
+  auditoria: "Auditoría",
+  configuracion: "Configuración",
+};
+
 /** Modules visible for a rubro: drop `recetas` unless it's farmacia. Single
- *  source of the gate shell.ts applies in `hydrateBranding`. */
+ *  source of the gate shell.ts applies in `hydrateBranding`. Kept on the coarse
+ *  {@link Vertical} for back-compat; prefer {@link visibleModulesForRubro}. */
 export function visibleModules(vertical: Vertical): ModuleId[] {
   return ALL_MODULES.filter((m) => (m === "recetas" ? hasRecetas(vertical) : true));
+}
+
+/** Modules visible for a full rubro, gated by its capability flags
+ *  ({@link featuresForRubro}). Service rubros (belleza/servicios) also drop the
+ *  physical-stock modules (inventario/compras) — they sell without inventory.
+ *  Single source the shell nav + onboarding preview both read. */
+export function visibleModulesForRubro(rubro: Rubro): ModuleId[] {
+  const f = featuresForRubro(rubro);
+  return ALL_MODULES.filter((m) => {
+    if (m === "recetas") return f.recetas;
+    if (m === "inventory" || m === "compras") return f.physicalStock;
+    return true;
+  });
 }

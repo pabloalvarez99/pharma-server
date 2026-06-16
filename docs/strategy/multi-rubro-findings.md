@@ -183,3 +183,23 @@ Nota de scope: (1)-(5) tocaron `crates/api/src/v1/catalog.rs` (backend roto en c
 real → GATE workspace, no sólo cliente, por charter). Cliente: `importar.ts` (flujo
 2 pasos) + `api.ts` append-only (`importProductsPreview`) + `import_products_preview`
 Tauri cmd. Pendiente lane hermana: `docs/operator` no documenta migración CSV todavía.
+
+## 2026-06-16 — Gating de módulos por rubro (no solo recetas) — ye
+
+7. **El gate de UI era binario (recetas sí/no) pero el catálogo tiene 8 rubros**
+   — `parseVertical` colapsa todo extra a `otro`, así que café (perecibles) y
+   peluquería (servicio sin stock) recibían el MISMO menú. → **FIJADO**: modelo de
+   capacidades por rubro en `vertical.ts` (`featuresForRubro` → `recetas`/`lotes`/
+   `physicalStock`/`clinical`) sobre la clave completa del catálogo (`parseRubro`,
+   NO colapsa). `visibleModulesForRubro` (first-run.ts) deriva el menú; shell.ts y
+   el preview de Configuración leen la MISMA fuente → no divergen.
+   - recetas/controlados + campos clínicos: SOLO farmacia.
+   - lotes/vencimiento (perecibles): farmacia + minimarket + café.
+   - servicios/belleza = ventas SIN stock físico → ocultan Inventario + Compras,
+     pero conservan POS/caja/boletas (prueba el core agnóstico).
+
+8. **PENDIENTE (anti-framework, no construido aún)**: `restaurant` quedó con
+   `lotes:false` por seguir el brief literal (perecibles = farmacia+minimarket+café).
+   Un restaurant real maneja insumos perecibles → cuando se valide ese rubro con un
+   cliente, revisar a `lotes:true`. No se cambia ahora (disciplina: pack/feature por
+   rubro se construye al validarlo, docs/strategy/rubro-catalog.md §Disciplina).

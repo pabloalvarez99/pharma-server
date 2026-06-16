@@ -26,7 +26,8 @@ import { renderConfiguracion } from "./configuracion";
 import { renderImportar } from "./importar";
 import { renderBoletas } from "./boletas";
 import { renderFacturas } from "./facturas";
-import { loadVertical, loadBusinessName, hasRecetas } from "../vertical";
+import { loadRubro, loadBusinessName } from "../vertical";
+import { visibleModulesForRubro } from "./first-run";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
@@ -217,22 +218,24 @@ export function renderShell(
 }
 
 // Apply the operator-chosen business name + rubro: rename the brand and hide
-// pharmacy-only nav (Recetas / Ley 20.000) when the vertical isn't farmacia.
+// nav for modules the rubro doesn't use (Recetas/Ley 20.000 off farmacia;
+// Inventario+Compras for service rubros that sell without physical stock).
 // Done post-render so renderShell stays synchronous; default state shows the
-// generic brand and keeps Recetas until the setting says otherwise.
+// generic brand and the full nav until the setting says otherwise.
 async function hydrateBranding(root: HTMLElement, serverUrl: string): Promise<void> {
-  const [vertical, name] = await Promise.all([
-    loadVertical(serverUrl),
+  const [rubro, name] = await Promise.all([
+    loadRubro(serverUrl),
     loadBusinessName(serverUrl),
   ]);
   if (name) {
     const brand = root.querySelector<HTMLSpanElement>("#brand-name");
     if (brand) brand.textContent = name;
   }
-  if (!hasRecetas(vertical)) {
-    const recetasBtn = root.querySelector<HTMLButtonElement>('.nav-item[data-nav="recetas"]');
-    recetasBtn?.remove();
-  }
+  const visible = new Set<string>(visibleModulesForRubro(rubro));
+  root.querySelectorAll<HTMLButtonElement>(".nav-item[data-nav]").forEach((btn) => {
+    const id = btn.dataset.nav;
+    if (id && !visible.has(id)) btn.remove();
+  });
 }
 
 async function hydrateLicense(root: HTMLElement, serverUrl: string): Promise<void> {
