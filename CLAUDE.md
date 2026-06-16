@@ -1,6 +1,25 @@
 # pharma-server — Project Context
 
-Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
+> ## 🎯 GOAL DEL PROYECTO — RUTBUSINESS (norte, fijado 2026-06-16 por founder)
+> **Dar a CADA negocio chileno —cualquier rubro, identificado por su RUT— un ERP
+> gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
+> invisible detrás del agente.** 1 RUT = 1 negocio = 1 agente. Modelo: freemium MSI
+> Windows (core gratis para siempre + tiers + microtx, [ADR-0001](./docs/adr/0001-freemium-pivot.md)).
+> **Farmacia = beachhead** (primer vertical validado), NO el límite ni la marca.
+> Fin de juego: ecosistema federado donde los agentes de distintos negocios transan
+> entre sí (Ed25519 envelopes, Fase 13). Ver [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+>
+> ## ⚡ ENFOQUE 100% RUTBUSINESS (founder, 2026-06-16) — directiva activa
+> **El producto es RUTBUSINESS**, NO "farmacia". `pharma-server` es solo el nombre del
+> repo git; la identidad del producto es **RutBusiness** (multi-rubro). Todo trabajo
+> nuevo se enmarca en RutBusiness: **cero** copy/UI/branding/scope pharma-específico
+> salvo como *vertical pack* condicional a `business.vertical`. Server + client (Tauri)
+> + CLI = piezas de RutBusiness, no de "pharma". Donde el código/doc asuma farmacia →
+> generalizar o condicionar al rubro (catálogo: [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md)).
+> Las secciones "para farmacias" más abajo son **histórico** — leer con este lente.
+> (RutAgentIA = nombre de la visión agéntica previa; mismo norte, capa más profunda.)
+
+Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
 
 **Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md). **Posicionamiento de mercado (reframe 2026-05-27)**: el producto es *infraestructura competitiva para el independiente* frente al oligopolio (~90% Ahumada/Cruz Verde/Salcobrand), no "otro ERP" — mercado subdigitalizado (no saturado), moat de 4 capas (POS = caballo de Troya → datos agregados → poder de compra colectivo → red operacional), riesgo = distribución+confianza no técnico → ver [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md). **Tesis unificadora 2026-2035** (visión, moat, flywheel, AI-native, LATAM multi-país, distribución, integraciones-as-platform) → ver [`docs/strategy/latam-master-plan.md`](./docs/strategy/latam-master-plan.md).
@@ -9,7 +28,7 @@ Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, a
 
 ## Producto / Visión comercial
 
-**Meta**: ERP **profesional para farmacias**, vendible como licencia on-prem (MSI + soporte). Comprador: farmacias independientes y cadenas chicas que quieren todo local, sin SaaS, sin cloud, sin lock-in.
+**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador: negocios independientes y cadenas chicas de **cualquier rubro** (farmacia, minimarket, restaurant, café, tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in. Farmacia = primer vertical validado (beachhead), no el límite.
 
 Pilares de venta (no negociables):
 - **Instalación 1 click** (MSI firmado, sin dependencias externas, sin Docker, sin Postgres aparte).
