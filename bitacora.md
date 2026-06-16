@@ -2997,3 +2997,49 @@ Sin migración (no hace falta tabla nueva; `backup_log` ya existe del #184). +5 
 --all --check` + `clippy --workspace --all-targets -D warnings` + `cargo test --workspace`
 (cli 25/25). Multi-tenant safe: el snapshot cubre todo el store SurrealKv (no
 tenant-scoped, igual que `backup_log`); el invariante se verifica per-tenant.
+
+## 2026-06-16 — paul · Tauri real-window smoke ola 6b + IPC contract probe
+
+Lane `feat/tauri-smoke-full-surfaces` (cascada off `feat/tauri-real-smoke` #214,
+porque el runbook `scripts/qa/tauri-smoke.md` vive ahí, aún sin integrar en
+erp-parity — base = #214 para que el diff sea sólo el delta; paxoloop rebasa a
+erp-parity tras aterrizar #214). Extiende el smoke del binario REAL (#214 probó
+POS limpio) al resto de mis superficies de cajero en la ventana real.
+
+1. **Runbook ampliado** (`scripts/qa/tauri-smoke.md` §3b/§3c): deep-dives manuales
+   por superficie — Devoluciones (total/parcial, badge derivado, restock disabled
+   by-design + nota), Caja (abrir → movimientos → arqueo esperado=apertura+ventas+
+   ingresos−egresos → cierre con cuadra/sobrante/faltante, multi-caja), Clientes +
+   fidelidad (alta, búsqueda debounce, acumulación de puntos visible tras re-abrir
+   el detalle = la trampa de UI stale que vitest mockea). Cada uno con "qué debe
+   verse en pantalla" tras la mutación + edges + nota MULTI-RUBRO (las 3 son
+   universales — idénticas en minimarket).
+
+2. **IPC seam verificado (estático)**: `api.ts` manda camelCase (`registerName`,
+   `openingCash`, `closingCashCounted`, `metodoReembolso`); Tauri v2 los mapea a
+   los params snake_case de `src-tauri/src/lib.rs`. Sin drift de nombres. Dinero
+   STRING end-to-end.
+
+3. **Probe de contrato nuevo** (`scripts/qa/tauri-contract-probe.sh`): los comandos
+   `invoke` deserializan cada respuesta del server en un struct serde fijo; un
+   campo requerido (no-`Option`) que el server deje de mandar hace que `invoke()`
+   tire en la ventana real — falla que las journeys vitest NO ven (mockean
+   `invoke`). El probe levanta pharma-api vivo (seed-demo, ambos verticales) y
+   asserta que TODAS las claves requeridas estén presentes/no-null contra los
+   field-sets de `lib.rs`: CashSession (open+lista+cerrada), Receipt+ReceiptItem,
+   CashCloseSummary (arqueo+close), Devolucion (create+lista), Customer/
+   CustomerDetail/CustomerOrder. Clientes degrada como la vista: 404 →
+   `CUSTOMERS_MODULE_MISSING` (INFO, no FAIL).
+
+Probe corrido EN VIVO contra pharma-api (build debug del tip), AMBOS verticales
+→ `FAILS=0`. Hallazgo de forma documentado: `POST /api/v1/pos/returns`
+(`create_refund`) devuelve el wrapper `RefundResponse` (`{devolucion, items,
+stock_movements, order_marked_refunded}`) como `serde_json::Value` crudo — la
+vista ignora el body; el struct plano `Devolucion` sólo lo deserializa
+`list_refunds` (GET `/returns`). El probe assertea `.devolucion` en el create y
+el plano en la lista, alineado con `lib.rs`.
+
+GATE cliente verde: `npm run build` (33 módulos) + `npm test` 194/194. Sin tocar
+código de vistas (doc + script de QA). Sin bugs de server en mi scope (todos los
+contratos IPC requeridos presentes en vivo). PR cascada vs #214 (paxoloop rebasa
+a erp-parity al integrar).
