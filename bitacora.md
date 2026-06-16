@@ -3378,3 +3378,46 @@ distintos, emoji back-compat).
 GATE cliente verde: `npm run build` (tsc+vite, 36 módulos) + `npm test` 244/244
 (+13). Sin Rust, sin migración, `api.ts`/`styles.css`/`main.ts` intactos. ESTADO
 ACTUAL no tocado.
+
+## 2026-06-16 — rubro-showcase P4: e2e + a11y del configurador (bob)
+
+FASE P4 de la vitrina de selección de rubro (docs/strategy/rubro-select-experience.md
+§10). P1 (2-paneles + preview en vivo) y P2 (icon set SVG + accent + estados) ya
+entregadas; esta lane = la verificación e2e/a11y que cierra la DoD §9 ("operable
+100%
+## 2026-06-16 — rubro-showcase P4: e2e + a11y del configurador (bob)
+
+FASE P4 de la vitrina de selección de rubro (docs/strategy/rubro-select-experience.md
+§10). P1 (2-paneles + preview en vivo) y P2 (icon set SVG + accent + estados) ya
+entregadas; esta lane = la verificación e2e/a11y que cierra la DoD §9 ("operable
+100% por teclado", "e2e cubre selección + preview + ambos verticales"). Solo
+`client/e2e/` (scope bob) — cero edición de vistas.
+
+- **`client/e2e/rubro-configurator.dom.test.ts`** (happy-dom, 14 tests): maneja el
+  grid REAL de `renderConfiguracion` (no una copia) como cajero sin mouse. Mockea
+  `../api` (Tauri invoke) y monta la vista. Verifica: `role=radiogroup`/`radio` +
+  `aria-checked` + roving tabindex (solo la card seleccionada es tab-reachable);
+  navegación completa por teclado (ArrowRight/Left con wrap, ArrowDown/Up salto de
+  fila 4-cols con clamp, Home/End); flechas mueven foco SIN cambiar selección;
+  Enter y Espacio fijan la card enfocada; preview en vivo sigue al rubro (click ->
+  tagline/nombre correctos); rubro servicio (belleza) previene honesto "venta sin
+  inventario" + categoria Inventario off; nota SII universal; cero dead-end (rubro
+  `pronto` es un radio real seleccionable, boton demo deshabilitado pero el rubro
+  se elige igual).
+- **`client/e2e/rubro-preview-model.test.ts`** (14 tests, puro, sin DOM): matriz
+  sobre los 8 rubros del catalogo — preview coherente por rubro, ambos verticales
+  gated mapean a su seed pack, recetas/controlados SOLO farmacia, boleta/factura
+  SII universal en los 8, servicios (belleza/servicios) `physicalStock:false` ->
+  inventario/compras ocultos pero POS+boleta si, `visibleCount` == nav real (la
+  preview no puede divergir del ERP).
+- **prefers-reduced-motion**: asercion estatica de que `brand.css` neutraliza el
+  motion del grid bajo el media query (offline, sin CDN).
+- Infra: `happy-dom` agregado a `client/package.json` devDependencies (primer test
+  DOM del proyecto; vitest default era node-env). `tsconfig` incluye solo `src` ->
+  los tests e2e no entran al `tsc` del build (no rompe `npm run build`).
+
+GATE cliente verde: `npm run build` (tsc+vite, 36 modulos) + `npm test` 272/272
+(+28). `npm run e2e` (live stack, sin cambios de harness/flows) corrido como gate
+local. Sin Rust, sin migracion, `api.ts`/vistas/`styles.css`/`main.ts` intactos.
+ESTADO ACTUAL no tocado. Lane cascada off P2 (paxoloop rebasa a erp-parity al
+integrar P1->P2->P4).
