@@ -3219,3 +3219,28 @@ GATE: cargo fmt --all --check ✓ · cargo clippy -p domain --all-targets -D war
 bench compila + corre (--test, dataset chico, 5/5 ops Success) + gate happy-path
 exit 0 ✓ · npm run e2e: 132 passed / 0 failed / 2 known-bug xfail, exit 0 ✓.
 Sin tocar vistas, sin api.ts, sin migración, sin código lib.
+
+## 2026-06-16 — paul ola 8 · keyboard-only POS-loop modals + multi-caja default
+
+Quality cashier loop (lane feat/quality-cashier-loop). Cazado manejando el loop
+sin mouse: TODOS los modales del loop (boleta, abrir/cerrar caja, devolución,
+cliente) sólo se cerraban con click en backdrop o botón Cancelar → un cajero
+teclado-only quedaba atrapado en la boleta tras cada venta. FIX:
+- `views/modal-keys.ts` (nuevo): `bindModalKeys(close, onEnter?)` — Escape cierra
+  (y Enter confirma, opcional) sobre document por la vida del modal + detach fn
+  que el caller pliega en su close() (sin fugas ni listeners apilados).
+- pos boleta: Escape vuelve al scan box (Enter se deja a Imprimir/Cerrar para no
+  tragarse la impresión por teclado).
+- caja abrir/cerrar: Escape cierra; Enter confirma (abrir desde cualquier campo;
+  cerrar sólo si el botón está habilitado).
+- devolución / cliente: Escape cierra (Enter sigue contextual: cargar boleta /
+  no auto-submit de form multi-campo).
+
+Pulido de default: el modal "Abrir caja" proponía "caja-1" SIEMPRE → abrir un 2°
+cajón sugería un nombre colisionado (confuso en arqueo). `nextDrawerName(existing)`
+(cashier-loop.ts, puro) sugiere el siguiente `caja-N` (max sufijo +1; fallback
+count+1 con nombres custom). Cableado en caja.ts.
+
+Tests: +5 journeys nextDrawerName (cashier-loop.test.ts). GATE cliente verde:
+npm run build (tsc+vite) ✓ · npm test 214/214 ✓ (+5). Sin Rust, sin api.ts, sin
+migración. api.ts intacto.

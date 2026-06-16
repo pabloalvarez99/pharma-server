@@ -20,7 +20,8 @@ import {
 import { clp, toNumber } from "../format";
 import { kpiSkeleton, asMessage, escapeHtml } from "./inventory";
 import "./rutbrand.css";
-import { expectedCash, discrepancy } from "./cashier-loop";
+import { expectedCash, discrepancy, nextDrawerName } from "./cashier-loop";
+import { bindModalKeys } from "./modal-keys";
 
 export function renderCaja(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -75,10 +76,10 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
     }
   }
 
-  function openBtn(label: string): void {
+  function openBtn(label: string, suggestedName: string): void {
     actionsEl.innerHTML = `<button id="caja-open-btn" class="btn-primary">${label}</button>`;
     actionsEl.querySelector<HTMLButtonElement>("#caja-open-btn")!
-      .addEventListener("click", () => openModal(modalHost, serverUrl, async () => {
+      .addEventListener("click", () => openModal(modalHost, serverUrl, suggestedName, async () => {
         toast("Caja abierta");
         await refresh();
       }));
@@ -98,7 +99,7 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
       </div>
     `;
     bodyEl.querySelector<HTMLButtonElement>("#caja-open-btn")!
-      .addEventListener("click", () => openModal(modalHost, serverUrl, async () => {
+      .addEventListener("click", () => openModal(modalHost, serverUrl, "caja-1", async () => {
         toast("Caja abierta");
         await refresh();
       }));
@@ -149,7 +150,7 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
         }),
       );
     });
-    openBtn("Abrir otra caja");
+    openBtn("Abrir otra caja", nextDrawerName(sessions.map((s) => s.register_name)));
   }
 
   void refresh();
@@ -160,6 +161,7 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
 function openModal(
   modalHost: HTMLElement,
   serverUrl: string,
+  suggestedName: string,
   onDone: () => void | Promise<void>,
 ): void {
   modalHost.innerHTML = `
@@ -168,7 +170,7 @@ function openModal(
         <h3 class="modal-title">Abrir caja</h3>
         <label class="field modal-field">
           <span class="modal-label">Nombre de la caja</span>
-          <input id="caja-name" type="text" value="caja-1" autocomplete="off" />
+          <input id="caja-name" type="text" value="${escapeHtml(suggestedName)}" autocomplete="off" />
         </label>
         <label class="field modal-field">
           <span class="modal-label">Monto inicial (CLP)</span>
@@ -186,11 +188,17 @@ function openModal(
     </div>
   `;
 
-  const close = () => (modalHost.innerHTML = "");
   const nameEl = modalHost.querySelector<HTMLInputElement>("#caja-name")!;
   const amountEl = modalHost.querySelector<HTMLInputElement>("#caja-amount")!;
   const errEl = modalHost.querySelector<HTMLElement>("#caja-modal-error")!;
   const confirmBtn = modalHost.querySelector<HTMLButtonElement>("#caja-confirm")!;
+
+  // Escape closes; Enter (from either field) confirms — caja open is keyboard-only.
+  const detachKeys = bindModalKeys(() => close(), () => confirmBtn.click());
+  const close = () => {
+    detachKeys();
+    modalHost.innerHTML = "";
+  };
 
   modalHost.querySelector<HTMLElement>(".modal-backdrop")!.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) close();
@@ -256,12 +264,23 @@ async function closeFlow(
     </div>
   `;
 
-  const close = () => (modalHost.innerHTML = "");
   const arqueoEl = modalHost.querySelector<HTMLElement>("#caja-arqueo")!;
   const countedEl = modalHost.querySelector<HTMLInputElement>("#caja-counted")!;
   const diffEl = modalHost.querySelector<HTMLElement>("#caja-diff")!;
   const errEl = modalHost.querySelector<HTMLElement>("#caja-modal-error")!;
   const confirmBtn = modalHost.querySelector<HTMLButtonElement>("#caja-confirm")!;
+
+  // Escape closes; Enter confirms the count (no-op while the button is disabled).
+  const detachKeys = bindModalKeys(
+    () => close(),
+    () => {
+      if (!confirmBtn.disabled) confirmBtn.click();
+    },
+  );
+  const close = () => {
+    detachKeys();
+    modalHost.innerHTML = "";
+  };
 
   modalHost.querySelector<HTMLElement>(".modal-backdrop")!.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) close();

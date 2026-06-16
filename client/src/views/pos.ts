@@ -37,6 +37,7 @@ import {
   splitPayment,
   type CartLine,
 } from "./cashier-loop";
+import { bindModalKeys } from "./modal-keys";
 
 interface PickedCustomer {
   id: string;
@@ -767,7 +768,12 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       </div>
     `;
 
+    // Escape dismisses the boleta and returns to the scan box, so a mouseless
+    // cashier isn't trapped on the ticket. (Enter is left for the focused
+    // Imprimir/Cerrar buttons — binding it here would swallow keyboard print.)
+    const detachKeys = bindModalKeys(() => close());
     const close = () => {
+      detachKeys();
       modalHost.innerHTML = "";
       searchEl.focus();
     };
