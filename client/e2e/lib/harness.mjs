@@ -74,9 +74,10 @@ export async function buildBinaries() {
 
 // --- server lifecycle -------------------------------------------------------
 
-/** Run a `pharma` CLI subcommand against the temp DB. */
-export function cli(args, dbPath) {
-  return run(CLI_BIN, args, { env: dbEnv(dbPath) });
+/** Run a `pharma` CLI subcommand against the temp DB. `extraEnv` layers on top
+ *  of the DB/JWT env (e.g. a passphrase var for `cert import --passphrase-env`). */
+export function cli(args, dbPath, extraEnv = {}) {
+  return run(CLI_BIN, args, { env: { ...dbEnv(dbPath), ...extraEnv } });
 }
 
 function dbEnv(dbPath) {
@@ -197,6 +198,9 @@ export class Client {
   }
   post(path, body, opts = {}) {
     return this.req("POST", path, { ...opts, body });
+  }
+  put(path, body, opts = {}) {
+    return this.req("PUT", path, { ...opts, body });
   }
 }
 

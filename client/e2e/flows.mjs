@@ -12,6 +12,12 @@
 
 import { Client, check, eq, section, knownBug } from "./lib/harness.mjs";
 
+/** First integer captured by `<tag>NNN</tag>` in an XML string, or null. */
+function xmlInt(xml, tag) {
+  const m = xml.match(new RegExp(`<${tag}>\\s*(-?\\d+)\\s*</${tag}>`));
+  return m ? Number(m[1]) : null;
+}
+
 /** Run the full golden path for one tenant/vertical. */
 export async function goldenPath({ tenant, email, password, vertical }) {
   section(`vertical=${vertical} tenant=${tenant}`);
@@ -304,6 +310,239 @@ export async function complianceFlow({ tenant, email, password, vertical }) {
   const period = new Date().toISOString().slice(0, 7); // YYYY-MM
   const libro = await c.get(`/dte/libro-ventas?period=${period}`, { expectOk: false });
   check(libro.status < 500, `libro-ventas handled cleanly (status ${libro.status}, no 5xx)`);
+}
+
+// Emisor + cert RUT the DTE-lifecycle tenant is bootstrapped with (run.mjs).
+// Must match the CAF <RE> and the test cert's --rut so the TED + CAF line up.
+export const DTE_EMISOR_RUT = "76123456-7";
+export const DTE_CERT_PASS = "test1234"; // crates/dte/tests/assets/test-cert.pfx
+
+/** Full DTE document lifecycle over the live stack (charter ola-6 spina vendible).
+ *  Runs against a tenant that run.mjs pre-loaded (server down) with a digital cert
+ *  and CAFs for boleta(39, folios 1..2) + factura(33, 1..1) + nota-crédito(61,
+ *  1..10), and NO CAF for guía(52). Drives REAL signed emission and asserts:
+ *    1. sin CAF       → emitting a tipo with no CAF fails CLEANLY (coded 409
+ *                       FOLIO_EXHAUSTED, never a 5xx). [charter said "422"; the
+ *                       real coded status is 409 — see MULTI-RUBRO/BUG notes.]
+ *    2. folio burn    → each emit consumes one folio; caf-status next_folio
+ *                       advances and `restantes` drops.
+ *    3. reference chain→ a nota-crédito referencing the factura persists
+ *                       <TpoDocRef>/<FolioRef> pointing at that exact folio.
+ *    4. monto coherence→ factura desglose nets out: MntNeto + IVA == MntTotal.
+ *    5. CAF agotado   → a second factura on a 1-folio CAF → clean 409, restantes 0.
+ *    6. aggregate     → GET /dte lists every emitted doc with matching folios +
+ *                       montos (the day's book cuadra); libro-ventas XML renders
+ *                       cleanly (empty offline — only SII-'accepted' docs land in
+ *                       the libro, by design; see note below). */
+export async function dteLifecycleFlow({ tenant, email, password }) {
+  section(`dte-lifecycle tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Catalog + a paid order to hang the boleta on (boleta = order-derived).
+  await c.post("/admin/seed-demo", { vertical: "pharmacy", force: true });
+  await c.put("/settings/dte.emisor", {
+    value: JSON.stringify({
+      rut: DTE_EMISOR_RUT,
+      razon_social: "FARMACIA TEST SPA",
+      giro: "FARMACIA",
+      direccion: "CALLE 123",
+      comuna: "COQUIMBO",
+      ciudad: "COQUIMBO",
+      acteco: 477310,
+    }),
+  });
+
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  const sellable = list.find((p) => p.stock > 0 && p.active !== false);
+  check(!!sellable, "dte: have a sellable product to bill");
+  await c.post("/cash-sessions", { register_name: "Caja DTE", opening_cash: "0" });
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [
+        {
+          product: sellable.id,
+          product_name: sellable.name,
+          quantity: 1,
+          unit_price: String(sellable.price),
+        },
+      ],
+      payment_method: "pos_cash",
+      cash_amount: String(sellable.price),
+    },
+    { headers: { "Idempotency-Key": `e2e-dte-${Date.now()}` } },
+  );
+  eq(sale.status, 201, "dte: paid order created for boleta");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "dte: sale returns order id");
+
+  const receptor = {
+    rut: "76086428-5",
+    razon_social: "Cliente DTE SpA",
+    giro: "Comercio",
+    direccion: "Av Siempre Viva 742",
+    comuna: "Coquimbo",
+  };
+  const today = new Date().toISOString().slice(0, 10);
+
+  // --- 1. sin CAF: guía(52) has no CAF → clean 409 FOLIO_EXHAUSTED -----------
+  //     The spec validates first (valid receptor + ind_traslado), so reaching
+  //     the folio step proves it gated on folio supply, not on a bad request.
+  const guia = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 52,
+      cert_passphrase: DTE_CERT_PASS,
+      receptor,
+      ind_traslado: 1,
+      items: [{ nombre: "Traslado E2E", cantidad: "1", precio_unitario: "1000" }],
+    },
+    { expectOk: false },
+  );
+  check(guia.status < 500, `sin-CAF guía handled cleanly (status ${guia.status}, no 5xx)`);
+  eq(guia.status, 409, "sin-CAF guía → 409 (coded folio gate, charter approx 422)");
+  eq(guia.body?.error?.code, "FOLIO_EXHAUSTED", "sin-CAF guía code FOLIO_EXHAUSTED");
+
+  // --- 2. boleta(39): emit consumes a folio; next_folio advances -------------
+  const caf39Before = (await c.get("/dte/caf-status?tipo=39")).body;
+  eq(caf39Before.cafs?.[0]?.next_folio, 1, "boleta CAF starts at folio 1");
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: DTE_CERT_PASS },
+    { expectOk: false },
+  );
+  eq(boleta.status, 201, "boleta 39 emitted (signed) with a real CAF/cert");
+  eq(boleta.body?.folio, 1, "boleta took folio 1");
+  const caf39After = (await c.get("/dte/caf-status?tipo=39")).body;
+  eq(caf39After.cafs?.[0]?.next_folio, 2, "boleta CAF advanced to folio 2");
+  eq(caf39After.cafs?.[0]?.restantes, 1, "boleta CAF has 1 folio left");
+
+  // --- 3+4. factura(33): emit, monto desglose coherent -----------------------
+  const factura = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 33,
+      cert_passphrase: DTE_CERT_PASS,
+      receptor,
+      // precio IVA-incluido (retail CL): 1190 → neto 1000 + IVA 190.
+      items: [{ nombre: "Item Factura E2E", cantidad: "1", precio_unitario: "1190" }],
+    },
+    { expectOk: false },
+  );
+  eq(factura.status, 201, "factura 33 emitted (signed)");
+  const facturaFolio = factura.body?.folio;
+  check(typeof facturaFolio === "number", "factura returned a folio");
+  const facturaTotal = Number(factura.body?.monto_total);
+  const facturaXml = (await c.get(`/dte/${encodeURIComponent(factura.body.id)}/xml`)).body;
+  const neto = xmlInt(facturaXml, "MntNeto");
+  const iva = xmlInt(facturaXml, "IVA");
+  const total = xmlInt(facturaXml, "MntTotal");
+  eq(neto, 1000, "factura MntNeto = 1000 (1190 / 1.19)");
+  eq(iva, 190, "factura IVA = 190");
+  eq(neto + iva, total, "factura desglose cuadra: MntNeto + IVA == MntTotal");
+  eq(total, facturaTotal, "factura XML MntTotal == DTO monto_total");
+
+  // --- 3. nota-crédito(61) referencing the factura ---------------------------
+  const nc = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 61,
+      cert_passphrase: DTE_CERT_PASS,
+      receptor,
+      referencias: [
+        {
+          tipo_doc_ref: "33",
+          folio_ref: String(facturaFolio),
+          fecha_ref: today,
+          cod_ref: 1, // anula
+          razon_ref: `Anula factura ${facturaFolio}`,
+        },
+      ],
+      items: [{ nombre: "Anulación factura E2E", cantidad: "1", precio_unitario: "1190" }],
+    },
+    { expectOk: false },
+  );
+  eq(nc.status, 201, "nota-crédito 61 emitted referencing the factura");
+  const ncXml = (await c.get(`/dte/${encodeURIComponent(nc.body.id)}/xml`)).body;
+  eq(xmlInt(ncXml, "TpoDocRef"), 33, "NC reference TpoDocRef points at factura (33)");
+  eq(xmlInt(ncXml, "FolioRef"), facturaFolio, "NC reference FolioRef = factura folio");
+
+  // --- 5. CAF agotado: the 1-folio factura CAF is now spent → clean 409 ------
+  const factura2 = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 33,
+      cert_passphrase: DTE_CERT_PASS,
+      receptor,
+      items: [{ nombre: "Segunda factura E2E", cantidad: "1", precio_unitario: "1190" }],
+    },
+    { expectOk: false },
+  );
+  check(factura2.status < 500, `CAF-agotado factura handled cleanly (status ${factura2.status}, no 5xx)`);
+  eq(factura2.status, 409, "CAF agotado → 409");
+  eq(factura2.body?.error?.code, "FOLIO_EXHAUSTED", "CAF agotado code FOLIO_EXHAUSTED");
+  const caf33 = (await c.get("/dte/caf-status?tipo=33")).body;
+  eq(caf33.folios_restantes, 0, "factura CAF exhausted (0 folios left)");
+
+  // --- 6. aggregate: every emitted doc is queryable + montos cuadran --------
+  const all = (await c.get("/dte")).body;
+  const rows = Array.isArray(all) ? all : (all?.items ?? []);
+  const byTipo = (t) => rows.filter((d) => d.tipo === t);
+  eq(byTipo(39).length, 1, "ledger has exactly the 1 boleta emitted");
+  eq(byTipo(33).length, 1, "ledger has exactly the 1 factura emitted");
+  eq(byTipo(61).length, 1, "ledger has exactly the 1 nota-crédito emitted");
+  const billed = byTipo(39)[0].folio === 1 && byTipo(33)[0].folio === facturaFolio;
+  check(billed, "ledger folios match what we emitted (day's book cuadra)");
+
+  // libro-ventas XML: renders cleanly. It aggregates only SII-'accepted' docs;
+  // offline (no SII send/poll) everything stays 'signed', so the book is empty
+  // by design — we assert it's well-formed + no 5xx, not that it lists drafts.
+  const period = today.slice(0, 7); // YYYY-MM
+  const libro = await c.get(`/dte/libro-ventas?period=${period}`, { expectOk: false });
+  check(libro.status === 200, `libro-ventas renders (status ${libro.status})`);
+  check(
+    typeof libro.body === "string" && libro.body.includes("LibroCompraVenta"),
+    "libro-ventas is well-formed XML",
+  );
+}
+
+/** 402 matrix: every Pro-gated report returns a clean 402 FEATURE_REQUIRES_UPGRADE
+ *  on Free (never a 5xx, never silent 200), while the core/free reports return a
+ *  200 JSON array. Pins the freemium gate contract (ADR-0005: core gratis, paid
+ *  surfaces upsell). Runs on any seeded tenant — no DTE setup needed. */
+export async function reports402Matrix({ tenant, email, password }) {
+  section(`reports-402-matrix tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Core (Free) reports — 200 + JSON array, both verticals.
+  for (const path of [
+    "/reports/sales-daily",
+    "/reports/top-products",
+    "/reports/stock-rotation",
+    "/reports/near-expiry",
+  ]) {
+    const r = await c.get(path, { expectOk: false });
+    check(r.status === 200 && Array.isArray(r.body), `core ${path} → 200 array`);
+  }
+
+  // Pro-gated reports — clean 402 FEATURE_REQUIRES_UPGRADE on Free.
+  for (const path of ["/reports/margins-daily"]) {
+    const r = await c.get(path, { expectOk: false });
+    eq(r.status, 402, `gated ${path} → 402`);
+    eq(r.body?.error?.code, "FEATURE_REQUIRES_UPGRADE", `gated ${path} code FEATURE_REQUIRES_UPGRADE`);
+  }
+
+  // Dashboard stays 200 on Free but degrades the gated margin field to null
+  // (never a 402 — the executive view must still load). ADR-0005 invariant.
+  const dash = await c.get("/reports/dashboard", { expectOk: false });
+  check(dash.status === 200, `dashboard → 200 on Free (status ${dash.status})`);
+  check(
+    dash.body != null && (dash.body.margen_hoy === null || dash.body.margen_hoy === undefined),
+    "dashboard margen_hoy degraded to null on Free (no 402)",
+  );
 }
 
 /** Multi-rubro contract for a NON-pharmacy rubro (minimarket): the operator must
