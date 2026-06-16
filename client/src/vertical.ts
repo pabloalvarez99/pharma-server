@@ -141,6 +141,14 @@ export interface RubroCard {
   /** Short, emotional tagline shown in the live ERP preview header. Makes each
    *  rubro feel native ("hecho para mi negocio") — pure copy, no feature build. */
   tagline: string;
+  /** Custom icon id (key into {@link RUBRO_ICONS}) — the self-hosted line-art
+   *  shown on the showcase card + preview header. Distinct from {@link icon}:
+   *  `icon` is the legacy emoji kept only for the login <option> dropdown. */
+  iconId: string;
+  /** Per-rubro accent (6-digit hex). Themes the card states (hover/selected
+   *  border, icon, ✓) and the preview, so each rubro reads as its own identity
+   *  instead of the single brand teal. Set as `--rubro-accent` on the card. */
+  accent: string;
   /** Seed pack to request (es→en), or `null` if none yet. */
   seedVertical: SeedVertical;
 }
@@ -155,6 +163,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "💊",
     help: "Recetas + libro de controlados (Ley 20.000), principio activo, lotes.",
     tagline: "Tu farmacia, en regla.",
+    iconId: "farmacia",
+    accent: "#1fd3a3",
     seedVertical: "pharmacy",
   },
   {
@@ -163,6 +173,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "🛒",
     help: "Abarrotes y perecibles. POS, inventario y boletas. Sin recetas.",
     tagline: "Tu almacén, al día.",
+    iconId: "minimarket",
+    accent: "#f5b53d",
     seedVertical: "minimarket",
   },
   {
@@ -171,6 +183,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "🍽",
     help: "ERP genérico. Pack demo próximamente.",
     tagline: "Tu cocina, bajo control.",
+    iconId: "restaurant",
+    accent: "#ff6b5d",
     seedVertical: null,
   },
   {
@@ -179,6 +193,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "☕",
     help: "ERP genérico. Pack demo próximamente.",
     tagline: "Tu café, listo cada mañana.",
+    iconId: "cafe",
+    accent: "#c98a4b",
     seedVertical: null,
   },
   {
@@ -187,6 +203,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "🛍",
     help: "ERP genérico. POS e inventario.",
     tagline: "Tu tienda, ordenada.",
+    iconId: "tienda",
+    accent: "#5aa9ff",
     seedVertical: null,
   },
   {
@@ -195,6 +213,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "💅",
     help: "Servicios y agenda; poco stock físico.",
     tagline: "Tu salón, agendado.",
+    iconId: "belleza",
+    accent: "#e879c7",
     seedVertical: null,
   },
   {
@@ -203,6 +223,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "🔧",
     help: "Ventas de servicios sin inventario físico.",
     tagline: "Tu oficio, facturado.",
+    iconId: "servicios",
+    accent: "#94a3c4",
     seedVertical: null,
   },
   {
@@ -211,6 +233,8 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     icon: "➕",
     help: "ERP genérico, sin secciones específicas de un rubro.",
     tagline: "Tu negocio, a tu manera.",
+    iconId: "otro",
+    accent: "#8b97ad",
     seedVertical: null,
   },
 ] as const;

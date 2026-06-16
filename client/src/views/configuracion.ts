@@ -23,6 +23,7 @@ import {
   parseRubro,
 } from "../vertical";
 import { rubroPreview } from "./first-run";
+import { rubroIconSvg } from "../brand/rubro-icons";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 
 type SettingKind = "boolean" | "number";
@@ -396,13 +397,22 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
           <div class="rubro-grid" role="radiogroup" aria-label="Rubro del negocio">
             ${RUBRO_CATALOG.map((r) => {
               const on = r.value === selectedVertical;
+              // Tag: an accent "datos demo" chip when a seed pack exists, else a
+              // muted "pronto" for the future rubros (still fully selectable —
+              // no dead-end), and nothing for the generic `otro`.
+              const tag = r.seedVertical
+                ? `<span class="rubro-tag demo">datos demo</span>`
+                : r.value !== "otro"
+                  ? `<span class="rubro-tag soon">pronto</span>`
+                  : "";
               return `
               <button type="button" role="radio" class="rubro-card${on ? " selected" : ""}"
-                      data-vertical="${r.value}" aria-checked="${on}" tabindex="${on ? 0 : -1}">
-                <span class="rubro-icon" aria-hidden="true">${r.icon}</span>
+                      data-vertical="${r.value}" aria-checked="${on}" tabindex="${on ? 0 : -1}"
+                      style="--rubro-accent:${r.accent}">
+                <span class="rubro-icon" aria-hidden="true">${rubroIconSvg(r.iconId)}</span>
                 <span class="rubro-label">${escapeHtml(r.label)}</span>
                 <span class="rubro-help">${escapeHtml(r.help)}</span>
-                ${r.seedVertical ? `<span class="rubro-tag">datos demo</span>` : ""}
+                ${tag}
               </button>`;
             }).join("")}
           </div>
@@ -527,6 +537,10 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     const rubro = parseRubro(value);
     const card = RUBRO_CATALOG.find((r) => r.value === value);
     const p = rubroPreview(rubro);
+    // Theme the whole preview panel to the rubro's accent so the header, the
+    // category checks and the native bullets read as that rubro's identity.
+    if (card) box.style.setProperty("--rubro-accent", card.accent);
+    else box.style.removeProperty("--rubro-accent");
 
     const catRow = (label: string, on: boolean): string =>
       `<li class="rubro-cat ${on ? "on" : "off"}">
@@ -561,7 +575,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
 
     box.innerHTML = `
       <header class="rubro-pv-head">
-        <span class="rubro-pv-icon" aria-hidden="true">${card?.icon ?? "➕"}</span>
+        <span class="rubro-pv-icon" aria-hidden="true">${rubroIconSvg(card?.iconId, { size: 26 })}</span>
         <div>
           <h4 class="rubro-pv-name">${escapeHtml(card?.label ?? "Otro")}</h4>
           <p class="rubro-pv-tag">${escapeHtml(card?.tagline ?? "")}</p>

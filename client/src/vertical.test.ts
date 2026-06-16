@@ -132,3 +132,27 @@ describe("featuresForRubro — per-rubro capability gate", () => {
     });
   });
 });
+
+describe("rubro visual identity (P2 showcase: accent + custom icon)", () => {
+  it("every card declares a custom icon id (not just an emoji)", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(typeof r.iconId).toBe("string");
+      expect(r.iconId.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("every card declares a 6-digit hex accent color", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(r.accent).toMatch(/^#[0-9a-fA-F]{6}$/);
+    });
+  });
+
+  it("accents are distinct so each rubro reads as its own (no two share a color)", () => {
+    const accents = RUBRO_CATALOG.map((r) => r.accent.toLowerCase());
+    expect(new Set(accents).size).toBe(accents.length);
+  });
+
+  it("keeps the emoji `icon` for back-compat (login <option> still uses it)", () => {
+    RUBRO_CATALOG.forEach((r) => expect(r.icon.length).toBeGreaterThan(0));
+  });
+});
