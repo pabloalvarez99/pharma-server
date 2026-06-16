@@ -1,6 +1,6 @@
 ---
 title: 06 · Problemas comunes y cómo resolverlos
-audience: cajeros, químicos farmacéuticos, dueños y administradores
+audience: cajeros, encargados de stock, dueños y administradores
 ---
 
 # Problemas comunes y cómo resolverlos
@@ -8,7 +8,7 @@ audience: cajeros, químicos farmacéuticos, dueños y administradores
 Esta página junta las dudas más frecuentes del día a día. Buscá tu situación en
 la tabla y seguí el "qué hacer". Casi todo se resuelve sin llamar al técnico.
 
-> **Lo primero, siempre**: respirá. La información de la farmacia vive en el
+> **Lo primero, siempre**: respirá. La información del negocio vive en el
 > computador del local y **no se pierde** porque se corte la luz o internet. Si
 > algo se ve raro, casi siempre alcanza con esperar unos segundos o reintentar.
 

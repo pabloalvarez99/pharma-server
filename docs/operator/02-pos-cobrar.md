@@ -124,7 +124,7 @@ caja, **o** el stock que mostraba el sistema estaba desactualizado.
 4. Si la persona se enoja porque "estaba ahí hace dos minutos", explicale que
    se vendió en otra caja del local en ese mismo momento.
 
-**Acción del admin / químico** (después, no en el momento):
+**Acción del admin / encargado de stock** (después, no en el momento):
 - Hacé un conteo físico de ese producto.
 - Si el stock del sistema y el físico no coinciden, hay un problema más grande
   que hay que investigar — avisá al dueño.

@@ -1,6 +1,6 @@
 ---
 title: 10 · Compras a proveedores
-audience: dueños y administradores de farmacia
+audience: dueños y administradores
 ---
 
 # Compras a proveedores

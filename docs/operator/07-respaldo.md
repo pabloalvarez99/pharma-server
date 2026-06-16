@@ -1,6 +1,6 @@
 ---
 title: 07 · Respaldo de la información
-audience: administradores y dueños de farmacia (con apoyo del técnico)
+audience: administradores y dueños (con apoyo del técnico)
 ---
 
 # Respaldo de la información
@@ -9,7 +9,7 @@ Este capítulo es para el **administrador**. Explica qué es un respaldo, cómo
 verificar que se está haciendo, y qué hacer para recuperar la información si
 algún día hiciera falta.
 
-> Toda la información de la farmacia (productos, stock, ventas, clientes,
+> Toda la información del negocio (productos, stock, ventas, clientes,
 > boletas) vive en el computador del local. Un **respaldo** es una copia de
 > seguridad de esa información, por si el computador se daña o se roba. Tenerlo
 > al día es lo que te deja dormir tranquilo.
@@ -19,13 +19,13 @@ algún día hiciera falta.
 El sistema guarda un **snapshot**: un único archivo comprimido
 (`pharma-backup-<fecha>.tar.gz`) con toda la base de datos. Por defecto se
 guarda en la carpeta `backups` dentro de los datos del servidor. Ese archivo es
-todo lo que necesitás para restaurar la farmacia en otro computador.
+todo lo que necesitás para restaurar el negocio en otro computador.
 
 ## Respaldo automático (recomendado)
 
 El sistema puede sacar un respaldo **solo, todas las noches**, sin que nadie
 tenga que acordarse. Esto lo deja activado **el técnico** una sola vez, eligiendo
-la hora (lo habitual es las **3:00 AM**, cuando la farmacia está cerrada) y
+la hora (lo habitual es las **3:00 AM**, cuando el local está cerrado) y
 cuántos días de respaldos guardar.
 
 > Por defecto el respaldo automático viene **apagado**. Pedile al técnico que lo
@@ -78,11 +78,11 @@ estar **detenido** mientras se restaura:
 pharma backup restore <ruta-al-archivo.tar.gz>
 ```
 
-Después se vuelve a iniciar el servicio y la farmacia queda tal como estaba en la
+Después se vuelve a iniciar el servicio y el negocio queda tal como estaba en la
 fecha de ese respaldo.
 
 > **Importante**: restaurar reemplaza todo lo que haya ahora por lo que estaba en
-> el respaldo. Nunca lo hagas "para probar" sobre la farmacia en uso — es una
+> el respaldo. Nunca lo hagas "para probar" sobre el negocio en uso — es una
 > operación de emergencia. Ante la duda, llamá al técnico.
 
 ## Resumen para el administrador

@@ -5,13 +5,84 @@ audience: todos los operadores, primer día
 
 # Tu primer inicio de sesión
 
-La primera vez que abrís Tu Farmacia, vas a ver la **pantalla de inicio de
-sesión**. No te asustés, son sólo tres campos. Vamos uno por uno.
+Hay **dos situaciones** distintas la primera vez que abrís RutBusiness:
+
+1. **Servidor recién instalado, sin ninguna cuenta todavía** → te aparece la
+   pantalla **Crea tu cuenta** (la dueña del negocio). Esto pasa una sola vez.
+2. **El servidor ya tiene cuenta** (tu admin ya la creó) → te aparece la
+   pantalla normal de **Iniciar sesión** con Sucursal, Correo y Contraseña.
+
+Abajo explicamos las dos.
+
+## Caso 1 — Crear la cuenta del negocio (primer arranque)
+
+La primera vez que se abre un servidor nuevo, RutBusiness detecta que **todavía
+no hay ninguna cuenta** y te muestra la pantalla **Crea tu cuenta**. A la
+izquierda dice *Bienvenido. Es la primera vez que abres este servidor.* Esta
+cuenta será la **dueña** del negocio.
+
+> (ver captura: pantalla "Crea tu cuenta" del primer arranque)
+
+Llená estos campos:
+
+### Nombre del negocio
+
+El nombre de tu local, como querés que aparezca. Por ejemplo `Almacén Don José`,
+`Minimarket La Esquina` o el nombre de tu farmacia.
+
+### Rubro
+
+Un menú para elegir **a qué se dedica tu negocio**. Esto define qué secciones
+del sistema se muestran. Las opciones:
+
+- 💊 **Farmacia** — habilita Recetas y el Libro de controlados (Ley 20.000),
+  principio activo y lotes.
+- 🛒 **Minimarket / Almacén** — abarrotes y perecibles. POS, inventario y
+  boletas. Sin recetas.
+- 🍽 **Restaurant / Comida**
+- ☕ **Café / Pastelería**
+- 🛍 **Tienda / Retail**
+- 💅 **Belleza / Estética** — servicios, poco stock físico.
+- 🔧 **Servicios / Oficios** — ventas de servicios sin inventario físico.
+- ➕ **Otro** — ERP genérico, sin secciones específicas de un rubro.
+
+No te preocupes si dudás: el rubro lo podés **cambiar después** en
+**Configuración**. Las boletas y facturas SII funcionan en todos los rubros.
+
+### Correo
+
+El correo electrónico de la cuenta dueña. Por ejemplo `dueno@minegocio.cl`. Con
+este correo vas a iniciar sesión después.
+
+### Contraseña
+
+Tu clave. **Mínimo 8 caracteres.** Anotala en un lugar seguro: es la cuenta
+dueña del negocio.
+
+### Conexión avanzada
+
+Igual que en el login normal: sólo la abrís si tu técnico te dictó otra
+dirección de servidor.
+
+Cuando todo esté completo, tocás **CREAR CUENTA Y ENTRAR**. El sistema crea la
+cuenta, la sucursal y te lleva directo al panel principal — sin pasar por
+comandos ni configuración técnica.
+
+> **¿Querés probar con datos de ejemplo?** Una vez adentro, en
+> **Configuración** podés tocar **Cargar datos demo** para llenar la aplicación
+> con productos, ventas y clientes de prueba de tu rubro. Sirve para practicar
+> antes de cargar tus datos reales. Ver
+> [Cargar tu catálogo](./13-importar-datos.md).
+
+## Caso 2 — Iniciar sesión (uso de todos los días)
+
+Si el servidor ya tiene cuenta, al abrir RutBusiness vas a ver la **pantalla de
+inicio de sesión** con tres campos. Vamos uno por uno.
 
 ## Paso 1 — Abrí la aplicación
 
-Hacé doble click en el icono **Tu Farmacia** del escritorio. Esperá unos
-segundos. Vas a ver cómo aparece el panel azul con el logo.
+Hacé doble click en el icono **RutBusiness** del escritorio. Esperá unos
+segundos. Vas a ver cómo aparece el panel con el logo.
 
 > (ver captura: pantalla de login al inicio)
 
@@ -22,22 +93,22 @@ La pantalla tiene tres campos en este orden:
 ### Sucursal
 
 Es el nombre corto de tu local. Tu administrador o tu técnico te lo va a decir.
-En la mayoría de las farmacias dice simplemente `principal`, o `coquimbo`, o el
-nombre del barrio.
+En la mayoría de los locales dice simplemente `principal`, o el nombre del
+barrio o la ciudad.
 
 - Lo que escribís acá **no** se distingue entre mayúsculas y minúsculas, pero
   por orden, escribilo siempre en minúsculas.
-- Si ves que ya viene con un valor escrito por defecto (por ejemplo
-  `tufarmacia`), dejalo así salvo que tu admin te haya dicho otra cosa.
+- Si ves que ya viene con un valor escrito por defecto, dejalo así salvo que tu
+  admin te haya dicho otra cosa.
 
 ### Correo
 
 Es tu **correo electrónico personal** dentro del sistema. Lo registró el dueño
 o el admin cuando te dieron acceso. Por ejemplo:
 
-- `cajera@tufarmacia.cl`
-- `juan.perez@tufarmacia.cl`
-- `dueno@tufarmacia.cl`
+- `cajera@minegocio.cl`
+- `juan.perez@minegocio.cl`
+- `dueno@minegocio.cl`
 
 Si no recordás cuál es el tuyo, preguntáselo a tu administradora. **No
 inventés** un correo que no esté registrado: el sistema no te va a dejar entrar.
@@ -86,9 +157,11 @@ Debajo del campo de contraseña vas a ver un texto chiquito gris que dice
 
 - **Operador normal**: no lo abras nunca. El sistema ya viene configurado.
 - **Tu técnico te pide cambiar el servidor**: lo abrís, ves un campo que dice
-  **Servidor** con un valor tipo `http://127.0.0.1:8080`. Cambialo SOLO si tu
-  técnico te dictó el valor exacto. El botón **Probar conexión** te dice ahí
-  mismo si el servidor responde, sin tener que iniciar sesión.
+  **Servidor** con un valor tipo `http://127.0.0.1:8080`. Si el servidor corre
+  en otro equipo de la red, escribís su IP y puerto (ej:
+  `http://192.168.1.50:8080`), pero **sólo** si tu técnico te dictó el valor
+  exacto. El botón **Probar conexión** te dice ahí mismo si el servidor responde,
+  sin tener que iniciar sesión.
 
 ## ¿Y si me olvidé la contraseña?
 

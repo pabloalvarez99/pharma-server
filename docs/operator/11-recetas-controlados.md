@@ -3,7 +3,12 @@ title: 11 · Recetas y libro de controlados
 audience: químicos farmacéuticos y administradores
 ---
 
-# Recetas y libro de controlados (Ley 20.000)
+# Recetas y libro de controlados (Ley 20.000) **(solo rubro farmacia)**
+
+> **Este capítulo aplica únicamente al rubro Farmacia.** El módulo **Recetas** y
+> el libro de controlados sólo aparecen en el menú si elegiste el rubro
+> *Farmacia* (al crear tu cuenta o en **Configuración**). Si tu negocio es otro
+> rubro, saltate este capítulo: el módulo no se muestra.
 
 El módulo **Recetas** lleva el registro de las recetas que dispensás y, en
 particular, el **libro de medicamentos controlados** que exige la Ley 20.000.

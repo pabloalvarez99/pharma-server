@@ -6,8 +6,8 @@ audience: dueños, administradores y cajeros con permiso de facturación
 # Facturas, notas de crédito/débito y guías — paso a paso
 
 Este capítulo explica cómo emitir, desde la pantalla **Facturas**, los otros
-documentos tributarios electrónicos (DTE) que usa una farmacia además de la
-boleta:
+documentos tributarios electrónicos (DTE) que usa cualquier negocio además de la
+boleta (sirve para **todos los rubros**):
 
 - **Factura electrónica (33)** — cuando el cliente es una empresa y pide
   factura (con su RUT, razón social y giro).
@@ -77,8 +77,8 @@ En **Items** agregá una línea por producto con **+ Agregar item**:
 - **Descripción** — el nombre del producto.
 - **Cantidad** y **Precio unit.** — el precio se escribe **con IVA incluido**
   (el mismo precio de la góndola).
-- **Exento** — marcalo sólo si ese producto no paga IVA (es poco común en
-  farmacia; dejalo sin marcar salvo que sepas que corresponde).
+- **Exento** — marcalo sólo si ese producto no paga IVA (es poco común; dejalo
+  sin marcar salvo que sepas que corresponde).
 
 A medida que cargás los productos, abajo a la derecha aparece el **resumen** que
 se va a emitir:

@@ -1,6 +1,6 @@
 ---
 title: 05 · Cierre de caja al final del día
-audience: cajeros, dueños y administradores de farmacia
+audience: cajeros, dueños y administradores
 ---
 
 # Cierre de caja al final del día
@@ -50,7 +50,7 @@ diferencia grande conviene revisarla **antes** de confirmar el cierre:
 Anotá siempre el motivo en la **nota de cierre**: así el dueño entiende la
 diferencia cuando revise.
 
-## Si la farmacia tiene más de una caja
+## Si el negocio tiene más de una caja
 
 Si trabajan con varios cajones (por ejemplo dos mostradores), cada uno se abre y
 se cierra por separado. En la vista **Caja** vas a ver todas las cajas abiertas;
@@ -60,7 +60,7 @@ para abrir un segundo cajón sin cerrar el primero.
 ## Qué hacer con la plata
 
 Una vez cerrada la caja, guardá el efectivo según el procedimiento de tu
-farmacia (sobre, caja fuerte, depósito). El sistema ya guardó el registro del
+negocio (sobre, caja fuerte, depósito). El sistema ya guardó el registro del
 turno; lo físico (la plata) lo manejás vos.
 
 ## Problemas comunes

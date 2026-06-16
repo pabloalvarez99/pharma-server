@@ -1,6 +1,6 @@
 ---
 title: 04 · Mirar los reportes
-audience: admin, dueña/o, químico responsable
+audience: admin, dueña/o, encargado responsable
 ---
 
 # Mirar los reportes
@@ -126,7 +126,7 @@ Los reportes premium son:
 - **ABC clasificación completa** — el ABC de TODOS tus productos, no sólo los
   Top 5. Disponible en **Business**.
 
-> ¿Cómo subir de plan? Tu admin compra el plan desde el portal de Tu Farmacia
+> ¿Cómo subir de plan? Tu admin compra el plan desde el portal de RutBusiness
 > (web). Cuando paga, se descarga un archivo `.lic` y tu técnico lo importa
 > en el sistema. El cambio es **inmediato**: no hace falta reiniciar nada.
 > Mirá `docs/product/license-activation.md` para el flujo técnico (es para
