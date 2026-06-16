@@ -187,6 +187,64 @@ async fn cannot_open_second_session_for_same_user() {
     assert_eq!(err.code(), "CONFLICT");
 }
 
+/// Concurrent `open_session` for the SAME cashier must yield exactly ONE open
+/// drawer — the check-then-act (`SELECT count` then `CREATE`) is a TOCTOU race
+/// without a per-(tenant,user) lock: two tasks both read count=0 and both
+/// CREATE, leaving the cashier with two open sessions that split
+/// `cash_sales_running` and corrupt arqueo/cierre. Same race class SALE_LOCKS
+/// closed for the POS write path (BUG-003/004).
+#[tokio::test]
+async fn concurrent_open_same_user_yields_single_session() {
+    let (db, tenant, user) = setup().await;
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let user = user.clone();
+        tasks.push(async move {
+            service::open_session(
+                &db,
+                &tenant,
+                &user,
+                OpenSessionInput {
+                    register_name: format!("caja-{i}"),
+                    opening_cash: dec("5000"),
+                    notes: None,
+                },
+            )
+            .await
+        });
+    }
+    let results = futures::future::join_all(tasks).await;
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    let conflicts = results
+        .iter()
+        .filter(|r| matches!(r, Err(e) if e.code() == "CONFLICT"))
+        .count();
+    assert_eq!(ok, 1, "exactly one concurrent open must win");
+    assert_eq!(
+        conflicts, 7,
+        "the other 7 must get CONFLICT, not a 2nd drawer"
+    );
+
+    // And the DB holds exactly one open session for the cashier.
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut r = db
+        .query(
+            "SELECT count() AS count FROM cash_register_session \
+             WHERE tenant=$t AND user=$u AND status='open' GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("u", user.clone()))
+        .await
+        .unwrap();
+    let c: Option<C> = r.take(0).unwrap();
+    assert_eq!(c.map(|x| x.count).unwrap_or(0), 1);
+}
+
 #[tokio::test]
 async fn movement_on_closed_session_rejected() {
     let (db, tenant, user) = setup().await;
