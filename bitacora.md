@@ -3339,3 +3339,41 @@ solo, sin técnico y sin CLI, llegue desde el MSI a su primera venta.
 
 GATE cliente verde: `npm run build` (tsc+vite, 33 módulos) + `npm test` 213/213 (+4).
 Sin Rust, sin migración, `api.ts` intacto. ESTADO ACTUAL no tocado.
+
+## 2026-06-16 — bob · Matriz de cobertura del gating por rubro (8 rubros)
+
+Lane `feat/rubro-gating-coverage` (WT pharma-wt-p9-gating). Apoyo a la vitrina de
+selección de rubro (independiente de la UI de ye): red de cobertura que prueba que
+los 8 rubros del catálogo muestran/ocultan las secciones correctas.
+
+- **Archivo nuevo** `client/e2e/rubro-gating-matrix.test.ts` (97 tests). Vitest lo
+  recoge desde `e2e/` (sin config de exclude); importa SOLO-lectura de
+  `src/vertical.ts` + `src/views/first-run.ts` (lógica de ye) → cero colisión, no
+  edito sus archivos ni sus tests.
+- **Qué fija** (gaps que los slices de `vertical.test.ts` / `first-run.test.ts` no
+  cubrían juntos):
+  1. `featuresForRubro` como tabla-spec COMPLETA: cada uno de los 8 rubros × sus 4
+     flags exactos (antes sólo farmacia tenía el objeto exacto) + invariantes
+     estructurales (clinical⇒recetas, recetas⇒sólo farmacia, lotes⇒physicalStock)
+     que atrapan una fila futura mal puesta.
+  2. **Consistencia nav-gate ↔ capability-gate**: `visibleModulesForRubro` concuerda
+     con `featuresForRubro` en los 8 (recetas↔recetas, inventory/compras↔
+     physicalStock). Nadie probaba que los DOS gates no se desincronicen.
+  3. Módulos universales (boleta+factura+pos/caja/clientes/devoluciones…) visibles
+     en LOS 8 → boleta/factura SII universal (`hasDte` true en todos); recetas
+     visible iff farmacia.
+  4. Rubros de servicio (belleza/servicios): sin physicalStock/lotes, ocultan
+     inventario/compras, pero conservan POS+boleta+caja (core agnóstico vende
+     servicio). belleza ≡ servicios.
+  5. `parseRubro` preserva los 8 vs `parseVertical` pliega los 6 extras a `otro`;
+     junk/null → perfil genérico no-farmacia.
+
+GATE: `npm run build` (tsc+vite, 35 módulos) ✓ · `npm test` 324/324 (+97) ✓ ·
+`npm run e2e` 132 passed / 0 failed / 2 known-bug xfail ✓ (la harness no se tocó;
+mi archivo es vitest, `node run.mjs` lo ignora). Sin Rust, sin migración, `api.ts`
+y `format.ts` intactos. ESTADO ACTUAL no tocado.
+
+NOTA paxoloop: el xfail BUG-bob-001 (devolución tipo total/parcial → 500) sigue
+rojo en la base a62f396 pese a que el board dice que #199 lo despintó — verificar si
+#199 aterrizó en erp-parity o si el probe e2e toca otra ruta. No es regresión de
+esta lane (xfail pre-existente, self-healing).
