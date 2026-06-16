@@ -620,6 +620,173 @@ async fn po_receive_skips_free_text_lines() {
     assert_eq!(n.unwrap_or(0), 0);
 }
 
+async fn sum_active_batch_stock(db: &Db, t: &Thing, pid: &str) -> i64 {
+    let p = surrealdb::sql::thing(pid).unwrap();
+    let mut r = db
+        .query(
+            "SELECT VALUE stock FROM product_batch \
+             WHERE tenant = $t AND product = $p AND active = true",
+        )
+        .bind(("t", t.clone()))
+        .bind(("p", p))
+        .await
+        .unwrap();
+    let v: Vec<i64> = r.take(0).unwrap();
+    v.iter().sum()
+}
+
+/// Regression: a line-level receipt that mixes a lotted and a non-lotted line
+/// on the SAME product must not desync `product.stock` from `Σ active
+/// product_batch.stock`. Before the guard, the non-lotted line bumped
+/// `product.stock` without creating a batch, so a batch-tracked product ended
+/// with `stock > Σbatch` → FEFO (`plan_fefo_optional`) saw the product as
+/// batch-tracked but could only satisfy the batched portion → phantom
+/// stock-out on units the operator can physically see on the shelf.
+#[tokio::test]
+async fn po_receive_lines_keeps_stock_in_sync_with_batches_for_lot_tracked_product() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("Amoxicilina", "1990", Some("100")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![
+                po_item(Some(&prod.id), "Amoxicilina", 5, "100"),
+                po_item(Some(&prod.id), "Amoxicilina", 10, "100"),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    service::send_purchase_order(&db, &t, &po.id).await.unwrap();
+    let line_lot = po.items[0].id.clone();
+    let line_nolot = po.items[1].id.clone();
+
+    // Receipt: line A with a lot (→ batch), line B without (→ would only bump
+    // product.stock). Lot makes the product batch-tracked.
+    let recv = service::receive_purchase_order_lines(
+        &db,
+        &t,
+        &po.id,
+        ReceivePurchaseOrder {
+            lines: vec![
+                ReceivePurchaseOrderLine {
+                    po_line_id: line_lot,
+                    qty_received: 5,
+                    lot: Some("L-A".into()),
+                    expiry_date: Some(chrono::Utc::now() + chrono::Duration::days(180)),
+                },
+                ReceivePurchaseOrderLine {
+                    po_line_id: line_nolot,
+                    qty_received: 10,
+                    lot: None,
+                    expiry_date: None,
+                },
+            ],
+            notes: None,
+        },
+        None,
+    )
+    .await;
+
+    // Canonical: a non-lotted line on a lot-tracked product is rejected so the
+    // operator must supply lot+expiry → invariant preserved by construction.
+    let err = recv.expect_err("non-lotted line on a lot-tracked product must be rejected");
+    assert!(
+        matches!(err.code(), "CONFLICT" | "INVALID_INPUT"),
+        "expected conflict/invalid, got {}",
+        err.code()
+    );
+
+    // PO did not partially apply: nothing moved.
+    let (stock, _) = product_stock_cost(&db, &prod.id).await;
+    let batch_sum = sum_active_batch_stock(&db, &t, &prod.id).await;
+    assert_eq!(stock, 0, "rejected receipt must not bump product.stock");
+    assert_eq!(batch_sum, 0, "rejected receipt must not create batches");
+    assert_eq!(stock, batch_sum, "product.stock == Σ batch.stock");
+}
+
+/// The same guard must allow an all-lotted receipt across two lots on one
+/// product: `product.stock == Σ batch.stock` and FEFO can satisfy the full
+/// on-hand quantity.
+#[tokio::test]
+async fn po_receive_lines_all_lotted_stays_in_sync_and_fefo_satisfies_full_stock() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(&db, &t, new_product("Amoxicilina", "1990", Some("100")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![
+                po_item(Some(&prod.id), "Amoxicilina", 5, "100"),
+                po_item(Some(&prod.id), "Amoxicilina", 10, "100"),
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    service::send_purchase_order(&db, &t, &po.id).await.unwrap();
+    let line_a = po.items[0].id.clone();
+    let line_b = po.items[1].id.clone();
+
+    service::receive_purchase_order_lines(
+        &db,
+        &t,
+        &po.id,
+        ReceivePurchaseOrder {
+            lines: vec![
+                ReceivePurchaseOrderLine {
+                    po_line_id: line_a,
+                    qty_received: 5,
+                    lot: Some("L-A".into()),
+                    expiry_date: Some(chrono::Utc::now() + chrono::Duration::days(90)),
+                },
+                ReceivePurchaseOrderLine {
+                    po_line_id: line_b,
+                    qty_received: 10,
+                    lot: Some("L-B".into()),
+                    expiry_date: Some(chrono::Utc::now() + chrono::Duration::days(180)),
+                },
+            ],
+            notes: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (stock, _) = product_stock_cost(&db, &prod.id).await;
+    let batch_sum = sum_active_batch_stock(&db, &t, &prod.id).await;
+    assert_eq!(stock, 15);
+    assert_eq!(stock, batch_sum, "product.stock == Σ batch.stock");
+
+    // FEFO can satisfy the full on-hand: 5 from L-A (earlier expiry) + 10 L-B.
+    let plan = domain::inventory::service::plan_fefo_optional(&db, &t, &prod.id, 15)
+        .await
+        .unwrap()
+        .expect("product is batch-tracked");
+    let planned: i64 = plan.iter().map(|a| a.qty).sum();
+    assert_eq!(planned, 15, "FEFO satisfies the full visible stock");
+}
+
 #[tokio::test]
 async fn po_receive_refuses_when_not_draft() {
     let (db, t) = setup().await;
