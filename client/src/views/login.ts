@@ -37,6 +37,9 @@ import {
   CONN_TIMEOUT_MS,
   loadStoredServer,
   saveStoredServer,
+  loadStoredTenant,
+  saveStoredTenant,
+  DEFAULT_TENANT_SLUG,
   type KeyStore,
 } from "./onboarding-ux";
 
@@ -45,7 +48,6 @@ import {
 // that doesn't exist → "credenciales no coinciden" on first ENTRAR. "principal"
 // matches the operator manual's suggested branch name; email is left blank (a
 // guessed address is worse than an empty one).
-const DEFAULT_TENANT = "principal";
 const DEFAULT_EMAIL = "";
 
 /** localStorage as a KeyStore, or undefined if the platform forbids it. */
@@ -55,6 +57,20 @@ function browserStore(): KeyStore | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Last branch slug that logged in / was created at setup, persisted across
+ *  launches so the Sucursal field pre-fills correctly (see onboarding-ux for the
+ *  storage-level helper + the lock-out rationale). */
+function storedTenant(): string {
+  const store = browserStore();
+  return store ? loadStoredTenant(store) : DEFAULT_TENANT_SLUG;
+}
+
+/** Remember the branch slug that worked, so the next launch pre-fills it. */
+function rememberTenant(slug: string): void {
+  const store = browserStore();
+  if (store) saveStoredTenant(store, slug);
 }
 
 /** Build-time override baked by Vite (`VITE_SERVER_URL`), if any. Lets a
@@ -99,6 +115,7 @@ export function renderLogin(
   onSuccess: (session: SessionInfo, serverUrl: string) => void,
 ): void {
   const initialServer = resolveServer();
+  const initialTenant = storedTenant();
   root.innerHTML = `
     <div class="login-stage" role="main">
       <div class="login-bg" aria-hidden="true">
@@ -153,7 +170,7 @@ export function renderLogin(
                 autocomplete="organization"
                 spellcheck="false"
                 placeholder="ej: principal"
-                value="${DEFAULT_TENANT}"
+                value="${escapeAttr(initialTenant)}"
                 aria-describedby="${FIELDS.tenant.err}"
                 required
               />
@@ -438,6 +455,8 @@ export function renderLogin(
       const session = await login(serverUrl, tenant, email, password);
       // Friendly tenant label for the shell (server /me only returns the record id).
       try { sessionStorage.setItem("tenant_slug", tenant); } catch { /* noop */ }
+      // Persist the slug that worked so the next launch pre-fills Sucursal.
+      rememberTenant(tenant);
       // Remember the server that worked so the next launch pre-fills it (and
       // the advanced panel stays collapsed — this machine is configured now).
       // Persisted in canonical form; survives restart (see onboarding-ux tests).
@@ -652,6 +671,9 @@ export function renderFirstRunSetup(
         vertical: rubro,
       });
       try { sessionStorage.setItem("tenant_slug", session.tenant_slug); } catch { /* noop */ }
+      // The server derives the slug from the business name — persist it so the
+      // owner isn't locked out on the next launch by a wrong "principal" pre-fill.
+      rememberTenant(session.tenant_slug);
       btn.classList.remove("loading");
       btn.classList.add("ok");
       btnLabel.textContent = "LISTO";

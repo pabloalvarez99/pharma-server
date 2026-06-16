@@ -3179,3 +3179,31 @@ GATE cliente verde: `npm run build` (33 módulos) + `npm test` 194/194. Sin toca
 código de vistas (doc + script de QA). Sin bugs de server en mi scope (todos los
 contratos IPC requeridos presentes en vivo). PR cascada vs #214 (paxoloop rebasa
 a erp-parity al integrar).
+
+## 2026-06-16 — ye · Checklist piloto primer-día + fix lock-out de Sucursal
+
+Lane `feat/operator-manual-pilot` (WT pharma-wt-p7-onboard). Foco: que un dueño
+solo, sin técnico y sin CLI, llegue desde el MSI a su primera venta.
+
+- **Doc nuevo** `docs/operator/14-piloto-primer-dia.md` (+ índice en README): checklist
+  operativo end-to-end (instalar → crear cuenta+rubro in-app → datos demo/importar →
+  abrir caja → primera venta → cierre), una casilla "✓ cómo sé que salió bien" por
+  paso, multi-rubro (marcas **(solo farmacia)**), y sección "lo que NUNCA necesitás"
+  (cero terminal, cero `pharma ...`). Verifiqué contra el código real: `setup_status`
+  → `setup_account` → `seed_demo` → `login` cubren el primer arranque sin CLI.
+- **BUG-ye-pilot-001 (P1, FIJADO)** — lock-out en el 2º arranque. `crates/api/src/setup.rs`
+  deriva el slug del tenant del NOMBRE del negocio (`slugify("Almacén Don José")` →
+  `almacen-don-jose`), nunca "principal". `login.ts` guardaba `tenant_slug` sólo en
+  `sessionStorage` (se pierde al cerrar la app) y pre-llenaba **Sucursal** con el literal
+  `"principal"`. Resultado: el dueño crea su cuenta, cierra la app, reabre → Sucursal
+  dice "principal" ≠ su tenant real → "credenciales no coinciden", afuera de su propio
+  servidor recién instalado.
+  FIX: helpers `loadStoredTenant/saveStoredTenant` (+ `TENANT_STORE_KEY`,
+  `DEFAULT_TENANT_SLUG`) en `onboarding-ux.ts` (módulo de storage ya testeado, mismo
+  patrón que `loadStoredServer`); `login.ts` persiste el slug en localStorage tras
+  setup (response `tenant_slug`) y tras login normal (lo tipeado), y pre-llena Sucursal
+  desde ahí con fallback "principal". +4 tests (round-trip, fallback, trim/no-overwrite,
+  privacy-mode no-throw).
+
+GATE cliente verde: `npm run build` (tsc+vite, 33 módulos) + `npm test` 213/213 (+4).
+Sin Rust, sin migración, `api.ts` intacto. ESTADO ACTUAL no tocado.

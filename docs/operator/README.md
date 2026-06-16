@@ -73,6 +73,9 @@ servidor. Para eso existe el manual técnico (`docs/ops/`).
 14. [Cargar tu catálogo desde un Excel/CSV](./13-importar-datos.md)
    — para el administrador: subir tus productos en masa desde una planilla, con
    vista previa antes de guardar, y cargar datos de ejemplo para probar.
+15. [Checklist del primer día (piloto)](./14-piloto-primer-dia.md)
+   — para el dueño que arranca solo: del MSI a tu primera venta sin técnico y
+   sin línea de comandos, con una casilla de verificación en cada paso.
 
 ## Cómo imprimir todo el manual
 

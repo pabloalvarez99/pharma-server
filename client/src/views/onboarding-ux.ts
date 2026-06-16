@@ -180,3 +180,39 @@ export function saveStoredServer(store: KeyStore, url: string): boolean {
     return false;
   }
 }
+
+// --- 4. Branch slug ("Sucursal") persistence -------------------------------
+
+export const TENANT_STORE_KEY = "pharma:tenant_slug";
+
+/** Generic fallback when no branch slug has been stored yet. Matches the
+ *  operator manual's suggested branch name. */
+export const DEFAULT_TENANT_SLUG = "principal";
+
+/** Read the persisted branch slug, defaulting to {@link DEFAULT_TENANT_SLUG}.
+ *  The server derives the slug from the business NAME at first-run setup (e.g.
+ *  "Almacén Don José" -> "almacen-don-jose"), which is almost never "principal";
+ *  persisting it keeps the next launch's Sucursal pre-fill correct so the lone
+ *  owner isn't locked out of their own freshly-installed server. */
+export function loadStoredTenant(store: KeyStore): string {
+  let raw: string | null;
+  try {
+    raw = store.getItem(TENANT_STORE_KEY);
+  } catch {
+    return DEFAULT_TENANT_SLUG;
+  }
+  const v = raw?.trim();
+  return v ? v : DEFAULT_TENANT_SLUG;
+}
+
+/** Persist the branch slug that worked. No-throw (storage may be unavailable);
+ *  a blank slug is ignored so it never overwrites a good value. */
+export function saveStoredTenant(store: KeyStore, slug: string): void {
+  const v = slug.trim();
+  if (!v) return;
+  try {
+    store.setItem(TENANT_STORE_KEY, v);
+  } catch {
+    /* noop — field just falls back to the default next launch */
+  }
+}
