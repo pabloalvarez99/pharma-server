@@ -119,6 +119,19 @@ pub async fn create_expense(
     // `cash` touches the drawer; bank/card/transfer do not. The session must
     // be open (mirrors `cash_register::add_movement`).
     let post_retiro = input.payment_method == "cash" && session_opt.is_some();
+    // Hold the cash-session mutation lock across the status-check + the
+    // CREATE-expense/CREATE-retiro transaction below, so this drawer write can't
+    // interleave with a concurrent `close_session` (which would freeze `expected`
+    // before our retiro lands → phantom faltante). Same lock `add_movement`/
+    // `close_session` take. Bound to this scope; held only when we touch a drawer.
+    let _drawer_guard = match (post_retiro, session_opt.as_ref()) {
+        (true, Some(sid)) => Some(
+            crate::cash_register::service::session_mutation_lock(tenant, &sid.to_string())
+                .lock_owned()
+                .await,
+        ),
+        _ => None,
+    };
     if post_retiro {
         let sid = session_opt.clone().unwrap();
         let mut sr = db

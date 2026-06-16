@@ -3339,3 +3339,40 @@ solo, sin técnico y sin CLI, llegue desde el MSI a su primera venta.
 
 GATE cliente verde: `npm run build` (tsc+vite, 33 módulos) + `npm test` 213/213 (+4).
 Sin Rust, sin migración, `api.ts` intacto. ESTADO ACTUAL no tocado.
+
+## 2026-06-16 — milton · Auditoría integridad/concurrencia caja: 3 races check-then-act
+
+Lane `feat/quality-integrity-deep` (WT pharma-wt-p9-integrity). Barrido de
+check-then-act sobre el dinero de caja. `open_session` ya estaba serializado
+(#226 OPEN_LOCKS); el resto del ciclo de caja NO. Tres TOCTOU de integridad de
+plata, misma clase que SALE_LOCKS/BUG-003/004, todos en `crates/domain`:
+
+- **BUG-milton-integrity-001 (P1)** — `cash_register::close_session` era
+  check-then-act sin lock: leía `status='open'` (vía `compute_summary`) y luego
+  `UPDATE` SIN guard de status. Dos cierres concurrentes (doble-click "Cerrar
+  caja", dos pestañas) pasaban ambos el check y ambos escribían — el segundo
+  pisaba counted/discrepancia del primero. FIX: lock per-(tenant,session)
+  `SESSION_LOCKS` sobre snapshot→freeze + `AND status='open'` como compare-and-swap
+  (defensa en profundidad).
+- **BUG-milton-integrity-002 (P1)** — `cash_register::add_movement` chequeaba
+  `status='open'` y luego `CREATE cash_movement`; un cierre concurrente podía
+  congelar `expected` entre el check y el CREATE → movimiento fuera del arqueo →
+  discrepancia fantasma. FIX: comparte el mismo `SESSION_LOCKS` que close.
+- **BUG-milton-integrity-003 (P1)** — `expenses::create_expense` (gasto efectivo
+  ligado a caja) postea un `retiro` en una transacción BEGIN/COMMIT, pero NO tomaba
+  el lock de la sesión: corriendo contra un cierre, el retiro caía tras el freeze →
+  cajón baja pero `expected` queda alto → faltante fantasma (la ruptura que su
+  propio comentario advertía). FIX: nuevo `cash_register::service::session_mutation_lock`
+  `pub(crate)`; `create_expense` lo toma (`.lock_owned()`) alrededor del
+  status-check + transacción.
+
++3 tests de concurrencia: `concurrent_close_same_session_closes_once` (1 gana,
+7 CONFLICT), `concurrent_movement_and_close_keep_drawer_consistent`,
+`cash_expense_racing_close_never_creates_phantom_faltante`. Invariante en todos:
+un movimiento/retiro está en `expected` syss tuvo éxito antes del freeze; si
+perdió la carrera → CONFLICT "caja cerrada", cajón intacto.
+
+GATE workspace verde: `cargo fmt --all -- --check` ✓ + `cargo clippy --workspace
+--all-targets -- -D warnings` ✓ + `cargo test --workspace` ✓ (cash_register 11/11,
+expenses 15/15). Sin migración; sin api.ts; errores user-facing en español. ESTADO
+ACTUAL no tocado.

@@ -214,6 +214,93 @@ async fn cash_expense_without_session_does_not_move_a_drawer() {
     assert_eq!(summary.session.closing_cash_expected, Some(dec("5000")));
 }
 
+/// A cash expense (drawer `retiro`) racing a `close_session` of the same session
+/// must never land after the close froze `expected` — that would drop the drawer
+/// while `expected` stayed high → phantom faltante. The shared cash-session lock
+/// makes the two mutually exclusive: either the retiro is included in the close's
+/// `expected`, or the expense is rejected because the caja is already closed.
+#[tokio::test]
+async fn cash_expense_racing_close_never_creates_phantom_faltante() {
+    use domain::cash_register::{model as cmodel, service as cash};
+
+    let (db, tenant, user) = setup().await;
+    let session = cash::open_session(
+        &db,
+        &tenant,
+        &user,
+        cmodel::OpenSessionInput {
+            register_name: "Caja 1".into(),
+            opening_cash: dec("10000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let expense = {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let user = user.clone();
+        let sid = session.id.clone();
+        async move {
+            service::create_expense(
+                &db,
+                &tenant,
+                Some(&user),
+                NewExpense {
+                    category: "varios".into(),
+                    description: "carrera".into(),
+                    amount: dec("3000"),
+                    payment_method: "cash".into(),
+                    cash_session: Some(sid),
+                    supplier: None,
+                    note: None,
+                    incurred_at: None,
+                },
+            )
+            .await
+        }
+    };
+    let close = {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let sid = session.id.clone();
+        async move {
+            cash::close_session(
+                &db,
+                &tenant,
+                &sid,
+                cmodel::CloseSessionInput {
+                    // Count the drawer as if the retiro happened (7000).
+                    closing_cash_counted: dec("7000"),
+                    notes: None,
+                },
+            )
+            .await
+        }
+    };
+    let (exp_res, close_res) = futures::future::join(expense, close).await;
+
+    let final_s = cash::get_session(&db, &tenant, &session.id).await.unwrap();
+    if close_res.is_ok() {
+        assert_eq!(final_s.status, "closed");
+        let expected = final_s.closing_cash_expected.unwrap();
+        match exp_res {
+            // Retiro landed before the freeze → counted in expected (10000 − 3000).
+            Ok(_) => assert_eq!(
+                expected,
+                dec("7000"),
+                "a retiro that succeeded must be inside the close's expected"
+            ),
+            // Expense lost the race → rejected as closed; drawer untouched.
+            Err(e) => {
+                assert_eq!(e.code(), "CONFLICT");
+                assert_eq!(expected, dec("10000"));
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn invalid_amount_or_payment_method_rejected() {
     let (db, tenant, user) = setup().await;
