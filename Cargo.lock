@@ -255,6 +255,7 @@ dependencies = [
  "hmac 0.12.1",
  "http-body-util",
  "hyper 1.9.0",
+ "jobs",
  "jsonwebtoken",
  "license",
  "metrics",

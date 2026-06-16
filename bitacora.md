@@ -3076,3 +3076,33 @@ xfail hasta que #211 aterrice, y volverá verde solo. No lo quité.
 
 GATE cliente: `npm run build` + `npm test` (194) + `npm run e2e`. Sólo `client/e2e/`;
 sin Rust, sin migración, `api.ts`/`format.ts` intactos.
+
+## 2026-06-16 — Backup NIGHTLY automático (cron hub) — pilar #8 cerrado
+
+- **Qué**: el snapshot ahora corre SOLO. Cierra el pilar #8 backup: ya existían
+  snapshot (#184), CLI (#185) y restore guiado (#208); faltaba la corrida
+  desatendida nocturna. Wiring en el scheduler hub existente
+  (`crates/api/src/lib.rs`), sin reestructurarlo.
+- **Config** (`BackupConfig`, `config/default.toml`, env `PHARMA__BACKUP__*`):
+  `enabled` (default `true` — data-safety es pilar Free, ADR-0005),
+  `schedule` (vacío ⇒ default `jobs::BACKUP_DEFAULT_CRON` = `0 0 3 * * *`),
+  `retention_count` (default 14, conserva los N snapshots más nuevos por conteo),
+  `retention_days` (cota extra por edad, default 0 = off), `log_retention`
+  (default 90 filas de `backup_log`).
+- **Cada corrida nocturna**: `run_scheduled_backup` → snapshot (`backup_now` en
+  `spawn_blocking`) → registra fila `backup_log` ok/failed + path + tamaño (mig
+  0028, ya existía; el job NO la escribía antes) → retención por conteo
+  (`jobs::retain_recent`) + por edad (`prune_backups`) → poda `backup_log`
+  (`prune_log`). Best-effort + offline-first: cualquier paso que falle se loguea,
+  NUNCA propaga → una noche mala graba fila `failed` y reintenta la próxima
+  ventana, no mata el scheduler.
+- **Tests** (kv-mem + tempdir, en `crates/api/src/lib.rs`): corrida crea archivo
+  + graba fila `ok` (source `scheduled`); backup fallido graba fila `failed` con
+  error y sin path; retención conserva los 2 más nuevos; `log_retention` acota
+  filas; default config = enabled + retención sensata. `jobs::retain_recent` y
+  `db::backup_log` ya tenían sus propios tests.
+- **Sin migración nueva** (`backup_log` 0028 basta). `api` ahora depende de `jobs`
+  (para `retain_recent` + `BACKUP_DEFAULT_CRON`). Multi-tenant safe: el snapshot
+  cubre todo el store SurrealKv (no tenant-scoped, igual que `backup_log`).
+- GATE workspace verde: `cargo fmt --all --check` + `clippy --workspace
+  --all-targets -D warnings` + `cargo test --workspace` (0 failed).
