@@ -3657,3 +3657,41 @@ GATE cliente verde: `npm run build` (tsc+vite, 36 modulos) + `npm test` 272/272
 local. Sin Rust, sin migracion, `api.ts`/vistas/`styles.css`/`main.ts` intactos.
 ESTADO ACTUAL no tocado. Lane cascada off P2 (paxoloop rebasa a erp-parity al
 integrar P1->P2->P4).
+
+## 2026-06-17 — paxoloop: INTEGRA olas 9-11 + perf-budget (15 PRs) a feature/erp-parity
+
+Integrados en worktree `pharma-integrate` (branch `integrate/ola-9-11`) off
+`origin/feature/erp-parity@a62f396`, FF push de vuelta a erp-parity:
+
+- **9 independientes (merge limpio)**: #228 pos-edges · #230 rubro-gating-matrix
+  (97 tests) · #231 stock↔lotes recepción multi-lote (BUG-marvin-004) · #232 3
+  races caja · #233 date-format stock views · #236 scan-flash POS · #237 refund/PO
+  races + db-busy→503 · #238 receipt/boleta + SII inline · #240 seed cafe+tienda.
+- **Cadena rubro (vitrina FOCO founder)**: #239 P3 (trae P1 #229 + P2 #234 +
+  profundidad) → #235 e2e configurador → #241 P4 e2e/a11y. 1 conflicto resuelto en
+  `vertical.ts`/`vertical.test.ts`: UNION de #240 (cafe/tienda `seedVertical` +
+  help "Datos demo incluidos") con P3 (tagline/iconId/accent/valueLines/comingSoon).
+- **milton perf rescatado**: trabajo uncommitted en `pharma-wt-p11-perf` → commit +
+  push → **PR #242** → merged. `inventory_summary` corría una 2da copia del
+  full-scan BUG-perf-001 (`GROUP ALL` sobre product, ~2.7s p99 @50k); ahora vía
+  `catalog::repo::stats` (view `product_stats` O(1), scan fallback). +bench
+  `inventory_summary_agg` + test que pinea el active-flip delta del view-UPDATE gotcha.
+
+**Reconciliación de contratos cross-PR** (commit `fix(integration)`, sin cambio de
+comportamiento de producto — los tests seguían copy/contrato viejo):
+- `rubro-preview-model.test.ts` (#241, off P2) asumía copy de valueLines pre-P3 →
+  alineado a la copy canónica que P3 (#239) shipeó; rubros de servicio asertan
+  `/sin inventario/i` (belleza ≠ servicios en copy exacta).
+- `rubro-configurator.dom.test.ts` (#241) asumía botón demo `disabled` para rubro
+  sin pack → el chain lo **oculta** (ULTRA-PLAN §8 "no dead-end") → asierta `hidden`.
+- `e2e/flows.mjs` goodsReceiptFlow mandaba línea de recepción sin lote → #231 ahora
+  la 409ea en producto con lotes (invariante stock==Σbatch) → manda lote+expiry,
+  corre el path real de lote (ambos verticales reciben + suben stock).
+
+**GATE FULL de record (verde)**: workspace `fmt` ✓ + `clippy -D warnings` ✓ (sin
+issues) + `test` **700 passed / 4 ignored / 104 suites**. Cliente `build` ✓ +
+`vitest` **413/413** + `npm run e2e` **165 passed / 0 failed / 2 xfail**
+(BUG-bob-001 devoluciones, conocido). Mig libre próxima = 0031.
+
+Único PR no-ola abierto = **#159** (DTE SII cert, BLOQUEADO por creds SII — no
+autónomo). Pendiente founder (no autónomo): cert Authenticode + piloto real.
