@@ -16,16 +16,21 @@ import {
   parseSaleError,
   customerSearch,
   getReceipt,
+  emitBoleta,
+  sendDte,
+  dteXml,
   CUSTOMERS_MODULE_MISSING,
   type Product,
   type PosItem,
   type PaymentMethod,
   type Customer,
   type Receipt,
+  type Dte,
   type LowStockAlert,
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { receiptText } from "./receipt-text";
 import "./rutbrand.css";
 import {
   addToCart as addCartLine,
@@ -768,8 +773,25 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             ${loyaltyBlock}
           </div>
           <div class="rcpt-foot muted">${escapeHtml(r.footer_note)}</div>
+          <!-- Boleta electrónica SII — optional, collapsed: the everyday cash
+               sale stays a one-key flow (print/copy/close). Emission needs the
+               cert passphrase, so it never blocks the hot path. -->
+          <details class="rcpt-sii" id="rcpt-sii">
+            <summary>Boleta electrónica SII</summary>
+            <div class="rcpt-sii-body">
+              <input type="password" id="rcpt-sii-pass" class="rb-input" placeholder="Clave del certificado" autocomplete="off" />
+              <input type="text" id="rcpt-sii-rut" class="rb-input" placeholder="RUT receptor (opcional)" autocomplete="off" />
+              <button type="button" class="btn-secondary" id="rcpt-sii-emit">Emitir y firmar</button>
+              <div class="rcpt-sii-status" id="rcpt-sii-status" hidden></div>
+              <div class="rcpt-sii-actions" id="rcpt-sii-after" hidden>
+                <button type="button" class="btn-ghost" id="rcpt-sii-xml">Descargar XML</button>
+                <button type="button" class="btn-ghost" id="rcpt-sii-send">Enviar al SII</button>
+              </div>
+            </div>
+          </details>
           <div class="modal-actions rcpt-actions">
             <button type="button" class="btn-ghost" id="rcpt-close">Cerrar</button>
+            <button type="button" class="btn-ghost" id="rcpt-copy">Copiar</button>
             <button type="button" class="btn-primary modal-confirm" id="rcpt-print">Imprimir</button>
           </div>
         </div>
@@ -787,9 +809,131 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     };
     host.querySelector<HTMLButtonElement>("#rcpt-close")!.addEventListener("click", close);
     host.querySelector<HTMLButtonElement>("#rcpt-print")!.addEventListener("click", () => window.print());
+    host.querySelector<HTMLButtonElement>("#rcpt-copy")!.addEventListener("click", () => {
+      void copyReceipt(r, host.querySelector<HTMLButtonElement>("#rcpt-copy")!);
+    });
     host.querySelector<HTMLElement>("#rcpt-backdrop")!.addEventListener("click", (e) => {
       if (e.target === e.currentTarget) close();
     });
+    bindSiiEmit(r);
+  }
+
+  // Copy a pasteable boleta to the clipboard (WhatsApp/email share). Falls back
+  // to a hidden textarea + execCommand where the async Clipboard API is blocked
+  // (insecure origin / older webview) so it works in the Tauri shell too.
+  async function copyReceipt(r: Receipt, btn: HTMLButtonElement): Promise<void> {
+    const text = receiptText(r);
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    if (!ok) ok = legacyCopy(text);
+    const prev = btn.textContent;
+    btn.textContent = ok ? "Copiado ✓" : "No se pudo copiar";
+    window.setTimeout(() => {
+      btn.textContent = prev;
+    }, 1600);
+  }
+
+  function legacyCopy(text: string): boolean {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  // Inline boleta-39 emission from the ticket. Free signs the XML locally (valid
+  // offline boleta); the SII *upload* is tier-gated, so "Enviar al SII" on Free
+  // returns FEATURE_REQUIRES_UPGRADE — surfaced as a calm note, never a crash.
+  function bindSiiEmit(r: Receipt): void {
+    const passEl = host.querySelector<HTMLInputElement>("#rcpt-sii-pass")!;
+    const rutEl = host.querySelector<HTMLInputElement>("#rcpt-sii-rut")!;
+    const emitBtn = host.querySelector<HTMLButtonElement>("#rcpt-sii-emit")!;
+    const statusEl = host.querySelector<HTMLElement>("#rcpt-sii-status")!;
+    const afterEl = host.querySelector<HTMLElement>("#rcpt-sii-after")!;
+    const xmlBtn = host.querySelector<HTMLButtonElement>("#rcpt-sii-xml")!;
+    const sendBtn = host.querySelector<HTMLButtonElement>("#rcpt-sii-send")!;
+    let dte: Dte | null = null;
+
+    const setStatus = (msg: string, kind: "ok" | "err" | "info"): void => {
+      statusEl.textContent = msg;
+      statusEl.className = `rcpt-sii-status ${kind}`;
+      statusEl.hidden = false;
+    };
+
+    emitBtn.addEventListener("click", async () => {
+      if (!passEl.value) {
+        setStatus("Ingresa la clave del certificado digital.", "err");
+        return;
+      }
+      emitBtn.disabled = true;
+      try {
+        dte = await emitBoleta(serverUrl, r.order_id, passEl.value, rutEl.value.trim() || undefined);
+        passEl.value = "";
+        setStatus(`Boleta folio ${num(dte.folio)} firmada · XML local listo.`, "ok");
+        afterEl.hidden = false;
+      } catch (err) {
+        const { message } = parseSaleError(err);
+        setStatus(message, "err");
+        emitBtn.disabled = false;
+      }
+    });
+
+    xmlBtn.addEventListener("click", async () => {
+      if (!dte) return;
+      try {
+        const xml = await dteXml(serverUrl, dte.id);
+        downloadXml(xml, `boleta-${dte.folio}.xml`);
+      } catch (err) {
+        setStatus(asMessage(err), "err");
+      }
+    });
+
+    sendBtn.addEventListener("click", async () => {
+      if (!dte) return;
+      sendBtn.disabled = true;
+      try {
+        const sent = await sendDte(serverUrl, dte.id);
+        dte = sent;
+        setStatus(`Boleta enviada al SII (${sent.estado}).`, "ok");
+      } catch (err) {
+        const { code, message } = parseSaleError(err);
+        setStatus(
+          code === "FEATURE_REQUIRES_UPGRADE"
+            ? `Envío automático al SII es plan Pro. El XML local ya es válido. ${message}`
+            : message,
+          "info",
+        );
+        sendBtn.disabled = false;
+      }
+    });
+  }
+
+  function downloadXml(xml: string, filename: string): void {
+    const blob = new Blob([xml], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // initial paint + scan-ready focus

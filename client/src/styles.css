@@ -2303,6 +2303,45 @@ button {
   justify-content: space-between;
 }
 
+/* Boleta SII — collapsed affordance under the ticket. Kept low-key so the
+   everyday cash sale stays print/copy/close. */
+.rcpt-sii {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border, #2a2a3a);
+  padding-top: 8px;
+  font-size: 13px;
+}
+.rcpt-sii > summary {
+  cursor: pointer;
+  color: var(--muted, #9aa);
+  list-style: none;
+}
+.rcpt-sii > summary::-webkit-details-marker {
+  display: none;
+}
+.rcpt-sii-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.rcpt-sii-actions {
+  display: flex;
+  gap: 8px;
+}
+.rcpt-sii-status {
+  font-size: 12px;
+}
+.rcpt-sii-status.ok {
+  color: var(--accent-3, #4caf50);
+}
+.rcpt-sii-status.err {
+  color: var(--danger, #e5484d);
+}
+.rcpt-sii-status.info {
+  color: var(--muted, #9aa);
+}
+
 /* print: show only the boleta, in paper-friendly black-on-white */
 @media print {
   body * {
@@ -2336,7 +2375,8 @@ button {
   #receipt-print .data-table td {
     color: #000 !important;
   }
-  .rcpt-actions {
+  .rcpt-actions,
+  .rcpt-sii {
     display: none !important;
   }
 }
