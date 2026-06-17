@@ -3470,3 +3470,29 @@ GATE workspace verde: `cargo fmt --all -- --check` ✓ + `cargo clippy --workspa
 --all-targets -- -D warnings` ✓ + `cargo test --workspace` ✓ (cash_register 11/11,
 expenses 15/15). Sin migración; sin api.ts; errores user-facing en español. ESTADO
 ACTUAL no tocado.
+
+## 2026-06-16 — paul · POS "muy producido" — flash de confirmación de scan
+
+Lane `feat/pos-produced` (WT pharma-wt-p10-pos). Pasada producida sobre el POS
+(pantalla más usada). Hallazgo manejando el loop como cajero rápido: al escanear
+el MISMO SKU repetido, el único cambio visible era el contador de cantidad subiendo
+en silencio — sin señal de que el scan registró. Para un escaneo veloz es fácil
+dudar si pasó. FIX (feel + confirmación):
+- `pos.ts`: `flashLineId` se setea al agregar (`addToCart`) o incrementar
+  (`changeQty(+delta)`, teclado o botón +), se aplica la clase `.pos-line-flash`
+  a esa línea por EXACTAMENTE un render y se limpia (sin re-flash en renders
+  posteriores por descuento/baja-cantidad/quitar). Como `renderCart()` reconstruye
+  los nodos de línea, la clase está presente al montar → la animación CSS corre una
+  sola vez.
+- `rutbrand.css`: keyframe `rb-line-flash` (barrido de tinte `--rb-brand-soft` +
+  empuje 3px), respeta `prefers-reduced-motion` (animación off → sin movimiento).
+  El fast path teclado-only de escritorio queda intacto.
+
+Estados empty/loading/error en español + keyboard-first ya estaban sólidos de olas
+previas (skeleton→fetch→swap, bindModalKeys Escape en boleta/caja/devolución/cliente,
+Enter en tender = Cobrar). Esta pasada agrega la confirmación que faltaba.
+
+GATE cliente verde: `npm run build` (tsc+vite) ✓ · `npm test` 227/227 ✓ ·
+`npm run e2e` 132/0/2-xfail ✓ (los 2 xfail = BUG-bob-001 preexistente, no tocado).
+Cambio puramente visual de cliente — sin backend, sin `api.ts`, sin lógica pura
+(`cashier-loop.ts`). ESTADO ACTUAL no tocado.

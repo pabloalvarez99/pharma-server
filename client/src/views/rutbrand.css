@@ -38,6 +38,35 @@
   letter-spacing: -0.01em;
 }
 
+/* ---- 1b. scan confirmation flash ------------------------------------------- *
+ * When a scan/click adds a product or bumps its qty, the affected cart line gets
+ * .pos-line-flash for one render. Because renderCart() rebuilds the line nodes,
+ * the class is present at mount → the animation plays exactly once. A brief tint
+ * sweep + nudge tells a fast cashier "that scan landed" even when only the qty
+ * counter changed. Honor reduced-motion: fall back to a static tint, no movement. */
+@keyframes rb-line-flash {
+  0% {
+    background: var(--rb-brand-soft, rgba(25, 211, 154, 0.18));
+    transform: translateX(3px);
+  }
+  60% {
+    background: var(--rb-brand-soft, rgba(25, 211, 154, 0.18));
+    transform: translateX(0);
+  }
+  100% {
+    background: transparent;
+    transform: translateX(0);
+  }
+}
+.view-pos .pos-line.pos-line-flash {
+  animation: rb-line-flash 460ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-pos .pos-line.pos-line-flash {
+    animation: none;
+  }
+}
+
 /* ---- 2. touch-responsive (tablet) ------------------------------------------ *
  * Gate on a coarse pointer (real touch) OR a narrow viewport so a mouse+keyboard
  * desktop keeps its compact, dense layout. ≥44px is the iOS/Material tap floor. */

@@ -69,6 +69,11 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   let selectedCustomer: PickedCustomer | null = null;
   let customerModuleOk = true;
   let currentResults: Product[] = [];
+  // The cart line to flash on the next render — set when a scan/click adds or
+  // bumps a line, cleared once the flash is applied. A fast cashier scanning the
+  // SAME SKU repeatedly only sees the qty tick up, so the flash is the signal the
+  // scan actually landed (one-shot CSS animation on the freshly-rendered node).
+  let flashLineId: string | null = null;
 
   host.innerHTML = `
     <section class="view view-pos">
@@ -458,6 +463,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // ---- cart ops ----
   function addToCart(p: Product): void {
     addCartLine(cart, p); // pure: out-of-stock reject + stock-capped increment
+    flashLineId = p.id; // confirm the scan/click on the affected line
     clearError();
     renderCart();
     searchEl.focus(); // keep the scanner/keyboard flow going
@@ -465,6 +471,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   function changeQty(id: string, delta: number): void {
     changeCartQty(cart, id, delta); // pure: clamp to stock, drop at 0
+    if (delta > 0) flashLineId = id; // confirm the increment (kbd/+ button)
     renderCart();
   }
 
@@ -492,7 +499,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       linesEl.innerHTML = cart
         .map(
           (l) => `
-        <div class="pos-line" data-id="${escapeHtml(l.product)}" tabindex="0" role="group"
+        <div class="pos-line${l.product === flashLineId ? " pos-line-flash" : ""}" data-id="${escapeHtml(l.product)}" tabindex="0" role="group"
              aria-label="${escapeHtml(l.name)}, ${l.qty} unidad(es). Flechas para ajustar, Supr para quitar.">
           <div class="pos-line-info">
             <div class="cell-main">${escapeHtml(l.name)}</div>
@@ -559,6 +566,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         });
       });
     }
+    flashLineId = null; // one-shot: don't re-flash on later discount/qty renders
     renderTotals();
     renderQuickChips();
     renderVuelto();
