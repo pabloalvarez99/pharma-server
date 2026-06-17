@@ -3404,3 +3404,32 @@ NOTA paxoloop: el xfail BUG-bob-001 (devolución tipo total/parcial → 500) sig
 rojo en la base a62f396 pese a que el board dice que #199 lo despintó — verificar si
 #199 aterrizó en erp-parity o si el probe e2e toca otra ruta. No es regresión de
 esta lane (xfail pre-existente, self-healing).
+
+## 2026-06-16 — marvin: recepción multi-lote no desincroniza stock↔lotes (quality-stock-deep)
+
+Lane `feat/quality-stock-deep` (WT pharma-wt-p9-stock). Foco: integridad de números
+de stock multi-lote en la recepción de mercadería (WAC + invariante FEFO).
+
+- **BUG-marvin-004 (P2, FIJADO)** — `receive_purchase_order_lines` rompía el invariante
+  `product.stock == Σ product_batch.stock (active)` cuando una recepción mezclaba una
+  línea **con lote** y una **sin lote** sobre el MISMO producto: la línea sin lote
+  bumpeaba `product.stock` sin crear un `product_batch`. Resultado: producto con
+  `stock=15` pero sólo `Σbatch=5`. Como `plan_fefo_optional` considera "batch-tracked"
+  a todo producto con ≥1 lote activo, una venta FEFO de las 15 unidades visibles en
+  góndola fallaba con `InsufficientStock` sobre 10 unidades fantasma → **stock-out
+  fantasma** en perecibles/farmacia. REPRO: test
+  `po_receive_lines_keeps_stock_in_sync_with_batches_for_lot_tracked_product`
+  (recibía OK pre-fix, `stock=15` sin batch).
+  FIX (`crates/domain/src/purchasing/service.rs`): si el producto es controlado por
+  lote — tiene lotes activos AHORA o recibe un lote en OTRA línea de la misma recepción
+  (`lotted_in_req`) — una línea sin lote se rechaza con `Conflict` ("el producto … se
+  controla por lote; indique lote y vencimiento"). El operador debe indicar lote+
+  vencimiento ⇒ invariante preservado por construcción. Multi-rubro: minimarket (sin
+  lotes) no se ve afectado — sus productos nunca son batch-tracked, recepción sin lote
+  sigue válida. Sin migración; `api.ts`/cliente intactos.
+- +2 tests: el de regresión (rechazo + nada se aplica: `stock==Σbatch==0`) y
+  `po_receive_lines_all_lotted_stays_in_sync_and_fefo_satisfies_full_stock` (dos lotes
+  → `stock==Σbatch==15`, FEFO satisface las 15).
+
+GATE workspace verde: `cargo fmt --all -- --check` + `cargo clippy --workspace
+--all-targets -- -D warnings` + `cargo test --workspace`. ESTADO ACTUAL no tocado.

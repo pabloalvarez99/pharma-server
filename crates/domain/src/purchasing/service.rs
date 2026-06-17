@@ -460,6 +460,22 @@ pub async fn receive_purchase_order_lines(
     for it in &current.items {
         by_id.insert(it.id.as_str(), it);
     }
+    // Products that receive at least one lot in THIS receipt become
+    // batch-tracked → every received line on them must carry a lot, else
+    // product.stock would diverge from Σ batch.stock (phantom FEFO stock-out).
+    let mut lotted_in_req: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for rl in &input.lines {
+        let has_lot = rl.lot.as_deref().is_some_and(|l| !l.trim().is_empty());
+        if !has_lot {
+            continue;
+        }
+        if let Some(pid) = by_id
+            .get(rl.po_line_id.as_str())
+            .and_then(|it| it.product.as_deref())
+        {
+            lotted_in_req.insert(pid.to_string());
+        }
+    }
     // Track running received-qty per line across the receipt body so two
     // receive-lines targeting the same po_line_id can't jointly over-receive.
     let mut received_in_req: BTreeMap<String, i64> = BTreeMap::new();
@@ -511,6 +527,20 @@ pub async fn receive_purchase_order_lines(
             .or_insert_with(|| (pid.clone(), 0i64, Decimal::ZERO));
         entry.1 += rl.qty_received;
         entry.2 += item.unit_cost * Decimal::from(rl.qty_received);
+
+        // Guard the batch invariant: a lot-tracked product (has active
+        // batches now, or gets a lot elsewhere in this receipt) cannot accept
+        // a non-lotted line — that would bump product.stock without a batch.
+        let has_lot = rl.lot.as_deref().is_some_and(|l| !l.trim().is_empty());
+        if !has_lot
+            && (lotted_in_req.contains(pid_str)
+                || crate::inventory::repo::count_active_batches(db, tenant, &pid).await? > 0)
+        {
+            return Err(DomainError::Conflict(format!(
+                "el producto de la línea {} se controla por lote; indique lote y vencimiento",
+                rl.po_line_id
+            )));
+        }
 
         if let Some(lot) = rl.lot.as_deref() {
             let lot = lot.trim();
