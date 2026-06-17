@@ -67,12 +67,21 @@ const DEMO_PREFIX: &str = "DEMO-";
 const DEMO_PO_PREFIX: &str = "DEMO-PO-";
 /// Prefijo del `external_ref` de las ventas históricas demo.
 const DEMO_SALE_PREFIX: &str = "DEMO-SALE-";
+/// Vencimiento (días) de un bien no perecible (retail): lejano a propósito para
+/// que el lote exista por el invariante del ledger pero nunca dispare near-expiry.
+const SHELF_STABLE_DAYS: i64 = 1825; // ~5 años
 
 /// Vertical de negocio para elegir el pack de datos demo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeedVertical {
     Pharmacy,
     Minimarket,
+    /// Café / pastelería: perecibles con lote + vencimiento corto.
+    Cafe,
+    /// Tienda / retail: bienes no perecibles, sin clínica. El stock igual entra
+    /// por lote (invariante del ledger) pero con vencimiento lejano → nunca cae
+    /// en near-expiry. Coherente con `featuresForRubro("tienda").lotes = false`.
+    Tienda,
 }
 
 impl SeedVertical {
@@ -82,8 +91,10 @@ impl SeedVertical {
         match s.trim().to_lowercase().as_str() {
             "pharmacy" | "farmacia" | "" => Ok(Self::Pharmacy), // default = farmacia
             "minimarket" | "general" | "almacen" | "almacén" | "market" => Ok(Self::Minimarket),
+            "cafe" | "café" | "pasteleria" | "pastelería" | "coffee" => Ok(Self::Cafe),
+            "tienda" | "retail" | "store" | "boutique" => Ok(Self::Tienda),
             other => Err(DomainError::Invalid(format!(
-                "vertical desconocido: «{other}» (use pharmacy|minimarket)"
+                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda)"
             ))),
         }
     }
@@ -92,6 +103,8 @@ impl SeedVertical {
         match self {
             Self::Pharmacy => "pharmacy",
             Self::Minimarket => "minimarket",
+            Self::Cafe => "cafe",
+            Self::Tienda => "tienda",
         }
     }
 }
@@ -186,6 +199,54 @@ fn minimarket_suppliers() -> Vec<DemoSupplier> {
             rut: "76.220.880-5",
             contact_name: "Ventas Las Brisas",
             contact_phone: "+56 9 7654 3210",
+        },
+    ]
+}
+
+/// Proveedores que abastecen el café/pastelería demo.
+fn cafe_suppliers() -> Vec<DemoSupplier> {
+    vec![
+        DemoSupplier {
+            name: "Tostaduría Andina Café",
+            rut: "76.901.330-7",
+            contact_name: "Pedidos Tostaduría",
+            contact_phone: "+56 2 2987 4400",
+        },
+        DemoSupplier {
+            name: "Panificadora San Camilo",
+            rut: "92.045.000-6",
+            contact_name: "Ventas San Camilo",
+            contact_phone: "+56 2 2555 8800",
+        },
+        DemoSupplier {
+            name: "Insumos Pastelería del Valle",
+            rut: "77.812.640-1",
+            contact_name: "Reparto del Valle",
+            contact_phone: "+56 9 8123 4567",
+        },
+    ]
+}
+
+/// Proveedores que abastecen la tienda/retail demo.
+fn tienda_suppliers() -> Vec<DemoSupplier> {
+    vec![
+        DemoSupplier {
+            name: "Importadora Textil Pacífico",
+            rut: "76.334.210-4",
+            contact_name: "Ventas Pacífico",
+            contact_phone: "+56 2 2640 3300",
+        },
+        DemoSupplier {
+            name: "Distribuidora Electrónica Maipú",
+            rut: "77.998.120-9",
+            contact_name: "Pedidos Maipú",
+            contact_phone: "+56 2 2712 9000",
+        },
+        DemoSupplier {
+            name: "Mayorista Librería Norte",
+            rut: "78.221.770-K",
+            contact_name: "Ventas Librería Norte",
+            contact_phone: "+56 9 7012 3456",
         },
     ]
 }
@@ -491,10 +552,302 @@ fn minimarket_pack() -> Vec<SeedItem> {
     ]
 }
 
+/// Pack café/pastelería: granos, leche, pastelería y sándwiches. Perecibles con
+/// lote + vencimiento corto (igual que minimarket), sin campos clínicos. Un par
+/// de stock bajo + un par próximos a vencer para que las alertas tengan datos.
+fn cafe_pack() -> Vec<SeedItem> {
+    vec![
+        SeedItem {
+            name: "Café en grano 1kg",
+            barcode: "7803000100012",
+            price: 12990,
+            cost: 8200,
+            stock: 40,
+            expiry_in_days: 240,
+            batch_code: "GRANO-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("1 kg"),
+        },
+        SeedItem {
+            name: "Leche entera 1L",
+            barcode: "7803000100029",
+            price: 1190,
+            cost: 760,
+            stock: 70,
+            expiry_in_days: 18,
+            batch_code: "LECHE-LOTE",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("1 litro"),
+        },
+        SeedItem {
+            name: "Croissant mantequilla",
+            barcode: "7803000100036",
+            price: 1490,
+            cost: 700,
+            stock: 36,
+            expiry_in_days: 3, // pastelería perecible próxima a vencer
+            batch_code: "CROIS-NEAR",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Unidad 70 g"),
+        },
+        SeedItem {
+            name: "Torta de chocolate (porción)",
+            barcode: "7803000100043",
+            price: 3490,
+            cost: 1800,
+            stock: 12,
+            expiry_in_days: 4,
+            batch_code: "TORTA-NEAR",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Porción 120 g"),
+        },
+        SeedItem {
+            name: "Muffin arándano",
+            barcode: "7803000100050",
+            price: 1890,
+            cost: 900,
+            stock: 5, // stock bajo
+            expiry_in_days: 5,
+            batch_code: "MUFFIN-LOW",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Unidad 90 g"),
+        },
+        SeedItem {
+            name: "Jugo natural naranja 350ml",
+            barcode: "7803000100067",
+            price: 2290,
+            cost: 1200,
+            stock: 28,
+            expiry_in_days: 6,
+            batch_code: "JUGO-LOTE",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("350 ml"),
+        },
+        SeedItem {
+            name: "Té en bolsitas x20",
+            barcode: "7803000100074",
+            price: 2490,
+            cost: 1400,
+            stock: 50,
+            expiry_in_days: 540,
+            batch_code: "TE-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("20 bolsitas"),
+        },
+        SeedItem {
+            name: "Azúcar blanca 1kg",
+            barcode: "7803000100081",
+            price: 1290,
+            cost: 800,
+            stock: 60,
+            expiry_in_days: 600,
+            batch_code: "AZUCAR-LOTE",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("1 kg"),
+        },
+        SeedItem {
+            name: "Vaso cartón 12oz x50",
+            barcode: "7803000100098",
+            price: 4990,
+            cost: 3100,
+            stock: 24,
+            expiry_in_days: 720,
+            batch_code: "VASO-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("50 unidades"),
+        },
+        SeedItem {
+            name: "Sándwich jamón queso",
+            barcode: "7803000100104",
+            price: 2990,
+            cost: 1500,
+            stock: 4,          // stock bajo
+            expiry_in_days: 2, // perecible próximo a vencer
+            batch_code: "SAND-LOW",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Unidad 180 g"),
+        },
+        SeedItem {
+            name: "Chocolate caliente sobre 30g",
+            barcode: "7803000100111",
+            price: 990,
+            cost: 520,
+            stock: 80,
+            expiry_in_days: 480,
+            batch_code: "CHOCO-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Sobre 30 g"),
+        },
+    ]
+}
+
+/// Pack tienda/retail: bienes durables (vestuario, librería, electrónica menor).
+/// Sin campos clínicos y NO perecibles → vencimiento lejano (`SHELF_STABLE_DAYS`)
+/// para que nunca caigan en near-expiry; el lote existe sólo por el invariante
+/// del ledger (stock entra por lote). Un par de stock bajo para alertas.
+fn tienda_pack() -> Vec<SeedItem> {
+    vec![
+        SeedItem {
+            name: "Polera algodón básica",
+            barcode: "7804000100011",
+            price: 7990,
+            cost: 3800,
+            stock: 45,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "POLERA-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Talla M"),
+        },
+        SeedItem {
+            name: "Jeans hombre azul",
+            barcode: "7804000100028",
+            price: 19990,
+            cost: 11000,
+            stock: 22,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "JEANS-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Talla 42"),
+        },
+        SeedItem {
+            name: "Calcetines pack x3",
+            barcode: "7804000100035",
+            price: 4990,
+            cost: 2300,
+            stock: 60,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "CALC-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("3 pares"),
+        },
+        SeedItem {
+            name: "Cuaderno universitario 100h",
+            barcode: "7804000100042",
+            price: 2490,
+            cost: 1200,
+            stock: 120,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "CUAD-LOTE",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("100 hojas"),
+        },
+        SeedItem {
+            name: "Lápiz pasta azul x10",
+            barcode: "7804000100059",
+            price: 2990,
+            cost: 1400,
+            stock: 80,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "LAPIZ-LOTE",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("10 unidades"),
+        },
+        SeedItem {
+            name: "Mochila escolar",
+            barcode: "7804000100066",
+            price: 14990,
+            cost: 8000,
+            stock: 3, // stock bajo
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "MOCHILA-LOW",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("22 litros"),
+        },
+        SeedItem {
+            name: "Audífonos in-ear",
+            barcode: "7804000100073",
+            price: 9990,
+            cost: 5200,
+            stock: 30,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "AUDIO-LOTE",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Con micrófono"),
+        },
+        SeedItem {
+            name: "Cargador USB-C 20W",
+            barcode: "7804000100080",
+            price: 12990,
+            cost: 7000,
+            stock: 25,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "CARGA-LOTE",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("20 W"),
+        },
+        SeedItem {
+            name: "Pilas AA pack x4",
+            barcode: "7804000100097",
+            price: 3490,
+            cost: 1800,
+            stock: 5, // stock bajo
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "PILAS-LOW",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("4 unidades"),
+        },
+        SeedItem {
+            name: "Gorro lana invierno",
+            barcode: "7804000100103",
+            price: 5990,
+            cost: 2800,
+            stock: 38,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "GORRO-LOTE",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("Talla única"),
+        },
+    ]
+}
+
 fn pack_for(v: SeedVertical) -> Vec<SeedItem> {
     match v {
         SeedVertical::Pharmacy => pharmacy_pack(),
         SeedVertical::Minimarket => minimarket_pack(),
+        SeedVertical::Cafe => cafe_pack(),
+        SeedVertical::Tienda => tienda_pack(),
     }
 }
 
@@ -502,6 +855,8 @@ fn suppliers_for(v: SeedVertical) -> Vec<DemoSupplier> {
     match v {
         SeedVertical::Pharmacy => pharmacy_suppliers(),
         SeedVertical::Minimarket => minimarket_suppliers(),
+        SeedVertical::Cafe => cafe_suppliers(),
+        SeedVertical::Tienda => tienda_suppliers(),
     }
 }
 
@@ -512,6 +867,8 @@ fn all_demo_supplier_names() -> Vec<String> {
     pharmacy_suppliers()
         .into_iter()
         .chain(minimarket_suppliers())
+        .chain(cafe_suppliers())
+        .chain(tienda_suppliers())
         .map(|s| s.name.to_string())
         .collect()
 }
@@ -841,6 +1198,15 @@ async fn wipe_demo(db: &Db, tenant: &Thing, ids: &[Thing]) -> DomainResult<()> {
 mod tests {
     use super::*;
 
+    /// Todos los verticales con pack demo. Fuente única para los tests que
+    /// barren los cuatro rubros.
+    const ALL_VERTICALS: [SeedVertical; 4] = [
+        SeedVertical::Pharmacy,
+        SeedVertical::Minimarket,
+        SeedVertical::Cafe,
+        SeedVertical::Tienda,
+    ];
+
     #[test]
     fn parse_vertical_accepts_synonyms_and_default() {
         assert_eq!(
@@ -860,7 +1226,76 @@ mod tests {
             SeedVertical::parse("  General ").unwrap(),
             SeedVertical::Minimarket
         );
+        assert_eq!(SeedVertical::parse("cafe").unwrap(), SeedVertical::Cafe);
+        assert_eq!(SeedVertical::parse("Café").unwrap(), SeedVertical::Cafe);
+        assert_eq!(
+            SeedVertical::parse("pastelería").unwrap(),
+            SeedVertical::Cafe
+        );
+        assert_eq!(SeedVertical::parse("tienda").unwrap(), SeedVertical::Tienda);
+        assert_eq!(
+            SeedVertical::parse("  Retail ").unwrap(),
+            SeedVertical::Tienda
+        );
         assert!(SeedVertical::parse("casino").is_err());
+    }
+
+    #[test]
+    fn label_round_trips_through_parse() {
+        for v in ALL_VERTICALS {
+            assert_eq!(SeedVertical::parse(v.label()).unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn cafe_pack_is_perishable_no_clinical() {
+        let pack = cafe_pack();
+        for item in &pack {
+            assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
+            assert!(item.active_ingredient.is_none());
+            assert!(!item.batch_code.is_empty(), "perecible necesita lote");
+        }
+        // Pastelería: al menos un perecible próximo a vencer (≤7 días).
+        assert!(
+            pack.iter().any(|i| i.expiry_in_days <= 7),
+            "café/pastelería debe tener perecibles próximos a vencer"
+        );
+    }
+
+    #[test]
+    fn tienda_pack_is_shelf_stable_no_clinical() {
+        let pack = tienda_pack();
+        for item in &pack {
+            assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
+            assert!(item.active_ingredient.is_none());
+            // Retail no perecible: vencimiento lejano → nunca near-expiry.
+            assert_eq!(
+                item.expiry_in_days, SHELF_STABLE_DAYS,
+                "{} debe ser no perecible",
+                item.name
+            );
+        }
+    }
+
+    #[test]
+    fn barcodes_are_globally_unique_across_packs() {
+        let mut codes: Vec<&str> = ALL_VERTICALS
+            .into_iter()
+            .flat_map(|v| {
+                pack_for(v)
+                    .into_iter()
+                    .map(|i| i.barcode)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let n = codes.len();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(
+            codes.len(),
+            n,
+            "barcodes deben ser únicos entre todos los packs"
+        );
     }
 
     #[test]
@@ -894,7 +1329,8 @@ mod tests {
 
     #[test]
     fn packs_are_believable_size_with_unique_barcodes() {
-        for pack in [pharmacy_pack(), minimarket_pack()] {
+        for v in ALL_VERTICALS {
+            let pack = pack_for(v);
             assert!(pack.len() >= 10, "catálogo demo debe ser creíble (≥10)");
             // Códigos de barra EAN-13 únicos dentro del pack.
             let mut codes: Vec<&str> = pack.iter().map(|i| i.barcode).collect();
@@ -911,7 +1347,7 @@ mod tests {
 
     #[test]
     fn every_item_points_to_a_real_supplier_index() {
-        for v in [SeedVertical::Pharmacy, SeedVertical::Minimarket] {
+        for v in ALL_VERTICALS {
             let sups = suppliers_for(v);
             assert!(sups.len() >= 3, "≥3 proveedores por vertical");
             for item in pack_for(v) {

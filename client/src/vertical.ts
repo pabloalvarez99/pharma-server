@@ -125,8 +125,9 @@ export async function loadBusinessName(serverUrl: string): Promise<string | null
 // their catalog key (which `parseVertical` coerces to `otro` = generic ERP).
 
 /** Seed pack a rubro maps to (en, for the seed-demo endpoint), or `null` when
- *  no demo pack exists yet for that rubro. */
-export type SeedVertical = "pharmacy" | "minimarket" | null;
+ *  no demo pack exists yet for that rubro. The string values mirror
+ *  `domain::seed::SeedVertical::parse` exactly. */
+export type SeedVertical = "pharmacy" | "minimarket" | "cafe" | "tienda" | null;
 
 /** One card of the onboarding rubro grid. */
 export interface RubroCard {
@@ -143,8 +144,8 @@ export interface RubroCard {
 }
 
 /** Catalog v1 — taxonomy reused from the founder's DSS project + farmacia/
- *  minimarket. `✅` packs today: farmacia, minimarket; the rest seed nothing
- *  until their rubro is validated. */
+ *  minimarket. `✅` packs today: farmacia, minimarket, cafe, tienda; the rest
+ *  seed nothing until their rubro is validated. */
 export const RUBRO_CATALOG: readonly RubroCard[] = [
   {
     value: "farmacia",
@@ -171,15 +172,15 @@ export const RUBRO_CATALOG: readonly RubroCard[] = [
     value: "cafe",
     label: "Café / Pastelería",
     icon: "☕",
-    help: "ERP genérico. Pack demo próximamente.",
-    seedVertical: null,
+    help: "Café, pastelería y sándwiches con lote y vencimiento. Datos demo incluidos.",
+    seedVertical: "cafe",
   },
   {
     value: "tienda",
     label: "Tienda / Retail",
     icon: "🛍",
-    help: "ERP genérico. POS e inventario.",
-    seedVertical: null,
+    help: "Vestuario, librería y electrónica menor. POS e inventario. Datos demo incluidos.",
+    seedVertical: "tienda",
   },
   {
     value: "belleza",
