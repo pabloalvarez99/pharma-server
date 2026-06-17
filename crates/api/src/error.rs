@@ -238,6 +238,19 @@ impl From<dte::DteError> for ApiError {
 impl From<domain::DomainError> for ApiError {
     fn from(e: domain::DomainError) -> Self {
         use domain::DomainError as D;
+        // Transient SurrealKv MVCC write-write / busy conflict → retryable 503,
+        // NOT an opaque 500. The operation didn't fail for a permanent reason;
+        // another concurrent write won the COMMIT race. Tell the client to
+        // reintentar with an actionable Spanish message instead of a scary
+        // "Error interno del servidor."
+        if e.is_retryable_db_conflict() {
+            tracing::warn!(error = %e, "transient db conflict → 503 (retryable)");
+            return Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SERVICE_UNAVAILABLE",
+                "El servicio está ocupado por otra operación simultánea. Reintente en unos segundos.",
+            );
+        }
         let status = match &e {
             D::NotFound => StatusCode::NOT_FOUND,
             D::Conflict(_) => StatusCode::CONFLICT,

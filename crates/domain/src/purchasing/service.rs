@@ -1,8 +1,12 @@
 //! Purchasing business logic: validation, compare best supplier, mapping.
 //! Thin orchestration over [`super::repo`].
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
 use rust_decimal::Decimal;
 use surrealdb::sql::Thing;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::errors::{DomainError, DomainResult};
 use crate::money::CURRENCY_CLP;
@@ -11,6 +15,32 @@ use super::model::*;
 use super::repo;
 
 type Db = surrealdb::Surreal<surrealdb::engine::local::Db>;
+
+/// Per-(tenant,purchase_order) serialization of every PO *state mutation*
+/// (send / receive / receive-lines / payment / cancel). Each of those is a
+/// check-then-act TOCTOU on the PO status + AP ledger: the handler reads the
+/// status (and, for payments, the running `paid`; for receipts, the current
+/// `product.stock`/WAC base) and then writes WITHOUT a compare-and-swap guard
+/// on the `WHERE id=$po` UPDATE. Concurrent callers on the SAME PO each pass
+/// the pre-check and each apply, breaking money/stock integrity: two receipts
+/// add stock twice + recompute WAC against a stale base + duplicate the
+/// `stock_movement` (phantom inventory); a receive racing a cancel moves stock
+/// on a PO that also flips to `cancelled` (status/stock disagree); two payments
+/// both pass the `Σ payments ≤ total` check and overpay; a payment racing a
+/// cancel posts money against a void doc, breaking `cancelled ⇒ Σ payments = 0`.
+/// Serializing per PO removes the whole family (same proven approach as
+/// `sales::service::SALE_LOCKS` / `cash_register::service` OPEN/SESSION locks).
+/// Different POs never share a lock, so throughput is unaffected.
+static PO_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> = OnceLock::new();
+
+fn purchase_order_lock(tenant: &Thing, po: &Thing) -> Arc<AsyncMutex<()>> {
+    let locks = PO_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = locks.lock().expect("PO_LOCKS mutex poisoned");
+    guard
+        .entry(format!("{tenant}|{po}"))
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
 
 fn parse_thing(s: &str) -> DomainResult<Thing> {
     surrealdb::sql::thing(s).map_err(|_| DomainError::Invalid(format!("id inválido: {s}")))
@@ -295,6 +325,8 @@ pub async fn send_purchase_order(
     id: &str,
 ) -> DomainResult<PurchaseOrderDto> {
     let po = parse_typed(id, "purchase_order")?;
+    let po_lock = purchase_order_lock(tenant, &po);
+    let _po_guard = po_lock.lock().await;
     let (status, _total, _currency) = repo::purchase_order_belongs(db, tenant, &po)
         .await?
         .ok_or(DomainError::NotFound)?;
@@ -345,6 +377,8 @@ pub async fn receive_purchase_order(
     admin: Option<&str>,
 ) -> DomainResult<PurchaseOrderDto> {
     let po = parse_typed(id, "purchase_order")?;
+    let po_lock = purchase_order_lock(tenant, &po);
+    let _po_guard = po_lock.lock().await;
     let current = repo::get_purchase_order(db, tenant, &po)
         .await?
         .ok_or(DomainError::NotFound)?;
@@ -434,6 +468,8 @@ pub async fn receive_purchase_order_lines(
     admin: Option<&str>,
 ) -> DomainResult<PurchaseOrderDto> {
     let po = parse_typed(id, "purchase_order")?;
+    let po_lock = purchase_order_lock(tenant, &po);
+    let _po_guard = po_lock.lock().await;
     let current = repo::get_purchase_order(db, tenant, &po)
         .await?
         .ok_or(DomainError::NotFound)?;
@@ -651,6 +687,8 @@ pub async fn create_purchase_payment(
     created_by: Option<&str>,
 ) -> DomainResult<PurchasePaymentDto> {
     let po = parse_typed(po_id, "purchase_order")?;
+    let po_lock = purchase_order_lock(tenant, &po);
+    let _po_guard = po_lock.lock().await;
     let (status, total, po_currency) = repo::purchase_order_belongs(db, tenant, &po)
         .await?
         .ok_or(DomainError::NotFound)?;
@@ -749,6 +787,8 @@ pub async fn cancel_purchase_order(
     id: &str,
 ) -> DomainResult<PurchaseOrderDto> {
     let po = parse_typed(id, "purchase_order")?;
+    let po_lock = purchase_order_lock(tenant, &po);
+    let _po_guard = po_lock.lock().await;
     let (status, _total, _currency) = repo::purchase_order_belongs(db, tenant, &po)
         .await?
         .ok_or(DomainError::NotFound)?;

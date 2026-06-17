@@ -90,12 +90,7 @@ const MAX_SALE_COMMIT_RETRIES: usize = 256;
 /// A losing SurrealKv transaction aborts at COMMIT with a retryable
 /// write-write conflict. Mirrors `crates/dte/src/caf.rs::is_mvcc_conflict_str`.
 fn is_retryable_conflict(e: &DomainError) -> bool {
-    if let DomainError::Db(inner) = e {
-        let s = inner.to_string();
-        s.contains("read or write conflict") || s.contains("failed transaction")
-    } else {
-        false
-    }
+    e.is_retryable_db_conflict()
 }
 
 /// Short linear backoff (max ~5ms). SurrealKv's conflict window is µs-scale;
@@ -568,6 +563,22 @@ pub async fn create_refund(
     // → `product.stock` bump only.
     let mut restock_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
         vec![None; req.items.len()];
+
+    // === Serialized, per-tenant critical section (refund integrity) ===
+    // The cumulative over-refund guard below is a check-then-act TOCTOU: it
+    // reads what was already refunded for this order (`sum_prior_refunds`) and
+    // plans the restock into the remaining lot capacity, THEN `apply_refund`
+    // writes. Two concurrent refunds of the same order both read the same
+    // `prior`, both pass `refund_exceeds_sold`, and both COMMIT → cumulative
+    // refund exceeds the sold qty (refund-fraud vector, BUG-005) and the FEFO
+    // restock double-fills the same lots, breaking
+    // `product.stock == Σ product_batch.stock`. Holding the SAME per-tenant lock
+    // as `post_sale` (SALE_LOCKS) serializes refund-vs-refund (the guard now
+    // holds) AND refund-vs-sale, so the `product.stock` UPDATE never races a
+    // concurrent writer — no losing MVCC abort to surface as a 5xx. Dropped as
+    // soon as `apply_refund` commits.
+    let sale_lock = tenant_sale_lock(tenant);
+    let _refund_guard = sale_lock.lock().await;
 
     if let Some(ord) = order_thing.as_ref() {
         let (_order, sold_items) = repo::get_order(db, tenant, ord)

@@ -32,6 +32,22 @@ impl From<surrealdb::Error> for DomainError {
 }
 
 impl DomainError {
+    /// `true` when this wraps a *transient* SurrealKv MVCC write-write / busy
+    /// conflict (the abort a losing concurrent transaction takes at COMMIT),
+    /// as opposed to a genuine storage fault. Lets the `api` layer answer a
+    /// retryable 503 ("reintente") instead of an opaque 500, and the write
+    /// paths decide whether to retry. Same string match the sale write path's
+    /// retry loop uses (`sales::service`) + `dte::caf`.
+    pub fn is_retryable_db_conflict(&self) -> bool {
+        match self {
+            Self::Db(inner) => {
+                let s = inner.to_string();
+                s.contains("read or write conflict") || s.contains("failed transaction")
+            }
+            _ => false,
+        }
+    }
+
     /// SCREAMING_SNAKE code for the error envelope.
     pub fn code(&self) -> &'static str {
         match self {

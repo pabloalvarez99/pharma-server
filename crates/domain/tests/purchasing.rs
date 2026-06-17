@@ -1238,3 +1238,189 @@ async fn po_cancel_refuses_when_payments_already_recorded() {
         .unwrap();
     assert_eq!(s.paid, dec("100"));
 }
+
+// --- concurrency / integrity (PO_LOCKS) ------------------------------------
+
+/// Build a draft PO with one catalogued line and the product pre-seeded to
+/// `stock`. Returns (po_id, product_id).
+async fn seed_receivable_po(
+    db: &Db,
+    t: &Thing,
+    stock: i64,
+    qty: i64,
+    cost: &str,
+) -> (String, String) {
+    let s = service::create_supplier(db, t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let prod = catalog::create_product(db, t, new_product("Paracetamol", "1990", Some("100")))
+        .await
+        .unwrap();
+    let pid_thing = surrealdb::sql::thing(&prod.id).unwrap();
+    db.query("UPDATE product SET stock = $st WHERE id = $p")
+        .bind(("st", stock))
+        .bind(("p", pid_thing))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        db,
+        t,
+        NewPurchaseOrder {
+            supplier: s.id,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "Paracetamol", qty, cost)],
+        },
+    )
+    .await
+    .unwrap();
+    (po.id, prod.id)
+}
+
+/// Concurrent `receive_purchase_order` on the SAME draft PO must apply EXACTLY
+/// once. Receipt is check-then-act (read `status='draft'` + the WAC base, then
+/// bump stock / recompute cost / append a movement, with no compare-and-swap on
+/// the status UPDATE). Without the per-PO lock two receipts both pass the check
+/// and both apply → stock added twice, WAC recomputed against a stale base, and
+/// a duplicate `stock_movement` (phantom inventory). One winner = `received`,
+/// the rest = `CONFLICT`.
+#[tokio::test]
+async fn concurrent_receive_same_po_applies_once() {
+    let (db, t) = setup().await;
+    // Seed stock=10; receive 30 @200. Correct single result: stock 40, WAC 175,
+    // one movement. A double-apply would read 70 stock and/or two movements.
+    let (po_id, prod_id) = seed_receivable_po(&db, &t, 10, 30, "200").await;
+
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let db = db.clone();
+        let t = t.clone();
+        let po_id = po_id.clone();
+        tasks.push(async move { service::receive_purchase_order(&db, &t, &po_id, None).await });
+    }
+    let results = futures::future::join_all(tasks).await;
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    let conflicts = results
+        .iter()
+        .filter(|r| matches!(r, Err(e) if e.code() == "CONFLICT"))
+        .count();
+    assert_eq!(ok, 1, "exactly one receipt must win");
+    assert_eq!(conflicts, 7, "the rest must be CONFLICT, not a 2nd apply");
+
+    // Stock + WAC reflect exactly one receipt.
+    let (stock, cost) = product_stock_cost(&db, &prod_id).await;
+    assert_eq!(stock, 40, "no phantom double-receive");
+    assert_eq!(cost, Some(dec("175")));
+    // Exactly one audit movement.
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut q = db
+        .query("SELECT count() AS count FROM stock_movement WHERE tenant=$t GROUP ALL")
+        .bind(("t", t.clone()))
+        .await
+        .unwrap();
+    let c: Option<C> = q.take(0).unwrap();
+    assert_eq!(c.map(|x| x.count).unwrap_or(0), 1);
+}
+
+/// Concurrent payments on the same PO must never overpay past `total`. The
+/// `paid + amount ≤ total` check is a TOCTOU on the running `Σ payments`:
+/// without the lock two payments both read `paid=0` and both pass. With a
+/// per-PO lock only the payments that actually fit are accepted.
+#[tokio::test]
+async fn concurrent_payments_never_overpay() {
+    let (db, t) = setup().await;
+    let po_id = seed_po_with_total(&db, &t, "10000").await;
+
+    // Eight concurrent payments of 6000 each: only one fits (a second would be
+    // 12000 > 10000). Without serialization several would pass the ≤total check.
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let db = db.clone();
+        let t = t.clone();
+        let po_id = po_id.clone();
+        tasks.push(async move {
+            service::create_purchase_payment(
+                &db,
+                &t,
+                &po_id,
+                NewPurchasePayment {
+                    amount: dec("6000"),
+                    currency: None,
+                    payment_method: Some("transfer".into()),
+                    cash_session: None,
+                    reference: Some(format!("TR-{i}")),
+                    note: None,
+                    paid_at: None,
+                },
+                None,
+            )
+            .await
+        });
+    }
+    let results = futures::future::join_all(tasks).await;
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(ok, 1, "only one 6000 payment fits under total=10000");
+    let s = service::get_purchase_payment_summary(&db, &t, &po_id)
+        .await
+        .unwrap();
+    assert_eq!(s.paid, dec("6000"));
+    assert!(s.balance >= Decimal::ZERO, "never overpaid past total");
+}
+
+/// A receipt racing a cancel on the same draft PO must leave a CONSISTENT
+/// terminal state: either `received` with stock moved + one movement, or
+/// `cancelled` with stock untouched + zero movements — never a half-applied mix
+/// (stock moved on a doc that also flipped to cancelled). The per-PO lock makes
+/// the two transitions mutually exclusive.
+#[tokio::test]
+async fn receive_racing_cancel_keeps_status_and_stock_consistent() {
+    let (db, t) = setup().await;
+    let (po_id, prod_id) = seed_receivable_po(&db, &t, 10, 30, "200").await;
+
+    let recv = {
+        let db = db.clone();
+        let t = t.clone();
+        let po_id = po_id.clone();
+        async move { service::receive_purchase_order(&db, &t, &po_id, None).await }
+    };
+    let canc = {
+        let db = db.clone();
+        let t = t.clone();
+        let po_id = po_id.clone();
+        async move { service::cancel_purchase_order(&db, &t, &po_id).await }
+    };
+    let (_r, _c) = futures::future::join(recv, canc).await;
+
+    let got = service::get_purchase_order(&db, &t, &po_id).await.unwrap();
+    let (stock, _cost) = product_stock_cost(&db, &prod_id).await;
+    #[derive(serde::Deserialize)]
+    struct C {
+        count: i64,
+    }
+    let mut q = db
+        .query("SELECT count() AS count FROM stock_movement WHERE tenant=$t GROUP ALL")
+        .bind(("t", t.clone()))
+        .await
+        .unwrap();
+    let movements = q
+        .take::<Option<C>>(0)
+        .unwrap()
+        .map(|x| x.count)
+        .unwrap_or(0);
+
+    match got.status.as_str() {
+        "received" => {
+            assert_eq!(stock, 40, "received ⇒ stock moved");
+            assert_eq!(movements, 1, "received ⇒ exactly one movement");
+        }
+        "cancelled" => {
+            assert_eq!(stock, 10, "cancelled ⇒ stock untouched");
+            assert_eq!(movements, 0, "cancelled ⇒ no stock movement");
+        }
+        other => panic!("inconsistent terminal status: {other}"),
+    }
+}

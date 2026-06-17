@@ -852,3 +852,87 @@ async fn refund_restock_without_product_is_rejected() {
         .unwrap_err();
     assert_eq!(err.code(), "INVALID_INPUT");
 }
+
+/// Concurrent refunds of the SAME order must never refund past the sold qty.
+/// The cumulative over-refund guard (`sum_prior_refunds` → `refund_exceeds_sold`
+/// → `apply_refund`) is a check-then-act TOCTOU: without serialization two
+/// refunds both read `prior=0`, both pass the guard, and both COMMIT → the
+/// order is refunded beyond what was sold (refund-fraud vector, BUG-005) and
+/// the FEFO restock double-bumps `product.stock`. `create_refund` now holds the
+/// same per-tenant `SALE_LOCKS` as `post_sale`, so the reads + write are atomic
+/// w.r.t. each other and w.r.t. concurrent sales.
+#[tokio::test]
+async fn concurrent_refunds_never_exceed_sold_quantity() {
+    let (db, tenant, admin) = setup().await;
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    // Sell all 10 units in one order, then fire 8 concurrent refunds of 6 each:
+    // a single refund (6) fits under sold=10; a second (6+6=12) must be rejected.
+    let p = catalog::create_product(&db, &tenant, np("Losartan 50", "2500", 10))
+        .await
+        .unwrap();
+    let sale = sell_one(&db, &tenant, &admin_t, &p.id, &p.name, 10, "2500").await;
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        0
+    );
+
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let admin_t = admin_t.clone();
+        let order = sale.order.id.clone();
+        let pid = p.id.clone();
+        let pname = p.name.clone();
+        tasks.push(async move {
+            let req = NewDevolucion {
+                order: Some(order),
+                tipo: "venta".into(),
+                motivo: "carrera de devoluciones".into(),
+                notas: None,
+                metodo_reembolso: Some("efectivo".into()),
+                items: vec![NewDevolucionItem {
+                    product: Some(pid),
+                    product_name: pname,
+                    quantity: 6,
+                    unit_price: dec("2500"),
+                    restock: true,
+                }],
+            };
+            sales::create_refund(&db, &tenant, Some(&admin_t), req).await
+        });
+    }
+    let results = futures::future::join_all(tasks).await;
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    assert_eq!(ok, 1, "exactly one refund of 6 fits under sold=10");
+    // Cumulative refunded qty (from stock movements) must not exceed sold.
+    #[derive(serde::Deserialize)]
+    struct Sum {
+        total: Option<i64>,
+    }
+    let mut q = db
+        .query(
+            "SELECT math::sum(delta) AS total FROM stock_movement \
+             WHERE tenant=$t AND reason='return' GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let refunded: i64 = q
+        .take::<Option<Sum>>(0)
+        .unwrap()
+        .and_then(|s| s.total)
+        .unwrap_or(0);
+    assert_eq!(refunded, 6, "only 6 units restocked, never more than sold");
+    // product.stock reflects exactly the one accepted restock (0 + 6).
+    assert_eq!(
+        catalog::get_product(&db, &tenant, &p.id)
+            .await
+            .unwrap()
+            .stock,
+        6
+    );
+}
