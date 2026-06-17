@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   clp,
   num,
+  fecha,
   toNumber,
   cleanRut,
   rutDigitVerifier,
@@ -197,6 +198,26 @@ describe("vuelto", () => {
     ] as const) {
       expect(vuelto(r, t).amount).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("fecha", () => {
+  it("renders es-CL dd-mm-yyyy with a full 4-digit year", () => {
+    // Noon-anchored (the server's date contract) so it never slips a day in CL TZ.
+    expect(fecha("2026-06-16T12:00:00Z")).toBe("16-06-2026");
+    expect(fecha("2026-01-05T12:00:00Z")).toBe("05-01-2026");
+  });
+
+  it("is consistent across views (no 2-digit-year drift)", () => {
+    // The whole point of consolidating: one canonical string everywhere.
+    const s = fecha("2026-12-31T12:00:00Z");
+    expect(s).toBe("31-12-2026");
+    expect(s).not.toMatch(/-\d{2}$/); // not `…-26`
+  });
+
+  it("echoes unparseable input verbatim rather than 'Invalid Date'", () => {
+    expect(fecha("not-a-date")).toBe("not-a-date");
+    expect(fecha("")).toBe("");
   });
 });
 
