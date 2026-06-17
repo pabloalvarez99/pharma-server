@@ -36,6 +36,39 @@ fn open_session_lock(tenant: &Thing, user: &Thing) -> Arc<AsyncMutex<()>> {
         .clone()
 }
 
+/// Per-(tenant,session) serialization of the cash-session MUTATION critical
+/// section, shared by `close_session` and `add_movement`. Both are check-then-act
+/// over a single session's drawer: each reads `status='open'` then writes. Without
+/// this lock two concurrent `close_session` calls (a double-clicked "Cerrar caja",
+/// two tabs) both pass the open-check and both UPDATE, and a `cash_movement`
+/// CREATE can slip in between a close's `compute_summary` snapshot and its UPDATE —
+/// the movement is then frozen out of `expected`, so `discrepancia` is phantom: a
+/// money-integrity break. Holding one lock across both paths makes the snapshot →
+/// write atomic per session. `open_session` uses a separate per-(tenant,user) lock
+/// (different invariant: one drawer per cashier); they never contend.
+static SESSION_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
+    OnceLock::new();
+
+fn session_lock(tenant: &Thing, session_id: &str) -> Arc<AsyncMutex<()>> {
+    let locks = SESSION_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut guard = locks.lock().expect("SESSION_LOCKS mutex poisoned");
+    guard
+        .entry(format!("{tenant}|{session_id}"))
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+/// Acquire the per-(tenant,session) cash-mutation lock for callers OUTSIDE this
+/// module that also write a session's drawer — specifically a cash `expense`
+/// that posts a `retiro` cash_movement. Such a write must serialize against
+/// `close_session` exactly like `add_movement` does, or the retiro can land after
+/// a concurrent close froze `expected`, leaving the drawer dropped but `expected`
+/// stale → phantom faltante. Caller holds `.lock().await` across its
+/// status-check + write.
+pub(crate) fn session_mutation_lock(tenant: &Thing, session_id: &str) -> Arc<AsyncMutex<()>> {
+    session_lock(tenant, session_id)
+}
+
 fn dec_val(d: Decimal) -> surrealdb::sql::Value {
     surrealdb::sql::Number::from(d).into()
 }
@@ -204,6 +237,12 @@ pub async fn add_movement(
     if input.reason.trim().is_empty() {
         return Err(DomainError::Invalid("reason requerido".into()));
     }
+    // Serialize against a concurrent close of the same session: without the lock
+    // the status check below can pass while a close is mid-flight, and the CREATE
+    // then lands after the close froze `expected` — a movement excluded from the
+    // drawer math. Held across the check + CREATE; dropped at return.
+    let lock = session_lock(tenant, session_id);
+    let _guard = lock.lock().await;
     let session = get_session(db, tenant, session_id).await?;
     if session.status != "open" {
         return Err(DomainError::Conflict(
@@ -371,6 +410,12 @@ pub async fn close_session(
     input: CloseSessionInput,
 ) -> DomainResult<CloseSummary> {
     let now = Utc::now();
+    // Serialize the snapshot → freeze against a concurrent close/movement of the
+    // same session. Two concurrent closes without this lock both pass the
+    // status check below and both UPDATE (the second silently overwriting the
+    // first's counted/discrepancia). Held across compute + UPDATE.
+    let lock = session_lock(tenant, session_id);
+    let _guard = lock.lock().await;
     let (session, cash_sales, movements_in, movements_out, expected) =
         compute_summary(db, tenant, session_id).await?;
     if session.status != "open" {
@@ -383,11 +428,14 @@ pub async fn close_session(
     }
     let discrepancia = crate::invariants::discrepancy(input.closing_cash_counted, expected);
     let sid = thing(session_id).unwrap();
+    // `AND status='open'` is a compare-and-swap guard: defense-in-depth so a
+    // freeze can never overwrite an already-closed row even if the lock above
+    // were bypassed. Under the lock the status check is authoritative.
     db.query(
         "UPDATE cash_register_session SET \
             closing_cash_counted=$cc, closing_cash_expected=$ce, \
             discrepancia=$d, closing_notes=$n, closed_at=$at, status='closed' \
-         WHERE id=$i AND tenant=$t",
+         WHERE id=$i AND tenant=$t AND status='open'",
     )
     .bind(("cc", dec_val(input.closing_cash_counted)))
     .bind(("ce", dec_val(expected)))

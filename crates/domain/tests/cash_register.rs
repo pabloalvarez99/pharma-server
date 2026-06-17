@@ -327,6 +327,144 @@ async fn close_already_closed_is_conflict() {
     assert_eq!(err.code(), "CONFLICT");
 }
 
+/// Concurrent `close_session` on the SAME session must close it exactly once —
+/// the check-then-act (`compute_summary` reads `status='open'`, then UPDATE) is a
+/// TOCTOU race without the per-(tenant,session) lock: two tasks both pass the
+/// open-check and both UPDATE, the second silently overwriting the first's
+/// counted/discrepancia. Exactly one must win; the rest get CONFLICT.
+#[tokio::test]
+async fn concurrent_close_same_session_closes_once() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "c1".into(),
+            opening_cash: dec("1000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut tasks = Vec::new();
+    for i in 0..8 {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let id = s.id.clone();
+        tasks.push(async move {
+            service::close_session(
+                &db,
+                &tenant,
+                &id,
+                CloseSessionInput {
+                    // Distinct counted per task so a double-write would be visible.
+                    closing_cash_counted: dec(&format!("{}", 1000 + i)),
+                    notes: None,
+                },
+            )
+            .await
+        });
+    }
+    let results = futures::future::join_all(tasks).await;
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    let conflicts = results
+        .iter()
+        .filter(|r| matches!(r, Err(e) if e.code() == "CONFLICT"))
+        .count();
+    assert_eq!(ok, 1, "exactly one concurrent close must win");
+    assert_eq!(
+        conflicts, 7,
+        "the other 7 must get CONFLICT, not a re-close"
+    );
+
+    // The frozen row reflects the winner only (one closed, counted unchanged after).
+    let final_s = service::get_session(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(final_s.status, "closed");
+    assert!(final_s.closing_cash_counted.is_some());
+}
+
+/// A `cash_movement` must not slip in between a close's `compute_summary` snapshot
+/// and its freeze (it would be excluded from `expected` → phantom discrepancia).
+/// The shared per-session lock makes movement and close mutually exclusive: under
+/// concurrency every movement that succeeds is included in the close's expected,
+/// and any that loses the race to the close is rejected as CONFLICT (closed).
+#[tokio::test]
+async fn concurrent_movement_and_close_keep_drawer_consistent() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "c1".into(),
+            opening_cash: dec("1000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let mv = {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let user = user.clone();
+        let id = s.id.clone();
+        async move {
+            service::add_movement(
+                &db,
+                &tenant,
+                Some(&user),
+                &id,
+                CashMovementInput {
+                    tipo: "ingreso".into(),
+                    amount: dec("500"),
+                    reason: "carrera".into(),
+                },
+            )
+            .await
+        }
+    };
+    let cl = {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        let id = s.id.clone();
+        async move {
+            service::close_session(
+                &db,
+                &tenant,
+                &id,
+                CloseSessionInput {
+                    closing_cash_counted: dec("1500"),
+                    notes: None,
+                },
+            )
+            .await
+        }
+    };
+    let (mv_res, cl_res) = futures::future::join(mv, cl).await;
+
+    // Close always wins or loses cleanly; never panics, never double-closes.
+    let final_s = service::get_session(&db, &tenant, &s.id).await.unwrap();
+    if cl_res.is_ok() {
+        assert_eq!(final_s.status, "closed");
+        let expected = final_s.closing_cash_expected.unwrap();
+        // If the movement landed before the freeze it is in expected (1500);
+        // otherwise it was rejected (closed) and expected stays at opening (1000).
+        match mv_res {
+            Ok(_) => assert_eq!(
+                expected,
+                dec("1500"),
+                "a movement that succeeded must be counted in the close's expected"
+            ),
+            Err(e) => {
+                assert_eq!(e.code(), "CONFLICT");
+                assert_eq!(expected, dec("1000"));
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn invalid_movement_type_or_amount_rejected() {
     let (db, tenant, user) = setup().await;
