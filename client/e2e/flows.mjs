@@ -317,7 +317,20 @@ export async function goodsReceiptFlow({ tenant, email, password, vertical }) {
   // 5. receive the goods — the operator's "Recibir" button --------------------
   const recv = await c.post(
     `/purchase-orders/${encodeURIComponent(poId)}/receive`,
-    { lines: [{ po_line_id: poLineId, qty_received: QTY }] },
+    // Lot-tracked products (the seed creates batches) require a lot + expiry on
+    // receipt: a lotless line on a batched product is a clean 409 (BUG-marvin-004
+    // guard, #231) so product.stock can't desync from Σ batch.stock. Send one so
+    // the real lot path runs end-to-end.
+    {
+      lines: [
+        {
+          po_line_id: poLineId,
+          qty_received: QTY,
+          lot: "E2E-LOT-1",
+          expiry_date: "2027-12-31T00:00:00Z",
+        },
+      ],
+    },
     { expectOk: false },
   );
   if (recv.ok) {

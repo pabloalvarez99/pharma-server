@@ -201,11 +201,13 @@ describe("configurator grid — cero dead-end", () => {
     restaurant.focus();
     press(restaurant, "Enter");
     expect(restaurant.getAttribute("aria-checked")).toBe("true");
-    // its card shows the muted "pronto" tag, and the demo button is disabled —
-    // but the rubro itself is fully chosen (a usable empty ERP, not a dead-end).
+    // its card shows the muted "pronto" tag; with no demo pack the demo button
+    // is hidden (no dead greyed control — ULTRA-PLAN §8 "no dead-end"), the
+    // operator is pointed at import/manual instead — the rubro is still fully
+    // chosen, a usable empty ERP.
     expect(restaurant.querySelector(".rubro-tag.soon")).not.toBeNull();
     const demoBtn = host.querySelector<HTMLButtonElement>("#cfg-demo-btn")!;
-    expect(demoBtn.disabled).toBe(true);
+    expect(demoBtn.hidden).toBe(true);
   });
 
   it("the demo button is enabled for a rubro that HAS a pack (farmacia)", async () => {

@@ -88,11 +88,13 @@ describe("ambos verticales gated — pharmacy + minimarket map to a seed pack", 
 
   it("farmacia preview is the maximal ERP: recetas + clínica + lotes native", () => {
     const p = rubroPreview("farmacia");
-    expect(p.native).toContain("Recetas y Libro de controlados (Ley 20.000)");
     expect(p.native).toContain(
-      "Ficha clínica: principio activo, laboratorio, interacciones",
+      "Recetas retenidas y Libro de controlados (Ley 20.000)",
     );
-    expect(p.native).toContain("Lotes y vencimiento para productos perecibles");
+    expect(p.native).toContain(
+      "Ficha clínica: principio activo, laboratorio e interacciones",
+    );
+    expect(p.native).toContain("Lotes y vencimiento con alertas de caducidad");
     expect(p.hidden).toEqual([]); // farmacia hides nothing notable
     expect(featuresForRubro("farmacia")).toEqual({
       recetas: true,
@@ -104,8 +106,10 @@ describe("ambos verticales gated — pharmacy + minimarket map to a seed pack", 
 
   it("minimarket: lotes (perecibles) but NO recetas/clínica leak from pharmacy", () => {
     const p = rubroPreview("minimarket");
-    expect(p.native).toContain("Lotes y vencimiento para productos perecibles");
-    expect(p.native).not.toContain("Recetas y Libro de controlados (Ley 20.000)");
+    expect(p.native).toContain("Lotes y vencimiento para perecibles, con alertas");
+    expect(p.native).not.toContain(
+      "Recetas retenidas y Libro de controlados (Ley 20.000)",
+    );
     expect(p.native.some((n) => n.includes("clínica"))).toBe(false);
     expect(p.hidden).toContain("Recetas"); // recetas is intentionally absent
     expect(featuresForRubro("minimarket").recetas).toBe(false);
@@ -159,7 +163,12 @@ describe("servicio sin stock — the agnostic-core proof (belleza/servicios)", (
       const p = rubroPreview(r);
       const inv = p.categories.find((c) => c.label === "Inventario y compras")!;
       expect(inv.on, `${r} inventory category`).toBe(false);
-      expect(p.native).toContain("Venta de servicios sin inventario ni lotes");
+      // belleza + servicios ship distinct native copy, but every service rubro
+      // states it sells without inventory (same canonical claim vertical.test.ts pins).
+      expect(
+        p.native.some((n) => /sin inventario/i.test(n)),
+        `${r} states selling without inventory`,
+      ).toBe(true);
       expect(p.hidden).toContain("Inventario");
       expect(p.hidden).toContain("Compras");
     }
