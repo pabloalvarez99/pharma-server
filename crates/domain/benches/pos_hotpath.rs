@@ -15,10 +15,12 @@
 //! SurrealKv writes back. Validate the absolute number on the deploy VM; use
 //! this bench to catch *regressions* between commits.
 //!
-//! Ops measured (the five that dominate a POS day), each one line:
+//! Ops measured (the ones that dominate a POS day), each one line:
 //! - `lookup_by_barcode` — `product_barcode` unique-index scan (scan-gun path).
 //! - `lookup_by_sku` — `product.external_id` index lookup (`find_id_by_external_id`).
 //! - `stock_stats_agg` — `catalog::service::stats`: count()/math::sum over all 50k.
+//! - `inventory_summary_agg` — `inventory::service::summary`: the inventory-module
+//!   landing aggregate (product stats via the maintained view + batch/falta counts).
 //! - `cierre_caja_agg` — `cash_register::service::compute_summary`: aggregate close.
 //! - `post_sale_insert` — `sales::service::post_sale`: full atomic sale (the only
 //!   write; registered LAST so its row growth never pollutes the read benches).
@@ -58,6 +60,7 @@ use tokio::runtime::Runtime;
 
 use domain::cash_register::{model::*, service as cash};
 use domain::catalog::{repo as catalog_repo, service as catalog};
+use domain::inventory::service as inventory;
 use domain::sales::{model::*, service as sales};
 
 type Db = Surreal<surrealdb::engine::local::Db>;
@@ -317,6 +320,11 @@ async fn op_cierre_caja(h: &Harness) {
         .expect("compute_summary");
 }
 
+async fn op_inventory_summary(h: &Harness) {
+    let s = inventory::summary(&h.db, &h.tenant).await.expect("summary");
+    debug_assert!(s.total_skus > 0);
+}
+
 async fn op_post_sale(h: &Harness) {
     sales::post_sale(
         &h.db,
@@ -391,6 +399,14 @@ fn bench_pos_hotpath(c: &mut Criterion) {
             }),
         ),
         (
+            "inventory_summary_agg",
+            percentiles("inventory_summary_agg", samples, || {
+                let s = Instant::now();
+                rt.block_on(op_inventory_summary(&h));
+                s.elapsed()
+            }),
+        ),
+        (
             "cierre_caja_agg",
             percentiles("cierre_caja_agg", samples, || {
                 let s = Instant::now();
@@ -454,6 +470,9 @@ fn bench_pos_hotpath(c: &mut Criterion) {
     });
     group.bench_function("stock_stats_agg", |b| {
         b.to_async(&rt).iter(|| op_stock_stats(&h));
+    });
+    group.bench_function("inventory_summary_agg", |b| {
+        b.to_async(&rt).iter(|| op_inventory_summary(&h));
     });
     group.bench_function("cierre_caja_agg", |b| {
         b.to_async(&rt).iter(|| op_cierre_caja(&h));
