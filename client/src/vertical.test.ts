@@ -160,3 +160,72 @@ describe("seedVerticalFor — rubro → demo seed pack (es→en)", () => {
     RUBRO_CATALOG.forEach((r) => expect(valid.has(r.seedVertical)).toBe(true));
   });
 });
+
+describe("rubro visual identity (P2 showcase: accent + custom icon)", () => {
+  it("every card declares a custom icon id (not just an emoji)", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(typeof r.iconId).toBe("string");
+      expect(r.iconId.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("every card declares a 6-digit hex accent color", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(r.accent).toMatch(/^#[0-9a-fA-F]{6}$/);
+    });
+  });
+
+  it("accents are distinct so each rubro reads as its own (no two share a color)", () => {
+    const accents = RUBRO_CATALOG.map((r) => r.accent.toLowerCase());
+    expect(new Set(accents).size).toBe(accents.length);
+  });
+
+  it("keeps the emoji `icon` for back-compat (login <option> still uses it)", () => {
+    RUBRO_CATALOG.forEach((r) => expect(r.icon.length).toBeGreaterThan(0));
+  });
+});
+
+describe("rubro depth (P3 showcase: native value copy + graceful roadmap)", () => {
+  it("every card declares valueLines + comingSoon arrays", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      expect(Array.isArray(r.valueLines)).toBe(true);
+      expect(Array.isArray(r.comingSoon)).toBe(true);
+    });
+  });
+
+  it("the generic 'otro' carries no rubro-native copy nor roadmap", () => {
+    const otro = RUBRO_CATALOG.find((r) => r.value === "otro")!;
+    expect(otro.valueLines).toEqual([]);
+    expect(otro.comingSoon).toEqual([]);
+  });
+
+  it("regulatory claims (Ley 20.000 / controlados) appear ONLY for farmacia", () => {
+    RUBRO_CATALOG.forEach((r) => {
+      const copy = r.valueLines.join(" ");
+      if (r.value === "farmacia") {
+        expect(copy).toMatch(/Ley 20\.000/);
+      } else {
+        expect(copy).not.toMatch(/Ley 20\.000|controlados/i);
+      }
+    });
+  });
+
+  it("service rubros (no physical stock) state 'sin inventario' honestly", () => {
+    ["belleza", "servicios"].forEach((v) => {
+      const r = RUBRO_CATALOG.find((c) => c.value === v)!;
+      expect(featuresForRubro(v).physicalStock).toBe(false);
+      expect(r.valueLines.join(" ")).toMatch(/sin inventario/i);
+    });
+  });
+
+  it("fully-built rubros have no roadmap; not-yet-built rubros document direction", () => {
+    const built = ["farmacia", "minimarket", "otro"];
+    RUBRO_CATALOG.forEach((r) => {
+      if (built.includes(r.value)) {
+        expect(r.comingSoon).toEqual([]);
+      } else {
+        expect(r.comingSoon.length).toBeGreaterThan(0);
+      }
+    });
+  });
+});

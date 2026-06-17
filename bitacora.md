@@ -3542,3 +3542,42 @@ Tests (+4 concurrencia, todos kv-mem + join_all):
 GATE: `cargo fmt --all -- --check` ✓ · `cargo clippy --workspace --all-targets -D warnings` ✓ ·
 `cargo test --workspace` ✓ (purchasing 26/26, sales 18/18, 0 fail). Sin migración.
 Sin api.ts. ESTADO ACTUAL no tocado.
+
+## 2026-06-16 — Rubro select P2: producción visual (iconos SVG + accent + estados) (ye)
+
+Lane `feat/rubro-showcase-p2` (WT pharma-wt-p10-rubro, cascada off P1
+`feat/rubro-showcase-p1`). FASE P2 del ULTRA-PLAN
+`docs/strategy/rubro-select-experience.md` §4: elevar la vitrina de rubro de
+"emoji + tarjetas planas" a producción visual on-brand. NO se reescribió el modelo
+de datos (P1) — sólo se le colgó identidad visual.
+
+- **Icon set SVG custom self-hosted** `client/src/brand/rubro-icons.ts` (NEW): 8
+  glifos line-style (grid 24×24, stroke 1.75px, `currentColor`, sin fill) +
+  `rubroIconSvg(iconId, {size})`. Reemplazan el emoji de `RubroCard.icon` (que
+  dependía de la fuente del SO). Offline-first (ADR-0005): inline, **cero CDN**, sin
+  `<use>`/sprite remoto, sin web-font. Decorativos: `aria-hidden`+`focusable=false`
+  (el label nombra el rubro). Id desconocido → glifo `otro` (nunca vacío).
+- **Accent por rubro** `vertical.ts` (append-only): a cada `RubroCard` se le agregó
+  `iconId` + `accent` (hex). Cada rubro lee como su propia identidad (teal salud /
+  ámbar / rojo / café / azul / rosa-violeta / slate / neutro) en vez del único teal
+  de marca. Se conserva `icon` (emoji) para el `<option>` de `login.ts` (back-compat).
+- **Estados de card + motion** `configuracion.ts` + `brand.css` (append): el render
+  inyecta el SVG + `--rubro-accent` inline en cada card y en el panel preview.
+  Estados rest/hover (lift 2px + sombra accent)/focus (ring accent)/selected (relleno
+  tenue + ✓ accent)/`pronto` (rubro futuro, badge muted, **igual seleccionable**, no
+  dead-end). Icono en azulejo que se enciende con el accent. Preview tematizada al
+  accent del rubro espiado/fijado. Motion 120–200ms; `@media (prefers-reduced-motion)`
+  → sin lift, el estado igual cambia. CSS scope `.rubro-config` para ganar
+  especificidad sobre `.rubro-card` de styles.css (carga después) sin filtrar a otros
+  usos del grid.
+- **Teclado/a11y**: el grid `role=radiogroup`/`radio` + roving tabindex + flechas +
+  Enter/Espacio ya venía de P1 — verificado intacto con la nueva estructura.
+
+TDD: tests primero (RED→GREEN). `brand/rubro-icons.test.ts` (9: inline/`currentColor`/
+offline-sin-CDN/aria-hidden/fallback/size/todo-glifo-real) + invariantes en
+`vertical.test.ts` (+4: cada card con iconId, accent hex de 6 dígitos, accents
+distintos, emoji back-compat).
+
+GATE cliente verde: `npm run build` (tsc+vite, 36 módulos) + `npm test` 244/244
+(+13). Sin Rust, sin migración, `api.ts`/`styles.css`/`main.ts` intactos. ESTADO
+ACTUAL no tocado.
