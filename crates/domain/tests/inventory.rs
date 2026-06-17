@@ -407,3 +407,62 @@ async fn summary_aggregates_products_batches_faltas() {
     assert_eq!(s.expiring_soon, 1);
     assert_eq!(s.open_faltas, 1);
 }
+
+/// The inventory-module-landing summary serves its product-side aggregate from
+/// the maintained `product_stats` view (migration 0029) instead of a fresh
+/// `GROUP ALL` full scan over `product` — the BUG-perf-001 fix, previously only
+/// wired into `catalog::service::stats` (the dashboard). This pins that the
+/// numbers stay correct across the writes the view maintains incrementally,
+/// including the `active` flip that a `DEFINE TABLE … AS SELECT` view would have
+/// mis-handled (the documented SurrealDB view-UPDATE gotcha).
+#[tokio::test]
+async fn summary_product_side_tracks_maintained_view() {
+    let (db, t, admin) = setup().await;
+    // A: out of stock (0); B: low (3 <= 5); C: healthy (100). cost = 100 each.
+    // A stays at stock 0 (out_of_stock); its id is not needed past creation.
+    catalog::create_product(&db, &t, new_product("A", "100"))
+        .await
+        .unwrap();
+    let b = catalog::create_product(&db, &t, new_product("B", "100"))
+        .await
+        .unwrap();
+    let c = catalog::create_product(&db, &t, new_product("C", "100"))
+        .await
+        .unwrap();
+    inv::add_movement(&db, &t, &b.id, 3, "manual_adjust", Some(&admin), None)
+        .await
+        .unwrap();
+    inv::add_movement(&db, &t, &c.id, 100, "manual_adjust", Some(&admin), None)
+        .await
+        .unwrap();
+
+    let s = inv::summary(&db, &t).await.unwrap();
+    assert_eq!(s.total_skus, 3);
+    assert_eq!(s.active_skus, 3);
+    assert_eq!(s.low_stock, 2, "A(0) + B(3) are <= LOW_STOCK_DEFAULT");
+    assert_eq!(s.out_of_stock, 1, "only A is at 0");
+    // value = (0 + 3 + 100) * 100 = 10300 (counts active + inactive).
+    assert_eq!(s.inventory_value, dec("10300"));
+
+    // Deactivating C must drop it from the active count via the EVENT delta —
+    // the exact UPDATE a pre-computed view mis-maintains. Value keeps active +
+    // inactive, so it is unchanged.
+    catalog::update_product(
+        &db,
+        &t,
+        &c.id.to_string(),
+        UpdateProduct {
+            active: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let s = inv::summary(&db, &t).await.unwrap();
+    assert_eq!(s.total_skus, 3);
+    assert_eq!(s.active_skus, 2, "C dropped from active");
+    assert_eq!(s.low_stock, 2, "A + B still active and low");
+    assert_eq!(s.out_of_stock, 1);
+    assert_eq!(s.inventory_value, dec("10300"), "value counts inactive too");
+}

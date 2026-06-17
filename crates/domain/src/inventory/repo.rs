@@ -617,29 +617,25 @@ pub async fn inventory_summary(
     low: i64,
     expiring_days: i64,
 ) -> DomainResult<InventorySummary> {
-    #[derive(Deserialize, Default)]
-    struct ProdAgg {
-        total: i64,
-        active: i64,
-        low_stock: i64,
-        out_of_stock: i64,
-        inventory_value: Option<Decimal>,
-    }
+    // Product-side aggregate (total / active / low / out-of-stock / value) is
+    // served from the maintained `product_stats` view (migration 0029) — an
+    // O(1) read. This used to run the same `GROUP ALL` full scan over `product`
+    // that BUG-perf-001 fixed for `catalog::repo::stats` (2.7s p99 @50k SKUs);
+    // this inventory-module-landing call site was a second copy of that scan.
+    // `catalog::repo::stats` falls back to the live scan for a non-default `low`
+    // or a tenant with no view row, so the result stays byte-identical.
+    let prod = crate::catalog::repo::stats(db, tenant, low).await?;
+
     #[derive(Deserialize, Default)]
     struct BatchAgg {
         expiring_soon: i64,
         expired: i64,
     }
+    // Batch expiry + open-faltas counts: bounded by the (far smaller) batch and
+    // falta tables, not the catalog, so these stay cheap.
     let mut r = db
         .query(
             "SELECT \
-               count() AS total, \
-               count(active = true) AS active, \
-               count(stock <= $low AND active = true) AS low_stock, \
-               count(stock <= 0 AND active = true) AS out_of_stock, \
-               math::sum(stock * (cost_price ?? 0dec)) AS inventory_value \
-             FROM product WHERE tenant = $t GROUP ALL;\
-             SELECT \
                count(expiry_date <= time::now() + duration::from::days($days) \
                      AND expiry_date >= time::now() \
                      AND active = true AND stock > 0) AS expiring_soon, \
@@ -648,20 +644,17 @@ pub async fn inventory_summary(
              SELECT count() AS open FROM falta WHERE tenant = $t AND resolved = false GROUP ALL;",
         )
         .bind(("t", tenant.clone()))
-        .bind(("low", low))
         .bind(("days", expiring_days))
         .await?;
-    let prod: Option<ProdAgg> = r.take(0)?;
-    let batch: Option<BatchAgg> = r.take(1)?;
-    let open: Option<i64> = r.take((2, "open"))?;
-    let prod = prod.unwrap_or_default();
+    let batch: Option<BatchAgg> = r.take(0)?;
+    let open: Option<i64> = r.take((1, "open"))?;
     let batch = batch.unwrap_or_default();
     Ok(InventorySummary {
         total_skus: prod.total,
         active_skus: prod.active,
         low_stock: prod.low_stock,
         out_of_stock: prod.out_of_stock,
-        inventory_value: prod.inventory_value.unwrap_or_default(),
+        inventory_value: prod.inventory_value,
         expiring_soon: batch.expiring_soon,
         expired: batch.expired,
         open_faltas: open.unwrap_or(0),
