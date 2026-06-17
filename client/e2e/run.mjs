@@ -25,6 +25,7 @@ import {
   noPrescriptionFlow,
   dteLifecycleFlow,
   reports402Matrix,
+  rubroShowcaseFlow,
   DTE_EMISOR_RUT,
   DTE_CERT_PASS,
 } from "./flows.mjs";
@@ -42,6 +43,10 @@ const TENANTS = [
 // separate so the golden-path tenants above still exercise the *Free, no-CAF*
 // clean-gate contract (a fresh install with nothing configured).
 const DTE_TENANT = { slug: "e2e-dte", name: "DTE Lifecycle E2E", vertical: "pharmacy" };
+// Dedicated tenant for the rubro-select showcase: its vertical is driven through
+// the live settings API by the flow itself (it round-trips all 8 catalog rubros),
+// so it bootstraps with no fixed vertical.
+const SHOWCASE_TENANT = { slug: "e2e-rubro", name: "Rubro Showcase E2E" };
 const TEST_PFX = join(REPO_ROOT, "crates", "dte", "tests", "assets", "test-cert.pfx");
 
 let server;
@@ -57,7 +62,7 @@ async function main() {
   section("bootstrap (CLI, server down)");
   await cli(["migrate"], dbPath);
   console.log("  ✓ migrations applied");
-  for (const t of [...TENANTS, DTE_TENANT]) {
+  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT]) {
     await cli(["tenant-create", t.name, "--slug", t.slug], dbPath);
     await cli(
       [
@@ -122,6 +127,15 @@ async function main() {
     // receta/controlados machinery, yet boleta stays universal.
     if (t.vertical === "minimarket") await noPrescriptionFlow(ctx);
   }
+
+  // Rubro-select showcase (the configurator + live preview, ULTRA-PLAN): every
+  // catalog rubro persists through the settings API and the agnostic core works
+  // end-to-end under a SERVICE rubro (belleza).
+  await rubroShowcaseFlow({
+    tenant: SHOWCASE_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+  });
 
   // DTE document lifecycle on its dedicated, fully-provisioned tenant.
   await dteLifecycleFlow({

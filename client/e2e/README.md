@@ -63,7 +63,19 @@ the binaries. Exit code is non-zero on any failed assertion.
    - **compliance** — core reports 200, margins Pro-gate, factura/libro clean.
    - **no-receta (minimarket only)** — confirms a non-pharmacy rubro is never
      forced through receta/controlados machinery, while boleta still emits.
-6. Tear down server + temp DB.
+6. On a dedicated tenant, run the **rubro-select showcase** (the configurator +
+   live preview, ULTRA-PLAN `docs/strategy/rubro-select-experience.md`):
+   - **configurator persistence** — every one of the 8 catalog rubros persists to
+     `business.vertical` and reads back **exactly** (raw catalog key, not folded
+     to `otro`); `business.name` round-trips too. The gate reads the stored value,
+     so a coerced rubro would mis-gate the whole ERP.
+   - **agnostic core under a service rubro** — pick `belleza` (a service rubro the
+     preview shows with **no** inventario/compras) and drive the whole day
+     `caja -> service sale -> receipt -> boleta gate -> cierre -> reporte` against
+     a manually-created service line. Proves a non-pharmacy, no-inventory rubro
+     never breaks the loop, boleta stays universal, recetas are never forced, and
+     reports gate cleanly (`margins-daily` 402).
+7. Tear down server + temp DB.
 
 ## Known-bug xfail (self-healing)
 

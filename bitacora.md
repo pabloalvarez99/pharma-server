@@ -3581,3 +3581,36 @@ distintos, emoji back-compat).
 GATE cliente verde: `npm run build` (tsc+vite, 36 módulos) + `npm test` 244/244
 (+13). Sin Rust, sin migración, `api.ts`/`styles.css`/`main.ts` intactos. ESTADO
 ACTUAL no tocado.
+
+## 2026-06-16 — bob: e2e del configurador de rubro + vista previa en vivo (showcase)
+
+Lane `feat/rubro-showcase-e2e` (WT pharma-wt-p10-e2e), CASCADA off P1
+`feat/rubro-showcase-p1` (#229, configurador 2-paneles + `rubroPreview`). Cierra la
+capa **e2e** de la vitrina RutBusiness (ULTRA-PLAN `docs/strategy/rubro-select-experience.md`):
+lo que sólo un run en vivo prueba —la preview pura ya la cubren `first-run.test.ts`
+(30) + la matriz de gating de #230.
+
+- **`rubroShowcaseFlow`** nuevo en `client/e2e/flows.mjs` (+ wired en `run.mjs`,
+  tenant dedicado `e2e-rubro`). Dos contratos sobre el stack vivo (real `pharma-api`
+  + SurrealKv):
+  - **(A) persistencia del configurador** — los 8 rubros del catálogo persisten a
+    `business.vertical` y vuelven a leerse **crudos** (no se pliegan a `otro`):
+    el gate (`loadRubro`/`featuresForRubro`) keya sobre el valor guardado, así que
+    un extra coercido server-side mis-gatearía todo el ERP. `business.name` también
+    round-trips (el wordmark de marca).
+  - **(B) core agnóstico bajo un rubro de SERVICIO** — se fija `belleza` (rubro
+    servicio: la preview muestra **sin** inventario/compras) y se maneja el día
+    entero `caja → venta de servicio → recibo → boleta gate → cierre → reporte`
+    sobre una línea de servicio creada a mano. Prueba que elegir un rubro
+    no-farmacia, sin inventario, **no rompe** el loop; boleta SII sigue UNIVERSAL
+    (400 limpio sin CAF, no 5xx); recetas nunca se fuerzan (200 vacío); reportes
+    core 200 y `margins-daily` 402 (Pro-gate). Nota: el server NO es rubro-aware al
+    vender (exige stock≥qty); el "sin stock" del rubro servicio es gating de UI
+    (cubierto por tests puros) — acá se prueba que el loop diario corre igual.
+- README `client/e2e/README.md` documenta el paso 6 (showcase) + sus asserts.
+
+GATE local verde: `npm run build` (tsc+vite, 35 módulos) + `npm test` 231/231 +
+`npm run e2e` **165 passed / 0 failed / 2 xfail** (BUG-bob-001 devolución, pre-existente,
+no de esta lane; los 33 asserts nuevos del showcase todos verdes). Sólo `client/e2e/`,
+sin tocar vistas, sin Rust, sin migración, `api.ts`/`format.ts` intactos. ESTADO ACTUAL
+no tocado.

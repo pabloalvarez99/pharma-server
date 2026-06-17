@@ -699,3 +699,137 @@ export async function noPrescriptionFlow({ tenant, email, password, vertical }) 
     `minimarket boleta still emits/gates cleanly (status ${boleta.status}, no 5xx)`,
   );
 }
+
+// --- rubro showcase (the "elige tu rubro" configurator, live) ----------------
+
+/** The catalog the onboarding rubro grid renders (mirrors client/src/vertical.ts
+ *  RUBRO_CATALOG). `seed` = a demo pack exists; `service` = a service rubro that
+ *  sells without physical stock (its UI hides inventario/compras). Hardcoded here
+ *  because the harness is plain node (.mjs) and can't import the TS source — the
+ *  rubro-gating-matrix vitest already pins the TS table; this asserts the SERVER
+ *  honours the value the configurator persists. */
+const RUBRO_CATALOG_E2E = [
+  { value: "farmacia", seed: true, service: false },
+  { value: "minimarket", seed: true, service: false },
+  { value: "restaurant", seed: false, service: false },
+  { value: "cafe", seed: false, service: false },
+  { value: "tienda", seed: false, service: false },
+  { value: "belleza", seed: false, service: true },
+  { value: "servicios", seed: false, service: true },
+  { value: "otro", seed: false, service: false },
+];
+
+/** Rubro-select showcase end-to-end (the founder's vitrina RutBusiness, ULTRA-PLAN
+ *  docs/strategy/rubro-select-experience.md; P1 = the 2-panel configurator + live
+ *  preview). The preview is pure client logic (covered by first-run.test.ts +
+ *  rubro-gating-matrix); what only a LIVE run can prove is that the value the
+ *  configurator SAVES round-trips through the real settings API and that the ERP
+ *  the preview promises actually works over HTTP for ANY rubro — including a
+ *  service rubro the onboarding flow can land on. Two contracts:
+ *
+ *   (A) configurator persistence — every one of the 8 catalog rubros persists
+ *       to `business.vertical` and reads back EXACTLY (raw catalog key, not folded
+ *       to "otro"): the gate (loadRubro/featuresForRubro) keys off the stored
+ *       value, so an extra rubro silently coerced server-side would mis-gate the
+ *       whole ERP. Plus `business.name` round-trips (the branded wordmark).
+ *
+ *   (B) agnostic core under a SERVICE rubro — pick belleza (a service rubro: the
+ *       preview shows NO inventario/compras), then drive the operator's whole day
+ *       login → caja → sale → receipt → boleta gate → cierre → reporte against a
+ *       manually-created service line. Proves choosing a non-pharmacy, no-inventory
+ *       rubro never breaks the daily loop, boleta stays UNIVERSAL, recetas are
+ *       never forced, and reports gate cleanly. Runs on its own tenant. */
+export async function rubroShowcaseFlow({ tenant, email, password }) {
+  section(`rubro-showcase tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // (A) Configurator persistence — every catalog rubro round-trips raw. -------
+  for (const r of RUBRO_CATALOG_E2E) {
+    const put = await c.put("/settings/business.vertical", { value: r.value });
+    check(put.ok, `configurador guarda rubro "${r.value}" (PUT ok)`);
+    const got = (await c.get("/settings/business.vertical")).body;
+    eq(got?.value, r.value, `rubro "${r.value}" persiste crudo (no se pliega a otro)`);
+  }
+  // Branded business name persists alongside the rubro (the sidebar wordmark).
+  const NAME = "Salón Showcase E2E";
+  await c.put("/settings/business.name", { value: NAME });
+  eq((await c.get("/settings/business.name")).body?.value, NAME, "nombre del negocio persiste");
+
+  // (B) Land on a SERVICE rubro (belleza) — exactly what an operator pins in the
+  // configurator — and prove the whole daily loop works with NO seed/clinical
+  // pack, selling a manual service line.
+  await c.put("/settings/business.vertical", { value: "belleza" });
+  eq((await c.get("/settings/business.vertical")).body?.value, "belleza", "rubro activo = belleza (servicio)");
+
+  // A service line: priced, NO active_ingredient/laboratory/lote (the agnostic
+  // core — a peluquería sells services, not clinical SKUs). Stock is still the
+  // server's sale guard (the *UI* is what hides inventory for a service rubro),
+  // so we stock it enough to sell.
+  const created = (await c.post("/products", {
+    name: "Corte de pelo",
+    price: "12000",
+    stock: 50,
+  })).body;
+  const svcId = created?.id;
+  check(!!svcId, "servicio creado (producto sin lote/clínica)");
+  check(!created?.active_ingredient, "servicio NO lleva principio activo (no pack clínico)");
+
+  const open = await c.post("/cash-sessions", { register_name: "Caja Belleza E2E", opening_cash: "0" });
+  const sessionId = open.body?.id;
+  check(!!sessionId, "caja abierta en rubro servicio");
+
+  const stockBefore = created.stock;
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [{ product: svcId, product_name: created.name, quantity: 1, unit_price: "12000" }],
+      payment_method: "pos_cash",
+      cash_amount: "12000",
+    },
+    { headers: { "Idempotency-Key": `e2e-belleza-${Date.now()}` } },
+  );
+  eq(sale.status, 201, "venta de servicio creada (201) — sin receta, sin inventario obligatorio");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "venta de servicio devuelve order id");
+  const afterSale = (await c.get(`/products/${encodeURIComponent(svcId)}`)).body;
+  eq(afterSale.stock, stockBefore - 1, "stock del servicio baja en 1 tras la venta");
+
+  const receipt = (await c.get(`/orders/${orderId}/receipt`)).body;
+  check(!!receipt && (receipt.items?.length ?? 0) >= 1, "boleta/recibo del servicio tiene línea");
+
+  // Boleta (DTE SII) is UNIVERSAL — a peluquería emits too. Free no-CAF → coded
+  // 4xx upsell, NEVER a 5xx/crash (boleta-gate contract holds in a service rubro).
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: "e2e" },
+    { expectOk: false },
+  );
+  check(boleta.status < 500, `servicio: boleta gestionada limpio (status ${boleta.status}, no 5xx)`);
+
+  // Recetas/controlados are NEVER forced on a service rubro: the libro is
+  // reachable (no crash) and empty.
+  const recetas = await c.get("/prescriptions", { expectOk: false });
+  check(recetas.status < 500, `servicio: recetas accesible sin crash (status ${recetas.status})`);
+  if (recetas.status === 200 && Array.isArray(recetas.body)) {
+    eq(recetas.body.length, 0, "servicio: cero recetas/controlados dispensados");
+  }
+
+  // Core reports stay 200 arrays; the Pro-gated one stays a clean 402 — the
+  // preview's "Reportes" category is honest in a service rubro too.
+  for (const path of ["/reports/sales-daily", "/reports/top-products"]) {
+    const rr = await c.get(path, { expectOk: false });
+    check(rr.status === 200 && Array.isArray(rr.body), `servicio: ${path} → 200 array`);
+  }
+  const margins = await c.get("/reports/margins-daily", { expectOk: false });
+  eq(margins.status, 402, "servicio: margins-daily → 402 (Pro-gate, sin 5xx)");
+
+  // Close the day — no open session left behind; the loop has no dead-end.
+  const close = await c.post(`/cash-sessions/${sessionId}/close`, { closing_cash_counted: "12000" });
+  check(close.ok, "caja del servicio cerrada (cierre del día completo)");
+  const salesDaily = await c.get("/reports/sales-daily");
+  check(
+    Array.isArray(salesDaily.body) && salesDaily.body.length > 0,
+    "servicio: la venta del día aparece en sales-daily",
+  );
+}
