@@ -140,3 +140,243 @@
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   }
 }
+
+/* ===========================================================================
+ * 3. POS PRODUCED SURFACE (V3) — the cashier's all-day screen, raised to the
+ *    rubro-select vara of craft (docs/strategy/rubro-select-experience.md §1/§9).
+ *
+ *    Brand tokens only (--rb-*, via brand.css). Every rule is scoped to .view-pos
+ *    so nothing leaks into ye/dashboard or the shared styles.css base — this layer
+ *    only *refines* the base cohesively (hierarchy, accent, motion, focus, states).
+ *    Motion stays in the 150–200ms band and yields to prefers-reduced-motion.
+ *    Keyboard-first: every surface the cashier can land on gets a visible ring.
+ * ======================================================================== */
+
+/* ---- search: the entry point of every sale ---- */
+.view-pos .view-search input {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  color: var(--rb-txt);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.view-pos .view-search input::placeholder {
+  color: var(--rb-txt-3);
+}
+.view-pos .view-search input:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  background: var(--rb-surface-2);
+  box-shadow: 0 0 0 4px var(--rb-brand-soft);
+}
+
+/* ---- product picker cards ---- */
+.view-pos .pos-result {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease,
+    background 0.16s ease;
+}
+.view-pos .pos-result:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--rb-brand) 55%, var(--rb-line));
+  background: linear-gradient(180deg, var(--rb-surface-2), var(--rb-surface));
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px -18px rgba(0, 0, 0, 0.75);
+}
+.view-pos .pos-result:active:not(:disabled) {
+  transform: translateY(0);
+}
+.view-pos .pos-result:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .pos-result-price {
+  color: var(--rb-brand);
+}
+/* a service line (rubro sin stock): the sub-line reads "Servicio" — render it as a
+ * calm pill, not a phantom stock count, so the card never implies inventory. */
+.view-pos .pos-result.is-service .cell-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-info);
+}
+.view-pos .pos-result.is-service .cell-sub::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rb-info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rb-info) 18%, transparent);
+}
+
+/* ---- cart rail ---- */
+.view-pos .pos-cart {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius);
+  box-shadow: var(--rb-shadow);
+}
+.view-pos .pos-cart .section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-txt-3);
+}
+.view-pos .pos-line {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line-soft);
+  border-radius: var(--rb-radius-sm);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.view-pos .pos-line:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .qty-btn {
+  background: var(--rb-surface-2);
+  border: 1px solid var(--rb-line);
+  color: var(--rb-txt);
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+.view-pos .qty-btn:hover:not(:disabled) {
+  border-color: var(--rb-brand);
+  color: var(--rb-brand);
+}
+.view-pos .qty-btn:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+
+/* ---- totals: the figure the cashier reads out loud ---- */
+.view-pos .pos-total {
+  border-top: 1px solid var(--rb-line);
+  color: var(--rb-txt-2);
+}
+.view-pos .pos-total strong {
+  font-size: 26px;
+  color: var(--rb-txt);
+}
+.view-pos .pos-disc-row strong {
+  color: var(--rb-amber);
+}
+
+/* ---- payment rail ---- */
+.view-pos .pos-method {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  color: var(--rb-txt-2);
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+.view-pos .pos-method:hover {
+  color: var(--rb-txt);
+  border-color: color-mix(in srgb, var(--rb-brand) 40%, var(--rb-line));
+}
+.view-pos .pos-method:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .pos-method.active {
+  border-color: var(--rb-brand);
+  background: var(--rb-brand-soft);
+  color: var(--rb-brand);
+}
+.view-pos .pos-quick-chip {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  color: var(--rb-txt);
+  border-radius: var(--rb-radius-sm);
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+.view-pos .pos-quick-chip:hover,
+.view-pos .pos-quick-chip:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .pos-vuelto.ok strong {
+  color: var(--rb-brand);
+}
+.view-pos .pos-vuelto.short strong,
+.view-pos .pos-split-info.short strong {
+  color: var(--rb-danger);
+}
+
+/* ---- charge CTA: the close of every sale ---- */
+.view-pos .pos-charge {
+  background: linear-gradient(180deg, var(--rb-brand), var(--rb-brand-deep));
+  color: #04140e;
+  border-radius: var(--rb-radius-sm);
+  box-shadow: 0 12px 26px -14px var(--rb-brand);
+  transition: filter 0.16s ease, transform 0.12s ease, box-shadow 0.16s ease;
+}
+.view-pos .pos-charge:not(:disabled):hover {
+  filter: brightness(1.05);
+}
+.view-pos .pos-charge:not(:disabled):active {
+  transform: translateY(1px);
+}
+.view-pos .pos-charge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--rb-brand-soft), 0 12px 26px -14px var(--rb-brand);
+}
+.view-pos .pos-charge:disabled {
+  background: var(--rb-surface-2);
+  color: var(--rb-txt-3);
+  box-shadow: none;
+}
+
+/* ---- produced states: empty cart / empty picker / error ---- */
+.view-pos .pos-lines .empty,
+.view-pos .pos-results .empty {
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--rb-txt-3);
+  border: 1px dashed var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  background: color-mix(in srgb, var(--rb-surface) 60%, transparent);
+}
+.view-pos .pos-error {
+  background: color-mix(in srgb, var(--rb-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rb-danger) 45%, transparent);
+  color: var(--rb-txt);
+  border-radius: var(--rb-radius-sm);
+}
+.view-pos .pos-error.pos-warn {
+  background: color-mix(in srgb, var(--rb-amber) 14%, transparent);
+  border-color: color-mix(in srgb, var(--rb-amber) 45%, transparent);
+}
+
+/* ---- loading skeleton tint to brand surface ---- */
+.view-pos .pos-results .table-skel .sk {
+  background: linear-gradient(
+    90deg,
+    var(--rb-surface) 25%,
+    var(--rb-surface-2) 50%,
+    var(--rb-surface) 75%
+  );
+}
+
+/* Motion discipline: the whole produced layer animates in the 150–200ms band.
+ * Under prefers-reduced-motion we keep state changes (color/ring) but kill the
+ * transforms + transitions, so a vestibular-sensitive cashier sees no movement. */
+@media (prefers-reduced-motion: reduce) {
+  .view-pos .pos-result,
+  .view-pos .pos-result:hover:not(:disabled),
+  .view-pos .pos-charge,
+  .view-pos .pos-charge:not(:disabled):active {
+    transition: none;
+    transform: none;
+  }
+}

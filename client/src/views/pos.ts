@@ -31,6 +31,7 @@ import {
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 import { receiptText } from "./receipt-text";
+import { featuresForRubro, loadRubro } from "../vertical";
 import "./rutbrand.css";
 import {
   addToCart as addCartLine,
@@ -74,6 +75,12 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   let selectedCustomer: PickedCustomer | null = null;
   let customerModuleOk = true;
   let currentResults: Product[] = [];
+  // Stock discipline depends on the rubro: a service rubro (physicalStock:false —
+  // peluquería, oficios) sells with no inventory, so "Stock 0 · agotado" would be
+  // a lie and the stock guards would dead-end every sale. Default to tracking
+  // (the physical-rubro behaviour) until the persisted rubro loads, then relax it
+  // for services and repaint the picker so the cards read honestly.
+  let trackStock = true;
   // The cart line to flash on the next render — set when a scan/click adds or
   // bumps a line, cleared once the flash is applied. A fast cashier scanning the
   // SAME SKU repeatedly only sees the qty tick up, so the flash is the signal the
@@ -215,11 +222,13 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => runSearch(searchEl.value.trim()), 220);
   });
-  // Scan-fast: Enter adds the first in-stock result (USB scanners emit Enter).
+  // Scan-fast: Enter adds the first sellable result (USB scanners emit Enter). On
+  // a physical rubro that's the first in-stock row; on a service rubro stock is
+  // meaningless, so the first row period.
   searchEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const first = currentResults.find((p) => p.stock > 0);
+    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
     if (first) {
       addToCart(first);
       searchEl.value = "";
@@ -227,6 +236,16 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     }
   });
   runSearch("");
+
+  // Resolve the rubro once; never throws (loadRubro defaults on any miss). For a
+  // service rubro, drop stock tracking and repaint the picker so the cards stop
+  // showing a phantom "agotado".
+  void loadRubro(serverUrl).then((rubro) => {
+    if (!featuresForRubro(rubro).physicalStock) {
+      trackStock = false;
+      runSearch(searchEl.value.trim());
+    }
+  });
 
   async function loadResults(search: string): Promise<void> {
     try {
@@ -236,10 +255,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         resultsEl.innerHTML = `<p class="empty">Sin resultados${search ? ` para «${escapeHtml(search)}»` : ""}.</p>`;
         return;
       }
-      resultsEl.innerHTML = rows.map(resultCard).join("");
+      resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock)).join("");
       resultsEl.querySelectorAll<HTMLButtonElement>(".pos-result").forEach((b, i) => {
         b.addEventListener("click", () => {
-          if (rows[i].stock > 0) addToCart(rows[i]);
+          if (!trackStock || rows[i].stock > 0) addToCart(rows[i]);
         });
       });
     } catch (err) {
@@ -467,7 +486,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   // ---- cart ops ----
   function addToCart(p: Product): void {
-    addCartLine(cart, p); // pure: out-of-stock reject + stock-capped increment
+    addCartLine(cart, p, { trackStock }); // pure: stock guards gated by rubro
     flashLineId = p.id; // confirm the scan/click on the affected line
     clearError();
     renderCart();
@@ -475,7 +494,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   function changeQty(id: string, delta: number): void {
-    changeCartQty(cart, id, delta); // pure: clamp to stock, drop at 0
+    changeCartQty(cart, id, delta, { trackStock }); // clamp to stock unless service
     if (delta > 0) flashLineId = id; // confirm the increment (kbd/+ button)
     renderCart();
   }
@@ -513,7 +532,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
           <div class="qty">
             <button type="button" class="qty-btn" data-act="dec" aria-label="Quitar uno">−</button>
             <span class="qty-val rb-num">${l.qty}</span>
-            <button type="button" class="qty-btn" data-act="inc" aria-label="Agregar uno" ${l.qty >= l.stock ? "disabled" : ""}>+</button>
+            <button type="button" class="qty-btn" data-act="inc" aria-label="Agregar uno" ${trackStock && l.qty >= l.stock ? "disabled" : ""}>+</button>
           </div>
           <input class="pos-line-disc" type="text" inputmode="numeric" placeholder="Desc."
                  value="${lineDiscountOf(l) > 0 ? lineDiscountOf(l) : ""}"
@@ -943,7 +962,21 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   searchEl.focus();
 }
 
-function resultCard(p: Product): string {
+// A picker card. On a service rubro (`trackStock` false) stock is meaningless, so
+// the card never shows a count or an "agotado" dead-end — it reads "Servicio" and
+// stays sellable. On a physical rubro it keeps the stock line + out-of-stock lock.
+function resultCard(p: Product, trackStock: boolean): string {
+  if (!trackStock) {
+    return `
+    <button type="button" class="pos-result is-service">
+      <div class="pos-result-info">
+        <div class="cell-main">${escapeHtml(p.name)}</div>
+        <div class="cell-sub muted">Servicio</div>
+      </div>
+      <div class="pos-result-price num rb-num">${clp(p.price)}</div>
+    </button>
+  `;
+  }
   const out = p.stock <= 0;
   return `
     <button type="button" class="pos-result ${out ? "is-out" : ""}" ${out ? "disabled" : ""}>
