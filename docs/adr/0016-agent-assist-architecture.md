@@ -82,6 +82,49 @@ la cara al dueño (consistente con la postura de `dashboard.rs`).
 `desconocido`. Cada uno con sinónimos es-CL y cubierto por tests (parser +
 ejecutor contra kv-mem sembrado + aislamiento de tenant).
 
+### Intents v2 (profundidad — Wave 2, 2026-06-20, milton)
+
+El set se amplía a **20 variantes** agregando las preguntas de alta frecuencia del
+dueño, todas mapeadas a servicios de **lectura** existentes (cero servicios nuevos,
+cero migración, read-only sagrado). El **contrato del endpoint NO cambia**: sigue
+siendo `{ intent, text, data? }` (campo prosa = `text`; ye construye la UI contra
+esa forma). Solo se **agregan** intents/contenido.
+
+Nuevos: `ventas_ayer` · `ventas_mes_pasado` · `ventas_vs_ayer` (comparativa día) ·
+`ventas_vs_mes_pasado` (comparativa mes) · `ventas_metodo_pago` (efectivo vs
+tarjeta) · `por_vencer_semana` (ventana 7d) · `clientes_top` (loyalty) ·
+`margen_producto` (margen unitario de un SKU) · `gastos_mes` (total + top
+categorías).
+
+Mapeo a lecturas: comparativas/método/mes-pasado/ayer → `expenses::sales_daily`
+con distintos rangos; `gastos_mes` → `expenses::list_expenses`; `clientes_top` →
+`customers::loyalty_stats`; `margen_producto` → `catalog::list_products` (price −
+cost). El parser es-CL se endureció con desambiguación de orden (método antes de
+caja y de comparativas; clientes antes de top-productos; margen-producto vs
+margen-mes por palabra-período; vence-semana antes de vence-30d) y fechas relativas
+(`hoy/ayer/esta semana/este mes/mes pasado`). `margen_producto` honra el mismo gate
+de licencia `reports.margins_daily` que `margen_mes` (degrada a nudge, no 402).
+
+## Camino LLM opt-in (futuro, NO en este MVP)
+
+El seam ya está listo. Cuando el fundador lo decida:
+
+### Cómo se prende (el flip, Wave 2)
+
+La plomería ya existe: `assist::AssistConfig { llm_enabled: bool (default OFF),
+llm_api_key: Option<String> }` + `assist::select_provider(&cfg) -> Box<dyn
+AssistProvider>`. Hoy `select_provider` **siempre** devuelve `Deterministic` (no
+hay `LlmProvider` compilado; cero red en este build aunque `llm_active()` sea
+true — solo loguea un warning). El endpoint ya llama a `select_provider(&AssistConfig::default())`,
+así que enchufar el LLM es un cambio **aislado**, sin tocar endpoint/parser/ejecutores:
+
+1. Implementar `LlmProvider` detrás de `AssistProvider` y devolverlo en
+   `select_provider` cuando `cfg.llm_active()`.
+2. Cablear `AssistConfig` desde la config real del server (env/`admin_setting`),
+   default OFF, key del dueño guardada local.
+
+El resto del camino opt-in:
+
 ## Camino LLM opt-in (futuro, NO en este MVP)
 
 El seam ya está listo. Cuando el fundador lo decida:

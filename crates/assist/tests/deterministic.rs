@@ -299,6 +299,168 @@ async fn ayuda_and_unknown_are_graceful() {
 }
 
 #[tokio::test]
+async fn ventas_ayer_is_empty_when_only_today_seeded() {
+    let (db, tenant, user) = setup().await;
+    seed_sales(&db, &tenant, &user).await; // today
+    let a = ask(&db, &tenant, "ventas de ayer").await;
+    assert_eq!(a.intent, "ventas_ayer");
+    // Sales were posted today, so yesterday's window sees none.
+    assert_eq!(a.data.unwrap()["orders"], 0);
+    assert!(a.text.to_lowercase().contains("ayer"), "text: {}", a.text);
+}
+
+#[tokio::test]
+async fn comparativa_dia_contrasts_today_and_yesterday() {
+    let (db, tenant, user) = setup().await;
+    seed_sales(&db, &tenant, &user).await; // 5000 today, 0 yesterday
+    let a = ask(&db, &tenant, "ventas de hoy vs ayer").await;
+    assert_eq!(a.intent, "ventas_vs_ayer");
+    let data = a.data.unwrap();
+    assert_eq!(data["current_revenue"], "5000");
+    assert_eq!(data["previous_revenue"], "0");
+    assert_eq!(data["delta"], "5000");
+}
+
+#[tokio::test]
+async fn ventas_por_metodo_breaks_down_cash_card() {
+    let (db, tenant, user) = setup().await;
+    seed_sales(&db, &tenant, &user).await; // all cash
+    let a = ask(&db, &tenant, "ventas por método de pago").await;
+    assert_eq!(a.intent, "ventas_metodo_pago");
+    let data = a.data.unwrap();
+    assert_eq!(data["cash"], "5000");
+    assert_eq!(data["card"], "0");
+    assert_eq!(data["cash_pct"], "100");
+}
+
+#[tokio::test]
+async fn ventas_por_metodo_empty_is_graceful() {
+    let (db, tenant, _user) = setup().await;
+    let a = ask(&db, &tenant, "cómo pagan mis clientes").await;
+    assert_eq!(a.intent, "ventas_metodo_pago");
+    assert_eq!(a.data.unwrap()["orders"], 0);
+}
+
+#[tokio::test]
+async fn margen_producto_computes_unit_margin() {
+    let (db, tenant, user) = setup().await;
+    seed_sales(&db, &tenant, &user).await;
+    let a = ask(&db, &tenant, "margen de paracetamol").await;
+    assert_eq!(a.intent, "margen_producto");
+    let data = a.data.unwrap();
+    // price 1500, cost 600 -> margin 900, 60%
+    assert_eq!(data["price"], "1500");
+    assert_eq!(data["cost"], "600");
+    assert_eq!(data["margin"], "900");
+    assert_eq!(data["margin_pct"], "60.0");
+}
+
+#[tokio::test]
+async fn margen_producto_no_match_is_graceful() {
+    let (db, tenant, _user) = setup().await;
+    let a = ask(&db, &tenant, "margen de aspirina").await;
+    assert_eq!(a.intent, "margen_producto");
+    assert!(a.text.to_lowercase().contains("no encontré"));
+}
+
+#[tokio::test]
+async fn gastos_mes_sums_and_breaks_down() {
+    use domain::expenses::model::NewExpense;
+    use domain::expenses::service as expenses;
+    let (db, tenant, _user) = setup().await;
+    for (cat, amt) in [("arriendo", "300000"), ("luz", "50000"), ("luz", "20000")] {
+        expenses::create_expense(
+            &db,
+            &tenant,
+            None,
+            NewExpense {
+                category: cat.into(),
+                description: format!("{cat} test"),
+                amount: dec(amt),
+                payment_method: "cash".into(),
+                cash_session: None,
+                supplier: None,
+                note: None,
+                incurred_at: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let a = ask(&db, &tenant, "gastos del mes").await;
+    assert_eq!(a.intent, "gastos_mes");
+    let data = a.data.unwrap();
+    assert_eq!(data["count"], 3);
+    assert_eq!(data["total"], "370000");
+}
+
+#[tokio::test]
+async fn gastos_mes_empty_is_graceful() {
+    let (db, tenant, _user) = setup().await;
+    let a = ask(&db, &tenant, "cuánto gasté este mes").await;
+    assert_eq!(a.intent, "gastos_mes");
+    assert_eq!(a.data.unwrap()["count"], 0);
+}
+
+#[tokio::test]
+async fn clientes_top_empty_is_graceful() {
+    let (db, tenant, _user) = setup().await;
+    let a = ask(&db, &tenant, "mejores clientes").await;
+    assert_eq!(a.intent, "clientes_top");
+    // No loyalty-bearing customers seeded -> friendly empty.
+    assert_eq!(a.data.unwrap()["count"], 0);
+}
+
+#[tokio::test]
+async fn por_vencer_semana_uses_seven_day_window() {
+    let (db, tenant, _user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("Amoxicilina", "3000", "1200", 0))
+        .await
+        .unwrap();
+    // Expires in 20 days: inside the 30-day window, OUTSIDE the 7-day one.
+    inventory::create_batch(
+        &db,
+        &tenant,
+        imodel::NewBatch {
+            product: p.id.clone(),
+            batch_code: "L1".into(),
+            expiry_date: Utc::now() + Duration::days(20),
+            stock: 10,
+            cost: Some(dec("1200")),
+            notes: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let week = ask(&db, &tenant, "qué se vence esta semana").await;
+    assert_eq!(week.intent, "por_vencer_semana");
+    assert_eq!(week.data.unwrap()["count"], 0, "20d batch is outside 7d");
+
+    let month = ask(&db, &tenant, "qué se vence").await;
+    assert_eq!(month.intent, "por_vencer");
+    assert_eq!(month.data.unwrap()["count"], 1, "20d batch is inside 30d");
+}
+
+#[tokio::test]
+async fn contract_shape_is_stable() {
+    // ye builds the UI against {intent, text, data?}. Lock that shape.
+    let (db, tenant, user) = setup().await;
+    seed_sales(&db, &tenant, &user).await;
+    let a = ask(&db, &tenant, "ventas hoy").await;
+    let json = serde_json::to_value(&a).unwrap();
+    assert!(json.get("intent").is_some(), "intent field present");
+    assert!(json.get("text").is_some(), "text field present");
+    assert!(json.get("data").is_some(), "data field present");
+    // Unknown carries no data -> the field is omitted, never null.
+    let huh = ask(&db, &tenant, "asdf qwer").await;
+    let hjson = serde_json::to_value(&huh).unwrap();
+    assert_eq!(hjson["intent"], "desconocido");
+    assert!(hjson.get("data").is_none(), "data omitted when absent");
+}
+
+#[tokio::test]
 async fn tenant_isolation_blocks_cross_reads() {
     let (db, tenant_a, user_a) = setup().await;
     seed_sales(&db, &tenant_a, &user_a).await;
