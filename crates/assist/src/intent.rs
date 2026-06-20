@@ -84,7 +84,7 @@ impl Intent {
 /// Lowercase + strip Spanish accents/diacritics so "qué", "que" and "QUE" all
 /// match the same keyword table. Keeps `ñ` folded to `n` (Chilean users rarely
 /// type it for keywords like "mañana").
-fn normalize(s: &str) -> String {
+pub(crate) fn normalize(s: &str) -> String {
     s.trim()
         .to_lowercase()
         .chars()

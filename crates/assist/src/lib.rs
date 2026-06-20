@@ -9,10 +9,15 @@
 //! later (owner-supplied key, default OFF) without rewriting any of this. The
 //! MVP ships only the [`Deterministic`] provider.
 
+pub mod actions;
 pub mod deterministic;
 pub mod intent;
 pub mod provider;
 
+pub use actions::{
+    build, execute, parse_action, store, Action, ActionOutcome, ActionParse, ActionProposal,
+    ActionStore, BuildOutcome,
+};
 pub use deterministic::Deterministic;
 pub use intent::{parse, Intent};
 pub use provider::{select_provider, Answer, AssistConfig, AssistProvider, AssistQuery};

@@ -17,6 +17,7 @@ chrono.workspace = true
 tracing.workspace = true
 surrealdb.workspace = true
 rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio.workspace = true
