@@ -1,0 +1,24 @@
+[package]
+name = "assist"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+domain = { path = "../domain" }
+db = { path = "../db" }
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+surrealdb.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+
+[dev-dependencies]
+tokio.workspace = true
+# kv-mem only for assist's own integration tests (not the shipped binary).
+surrealdb = { workspace = true, features = ["kv-mem"] }

@@ -13,6 +13,7 @@ pharma-core = { path = "../core" }
 db = { path = "../db" }
 auth = { path = "../auth" }
 domain = { path = "../domain" }
+assist = { path = "../assist" }
 agent = { path = "../agent" }
 license = { path = "../license" }
 dte = { path = "../dte" }

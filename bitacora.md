@@ -3695,3 +3695,43 @@ issues) + `test` **700 passed / 4 ignored / 104 suites**. Cliente `build` ✓ +
 
 Único PR no-ola abierto = **#159** (DTE SII cert, BLOQUEADO por creds SII — no
 autónomo). Pendiente founder (no autónomo): cert Authenticode + piloto real.
+
+---
+
+## 2026-06-19 — V1 EL AGENTE: "Pregúntale a tu negocio" (milton, lane assist)
+
+North-star differentiator (1 RUT = 1 negocio = 1 agente IA) por fin en código.
+Crate nuevo **`crates/assist`** + endpoint + ADR-0016, todo **offline-first**
+(ADR-0005: sin red, sin CDN, sin LLM en el MVP). Branch `feat/assist-mvp-agent`
+off `origin/feature/erp-parity@5262607`.
+
+- **`crates/assist`** (workspace member nuevo):
+  - `intent.rs` — `parse(question) -> Intent` determinístico es-CL: normaliza
+    (lowercase + strip acentos) + matchea keywords/patrones contra un set
+    **cerrado** de intents; lo no-clasificable → `Unknown` (nudge amable). Set
+    v1: `ventas_hoy · ventas_mes · por_vencer · stock_producto · caja_actual ·
+    top_productos · margen_mes · stock_bajo · resumen_inventario · ayuda ·
+    desconocido`. Gotcha resuelto: "inventario" contiene substring "venta" → la
+    rama inventario DEBE preceder a la de ventas.
+  - `provider.rs` — el seam `AssistProvider { async fn answer(&AssistQuery) ->
+    DomainResult<Answer> }`. `AssistQuery` = pregunta cruda + intent + `&Db`
+    read-only + `&tenant`. Listo para enchufar un `LlmProvider` opt-in (key del
+    dueño, default OFF) DESPUÉS sin tocar endpoint ni parser.
+  - `deterministic.rs` — impl por default. Cada intent llama a un servicio de
+    **lectura** existente (`expenses::{sales_daily,near_expiry,top_products,
+    margins_daily}`, `catalog::{stats,list_products}`,
+    `cash_register::compute_summary`, `inventory::reorder_suggestions`). Nunca
+    muta. Respuestas en español + payload estructurado. Helper `clp()` formatea
+    pesos CL con separador de miles.
+- **Endpoint** `POST /api/v1/assist/ask { question } -> { answer, intent, data? }`
+  (`crates/api/src/v1/assist.rs`): read-only, tenant-scoped (JWT), role-gated
+  `cashier_plus`. Wired con 1 línea en `v1/mod.rs`. El intent de margen honra el
+  gate `reports.margins_daily` y **degrada** (no 402) a nudge de upgrade en Free
+  — el agente siempre responde.
+- **ADR-0016** documenta arquitectura, stance determinístico-primero offline-first
+  y el camino LLM-opt-in para que el fundador decida después.
+- **Sin migración**: assist es read-only, no loguea queries → 0031 sigue libre.
+- Tests: `intent` (cada intent + sinónimos es + desconocido) **15/15** +
+  integración kv-mem sembrado (ejecutores devuelven data real + aislamiento de
+  tenant + role/empty graceful) **13/13**. GATE assist verde (`fmt` ✓,
+  `clippy -p assist -p api -D warnings`, `cargo test -p assist`).

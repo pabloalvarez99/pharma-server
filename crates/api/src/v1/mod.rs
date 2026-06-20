@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod agent_orders;
+pub mod assist;
 pub mod audit;
 pub mod backup;
 pub use backup::{backup_now, prune_backups, BackupReport};
@@ -36,6 +37,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(purchasing::router(state.clone()))
         .merge(sales::router(state.clone()))
         .merge(agent_orders::router(state.clone()))
+        .merge(assist::router(state.clone()))
         .merge(cash_register::router(state.clone()))
         .merge(expenses::router(state.clone()))
         .merge(dashboard::router(state.clone()))
