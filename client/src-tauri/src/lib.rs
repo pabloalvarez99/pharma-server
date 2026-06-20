@@ -611,18 +611,32 @@ pub struct Dte {
     pub has_xml: bool,
 }
 
+/// A write the agent PROPOSES (`crates/api/src/v1/assist.rs` propose→confirm).
+/// Present on [`AssistAnswer`] only when the question asked for a mutation. The
+/// `confirm_token` is the single-use ticket the client must hand back to
+/// `/assist/act` — `ask` itself mutates nothing.
+#[derive(Serialize, Deserialize)]
+pub struct AgentProposal {
+    pub action: String,
+    pub resumen: String,
+    pub confirm_token: String,
+}
+
 /// Mirrors `crates/assist/src/provider.rs::Answer` — the agent's reply to one
 /// "Pregúntale a tu negocio" question (ADR-0016). `intent` is the stable machine
 /// label (`ventas_hoy` … `desconocido`); `text` is the Spanish prose grounded in
 /// the tenant's own data; `data` is the optional structured payload (absent when
 /// the intent carries no figures — `#[serde(default)]` so the missing field is
-/// `None`, not a deserialize error).
+/// `None`, not a deserialize error). `proposal` is present only for a WRITE
+/// question — the UI gates it behind an explicit confirmation.
 #[derive(Serialize, Deserialize)]
 pub struct AssistAnswer {
     pub intent: String,
     pub text: String,
     #[serde(default)]
     pub data: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<AgentProposal>,
 }
 
 /// Server error envelope (`crates/api/src/error.rs`):
@@ -1474,6 +1488,40 @@ async fn assist_ask(
         .post(format!("{base}/api/v1/assist/ask"))
         .bearer_auth(token)
         .json(&serde_json::json!({ "question": question }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta del agente inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/assist/act` (Bearer) — EXECUTE the write the agent proposed,
+/// authorised by the single-use `confirm_token` from a prior `assist_ask`
+/// proposal. This is the ONLY agent call that mutates tenant data; the webview
+/// reaches it solely from the owner's explicit "Confirmar" click. A role-denied
+/// write (403) or an expired/spent token surfaces the server's Spanish message
+/// via [`error_message`]. The action result rides back as raw JSON (`{ text,
+/// .. }`) so the exact shape can grow server-side without breaking the client.
+#[tauri::command]
+async fn assist_act(
+    state: State<'_, SessionState>,
+    server_url: String,
+    confirm_token: String,
+) -> Result<serde_json::Value, String> {
+    if confirm_token.trim().is_empty() {
+        return Err("No hay una acción para confirmar.".to_string());
+    }
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/assist/act"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "confirm_token": confirm_token }))
         .send()
         .await
         .map_err(conn_error)?;
@@ -3179,7 +3227,8 @@ pub fn run() {
             poll_dte,
             cancel_dte,
             seed_demo,
-            assist_ask
+            assist_ask,
+            assist_act
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

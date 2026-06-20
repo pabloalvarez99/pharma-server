@@ -4076,3 +4076,47 @@ ajeno = flake wall-clock de `inventory-perf.test.ts` bajo carga de builds
 concurrentes; pasa aislado 8/8 — reportado a paxoloop, NO tocar). Scope:
 `views/{pos,devoluciones}.ts` + test nuevo. Sin backend, sin `vertical.ts`
 (sólo lectura), sin migración.
+
+---
+
+## 2026-06-20 · ye · W3 FLAGSHIP — el agente ACTÚA (UX confirmación)
+
+`feat/agent-actions-ux` off `feature/erp-parity` @7ac414d (W1+W2 integrados;
+ask-bar W2 read-only ya en base). LANE: que el dueño le PIDA acciones al agente
+("registrá un gasto de $5000 nafta") — **el agente NUNCA escribe sin confirmación
+explícita**.
+
+Contrato propose→confirm (`crates/api/src/v1/assist.rs`, milton, FROZEN — lo
+CONSUMO, no lo cambio): `ask` puede devolver una **propuesta**
+`{action, resumen, confirm_token}`; el cliente muestra tarjeta de confirmación y
+al **Confirmar** llama a `/assist/act` con el token de un solo uso. `ask` no
+muta nada — el token es la única vía de commit. (Milton aún no había mergeado su
+lado al base; consumo a la forma frozen del prompt; se reconcilia en integración.)
+
+Cliente:
+- **`askbar.ts`** — máquina de estados extendida: `proposal` / `executing` /
+  `done` además de idle/loading/answer/error. `responseState` rutea propuesta→
+  tarjeta (gated) vs respuesta normal. `isProposal` guard (token no vacío).
+  Tarjeta "Vas a registrar un gasto de $5.000 (nafta). ¿Confirmar?" con
+  **Confirmar/Cancelar**; el write dispara SOLO desde el click Confirmar
+  (`assistAct`), botones lockeados mientras vuela (no doble-commit), receipt es-CL
+  al volver. Cancelar → idle. Estado "acción no permitida por tu rol" = 403
+  verbatim del server.
+- **`src-tauri/lib.rs`** — command NUEVO `assist_act` (POST `/assist/act` +
+  Bearer + `confirm_token`) + `AgentProposal`/`proposal` en `AssistAnswer`.
+  Único worker que toca src-tauri este wave.
+- **`api.ts`** — `AgentProposal`/`AssistActResult` + `assistAct()` wrapper.
+- **`brand.css`** — `.agent-proposal`/`.agent-confirm`/`.agent-cancel`/
+  `.agent-bubble-ok` (ámbar = "esto va a actuar", brand = receipt). Disjunto de
+  `rutbrand`/`dash-*`/paul. reduced-motion + focus ring.
+- Hotkey global `/` para enfocar ask-bar: ya en shell.ts (W2), sin cambio.
+
+Tests: `askbar.test.ts` +32 (isProposal/responseState/doneState + render
+proposal/executing/done, escape XSS, token no leakea al markup). NUEVO
+`askbar-action-flow.dom.test.ts` (happy-dom, 5) — invariante núcleo:
+`assist_act` corre SOLO tras Confirmar; ask→no-ejecuta; Cancelar→no-ejecuta;
+403→mensaje es-CL; respuesta read-only→sin tarjeta.
+
+GATE verde: `npm run build` ok · `vitest` **507/507** (20 files) ·
+`cargo fmt` ok · `cargo clippy --manifest-path client/src-tauri/Cargo.toml
+--all-targets -- -D warnings` **0 warnings**.
