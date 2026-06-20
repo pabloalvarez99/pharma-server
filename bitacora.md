@@ -3964,3 +3964,40 @@ boleta 39 → factura 33 → NC 61 → **ND 56** → guía 52 (sin-CAF gate).
 
 GATE verde: `npm run build` ok · `vitest` **475/475** · `npm run e2e`
 **178 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin tocar backend/db).
+
+---
+
+## 2026-06-20 — marvin · W3 2º rubro real: RESTAURANT (mixto stock/sin-stock)
+
+Sexto vertical de seed-demo: **restaurant**, el primer rubro **mixto** que prueba
+el core con ambos modos a la vez en un mismo catálogo:
+
+- **Insumos físicos** (harina, aceite 5L, carne molida, tomate, papa, queso) —
+  bienes con stock + lote + vencimiento escalonado (sanos / próximos a vencer /
+  stock bajo). Stock entra por lote → emite `stock_movement`, preservando el
+  invariante `product.stock == Σ lote == Σ movimiento`.
+- **Platos preparados** (lomo a lo pobre, churrasco italiano, empanada de pino,
+  completo, cazuela, papas fritas, ensalada césar, menú del día) — vendibles SIN
+  inventario físico: `physical_stock = false` (W2/mig 0031), stock 0, sin lote.
+  La venta de un plato salta el chequeo de stock (como un servicio).
+
+Señal por-ítem físico vs. vendible-sin-stock = `batch_code` no vacío. El loop de
+`seed_demo` pasó de decidir "físico" por vertical a decidirlo por ítem:
+`v != Servicios && !item.batch_code.is_empty()` → restaurant mezcla ambos en un
+catálogo. `restaurant_suppliers()` (3 proveedores de insumos) para que Compras
+tenga con quién operar. CLI `seed-demo --vertical restaurant` + help actualizado.
+
+**Test de integración** (`tests/seed_restaurant_rubro.rs`, kv-mem): siembra
+restaurant, hace una venta POS mixta (1 plato + 2 insumos), verifica que sólo el
+insumo emite movimiento de venta, el plato no toca inventario (stock 0, sin
+movimientos), el insumo descuenta qty con `stock == Σ lote == Σ movimiento`
+intacto, y emite boleta 39 con ambas líneas. Tests unitarios en `seed.rs`:
+restaurant en `ALL_VERTICALS` (barcodes únicos globales 7806…, ≥10 ítems,
+EAN-13, ≥3 proveedores) + `restaurant_pack_mixes_physical_insumos_and_serviceable_platos`.
+
+GATE: `cargo fmt --all -- --check` ok · `cargo clippy --workspace --all-targets
+-- -D warnings` ok · `cargo test --workspace` verde por marcadores (todos los
+`test result: ok`; el TESTEXIT=1 fue el crash transiente conocido de
+exec_dashboard bajo cargo paralelo sobre un mismo `target/` — re-corrido aislado
+8/8 ok). Mig libre = 0032 (no usada; no tocó backend/db). Scope:
+`crates/domain/src/seed.rs` + CLI seed-demo help + test nuevo.
