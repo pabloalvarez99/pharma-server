@@ -3,14 +3,15 @@
 //!
 //! La vitrina RutBusiness ofrece 8 rubros pero sólo farmacia/minimarket eran
 //! reales. Este test prueba en vivo que el seed de servicios + el path POS +
-//! el renderer DTE funcionan para una línea de servicio:
+//! el renderer DTE funcionan para una línea de servicio, modelada de forma
+//! honesta (`physical_stock = false`, migración 0031):
 //!
-//! 1. `seed_demo("servicios")` siembra el catálogo de servicios.
-//! 2. Una venta POS de un servicio tiene éxito (el servicio se vende como
-//!    cualquier ítem: el stock alto `SERVICE_STOCK` deja pasar el chequeo
-//!    incondicional `stock < qty` del server).
-//! 3. El invariante del ledger se mantiene tras la venta:
-//!    `product.stock == Σ stock_movement.delta`.
+//! 1. `seed_demo("servicios")` siembra el catálogo de servicios con stock 0,
+//!    SIN lote y SIN movimiento de inventario.
+//! 2. Una venta POS de un servicio tiene éxito a pesar del stock 0: la venta
+//!    salta el chequeo `stock < qty` para `physical_stock = false`.
+//! 3. La venta NO crea `stock_movement` de inventario (un servicio no descuenta
+//!    stock) y `product.stock` sigue en 0.
 //! 4. La boleta 39 (`dte::xml::render_unsigned`) produce un XML válido para esa
 //!    línea de servicio.
 
@@ -81,8 +82,12 @@ async fn sells_a_service_end_to_end_and_emits_boleta() {
         "catálogo de servicios creíble"
     );
     assert_eq!(
-        summary.products_created, summary.movements_emitted,
-        "cada servicio entra por un lote → un movimiento (invariante del ledger)"
+        summary.movements_emitted, 0,
+        "un servicio no tiene inventario → cero movimientos de stock"
+    );
+    assert_eq!(
+        summary.batches_created, 0,
+        "un servicio no se siembra con lote"
     );
 
     // 2) Tomar un servicio sembrado (por su external_id demo determinístico).
@@ -100,12 +105,15 @@ async fn sells_a_service_end_to_end_and_emits_boleta() {
     let before = catalog::get_product(&db, &tenant, &service_id)
         .await
         .unwrap();
-    assert!(before.stock > 0, "servicio con stock-proxy ilimitado");
-    // El invariante del ledger ya se cumple post-seed.
+    assert!(
+        !before.physical_stock,
+        "el servicio se siembra como no físico (physical_stock = false)"
+    );
+    assert_eq!(before.stock, 0, "servicio sin inventario → stock 0");
     assert_eq!(
-        before.stock,
         movement_sum(&db, &tenant, &service_id).await,
-        "post-seed: product.stock == Σ delta"
+        0,
+        "post-seed: el servicio no emitió ningún movimiento de inventario"
     );
 
     // 3) Venta POS del servicio (sin bien físico, pero el path es el mismo).
@@ -131,21 +139,24 @@ async fn sells_a_service_end_to_end_and_emits_boleta() {
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin), Some("admin"), None, req)
         .await
-        .expect("la venta de un servicio debe tener éxito");
+        .expect("la venta de un servicio debe tener éxito pese al stock 0");
     assert_eq!(resp.items.len(), 1);
     assert_eq!(resp.items[0].quantity, qty);
     assert_eq!(resp.order.total, unit_price * Decimal::from(qty));
+    assert!(
+        resp.stock_movements.is_empty(),
+        "la venta de un servicio NO emite movimiento de inventario"
+    );
 
-    // 4) Invariante del ledger tras la venta: stock bajó qty y sigue cuadrando
-    //    con el ledger de movimientos.
+    // 4) El servicio no toca inventario: stock sigue en 0 y no hay movimientos.
     let after = catalog::get_product(&db, &tenant, &service_id)
         .await
         .unwrap();
-    assert_eq!(after.stock, before.stock - qty, "el servicio descontó qty");
+    assert_eq!(after.stock, 0, "el servicio no descuenta stock");
     assert_eq!(
-        after.stock,
         movement_sum(&db, &tenant, &service_id).await,
-        "post-venta: product.stock == Σ delta"
+        0,
+        "post-venta: el servicio sigue sin movimientos de inventario"
     );
 
     // 5) Boleta 39 para la línea de servicio → XML válido.

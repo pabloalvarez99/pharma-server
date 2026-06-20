@@ -230,35 +230,47 @@ pub async fn post_sale(
             if loaded.len() != req.items.len() {
                 return Err(DomainError::NotFound);
             }
-            let by_id: HashMap<String, i64> =
-                loaded.iter().map(|p| (p.id.to_string(), p.stock)).collect();
+            // (stock, physical_stock) per product id. A service line
+            // (`physical_stock = false`) skips the stock pre-check entirely — a
+            // haircut never runs out of inventory.
+            let by_id: HashMap<String, (i64, bool)> = loaded
+                .iter()
+                .map(|p| (p.id.to_string(), (p.stock, p.physical_stock)))
+                .collect();
+            let mut physical: Vec<bool> = Vec::with_capacity(req.items.len());
             for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
-                let stock = by_id
+                let (stock, is_physical) = by_id
                     .get(&pthing.to_string())
                     .copied()
                     .ok_or(DomainError::NotFound)?;
-                if stock < req_item.quantity {
+                if is_physical && stock < req_item.quantity {
                     return Err(DomainError::InsufficientStock);
                 }
+                physical.push(is_physical);
             }
 
             // FEFO plan per line. `None` = product not batch-tracked (legacy
-            // product.stock-only path); `Some(plan)` = batch-tracked, lots
-            // consumed earliest-expiry-first inside the sale tx;
-            // `Err(InsufficientStock)` = tracked but non-expired lots can't
-            // cover the line.
+            // product.stock-only path) OR a service (no inventory at all);
+            // `Some(plan)` = batch-tracked, lots consumed earliest-expiry-first
+            // inside the sale tx; `Err(InsufficientStock)` = tracked but
+            // non-expired lots can't cover the line. Services skip FEFO planning
+            // outright — they have no batches to consume.
             let mut fefo_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
                 Vec::with_capacity(req.items.len());
-            for it in &req.items {
-                fefo_plans.push(
-                    crate::inventory::service::plan_fefo_optional(
-                        db,
-                        tenant,
-                        &it.product,
-                        it.quantity,
-                    )
-                    .await?,
-                );
+            for (it, is_physical) in req.items.iter().zip(physical.iter()) {
+                if *is_physical {
+                    fefo_plans.push(
+                        crate::inventory::service::plan_fefo_optional(
+                            db,
+                            tenant,
+                            &it.product,
+                            it.quantity,
+                        )
+                        .await?,
+                    );
+                } else {
+                    fefo_plans.push(None);
+                }
             }
 
             match repo::apply_sale(
@@ -269,6 +281,7 @@ pub async fn post_sale(
                 customer.as_ref(),
                 &req,
                 &fefo_plans,
+                &physical,
                 subtotal,
                 discount,
                 total,

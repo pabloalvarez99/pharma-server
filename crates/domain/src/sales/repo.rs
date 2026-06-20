@@ -125,6 +125,13 @@ struct StockCheck {
     id: Thing,
     stock: i64,
     name: String,
+    #[serde(default = "default_true")]
+    physical_stock: bool,
+}
+
+/// Serde fallback: una fila sin la columna (pre-migración 0031) es física.
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,7 +172,7 @@ pub async fn load_products_for_sale(
         .query(
             // Fetch directly by record-id (`FROM $ids`) = O(cart). `FROM product
             // WHERE id IN $ids` scans the whole product table per sale (BUG-perf-002).
-            "SELECT id, stock, name FROM $ids \
+            "SELECT id, stock, name, physical_stock FROM $ids \
              WHERE tenant = $t AND active = true",
         )
         .bind(("t", tenant.clone()))
@@ -179,6 +186,7 @@ pub async fn load_products_for_sale(
             id: r.id,
             stock: r.stock,
             name: r.name,
+            physical_stock: r.physical_stock,
         })
         .collect())
 }
@@ -187,6 +195,8 @@ pub struct StockCheckOut {
     pub id: Thing,
     pub stock: i64,
     pub name: String,
+    /// `false` = servicio → la venta salta el chequeo de stock y el plan FEFO.
+    pub physical_stock: bool,
 }
 
 // --- POS sale atomic tx ----------------------------------------------------
@@ -217,6 +227,12 @@ pub struct AppliedSale {
 /// `Some(plan)` = consume those lots. Callers MUST have validated tenant
 /// ownership + sufficient stock and built the plan
 /// ([`super::service::post_sale`]).
+///
+/// `physical[i]` aligns with `req.items[i]`: `true` = bien físico (emite el
+/// `UPDATE product.stock` + `stock_movement` de la línea, comportamiento de
+/// siempre); `false` = servicio (`product.physical_stock = false`) → la línea
+/// crea sólo su `order_item`, sin tocar inventario ni emitir movimiento. Un
+/// servicio nunca trae `fefo_plan`, así que el bloque FEFO no se ve afectado.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_sale(
     db: &Db,
@@ -226,6 +242,7 @@ pub async fn apply_sale(
     customer: Option<&Thing>,
     req: &PosSaleRequest,
     fefo_plans: &[Option<Vec<FefoAllocation>>],
+    physical: &[bool],
     subtotal: Decimal,
     discount: Decimal,
     total: Decimal,
@@ -247,18 +264,40 @@ pub async fn apply_sale(
             sold_by_name=$sbname, notes=$notes, external_ref=$ext \
             RETURN AFTER; ",
     );
+    // Per item we always emit the `order_item` CREATE; a *physical* line also
+    // emits the `product.stock` UPDATE + `stock_movement` CREATE. A service line
+    // (`physical[i] == false`) emits neither — it touches no inventory. Because
+    // the statement count per item is no longer fixed, we record each line's
+    // result-slot offsets to parse them back below.
+    let mut item_slots: Vec<(usize, Option<usize>)> = Vec::with_capacity(n);
+    let mut stmt_idx = 1usize; // slot 0 = the order CREATE above
     for i in 0..n {
+        let order_item_slot = stmt_idx;
         q.push_str(&format!(
             "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
                 product_name=$pn{i}, quantity=$qty{i}, unit_price=$up{i}, \
                 subtotal=$st{i}, batch=$bt{i}, batches_json=$bts{i} \
-                RETURN AFTER; \
-             UPDATE $p{i} SET stock = stock - $qty{i} \
-                WHERE tenant = $t; \
-             CREATE stock_movement SET tenant=$t, product=$p{i}, \
-                delta = 0 - $qty{i}, reason='sale', \
-                admin=$sb, ref=$ref RETURN AFTER; ",
+                RETURN AFTER; ",
         ));
+        stmt_idx += 1;
+        let movement_slot = if physical[i] {
+            q.push_str(&format!(
+                "UPDATE $p{i} SET stock = stock - $qty{i} \
+                    WHERE tenant = $t; ",
+            ));
+            stmt_idx += 1;
+            let mov_slot = stmt_idx;
+            q.push_str(&format!(
+                "CREATE stock_movement SET tenant=$t, product=$p{i}, \
+                    delta = 0 - $qty{i}, reason='sale', \
+                    admin=$sb, ref=$ref RETURN AFTER; ",
+            ));
+            stmt_idx += 1;
+            Some(mov_slot)
+        } else {
+            None
+        };
+        item_slots.push((order_item_slot, movement_slot));
     }
     // FEFO batch decrements grouped at the tail so the per-item result
     // indices above stay fixed regardless of allocation count.
@@ -348,8 +387,11 @@ pub async fn apply_sale(
     }
     let mut r2 = qb.await?.check()?;
 
-    // Statement indices (BEGIN/COMMIT excluded): 0 = order CREATE;
-    // item i: order_item at 1+i*3, product UPDATE at 2+i*3, movement at 3+i*3.
+    // Statement slot 0 = the order CREATE. Each item's order_item (and, for a
+    // physical line, its stock_movement) live at the slots recorded in
+    // `item_slots`. A service line has no movement → it contributes nothing to
+    // `movements_out`, so the returned `stock_movements` reflect only the
+    // inventory-affecting lines.
     let order_rows: Vec<OrderRow> = r2.take(0)?;
     let order: OrderDto = order_rows
         .into_iter()
@@ -359,8 +401,8 @@ pub async fn apply_sale(
 
     let mut items_out = Vec::with_capacity(n);
     let mut movements_out = Vec::with_capacity(n);
-    for i in 0..n {
-        let item_rows: Vec<OrderItemRow> = r2.take(1 + i * 3)?;
+    for (order_item_slot, movement_slot) in &item_slots {
+        let item_rows: Vec<OrderItemRow> = r2.take(*order_item_slot)?;
         items_out.push(
             item_rows
                 .into_iter()
@@ -370,17 +412,19 @@ pub async fn apply_sale(
                 })?
                 .into(),
         );
-        let mov_rows: Vec<MovementIdRow> = r2.take(3 + i * 3)?;
-        movements_out.push(
-            mov_rows
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    DomainError::Other(anyhow::anyhow!("stock_movement insert returned 0 rows"))
-                })?
-                .id
-                .to_string(),
-        );
+        if let Some(mov_slot) = movement_slot {
+            let mov_rows: Vec<MovementIdRow> = r2.take(*mov_slot)?;
+            movements_out.push(
+                mov_rows
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        DomainError::Other(anyhow::anyhow!("stock_movement insert returned 0 rows"))
+                    })?
+                    .id
+                    .to_string(),
+            );
+        }
     }
 
     Ok(AppliedSale {
