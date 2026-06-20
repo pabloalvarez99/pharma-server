@@ -876,3 +876,215 @@ export async function rubroShowcaseFlow({ tenant, email, password }) {
     "servicio: la venta del día aparece en sales-daily",
   );
 }
+
+// --- business agent ask-bar (read-only) + reports consistency ----------------
+
+/** Fold TODAY's row of /reports/sales-daily into `{revenue, orders}`. The seed
+ *  imports historic orders on PAST dates, so we must isolate today's bucket to
+ *  compare apples-to-apples with the agent's "ventas hoy" (which sums the same
+ *  `sales_daily` rollup over today's UTC range). `DailySalesRow.date` is
+ *  "YYYY-MM-DD" in UTC — match it to the UTC date so day boundaries align with
+ *  the agent's `today_range`. Money is a STRING on the wire
+ *  (rust_decimal::serde::str) and the agent answers with `rev.to_string()` too,
+ *  so we fold via Number() — "1234" vs "1234.00" must compare equal. */
+async function salesDailyTotals(c) {
+  const today = new Date().toISOString().slice(0, 10); // UTC YYYY-MM-DD
+  const rows = (await c.get("/reports/sales-daily")).body;
+  const list = Array.isArray(rows) ? rows : [];
+  let revenue = 0;
+  let orders = 0;
+  for (const r of list) {
+    if (r.date !== today) continue;
+    revenue += Number(r.revenue);
+    orders += r.orders;
+  }
+  return { revenue, orders };
+}
+
+/** Business agent ("Pregúntale a tu negocio", ADR-0016) end-to-end over HTTP —
+ *  the W2 ask-bar (`POST /api/v1/assist/ask`). READ-ONLY: the agent parses a
+ *  Spanish question into a deterministic intent and answers from the tenant's own
+ *  data. Runs for BOTH verticals AFTER the sales flows have seeded + sold, so the
+ *  numbers are non-trivial. Three things only a LIVE run proves:
+ *
+ *   (1) the three headline questions ("ventas hoy", "qué se vence", "stock de X")
+ *       parse to the right intent and answer 200 with grounded `data` (never a
+ *       crash, never an empty body);
+ *   (2) CONSISTENCY — the figure the agent gives for "ventas hoy" is the SAME
+ *       number /reports/sales-daily reports (the agent's `ventas` executor and the
+ *       report endpoint both fold `expenses::service::sales_daily`, so a drift here
+ *       means someone forked the source — the bug paxoloop must hear about, not a
+ *       number to patch on one side). Same for "stock de X" vs /products.
+ *   (3) the agent NEVER 402s in the owner's face: the Pro-gated margin question
+ *       DEGRADES to a friendly upgrade nudge on Free (ADR-0005 inv. 1), the mirror
+ *       of /reports/margins-daily's hard 402 (reports402Matrix). */
+export async function agentAskFlow({ tenant, email, password, vertical }) {
+  section(`agent ask-bar (read-only) vertical=${vertical} tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Empty question is a clean 400 (never a 5xx / silent empty answer).
+  const empty = await c.post("/assist/ask", { question: "   " }, { expectOk: false });
+  eq(empty.status, 400, "pregunta vacía → 400");
+
+  // (1)+(2) "ventas hoy" — right intent, grounded data, and the number MATCHES
+  // the report (same source). Everything sold in this run happened today, so the
+  // full /reports/sales-daily total equals the agent's "hoy" figure.
+  const ventas = await c.post("/assist/ask", { question: "¿cuánto vendí hoy?" });
+  eq(ventas.status, 200, "agente responde «ventas hoy» (200)");
+  eq(ventas.body?.intent, "ventas_hoy", "intent = ventas_hoy");
+  check(ventas.body?.data != null, "respuesta trae data estructurada");
+  check(
+    typeof ventas.body?.text === "string" && ventas.body.text.length > 0,
+    "respuesta trae prosa es-CL no vacía",
+  );
+  const totals = await salesDailyTotals(c);
+  eq(
+    Number(ventas.body.data.revenue),
+    totals.revenue,
+    "CONSISTENCIA: ventas-hoy del agente == total de /reports/sales-daily (misma fuente)",
+  );
+  eq(
+    ventas.body.data.orders,
+    totals.orders,
+    "CONSISTENCIA: nº de órdenes del agente == /reports/sales-daily",
+  );
+
+  // (1) "qué se vence" — parses to por_vencer, answers with a count (0 is a valid
+  // answer; a minimarket carries no batches, a pharmacy may). No crash either way.
+  const vence = await c.post("/assist/ask", { question: "¿qué se vence?" });
+  eq(vence.status, 200, "agente responde «qué se vence» (200)");
+  eq(vence.body?.intent, "por_vencer", "intent = por_vencer");
+  check(
+    typeof vence.body?.data?.count === "number",
+    "«qué se vence» trae un conteo numérico",
+  );
+
+  // (1)+(2) "stock de X" — pick a real catalog product and assert the agent's
+  // reported stock MATCHES /products (the catalog is the single source). The
+  // agent searches by term and returns up to 5 matches; we locate ours by exact
+  // name so ranking order can't flake the assertion.
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  const probe = list.find((p) => p.stock > 0 && p.active !== false);
+  check(!!probe, "hay un producto con stock para consultar");
+  const stockAsk = await c.post("/assist/ask", { question: `stock de ${probe.name}` });
+  eq(stockAsk.status, 200, "agente responde «stock de <producto>» (200)");
+  eq(stockAsk.body?.intent, "stock_producto", "intent = stock_producto");
+  const matches = stockAsk.body?.data?.matches ?? [];
+  const mine = matches.find((m) => m.name === probe.name);
+  check(!!mine, `el producto consultado «${probe.name}» aparece en las coincidencias`);
+  if (mine) {
+    eq(
+      mine.stock,
+      probe.stock,
+      "CONSISTENCIA: stock que reporta el agente == /products (mismo catálogo)",
+    );
+  }
+
+  // (3) Pro-gated margin DEGRADES (not 402) on Free — the agent must always
+  // answer something. Mirror of /reports/margins-daily's hard 402.
+  const margen = await c.post("/assist/ask", { question: "¿cuál fue mi margen del mes?" }, { expectOk: false });
+  eq(margen.status, 200, "agente «margen del mes» NO 402 en Free (degrada amable)");
+  eq(margen.body?.intent, "margen_mes", "intent = margen_mes (aun degradado)");
+  check(
+    typeof margen.body?.text === "string" && /pro/i.test(margen.body.text),
+    "«margen» en Free nudge-ea al plan Pro en vez de 402",
+  );
+
+  // Read-only guarantee: asking changed nothing — the probe's stock is intact.
+  const after = (await c.get(`/products/${encodeURIComponent(probe.id)}`)).body;
+  eq(after.stock, probe.stock, "el agente es read-only: el stock no cambió tras preguntar");
+}
+
+// --- service sale: physical_stock = false (W2) -------------------------------
+
+/** A SERVICE rubro sells items that are NOT physical goods — a haircut has no
+ *  inventory, no lot, no expiry (migración 0031, `product.physical_stock`). W2
+ *  landed the honest flag; this proves the contract end-to-end on a tenant seeded
+ *  with the `servicios` pack (every item `physical_stock = false`, `stock = 0`):
+ *
+ *   - a service line sells with stock 0 → 201 (the sale path SKIPS the
+ *     `stock < qty` pre-check for a non-physical item — a service never runs out);
+ *   - the sale moves NO inventory: `stock_movements` is empty AND the product's
+ *     stock stays 0 (no decrement, no FEFO);
+ *   - boleta (DTE SII) stays UNIVERSAL — a salón emits too (Free no-CAF → clean
+ *     4xx, never a 5xx);
+ *   - services DON'T pollute inventory alerts: with every product at stock 0 the
+ *     inventory summary still reports `out_of_stock = 0` (migración 0031 excludes
+ *     `physical_stock = false` from low/out-of-stock), cross-checked through the
+ *     agent's "resumen de inventario" — tying the ask-bar to the stock model.
+ *
+ *  Distinct from rubroShowcaseFlow's belleza leg, which sells a STOCKED service
+ *  created via POST /products (físico by DB default) — that proves the agnostic
+ *  daily loop; THIS proves the physical_stock = false inventory contract. */
+export async function serviceSaleFlow({ tenant, email, password }) {
+  section(`service sale (physical_stock=false) tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Seed the servicios pack — same service the in-app button / CLI use.
+  const seed = await c.post("/admin/seed-demo", { vertical: "servicios", force: true });
+  check(seed.ok, "seed-demo servicios ok");
+  eq(seed.body?.vertical, "servicios", "summary reporta vertical = servicios");
+
+  // The catalog is all services: no physical stock, no clinical fields.
+  const products = (await c.get("/products")).body;
+  const list = Array.isArray(products) ? products : (products?.items ?? []);
+  check(list.length > 0, `catálogo de servicios no vacío (${list.length} ítems)`);
+  const svc = list.find((p) => p.physical_stock === false);
+  check(!!svc, "hay un ítem servicio (physical_stock = false)");
+  eq(svc.stock, 0, "el servicio se siembra con stock 0 (sin inventario)");
+  check(!svc.active_ingredient, "el servicio NO lleva principio activo (sin pack clínico)");
+
+  const open = await c.post("/cash-sessions", { register_name: "Caja Servicio E2E", opening_cash: "0" });
+  const sessionId = open.body?.id;
+  check(!!sessionId, "caja abierta para venta de servicio");
+
+  // The core: sell a service that has stock 0. The sale path skips the stock
+  // pre-check for a non-physical item, so this must succeed (a haircut never
+  // runs out of inventory).
+  const sale = await c.post(
+    "/pos/sale",
+    {
+      items: [{ product: svc.id, product_name: svc.name, quantity: 1, unit_price: String(svc.price) }],
+      payment_method: "pos_cash",
+      cash_amount: String(svc.price),
+    },
+    { headers: { "Idempotency-Key": `e2e-svc-${Date.now()}` } },
+  );
+  eq(sale.status, 201, "venta de servicio con stock 0 → 201 (salta el chequeo de stock)");
+  const orderId = sale.body.order?.id;
+  check(!!orderId, "venta de servicio devuelve order id");
+
+  // No inventory moved: no stock_movement AND stock stays 0 (no decrement/FEFO).
+  const movements = sale.body.stock_movements ?? [];
+  eq(movements.length, 0, "la venta de servicio NO genera stock_movement (no toca inventario)");
+  const afterSale = (await c.get(`/products/${encodeURIComponent(svc.id)}`)).body;
+  eq(afterSale.stock, 0, "el stock del servicio sigue en 0 tras la venta (sin decremento)");
+
+  // Boleta (DTE SII) is UNIVERSAL — a salón emits too. Free no-CAF → clean 4xx.
+  const receipt = (await c.get(`/orders/${orderId}/receipt`)).body;
+  check(!!receipt && (receipt.items?.length ?? 0) >= 1, "recibo del servicio tiene línea");
+  const boleta = await c.post(
+    "/dte/boletas",
+    { order_id: orderId, cert_passphrase: "e2e" },
+    { expectOk: false },
+  );
+  check(boleta.status < 500, `servicio: boleta gestionada limpio (status ${boleta.status}, no 5xx)`);
+
+  // Services don't pollute inventory alerts: every product is stock 0 yet the
+  // inventory summary reports 0 out-of-stock (migración 0031 excludes services).
+  // Cross-checked via the agent's "resumen de inventario" — same stat source.
+  const resumen = await c.post("/assist/ask", { question: "resumen de inventario" });
+  eq(resumen.body?.intent, "resumen_inventario", "intent = resumen_inventario");
+  eq(
+    resumen.body?.data?.out_of_stock,
+    0,
+    "servicios NO cuentan como agotados (out_of_stock = 0 pese a stock 0)",
+  );
+  check(resumen.body?.data?.total >= 1, "el resumen cuenta los servicios como productos vendibles");
+
+  const close = await c.post(`/cash-sessions/${sessionId}/close`, { closing_cash_counted: String(svc.price) });
+  check(close.ok, "caja del servicio cerrada");
+}

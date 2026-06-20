@@ -3964,3 +3964,39 @@ boleta 39 → factura 33 → NC 61 → **ND 56** → guía 52 (sin-CAF gate).
 
 GATE verde: `npm run build` ok · `vitest` **475/475** · `npm run e2e`
 **178 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin tocar backend/db).
+
+---
+
+## 2026-06-20 · bob · W3 — e2e agente ask-bar + venta-servicio + consistencia
+
+Lane `feat/e2e-agent-service` (off `feature/erp-parity` @7ac414d). Cubre con e2e lo
+que aterrizó en W2 (ask-bar agente, `product.physical_stock`) y ancla que **agente y
+reports dan el mismo número**. Scope: `client/e2e/{flows.mjs,run.mjs}` (sin tocar
+backend/db/vertical.ts/pos).
+
+**Agente ask-bar (read-only, `POST /api/v1/assist/ask`)** — `agentAskFlow`, corre en
+**ambos verticales** tras sembrar+vender (números no triviales):
+- Las 3 preguntas-cabecera parsean al intent correcto y responden 200 con `data`
+  estructurada: «ventas hoy» (`ventas_hoy`), «qué se vence» (`por_vencer`), «stock de
+  X» (`stock_producto`). Pregunta vacía → 400 limpio.
+- **CONSISTENCIA (lo que sólo un live prueba)**: la cifra del agente para «ventas hoy»
+  == total de `/reports/sales-daily` del día (ambos pliegan `expenses::service::
+  sales_daily`); el stock que reporta == `/products`. Si divergen, es bug de fuente
+  bifurcada (reportar a paxoloop), no número a parchar. Verde: farmacia 1990/8,
+  minimarket 2790/64.
+- El agente **nunca 402 en la cara del dueño**: «margen del mes» (Pro-gated) DEGRADA a
+  nudge amable (200 + texto Pro), espejo del 402 duro de `/reports/margins-daily`.
+- Read-only garantizado: el stock no cambia tras preguntar.
+
+**Venta-servicio (`physical_stock = false`, migración 0031)** — `serviceSaleFlow`,
+tenant propio `e2e-servicios` (siembra pack `servicios`):
+- Servicio con **stock 0 vende → 201** (el path de venta salta el chequeo `stock < qty`
+  para ítem no-físico). La venta **NO mueve inventario**: `stock_movements` vacío +
+  stock sigue 0 (sin decremento/FEFO).
+- Boleta (DTE SII) UNIVERSAL — un salón emite (Free no-CAF → 4xx limpio, no 5xx).
+- Servicios **no ensucian alertas**: con todo a stock 0, `out_of_stock = 0`
+  (migración 0031 excluye `physical_stock=false`), cruzado vía «resumen de inventario»
+  del agente — atando ask-bar al modelo de stock.
+
+GATE verde: `npm run build` ok · `vitest` **490/490** · `npm run e2e`
+**233 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin nuevas migraciones).

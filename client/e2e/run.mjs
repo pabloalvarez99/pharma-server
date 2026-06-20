@@ -26,6 +26,8 @@ import {
   dteLifecycleFlow,
   reports402Matrix,
   rubroShowcaseFlow,
+  agentAskFlow,
+  serviceSaleFlow,
   DTE_EMISOR_RUT,
   DTE_CERT_PASS,
 } from "./flows.mjs";
@@ -47,6 +49,10 @@ const DTE_TENANT = { slug: "e2e-dte", name: "DTE Lifecycle E2E", vertical: "phar
 // the live settings API by the flow itself (it round-trips all 8 catalog rubros),
 // so it bootstraps with no fixed vertical.
 const SHOWCASE_TENANT = { slug: "e2e-rubro", name: "Rubro Showcase E2E" };
+// Dedicated tenant for the service-rubro inventory contract (physical_stock =
+// false, migración 0031): the flow seeds the `servicios` pack itself and sells a
+// stock-0 service, so it bootstraps with no fixed vertical.
+const SERVICE_TENANT = { slug: "e2e-servicios", name: "Servicios E2E" };
 const TEST_PFX = join(REPO_ROOT, "crates", "dte", "tests", "assets", "test-cert.pfx");
 
 let server;
@@ -62,7 +68,7 @@ async function main() {
   section("bootstrap (CLI, server down)");
   await cli(["migrate"], dbPath);
   console.log("  ✓ migrations applied");
-  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT]) {
+  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT, SERVICE_TENANT]) {
     await cli(["tenant-create", t.name, "--slug", t.slug], dbPath);
     await cli(
       [
@@ -125,6 +131,10 @@ async function main() {
     await goodsReceiptFlow(ctx);
     await complianceFlow(ctx);
     await reports402Matrix(ctx);
+    // Business agent ask-bar (W2, read-only): the headline questions answer
+    // correctly AND the figure matches /reports (same source). Runs last so the
+    // tenant already has the day's sales seeded.
+    await agentAskFlow(ctx);
     // Multi-rubro: a non-pharmacy rubro must never be forced through
     // receta/controlados machinery, yet boleta stays universal.
     if (t.vertical === "minimarket") await noPrescriptionFlow(ctx);
@@ -135,6 +145,14 @@ async function main() {
   // end-to-end under a SERVICE rubro (belleza).
   await rubroShowcaseFlow({
     tenant: SHOWCASE_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+  });
+
+  // Service-rubro inventory contract (physical_stock = false, migración 0031):
+  // a stock-0 service sells, moves NO inventory, and never pollutes out-of-stock.
+  await serviceSaleFlow({
+    tenant: SERVICE_TENANT.slug,
     email: EMAIL,
     password: PASSWORD,
   });
