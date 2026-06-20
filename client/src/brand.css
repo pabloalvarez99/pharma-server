@@ -334,3 +334,93 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .dash-activate-card{flex-wrap:wrap}
   .dash-activate-actions{flex-direction:row;align-items:center;width:100%;justify-content:flex-start}
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Agent ask-bar — "Pregúntale a tu negocio" (ADR-0016, lane W2).
+ * The north star surface: the owner talks to their business. Showcase-grade
+ * craft (docs/strategy/rubro-select-experience.md §1+§9): brand glow, calm
+ * motion, full reduced-motion fallback, visible focus ring, dark-theme native.
+ * Classes are `.agent-*` (disjoint from paul's `.dash-*`). Colors via tokens
+ * so light/dark theme follow `:root` automatically.
+ * ════════════════════════════════════════════════════════════════════════ */
+.agent-ask{
+  position:relative;margin:0 0 22px;padding:20px 22px;border-radius:var(--rb-radius);
+  background:
+    radial-gradient(120% 140% at 0% 0%,var(--rb-brand-soft),transparent 55%),
+    linear-gradient(180deg,var(--rb-surface-2),var(--rb-surface));
+  border:1px solid var(--rb-line);box-shadow:var(--rb-shadow);overflow:hidden}
+.agent-ask::before{ /* thin brand edge — signals "this is the agent, not a table" */
+  content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep))}
+.agent-ask-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+.agent-spark{display:inline-grid;place-items:center;width:38px;height:38px;flex:none;
+  border-radius:11px;color:var(--rb-brand);
+  background:var(--rb-brand-soft);border:1px solid var(--rb-line)}
+.agent-spark svg{width:22px;height:22px}
+.agent-ask-headtext{min-width:0}
+.agent-ask-title{margin:0;font-family:var(--rb-ff-display);font-weight:600;
+  letter-spacing:-.02em;font-size:18px;color:var(--rb-txt)}
+.agent-ask-sub{margin:2px 0 0;font-size:13px;color:var(--rb-txt-2)}
+.agent-ask-sub kbd{font-family:var(--rb-ff-mono);font-size:11px;padding:1px 6px;
+  border-radius:6px;background:var(--rb-raise);border:1px solid var(--rb-line);
+  color:var(--rb-txt-2)}
+.agent-ask-form{display:flex;gap:10px}
+.agent-ask-input{flex:1;min-width:0;padding:13px 15px;border-radius:var(--rb-radius-sm);
+  background:var(--rb-ink);border:1px solid var(--rb-line);color:var(--rb-txt);
+  font-family:var(--rb-ff-sans);font-size:15px;letter-spacing:-.01em;
+  transition:border-color .16s,box-shadow .16s}
+.agent-ask-input::placeholder{color:var(--rb-txt-3)}
+.agent-ask-input:focus-visible,.agent-ask-input:focus{outline:none;
+  border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-ask-send{flex:none;border:none;cursor:pointer;padding:0 18px;
+  border-radius:var(--rb-radius-sm);font-family:var(--rb-ff-sans);font-weight:600;
+  font-size:15px;color:#04130d;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep));
+  transition:transform .14s,filter .14s,opacity .14s}
+.agent-ask-send:hover{filter:brightness(1.06)}
+.agent-ask-send:active{transform:translateY(1px)}
+.agent-ask-send:disabled{opacity:.55;cursor:default;filter:none}
+.agent-ask-send:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-ask-out{margin-top:14px}
+/* suggestion chips (idle + "no entendí") */
+.agent-suggest-lead{margin:0 0 8px;font-size:12px;color:var(--rb-txt-3);
+  text-transform:uppercase;letter-spacing:.06em}
+.agent-chips{display:flex;flex-wrap:wrap;gap:8px}
+.agent-chip{cursor:pointer;padding:7px 12px;border-radius:999px;font-size:13px;
+  font-family:var(--rb-ff-sans);color:var(--rb-txt-2);
+  background:var(--rb-raise);border:1px solid var(--rb-line);
+  transition:color .14s,border-color .14s,background .14s,transform .14s}
+.agent-chip:hover{color:var(--rb-txt);border-color:var(--rb-brand);
+  background:var(--rb-brand-soft)}
+.agent-chip:active{transform:translateY(1px)}
+.agent-chip:focus-visible{outline:none;border-color:var(--rb-brand);
+  box-shadow:0 0 0 3px var(--rb-brand-soft)}
+/* answer bubble */
+.agent-bubble{padding:13px 15px;border-radius:var(--rb-radius-sm);
+  background:var(--rb-ink);border:1px solid var(--rb-line);
+  color:var(--rb-txt);font-size:15px;line-height:1.5;white-space:pre-wrap}
+.agent-bubble-soft{color:var(--rb-txt-2);font-style:italic}
+.agent-bubble-error{border-color:var(--rb-danger);
+  color:var(--rb-danger);background:rgba(255,93,108,.08);margin-bottom:12px}
+.agent-bubble-error+.agent-suggest-lead{margin-top:0}
+/* thinking indicator */
+.agent-thinking{display:flex;align-items:center;gap:10px;padding:13px 15px;
+  border-radius:var(--rb-radius-sm);background:var(--rb-ink);
+  border:1px solid var(--rb-line);color:var(--rb-txt-2);font-size:14px}
+.agent-dots{display:inline-flex;gap:5px}
+.agent-dots i{width:7px;height:7px;border-radius:50%;background:var(--rb-brand);opacity:.5}
+
+@media (prefers-reduced-motion:no-preference){
+  .agent-ask{animation:agent-rise .42s cubic-bezier(.22,.61,.36,1) both}
+  .agent-dots i{animation:agent-blink 1s ease-in-out infinite}
+  .agent-dots i:nth-child(2){animation-delay:.16s}
+  .agent-dots i:nth-child(3){animation-delay:.32s}
+  .agent-bubble,.agent-bubble-error{animation:agent-rise .26s ease both}
+}
+@keyframes agent-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes agent-blink{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+
+@media (max-width:640px){
+  .agent-ask-form{flex-direction:column}
+  .agent-ask-send{padding:12px 18px}
+}

@@ -611,6 +611,20 @@ pub struct Dte {
     pub has_xml: bool,
 }
 
+/// Mirrors `crates/assist/src/provider.rs::Answer` — the agent's reply to one
+/// "Pregúntale a tu negocio" question (ADR-0016). `intent` is the stable machine
+/// label (`ventas_hoy` … `desconocido`); `text` is the Spanish prose grounded in
+/// the tenant's own data; `data` is the optional structured payload (absent when
+/// the intent carries no figures — `#[serde(default)]` so the missing field is
+/// `None`, not a deserialize error).
+#[derive(Serialize, Deserialize)]
+pub struct AssistAnswer {
+    pub intent: String,
+    pub text: String,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -1437,6 +1451,38 @@ async fn dashboard_report(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta del panel inválida del servidor: {e}"))
+}
+
+// --- agent assist ("Pregúntale a tu negocio", ADR-0016) --------------------
+
+/// POST `/api/v1/assist/ask` (Bearer, cashier+) — the read-only, offline-first
+/// business agent. Forwards the owner's raw Spanish question; the server parses
+/// a deterministic intent and answers from the tenant's OWN data (no LLM, no
+/// network beyond this LAN call). Always resolves with an [`AssistAnswer`] on a
+/// 2xx — note that "no entendí" is itself a 200 (`intent = "desconocido"`), not
+/// an error. A non-2xx surfaces the server's Spanish message.
+#[tauri::command]
+async fn assist_ask(
+    state: State<'_, SessionState>,
+    server_url: String,
+    question: String,
+) -> Result<AssistAnswer, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/assist/ask"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "question": question }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta del agente inválida del servidor: {e}"))
 }
 
 // --- POS sale --------------------------------------------------------------
@@ -3132,7 +3178,8 @@ pub fn run() {
             send_dte,
             poll_dte,
             cancel_dte,
-            seed_demo
+            seed_demo,
+            assist_ask
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

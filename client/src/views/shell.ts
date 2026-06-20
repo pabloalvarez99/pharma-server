@@ -215,6 +215,42 @@ export function renderShell(
   void hydrateLicense(root, serverUrl);
   void hydrateHealth(root, serverUrl);
   void hydrateBranding(root, serverUrl);
+  installAskShortcut();
+}
+
+// Keyboard-first access to the agent ask-bar: pressing "/" anywhere (except
+// while typing in a field) focuses the "Pregúntale a tu negocio" input. If the
+// operator is on another view, it jumps to Panel first, then focuses once the
+// dashboard has mounted the ask-bar. Installed once per process (re-login
+// re-renders the shell but must not stack duplicate listeners).
+let askShortcutInstalled = false;
+function installAskShortcut(): void {
+  if (askShortcutInstalled) return;
+  askShortcutInstalled = true;
+
+  const focusAsk = (): boolean => {
+    const input = document.querySelector<HTMLInputElement>(".agent-ask-input");
+    if (!input) return false;
+    input.focus();
+    input.select();
+    return true;
+  };
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as HTMLElement | null;
+    if (
+      t &&
+      (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+    ) {
+      return; // don't hijack "/" while the operator is typing somewhere else
+    }
+    e.preventDefault();
+    if (focusAsk()) return;
+    // Not on the dashboard — switch to Panel, then focus once it has rendered.
+    document.querySelector<HTMLButtonElement>('.nav-item[data-nav="dashboard"]')?.click();
+    window.setTimeout(focusAsk, 60);
+  });
 }
 
 // Apply the operator-chosen business name + rubro: rename the brand and hide

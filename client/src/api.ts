@@ -1447,3 +1447,23 @@ export function seedDemo(
 ): Promise<SeedSummary> {
   return invoke<SeedSummary>("seed_demo", { serverUrl, vertical, force });
 }
+
+// --- agent assist ("Pregúntale a tu negocio", ADR-0016) ---------------------
+
+/** The agent's reply (`crates/assist/src/provider.rs::Answer`). `intent` is the
+ *  stable machine label (`ventas_hoy` … `desconocido`); `text` the Spanish
+ *  answer grounded in the tenant's own data; `data` an optional structured
+ *  payload backing the prose (absent when the intent carries no figures). */
+export interface AssistAnswer {
+  intent: string;
+  text: string;
+  data?: unknown;
+}
+
+/** POST /api/v1/assist/ask (Bearer, cashier+) — the read-only, offline-first
+ *  business agent. Resolves with the answer even when the agent didn't
+ *  understand (`intent = "desconocido"` is a normal 200, not an error); a server
+ *  failure rejects with a Spanish string. */
+export function assistAsk(serverUrl: string, question: string): Promise<AssistAnswer> {
+  return invoke<AssistAnswer>("assist_ask", { serverUrl, question });
+}

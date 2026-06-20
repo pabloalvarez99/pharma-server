@@ -3898,3 +3898,32 @@ dentro) con tokens `--rb-*` — cero fuga a styles.css/brand.css de otras lanes:
 
 GATE verde: `npm run build` ok (tsc + vite) · `vitest` **447/447**. Sin lógica nueva →
 sin tests nuevos (math del loop ya cubierta por cashier-loop.test.ts, no duplicada).
+
+---
+
+## 2026-06-20 · ye (W2) — el agente cobra vida: ask-bar "Pregúntale a tu negocio" (cliente)
+
+North star hecho visible (1 RUT = 1 agente). UI que consume el backend de milton
+(crate `assist` + `POST /api/v1/assist/ask`, ADR-0016) — contrato **estable**, no
+tocado.
+
+- **Tauri command nuevo** `assist_ask` (`client/src-tauri/src/lib.rs`) → POST
+  `/api/v1/assist/ask` con el JWT en memoria; `AssistAnswer { intent, text, data? }`
+  (`#[serde(default)]` en `data`). Registrado en `invoke_handler`. Único worker que
+  tocó `src-tauri` este wave.
+- **Componente ask-bar** `client/src/views/askbar.ts` — input "Pregúntale a tu
+  negocio" + chips de preguntas sugeridas **adaptadas al rubro** (servicio sin
+  stock nunca ve "vencer"/"agotando"). Estados idle/loading/answer/error con gracia;
+  "no entendí" = 200 con `intent="desconocido"` → re-ofrece ejemplos, **nunca** error
+  en la cara. Lógica pura separada (state-map + sugerencias + HTML) → `askbar.test.ts`
+  (15 tests, incl. escape XSS). Wrapper TS `assistAsk` en `api.ts` (append-only).
+- **Dashboard** monta el ask-bar bajo el hero (`#dash-agent`). **Shell**: atajo
+  global `/` enfoca el ask-bar (keyboard-first); si no estás en Panel, salta a Panel
+  y enfoca. Listener instalado una sola vez.
+- **Craft vitrina** (`brand.css`, clases `.agent-*`, disjuntas de `.dash-*`): borde
+  de marca, glow, motion con `prefers-reduced-motion`, focus ring visible, tokens
+  dark/light. Copy 100% es-CL multi-rubro, cero pharma hardcoded.
+
+GATE verde: `npm run build` ok · `vitest` **462/462** · `cargo fmt --check` ok ·
+`cargo clippy -- -D warnings` **0** (target aislado). Branch `feat/agent-client-askbar`
+off `origin/feature/erp-parity@0db051e`.
