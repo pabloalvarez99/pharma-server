@@ -271,7 +271,7 @@ pub async fn apply_sale(
     // result-slot offsets to parse them back below.
     let mut item_slots: Vec<(usize, Option<usize>)> = Vec::with_capacity(n);
     let mut stmt_idx = 1usize; // slot 0 = the order CREATE above
-    for i in 0..n {
+    for (i, &is_physical) in physical.iter().enumerate().take(n) {
         let order_item_slot = stmt_idx;
         q.push_str(&format!(
             "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
@@ -280,7 +280,7 @@ pub async fn apply_sale(
                 RETURN AFTER; ",
         ));
         stmt_idx += 1;
-        let movement_slot = if physical[i] {
+        let movement_slot = if is_physical {
             q.push_str(&format!(
                 "UPDATE $p{i} SET stock = stock - $qty{i} \
                     WHERE tenant = $t; ",
