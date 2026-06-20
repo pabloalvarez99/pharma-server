@@ -6,6 +6,7 @@ import {
   withTimeout,
   TimeoutError,
   dashboardCta,
+  dashboardActivation,
   loadStoredServer,
   saveStoredServer,
   loadStoredTenant,
@@ -96,6 +97,94 @@ describe("dashboardCta", () => {
     const r = dashboardCta({ productCount: null, hasSales: false });
     expect(r.state).toBe("unknown");
     expect(r.cta).toBeNull();
+  });
+});
+
+describe("dashboardActivation (rubro-aware first value)", () => {
+  // Product rubros flow: fresh catalog → import → first sale → ready.
+  it("product rubro, empty catalog → teaches importing the catalog", () => {
+    const r = dashboardActivation({
+      productCount: 0,
+      hasSales: false,
+      salesKnown: true,
+      rubro: "minimarket",
+    });
+    expect(r.state).toBe("fresh");
+    expect(r.physicalStock).toBe(true);
+    expect(r.cta?.nav).toBe("importar");
+    // demo stays reachable but secondary, not the primary teaching action.
+    expect(r.cta?.secondary?.nav).toBe("configuracion");
+  });
+
+  it("product rubro, catalog but no sales → first sale", () => {
+    const r = dashboardActivation({
+      productCount: 24,
+      hasSales: false,
+      salesKnown: true,
+      rubro: "farmacia",
+    });
+    expect(r.state).toBe("stock-only");
+    expect(r.cta?.nav).toBe("pos");
+    expect(r.cta?.secondary).toBeUndefined();
+  });
+
+  it("product rubro with sales → ready, no CTA", () => {
+    const r = dashboardActivation({
+      productCount: 24,
+      hasSales: true,
+      salesKnown: true,
+      rubro: "farmacia",
+    });
+    expect(r.state).toBe("ready");
+    expect(r.cta).toBeNull();
+  });
+
+  // Service rubros (physicalStock:false) never see "import products" — a
+  // peluquero sells services, not stock. Activation is sales-driven only.
+  it("service rubro, no sales → first SERVICE (never import products)", () => {
+    const r = dashboardActivation({
+      productCount: 0,
+      hasSales: false,
+      salesKnown: true,
+      rubro: "belleza",
+    });
+    expect(r.physicalStock).toBe(false);
+    expect(r.cta?.nav).toBe("pos");
+    expect(r.cta?.label).not.toMatch(/producto/i);
+    expect(r.cta?.secondary).toBeUndefined();
+  });
+
+  it("service rubro with sales → ready", () => {
+    const r = dashboardActivation({
+      productCount: 0,
+      hasSales: true,
+      salesKnown: true,
+      rubro: "servicios",
+    });
+    expect(r.state).toBe("ready");
+    expect(r.cta).toBeNull();
+  });
+
+  it("service rubro, sales unknown → no nag", () => {
+    const r = dashboardActivation({
+      productCount: null,
+      hasSales: false,
+      salesKnown: false,
+      rubro: "belleza",
+    });
+    expect(r.state).toBe("unknown");
+    expect(r.cta).toBeNull();
+  });
+
+  it("generic 'otro' is treated as a product rubro (has stock)", () => {
+    const r = dashboardActivation({
+      productCount: 0,
+      hasSales: false,
+      salesKnown: true,
+      rubro: "otro",
+    });
+    expect(r.physicalStock).toBe(true);
+    expect(r.cta?.nav).toBe("importar");
   });
 });
 

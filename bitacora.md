@@ -3796,3 +3796,36 @@ ring en cada superficie que toca el teclado, micro-motion 150–200ms con guard
 
 `format.ts` sin tocar (solo lectura). Lógica money/stock intacta — pura elevación
 de presentación + 1 parámetro de gating por rubro.
+
+---
+
+## 2026-06-19 · ye · LANE V4 — activación + dashboard showcase
+
+**Branch** `feat/dashboard-activation` (off `origin/feature/erp-parity` @5262607).
+Ola "mejorar el producto" (no launch). Primer valor + home del dueño.
+
+**Qué cambió (cliente, scope ye):**
+- `views/dashboard.ts` — elevado a grado-vitrina: hero personal (saludo por hora +
+  nombre del negocio + chip de rubro on-brand con ícono SVG self-hosted), banda de
+  activación guiada, KPIs y top-list con ritmo producido. Regiones cargan
+  independientes (skeleton propio); un fetch lento/fallido nunca blanquea el resto.
+- **Multi-rubro nativo**: rubro de SERVICIO (`physicalStock:false`, belleza/servicios)
+  NO ve valor inventario / stock crítico / por vencer → KPIs sales-shaped (ventas
+  hoy / ventas 30d / servicios hoy / ticket promedio) y su empty-state guía a la
+  primera VENTA, nunca a "importar productos" que jamás tendrá.
+- **Guided first-value**: empty-states que ENSEÑAN — catálogo vacío → "Importar
+  productos" (nav→importar, demo como link secundario→configuración); con stock sin
+  ventas → "Hacer primera venta" (nav→pos). Navega vía la nav existente, sin nueva
+  superficie de ruteo.
+- `views/onboarding-ux.ts` — nueva lógica pura **single-source** `dashboardActivation`
+  (rubro-aware): reusa `dashboardCta` para rubros de producto (umbrales sin divergir)
+  y maneja servicio puro por ventas. Sin duplicar el flujo en la vista.
+- `brand.css` — append namespaced `.dash-*` (hero/activación/motion). Reveal
+  escalonado que respeta `prefers-reduced-motion`. Cero CDN. NO toca styles.css/
+  main.ts ni choca con paul/POS (rutbrand.css).
+
+**Tests**: +8 vitest `dashboardActivation` (producto fresh/stock-only/ready/unknown;
+servicio sin-ventas/con-ventas/unknown; `otro`=producto). GATE cliente:
+`npm run build` ✅ · `npm test` **420/420** (1 flake aislado en
+`rubro-configurator.dom.test.ts` por timeout bajo carga paralela → 14/14 verde en
+aislado con `--testTimeout=20000`; no es de esta lane).

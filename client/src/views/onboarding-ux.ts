@@ -12,6 +12,7 @@
 // See teamwork_op.txt LANE B.
 
 import { validateServerUrl } from "./first-run";
+import { featuresForRubro, type Rubro } from "../vertical";
 
 // --- 1. Connection retry / timeout -----------------------------------------
 
@@ -140,6 +141,114 @@ export function dashboardCta(input: CtaInput): DashboardCta {
     };
   }
   return { state: "ready", cta: null };
+}
+
+// --- 2b. Rubro-aware dashboard activation (guided first value) --------------
+//
+// `dashboardCta` classifies a panel from catalog/sales alone. The dashboard,
+// though, must also be MULTI-RUBRO native: a service rubro (belleza/servicios,
+// `physicalStock:false`) sells without inventory, so "tu negocio está vacío —
+// importa productos" is wrong and confusing for a peluquero. This layer wraps
+// the canonical classifier and re-frames the next step per rubro, so there is
+// ONE place that decides "what should this operator do next on the panel".
+//
+// It reuses `dashboardCta` for product rubros (thresholds never diverge) and
+// drives service rubros purely off sales. The returned CTA carries the nav id
+// the dashboard button should jump to (the existing sidebar nav), so empty
+// states teach the real next move instead of dead-ending.
+
+/** Nav ids the activation CTA can route to (subset of the shell nav). */
+export type ActivationNav = "importar" | "pos" | "configuracion";
+
+export interface ActivationInput {
+  /** Total products in the catalog (null = stats unknown / not fetched). */
+  productCount: number | null;
+  /** Any sales recorded yet. */
+  hasSales: boolean;
+  /** Whether the sales stat is actually known (false = fetch failed → don't
+   *  nag a rubro whose activation depends on sales). */
+  salesKnown: boolean;
+  /** The operator's chosen rubro — decides product- vs service-shaped guidance. */
+  rubro: Rubro;
+}
+
+export interface ActivationCta {
+  title: string;
+  /** Teaching body — explains the next step, never just a label. */
+  body: string;
+  /** Primary button label (the action it teaches). */
+  label: string;
+  /** Sidebar nav id the primary button jumps to. */
+  nav: ActivationNav;
+  /** Optional secondary link (e.g. "o carga datos demo") so demo stays one
+   *  click away without competing with the primary teaching action. */
+  secondary?: { label: string; nav: ActivationNav };
+}
+
+export interface DashboardActivation {
+  state: CtaState;
+  /** Whether this rubro tracks physical stock — the dashboard uses it to pick
+   *  product-shaped (valor/stock/vencimiento) vs service-shaped KPIs. */
+  physicalStock: boolean;
+  /** The guided next-step CTA, or null when the panel is "ready". */
+  cta: ActivationCta | null;
+}
+
+/** Decide the guided next step for the dashboard, rubro-aware. Product rubros
+ *  flow fresh → import catalog → first sale → ready; service rubros skip the
+ *  inventory steps entirely (no physical stock) and flow no-sales → first
+ *  service → ready. Single source the panel renders from. */
+export function dashboardActivation(input: ActivationInput): DashboardActivation {
+  const physicalStock = featuresForRubro(input.rubro).physicalStock;
+
+  // Service rubros: productCount is meaningless (they sell no stock), so the
+  // only signal is sales. An unknown sales stat must NOT nag.
+  if (!physicalStock) {
+    if (!input.salesKnown) return { state: "unknown", physicalStock, cta: null };
+    if (input.hasSales) return { state: "ready", physicalStock, cta: null };
+    return {
+      state: "stock-only",
+      physicalStock,
+      cta: {
+        title: "Listo para tu primer cobro",
+        body: "Tu rubro vende servicios, sin inventario. Abre la caja y registra tu primer servicio en el POS.",
+        label: "Registrar primer servicio",
+        nav: "pos",
+      },
+    };
+  }
+
+  // Product rubros: reuse the canonical classifier so thresholds never drift.
+  const base = dashboardCta({ productCount: input.productCount, hasSales: input.hasSales });
+  if (!base.cta) return { state: base.state, physicalStock, cta: null };
+
+  if (base.cta.action === "seed-demo") {
+    // Empty catalog → teach the real first move: load your own products. Demo
+    // stays reachable as the secondary link for someone just trying the system.
+    return {
+      state: base.state,
+      physicalStock,
+      cta: {
+        title: "Carga tu catálogo",
+        body: "Importa tus productos desde un archivo CSV para empezar a vender. ¿Solo estás probando? Carga datos de demostración.",
+        label: "Importar productos",
+        nav: "importar",
+        secondary: { label: "Cargar datos demo", nav: "configuracion" },
+      },
+    };
+  }
+
+  // Catalog present, no sales yet → make the first sale.
+  return {
+    state: base.state,
+    physicalStock,
+    cta: {
+      title: "Listo para vender",
+      body: "Ya tienes productos cargados. Abre la caja y registra tu primera venta en el POS.",
+      label: "Hacer primera venta",
+      nav: "pos",
+    },
+  };
 }
 
 // --- 3. Server URL persistence ---------------------------------------------

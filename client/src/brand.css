@@ -250,3 +250,87 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   color:var(--muted)}
 .rubro-config .rubro-coming li::before{content:"\25F7";position:absolute;left:0;
   color:color-mix(in srgb,var(--rubro-accent,var(--accent)) 60%,var(--muted))}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Dashboard showcase — the owner's home (lane feat/dashboard-activation, ye).
+ * Elevates the panel from "de dev" to a produced product surface: a personal
+ * hero, a guided first-value band, and a refined KPI/top-list rhythm. Uses the
+ * global tokens from styles.css (loaded AFTER this sheet, so var() resolves).
+ * Own `.dash-*` namespace — NO collision with paul/POS (rutbrand.css) and does
+ * NOT touch styles.css/main.ts. Append-only.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+.dash-showcase{display:flex;flex-direction:column;gap:18px}
+
+/* ── Hero header ─────────────────────────────────────────────────────────
+ * A personal, time-aware greeting with the business name + rubro chip. A soft
+ * brand glow on the right gives it production polish without a heavy graphic. */
+.dash-hero{position:relative;overflow:hidden;display:flex;align-items:flex-end;
+  justify-content:space-between;gap:18px;
+  padding:22px 24px;border:1px solid var(--line);border-radius:var(--radius-card,18px);
+  background:
+    radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 55%),
+    linear-gradient(180deg,var(--bg-1),color-mix(in srgb,var(--bg-1) 80%,#000))}
+.dash-hero-main{position:relative;z-index:1;min-width:0}
+.dash-hero-rubro{display:inline-flex;align-items:center;gap:7px;
+  margin-bottom:9px;padding:4px 11px 4px 9px;
+  font-size:12px;font-weight:600;letter-spacing:.2px;
+  color:var(--rubro-accent,var(--accent));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 35%,transparent);
+  border-radius:var(--radius-pill,999px)}
+.dash-hero-rubro .dash-hero-ico{flex:0 0 auto}
+.dash-hero-title{font-family:var(--rb-ff-display,inherit);
+  font-size:clamp(22px,3vw,30px);font-weight:600;line-height:1.12;
+  letter-spacing:-.4px;color:var(--text);margin:0}
+.dash-hero-name{color:var(--accent)}
+.dash-hero-sub{margin:6px 0 0;font-size:13.5px;color:var(--muted);
+  text-transform:capitalize}
+.dash-hero-glow{position:absolute;z-index:0;top:-60%;right:-8%;width:340px;height:340px;
+  border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 26%,transparent),transparent 68%);
+  filter:blur(8px)}
+
+/* ── Activation band (guided first value) ────────────────────────────────
+ * Replaces a wall of "$0" on a fresh install with one teaching next step.
+ * Reads as an inviting card, not an error; the rubro accent themes its edge. */
+.dash-activate-card{display:flex;align-items:center;gap:16px;
+  padding:16px 18px;border-radius:var(--radius-card,18px);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 40%,var(--line));
+  background:linear-gradient(180deg,
+    color-mix(in srgb,var(--rubro-accent,var(--accent)) 11%,var(--bg-1)),
+    color-mix(in srgb,var(--rubro-accent,var(--accent)) 4%,var(--bg-1)))}
+.dash-activate-ico{flex:0 0 auto;display:grid;place-items:center;width:44px;height:44px;
+  border-radius:12px;color:var(--rubro-accent,var(--accent));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 16%,transparent);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 32%,transparent)}
+.dash-activate-text{flex:1 1 auto;min-width:0}
+.dash-activate-text strong{display:block;font-size:15.5px;color:var(--text);margin-bottom:3px}
+.dash-activate-text p{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.dash-activate-actions{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.dash-activate-btn{white-space:nowrap}
+.dash-activate-link{background:none;border:none;cursor:pointer;padding:2px 4px;
+  font-size:12.5px;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+.dash-activate-link:hover{color:var(--text)}
+
+/* ── KPI + top rhythm (tighten the produced spacing) ─────────────────────── */
+.dash-top-card .card-head{display:flex;align-items:center;justify-content:space-between}
+
+/* ── Motion: a calm staggered reveal on mount. Cheap, on-brand, and fully
+ * disabled under prefers-reduced-motion (the panel still renders instantly). */
+@media (prefers-reduced-motion:no-preference){
+  .dash-showcase>.dash-hero,
+  .dash-showcase>.dash-activate:not([hidden]),
+  .dash-showcase>.dash-kpis,
+  .dash-showcase>.dash-top-card{
+    animation:dash-rise .42s cubic-bezier(.22,.61,.36,1) both}
+  .dash-showcase>.dash-activate:not([hidden]){animation-delay:.05s}
+  .dash-showcase>.dash-kpis{animation-delay:.1s}
+  .dash-showcase>.dash-top-card{animation-delay:.16s}
+}
+@keyframes dash-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+@media (max-width:640px){
+  .dash-activate-card{flex-wrap:wrap}
+  .dash-activate-actions{flex-direction:row;align-items:center;width:100%;justify-content:flex-start}
+}
