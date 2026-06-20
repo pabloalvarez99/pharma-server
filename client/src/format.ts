@@ -171,3 +171,78 @@ export function formatRut(raw: string): string {
   const dv = c.slice(-1);
   return `${num(Number(body))}-${dv}`;
 }
+
+// --- insight math (canonical) ------------------------------------------------
+// The ONE source of the numbers behind any "qué hacer" surface. Reportes
+// (reports-insights.ts) computes its cards from here TODAY; the agent (milton/ye)
+// will answer "¿cuánto compro?", "¿cómo va mi margen?", "¿qué día vendo más?"
+// from the SAME functions TOMORROW — so a card and a chat reply never disagree by
+// a rounding rule. Pure number-in/number-out (no row types, no DOM): generic,
+// vertical-agnostic, trivially testable. Money arrives as Decimal strings → parse
+// with `toNumber` at the edge, never round-trip a float to the server.
+
+/** Signed percentage change `(curr-prev)/prev*100`, rounded to 1 decimal.
+ *  `null` when `prev <= 0` (no meaningful base — never divide by zero, never
+ *  report a "+∞%" jump from nothing). The canonical trend primitive. */
+export function pctDelta(curr: number, prev: number): number | null {
+  if (!(prev > 0)) return null;
+  return Math.round(((curr - prev) / prev) * 1000) / 10;
+}
+
+/** Render a delta as a signed percent string (`10` → `"+10,0%"`, `-8` →
+ *  `"−8,0%"`), es-CL decimal comma + a real minus sign (U+2212, not a hyphen) so
+ *  it reads cleanly in a sentence. The sign lives in the string, the magnitude in
+ *  the number — a card never has to re-derive the direction. */
+export function signedPct(d: number): string {
+  const sign = d >= 0 ? "+" : "−";
+  return `${sign}${Math.abs(d).toFixed(1).replace(".", ",")}%`;
+}
+
+/** Blended (revenue-weighted) gross-margin percent across a set of days/lines:
+ *  `Σmargin / Σrevenue * 100`, rounded to 1 decimal. Weighting by revenue (not a
+ *  naïve average of daily percentages) is the only honest way to roll a margin up
+ *  to a month — a $1M day at 30% and a $1k day at 60% blend near 30%, not 45%.
+ *  `null` when total revenue ≤ 0 (no base to take a percentage of). */
+export function blendedMarginPct(totalMargin: number, totalRevenue: number): number | null {
+  if (!(totalRevenue > 0)) return null;
+  return Math.round((totalMargin / totalRevenue) * 1000) / 10;
+}
+
+/** Units to BUY now so on-hand stock covers `coverDays` more days at the current
+ *  sell-through rate. The run-rate is read off `daysOfInventory` (how many days
+ *  the current stock lasts) so no external window has to be threaded through:
+ *  rate = currentStock / daysOfInventory, target = rate × coverDays, buy =
+ *  ceil(target − currentStock). Returns 0 when the product isn't selling
+ *  (`daysOfInventory ≤ 0`, not computable) or already covers the horizon — we
+ *  never suggest buying what isn't moving (that's the dead-stock surface, not
+ *  this one). Always a non-negative integer (you can't buy a fraction of a box). */
+export function reorderUnits(
+  currentStock: number,
+  daysOfInventory: number,
+  coverDays: number,
+): number {
+  if (!(daysOfInventory > 0) || !(currentStock > 0) || !(coverDays > 0)) return 0;
+  const runRate = currentStock / daysOfInventory;
+  const buy = Math.ceil(runRate * coverDays - currentStock);
+  return buy > 0 ? buy : 0;
+}
+
+/** Day-of-week names (es-CL, 0 = domingo … 6 = sábado) — the index `Date.getDay()`
+ *  returns, so a "tu día más fuerte" insight can name the peak day. */
+export const WEEKDAYS_ES = [
+  "domingo",
+  "lunes",
+  "martes",
+  "miércoles",
+  "jueves",
+  "viernes",
+  "sábado",
+] as const;
+
+/** Weekday name for an `YYYY-MM-DD` date, parsed at local midnight so the day
+ *  doesn't shift under a UTC offset. Returns `""` for an unparseable date rather
+ *  than "Invalid Date". */
+export function weekdayEs(date: string): string {
+  const d = new Date(`${date}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? "" : WEEKDAYS_ES[d.getDay()];
+}

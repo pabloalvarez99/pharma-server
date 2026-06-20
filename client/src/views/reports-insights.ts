@@ -9,7 +9,16 @@
 // `toNumber` for arithmetic only and re-format for display with `clp`/`num`.
 // Insights are vertical-agnostic (a $ at risk by expiry reads the same for a
 // pharmacy lote and a minimarket batch).
-import { clp, num, toNumber } from "../format";
+import {
+  clp,
+  num,
+  toNumber,
+  pctDelta,
+  signedPct,
+  blendedMarginPct,
+  reorderUnits,
+  weekdayEs,
+} from "../format";
 import type {
   DailySalesRow,
   DailyMarginRow,
@@ -37,14 +46,12 @@ export interface Insight {
 }
 
 const HORIZON_DAYS = 30; // "este mes" — near-expiry exposure window.
+const COVER_DAYS = 30; // reorder target: keep ~1 month of cover on movers.
+const PEAK_MIN_DAYS = 5; // don't call a "peak day" from a handful of rows (noise).
 
-/** Signed percentage change `(curr-prev)/prev*100`, rounded to 1 decimal.
- *  `null` when `prev <= 0` (no meaningful base — never divide by zero, never
- *  report a "+∞%" jump from nothing). */
-export function pctDelta(curr: number, prev: number): number | null {
-  if (!(prev > 0)) return null;
-  return Math.round(((curr - prev) / prev) * 1000) / 10;
-}
+// pctDelta lives in ../format now (the canonical insight-math layer the agent
+// will share); re-exported here so existing importers/tests keep their path.
+export { pctDelta };
 
 /** Build a `{ id → retail price }` map from the products list, so the
  *  expiry/rotation insights can value units the report feeds only count. A
@@ -129,6 +136,123 @@ export function computeStalledStock(
     }
   }
   return { count, units, value };
+}
+
+/** Replenishment suggestion in money: movers (selling, with on-hand stock) whose
+ *  days-of-inventory falls under the cover horizon are about to stock out — every
+ *  unit you fail to restock is a sale you won't make. Units = Σ reorderUnits per
+ *  product; value = Σ units × retail price (we value at sale price — the cost feed
+ *  isn't in the rotation row; it's an order-of-magnitude "cuánto repongo", not a
+ *  PO). `top` is the single biggest contributor by value, so the card can say
+ *  "compra ~N de «X»" (qué + cuánto), not just a lump sum. */
+export interface ReorderNeed {
+  count: number;
+  units: number;
+  value: number;
+  topName: string;
+  topUnits: number;
+  coverDays: number;
+}
+
+export function computeReorder(
+  rows: readonly StockRotationRow[],
+  prices: ReadonlyMap<string, number>,
+  coverDays: number = COVER_DAYS,
+): ReorderNeed {
+  let count = 0,
+    units = 0,
+    value = 0,
+    topName = "",
+    topUnits = 0,
+    topValue = -1;
+  for (const r of rows) {
+    if (r.qty_sold <= 0 || r.days_of_inventory == null) continue;
+    const doi = toNumber(r.days_of_inventory);
+    const buy = reorderUnits(r.current_stock, doi, coverDays);
+    if (buy <= 0) continue;
+    const v = buy * (prices.get(r.product_id) ?? 0);
+    count += 1;
+    units += buy;
+    value += v;
+    if (v > topValue) {
+      topValue = v;
+      topName = r.product_name;
+      topUnits = buy;
+    }
+  }
+  return { count, units, value, topName, topUnits, coverDays };
+}
+
+/** Month-over-month margin trend (revenue-weighted), for the latest two calendar
+ *  months present in the daily-margin series. Day-over-day margin is noisy; the
+ *  dueño steers on the monthly direction. `null` when fewer than two months are
+ *  loaded (no honest comparison) or either month has no revenue. */
+export interface MarginTrend {
+  currMonth: string;
+  prevMonth: string;
+  currPct: number;
+  prevPct: number;
+  pts: number;
+}
+
+export function computeMarginTrend(rows: readonly DailyMarginRow[]): MarginTrend | null {
+  const byMonth = new Map<string, { margin: number; revenue: number }>();
+  for (const r of rows) {
+    const m = r.date.slice(0, 7); // YYYY-MM
+    const acc = byMonth.get(m) ?? { margin: 0, revenue: 0 };
+    acc.margin += toNumber(r.margin);
+    acc.revenue += toNumber(r.revenue);
+    byMonth.set(m, acc);
+  }
+  const months = [...byMonth.keys()].sort(); // chronological
+  if (months.length < 2) return null;
+  const currMonth = months[months.length - 1];
+  const prevMonth = months[months.length - 2];
+  const currPct = blendedMarginPct(byMonth.get(currMonth)!.margin, byMonth.get(currMonth)!.revenue);
+  const prevPct = blendedMarginPct(byMonth.get(prevMonth)!.margin, byMonth.get(prevMonth)!.revenue);
+  if (currPct == null || prevPct == null) return null;
+  return {
+    currMonth,
+    prevMonth,
+    currPct,
+    prevPct,
+    pts: Math.round((currPct - prevPct) * 10) / 10,
+  };
+}
+
+/** The weekday that brings in the most revenue across the loaded series, so the
+ *  dueño can staff/stock it. Revenue is summed per `Date.getDay()` bucket; the
+ *  winner's share of the week is reported too. `null` until there's enough data
+ *  (`PEAK_MIN_DAYS` rows with revenue) — a peak from two days is noise, not a
+ *  pattern. */
+export interface PeakDay {
+  weekday: string;
+  value: number;
+  sharePct: number;
+}
+
+export function computePeakDay(rows: readonly DailySalesRow[]): PeakDay | null {
+  const withRev = rows.filter((r) => toNumber(r.revenue) > 0);
+  if (withRev.length < PEAK_MIN_DAYS) return null;
+  const buckets = new Map<string, number>();
+  let total = 0;
+  for (const r of withRev) {
+    const day = weekdayEs(r.date);
+    if (!day) continue;
+    const rev = toNumber(r.revenue);
+    buckets.set(day, (buckets.get(day) ?? 0) + rev);
+    total += rev;
+  }
+  if (total <= 0) return null;
+  let weekday = "",
+    value = -1;
+  for (const [day, v] of buckets) {
+    if (v > value) {
+      value = v;
+      weekday = day;
+    }
+  }
+  return { weekday, value, sharePct: Math.round((value / total) * 1000) / 10 };
 }
 
 // --- card builders (pure → tested for tone + copy) ---------------------------
@@ -312,6 +436,55 @@ export function topSellerInsight(rows: readonly TopProductRow[]): Insight | null
   };
 }
 
+/** Replenishment suggestion: how much money to put back into stock, and the one
+ *  product to start with. Actionable money the dueño leaves on the table by
+ *  stocking out. */
+export function reorderInsight(n: ReorderNeed): Insight | null {
+  if (n.count <= 0 || n.units <= 0) return null;
+  const money = n.value > 0 ? clp(n.value) : `${num(n.units)} unidad(es)`;
+  const lead =
+    n.topName && n.topUnits > 0
+      ? `Empieza por ${num(n.topUnits)} de «${n.topName}».`
+      : "Prioriza los de mayor venta.";
+  return {
+    id: "reorder",
+    icon: "🛒",
+    title: `Repón ${money} para no quebrar stock`,
+    detail: `${num(n.count)} producto(s) que se venden se agotan en menos de ${num(n.coverDays)} días.`,
+    action: `${lead} Cada quiebre es una venta perdida.`,
+    tone: "warn",
+  };
+}
+
+/** Monthly margin direction (Pro): the trend the dueño steers on, mes vs mes. */
+export function marginTrendInsight(t: MarginTrend | null): Insight | null {
+  if (!t || t.pts === 0) return null;
+  const up = t.pts > 0;
+  return {
+    id: "margin-trend",
+    icon: up ? "📈" : "📉",
+    title: `Margen mensual ${signedPct(t.pts)} vs el mes pasado`,
+    detail: `Este mes ${t.currPct.toFixed(1)}% frente a ${t.prevPct.toFixed(1)}% el mes anterior.`,
+    action: up
+      ? "Buena tendencia. Mantén la disciplina de precios y compras."
+      : "Tu utilidad mensual cae: renegocia costos o ajusta precios de los productos de más venta.",
+    tone: up ? "good" : "warn",
+  };
+}
+
+/** Peak sales day of the week — where to concentrate personal y stock. */
+export function peakDayInsight(p: PeakDay | null): Insight | null {
+  if (!p || !p.weekday) return null;
+  return {
+    id: "peak-day",
+    icon: "🗓️",
+    title: `Tu día más fuerte: ${p.weekday}`,
+    detail: `Concentra ${p.sharePct.toFixed(1)}% de tus ventas (${clp(p.value)}).`,
+    action: "Refuerza personal, caja y stock ese día; programa ahí tus promos.",
+    tone: "good",
+  };
+}
+
 /** Everything the insight strip needs. `margins=null` + `marginsGated=true`
  *  renders the Pro upsell; `margins` present renders the real margin delta. */
 export interface InsightInputs {
@@ -334,18 +507,24 @@ export function buildInsights(inp: InsightInputs): Insight[] {
   const today = inp.today ?? new Date().toISOString().slice(0, 10);
   const exposure = computeExpiryExposure(inp.nearExpiry, inp.prices, inp.horizonDays);
   const stalled = computeStalledStock(inp.rotation, inp.prices);
+  const reorder = computeReorder(inp.rotation, inp.prices);
   const margin = inp.margins
     ? marginDeltaInsight(inp.margins, today)
     : inp.marginsGated
       ? marginGatedInsight()
       : null;
+  // Monthly margin trend only with real (Pro) data — never from the gated stub.
+  const marginTrend = inp.margins ? marginTrendInsight(computeMarginTrend(inp.margins)) : null;
   const cards = [
-    expiredInsight(exposure),
-    nearExpiryInsight(exposure),
-    salesDeltaInsight(inp.sales, today),
-    margin,
-    stalledInsight(stalled),
-    topSellerInsight(inp.top),
+    expiredInsight(exposure), // money already lost
+    nearExpiryInsight(exposure), // money at risk by expiry
+    reorderInsight(reorder), // money lost to stock-outs (act: buy)
+    salesDeltaInsight(inp.sales, today), // day-over-day pulse
+    margin, // today's margin (or Pro upsell)
+    marginTrend, // monthly margin direction (Pro)
+    stalledInsight(stalled), // frozen capital (dead stock)
+    peakDayInsight(computePeakDay(inp.sales)), // when to push
+    topSellerInsight(inp.top), // the win to reinforce
   ];
   return cards.filter((c): c is Insight => c !== null);
 }
