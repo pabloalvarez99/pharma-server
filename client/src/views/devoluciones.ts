@@ -19,6 +19,7 @@ import {
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { featuresForRubro, loadRubro } from "../vertical";
 import "./rutbrand.css";
 import {
   deriveTipo as deriveTipoOf,
@@ -30,6 +31,28 @@ import {
 import { bindModalKeys } from "./modal-keys";
 
 const PAGE_LIMIT = 60;
+
+// Subtitle copy depends on the rubro: a physical rubro restocks returned goods
+// aparte (Inventario → Ajustar stock); a service rubro (physicalStock:false —
+// peluquería, oficios) has no stock to reabastecer, so the clause would be a lie.
+export function devolucionesSubtitle(physicalStock: boolean): string {
+  return physicalStock
+    ? "Reembolsos sobre ventas. El dinero y el registro quedan; el stock se reabastece aparte."
+    : "Reembolsos sobre ventas. El dinero y el registro quedan.";
+}
+
+// The "Reingresar al stock" toggle + its note only make sense for a physical
+// rubro. For a service rubro there is no inventory to return to, so the whole
+// control is omitted (not just disabled) — no phantom stock friction on a refund.
+export function restockControlHtml(physicalStock: boolean): string {
+  if (!physicalStock) return "";
+  return `
+        <label class="dev-restock-toggle">
+          <input id="dev-f-restock" type="checkbox" disabled />
+          <span>Reingresar al stock</span>
+        </label>
+        <p class="muted dev-restock-note">No disponible desde la boleta: no identifica el producto (sólo nombre). Reingresa el stock vendible vía Inventario → Ajustar stock.</p>`;
+}
 
 const METODO_OPTS: { value: string; label: string }[] = [
   { value: "efectivo", label: "Efectivo" },
@@ -43,7 +66,7 @@ export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
       <div class="view-head">
         <div>
           <h2>Devoluciones</h2>
-          <p class="muted">Reembolsos sobre ventas. El dinero y el registro quedan; el stock se reabastece aparte.</p>
+          <p class="muted" id="dev-subtitle">${devolucionesSubtitle(true)}</p>
         </div>
         <button id="dev-new" type="button" class="btn-ghost">+ Nueva devolución</button>
       </div>
@@ -59,6 +82,16 @@ export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
 
   const tableHost = host.querySelector<HTMLElement>("#dev-table")!;
   const modalHost = host.querySelector<HTMLElement>("#dev-modal-host")!;
+  const subtitleEl = host.querySelector<HTMLElement>("#dev-subtitle")!;
+
+  // Default to the physical-rubro copy until the persisted rubro loads (never
+  // throws), then relax the stock wording for a service rubro. The modal reads
+  // the resolved flag so its restock control matches the subtitle.
+  let physicalStock = true;
+  void loadRubro(serverUrl).then((rubro) => {
+    physicalStock = featuresForRubro(rubro).physicalStock;
+    if (!physicalStock) subtitleEl.textContent = devolucionesSubtitle(false);
+  });
 
   async function reload(): Promise<void> {
     tableHost.innerHTML = tableSkeleton(6);
@@ -71,7 +104,7 @@ export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
   }
 
   host.querySelector<HTMLButtonElement>("#dev-new")!.addEventListener("click", () => {
-    openRefundModal(modalHost, serverUrl, () => void reload());
+    openRefundModal(modalHost, serverUrl, physicalStock, () => void reload());
   });
 
   void reload();
@@ -127,6 +160,7 @@ function devolucionRow(d: Devolucion): string {
 function openRefundModal(
   modalHost: HTMLElement,
   serverUrl: string,
+  physicalStock: boolean,
   onSaved: () => void,
 ): void {
   modalHost.innerHTML = `
@@ -164,11 +198,7 @@ function openRefundModal(
           <label class="modal-label" for="dev-f-notas">Notas (opcional)</label>
           <input id="dev-f-notas" type="text" autocomplete="off" />
         </div>
-        <label class="dev-restock-toggle">
-          <input id="dev-f-restock" type="checkbox" disabled />
-          <span>Reingresar al stock</span>
-        </label>
-        <p class="muted dev-restock-note">No disponible desde la boleta: no identifica el producto (sólo nombre). Reingresa el stock vendible vía Inventario → Ajustar stock.</p>
+        ${restockControlHtml(physicalStock)}
         <div id="dev-f-error" class="form-error" hidden></div>
         <div class="modal-actions">
           <button type="button" class="btn-ghost" id="dev-f-cancel">Cancelar</button>
@@ -192,7 +222,9 @@ function openRefundModal(
   const itemsHost = modalHost.querySelector<HTMLElement>("#dev-f-items")!;
   const motivoEl = modalHost.querySelector<HTMLInputElement>("#dev-f-motivo")!;
   const tipoBadge = modalHost.querySelector<HTMLElement>("#dev-f-tipo-badge")!;
-  const restockEl = modalHost.querySelector<HTMLInputElement>("#dev-f-restock")!;
+  // Null on a service rubro: the restock toggle is omitted entirely (see
+  // restockControlHtml), so a refund there never tries to re-stock.
+  const restockEl = modalHost.querySelector<HTMLInputElement>("#dev-f-restock");
   const metodoEl = modalHost.querySelector<HTMLSelectElement>("#dev-f-metodo")!;
   const notasEl = modalHost.querySelector<HTMLInputElement>("#dev-f-notas")!;
   const errEl = modalHost.querySelector<HTMLElement>("#dev-f-error")!;
@@ -278,7 +310,7 @@ function openRefundModal(
     // Validate + build the refund lines with the same pure logic the tests drive.
     // restock only sticks when the toggle is on AND the line identifies a product
     // (boleta lines don't, so it stays false — the toggle is disabled).
-    const validated = validateRefund(draftLines(), { restock: restockEl.checked });
+    const validated = validateRefund(draftLines(), { restock: restockEl?.checked ?? false });
     if (!validated.ok) return fail(validated.error);
     const items: RefundItem[] = validated.value.items;
 

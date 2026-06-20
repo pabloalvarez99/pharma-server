@@ -965,7 +965,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 // A picker card. On a service rubro (`trackStock` false) stock is meaningless, so
 // the card never shows a count or an "agotado" dead-end — it reads "Servicio" and
 // stays sellable. On a physical rubro it keeps the stock line + out-of-stock lock.
-function resultCard(p: Product, trackStock: boolean): string {
+// Exported (pure, no DOM) so the per-rubro render is unit-tested directly.
+export function resultCard(p: Product, trackStock: boolean): string {
   if (!trackStock) {
     return `
     <button type="button" class="pos-result is-service">

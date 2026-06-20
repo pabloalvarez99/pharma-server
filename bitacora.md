@@ -4045,3 +4045,34 @@ GATE: `cargo fmt --all -- --check` ok · `cargo clippy --workspace --all-targets
 exec_dashboard bajo cargo paralelo sobre un mismo `target/` — re-corrido aislado
 8/8 ok). Mig libre = 0032 (no usada; no tocó backend/db). Scope:
 `crates/domain/src/seed.rs` + CLI seed-demo help + test nuevo.
+
+---
+
+## 2026-06-20 — W3 paul: servicio en POS/caja/devoluciones (rubro gate)
+
+Cierra el loop del rubro **servicio** en el cliente: un peluquero/consultor
+(rubros `belleza`/`servicios`, `physicalStock:false` vía
+`featuresForRubro` de `vertical.ts`) no debe ver "Stock 0 · agotado".
+
+- **POS** (`views/pos.ts`): ya producido en W2 (`trackStock` + `loadRubro` →
+  `resultCard(p, trackStock)` pinta "Servicio" sin stock ni candado de agotado;
+  scan/Enter/click venden sin fricción). Esta W3 sólo **exporta `resultCard`**
+  (puro, sin DOM) para cubrirlo con vitest directo.
+- **Devoluciones** (`views/devoluciones.ts`): la copia de stock mentía a un
+  rubro servicio. Gated por rubro:
+  - `devolucionesSubtitle(physicalStock)` — físico menciona "el stock se
+    reabastece aparte"; servicio omite la cláusula.
+  - `restockControlHtml(physicalStock)` — el toggle "Reingresar al stock" + nota
+    se **omiten** (no sólo se deshabilitan) en servicio; `restockEl` ahora puede
+    ser null → guard `restockEl?.checked ?? false`.
+- **Caja** (`views/caja.ts`): sin UI de stock → sin cambios.
+
+Señal a nivel **rubro** (no por-producto), comportamiento físico intacto.
+
+Tests nuevos: `views/pos-service.test.ts` (7) — render condicional de
+`resultCard` físico vs servicio + helpers de devoluciones, atados a
+`featuresForRubro`. GATE: `npm run build` ok · `vitest` **496 passed** (1 fallo
+ajeno = flake wall-clock de `inventory-perf.test.ts` bajo carga de builds
+concurrentes; pasa aislado 8/8 — reportado a paxoloop, NO tocar). Scope:
+`views/{pos,devoluciones}.ts` + test nuevo. Sin backend, sin `vertical.ts`
+(sólo lectura), sin migración.
