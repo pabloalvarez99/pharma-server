@@ -15,4 +15,4 @@ pub mod provider;
 
 pub use deterministic::Deterministic;
 pub use intent::{parse, Intent};
-pub use provider::{Answer, AssistProvider, AssistQuery};
+pub use provider::{select_provider, Answer, AssistConfig, AssistProvider, AssistQuery};

@@ -10,7 +10,10 @@ use surrealdb::sql::Thing;
 use db::Db;
 use domain::cash_register::{model::SessionFilters, service as caja};
 use domain::catalog::{model::ProductFilters, service as catalog};
-use domain::expenses::model::{NearExpiryFilters, SalesReportFilters, TopProductsFilters};
+use domain::customers::service as customers;
+use domain::expenses::model::{
+    ExpenseFilters, NearExpiryFilters, SalesReportFilters, TopProductsFilters,
+};
 use domain::expenses::service as reports;
 use domain::inventory::service as inventory;
 use domain::DomainResult;
@@ -27,12 +30,25 @@ impl AssistProvider for Deterministic {
     async fn answer(&self, q: &AssistQuery<'_>) -> DomainResult<Answer> {
         match &q.intent {
             Intent::VentasHoy => ventas(q.db, q.tenant, &q.intent, today_range()).await,
+            Intent::VentasAyer => ventas(q.db, q.tenant, &q.intent, yesterday_range()).await,
             Intent::VentasMes => ventas(q.db, q.tenant, &q.intent, month_range()).await,
-            Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent).await,
+            Intent::VentasMesPasado => ventas(q.db, q.tenant, &q.intent, last_month_range()).await,
+            Intent::ComparativaDia => {
+                comparativa(q.db, q.tenant, &q.intent, today_range(), yesterday_range()).await
+            }
+            Intent::ComparativaMes => {
+                comparativa(q.db, q.tenant, &q.intent, month_range(), last_month_range()).await
+            }
+            Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &q.intent).await,
+            Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent, 30).await,
+            Intent::PorVencerSemana => por_vencer(q.db, q.tenant, &q.intent, 7).await,
             Intent::StockProducto(term) => stock_producto(q.db, q.tenant, &q.intent, term).await,
             Intent::CajaActual => caja_actual(q.db, q.tenant, &q.intent).await,
             Intent::TopProductos => top_productos(q.db, q.tenant, &q.intent).await,
+            Intent::ClientesTop => clientes_top(q.db, q.tenant, &q.intent).await,
             Intent::MargenMes => margen_mes(q.db, q.tenant, &q.intent).await,
+            Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &q.intent, term).await,
+            Intent::GastosMes => gastos_mes(q.db, q.tenant, &q.intent).await,
             Intent::StockBajo => stock_bajo(q.db, q.tenant, &q.intent).await,
             Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &q.intent).await,
             Intent::Ayuda => Ok(ayuda(&q.intent)),
@@ -58,16 +74,22 @@ async fn ventas(
         cash += r.cash;
         card += r.card;
     }
-    let periodo = if matches!(intent, Intent::VentasMes) {
-        "este mes"
-    } else {
-        "hoy"
+    let (periodo, past) = match intent {
+        Intent::VentasMes => ("este mes", false),
+        Intent::VentasMesPasado => ("el mes pasado", true),
+        Intent::VentasAyer => ("ayer", true),
+        _ => ("hoy", false),
     };
     let text = if orders == 0 {
-        format!("No registras ventas {periodo} todavía.")
+        if past {
+            format!("No registraste ventas {periodo}.")
+        } else {
+            format!("No registras ventas {periodo} todavía.")
+        }
     } else {
+        let verb = if past { "tuviste" } else { "llevas" };
         format!(
-            "{periodo} llevas {orders} {} por {} (efectivo {}, tarjeta {}).",
+            "{periodo} {verb} {orders} {} por {} (efectivo {}, tarjeta {}).",
             plural(orders, "venta", "ventas"),
             clp(rev),
             clp(cash),
@@ -84,12 +106,17 @@ async fn ventas(
     )
 }
 
-async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
-    let rows = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(30) }).await?;
+async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> DomainResult<Answer> {
+    let rows = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(days) }).await?;
+    let ventana = if days == 7 {
+        "esta semana".to_string()
+    } else {
+        format!("los próximos {days} días")
+    };
     if rows.is_empty() {
         return Ok(
-            Answer::new(intent, "Nada por vencer en los próximos 30 días. 👍")
-                .with_data(serde_json::json!({ "count": 0 })),
+            Answer::new(intent, format!("Nada por vencer en {ventana}. 👍"))
+                .with_data(serde_json::json!({ "count": 0, "days": days })),
         );
     }
     let expired = rows.iter().filter(|r| r.expired).count();
@@ -122,15 +149,17 @@ async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
         String::new()
     };
     let text = format!(
-        "Tienes {} {} por vencer en 30 días: {}.{}",
+        "Tienes {} {} por vencer en {}: {}.{}",
         rows.len(),
         plural(rows.len() as i64, "lote", "lotes"),
+        ventana,
         detail.join(", "),
         alerta,
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "count": rows.len(),
         "expired": expired,
+        "days": days,
     })))
 }
 
@@ -339,11 +368,250 @@ async fn resumen_inventario(db: &Db, tenant: &Thing, intent: &Intent) -> DomainR
     })))
 }
 
+/// Sum the daily-sales rollup over `range` into `(orders, revenue, cash, card)`.
+async fn sum_sales(
+    db: &Db,
+    tenant: &Thing,
+    range: SalesReportFilters,
+) -> DomainResult<(i64, Decimal, Decimal, Decimal)> {
+    let rows = reports::sales_daily(db, tenant, range).await?;
+    let (mut orders, mut rev, mut cash, mut card) =
+        (0i64, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    for r in &rows {
+        orders += r.orders;
+        rev += r.revenue;
+        cash += r.cash;
+        card += r.card;
+    }
+    Ok((orders, rev, cash, card))
+}
+
+async fn comparativa(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    current: SalesReportFilters,
+    previous: SalesReportFilters,
+) -> DomainResult<Answer> {
+    let (cur_orders, cur_rev, _, _) = sum_sales(db, tenant, current).await?;
+    let (prev_orders, prev_rev, _, _) = sum_sales(db, tenant, previous).await?;
+    let (actual, anterior) = if matches!(intent, Intent::ComparativaMes) {
+        ("este mes", "el mes pasado")
+    } else {
+        ("hoy", "ayer")
+    };
+    let delta = cur_rev - prev_rev;
+    let pct = if prev_rev.is_zero() {
+        None
+    } else {
+        Some((delta / prev_rev * Decimal::from(100)).round_dp(1))
+    };
+    let tendencia = match pct {
+        Some(p) if p > Decimal::ZERO => format!("{} más (+{}%)", clp(delta), p),
+        Some(p) if p < Decimal::ZERO => format!("{} menos ({}%)", clp(delta.abs()), p),
+        Some(_) => "lo mismo (0%)".to_string(),
+        None if cur_rev.is_zero() => "sin datos para comparar".to_string(),
+        None => format!("{} más (no había ventas {anterior})", clp(delta)),
+    };
+    let text = format!(
+        "{} llevas {} en {} {}; {} fueron {} en {} {}. Vas {}.",
+        capitalize(actual),
+        clp(cur_rev),
+        cur_orders,
+        plural(cur_orders, "venta", "ventas"),
+        anterior,
+        clp(prev_rev),
+        prev_orders,
+        plural(prev_orders, "venta", "ventas"),
+        tendencia,
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "current_revenue": cur_rev.to_string(),
+        "current_orders": cur_orders,
+        "previous_revenue": prev_rev.to_string(),
+        "previous_orders": prev_orders,
+        "delta": delta.to_string(),
+        "delta_pct": pct.map(|p| p.to_string()),
+    })))
+}
+
+async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let (orders, rev, cash, card) = sum_sales(db, tenant, month_range()).await?;
+    if orders == 0 {
+        return Ok(Answer::new(
+            intent,
+            "No hay ventas este mes para desglosar por método de pago.",
+        )
+        .with_data(serde_json::json!({ "orders": 0 })));
+    }
+    let share = |part: Decimal| -> Decimal {
+        if rev.is_zero() {
+            Decimal::ZERO
+        } else {
+            (part / rev * Decimal::from(100)).round_dp(1)
+        }
+    };
+    let text = format!(
+        "Este mes: efectivo {} ({}%) y tarjeta {} ({}%), sobre {} en total.",
+        clp(cash),
+        share(cash),
+        clp(card),
+        share(card),
+        clp(rev),
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "revenue": rev.to_string(),
+        "cash": cash.to_string(),
+        "card": card.to_string(),
+        "cash_pct": share(cash).to_string(),
+        "card_pct": share(card).to_string(),
+    })))
+}
+
+async fn clientes_top(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let stats = customers::loyalty_stats(db, tenant).await?;
+    if stats.top_customers.is_empty() {
+        return Ok(Answer::new(
+            intent,
+            "Todavía no tengo un ranking de clientes. Aparecerá cuando registres \
+             ventas asociadas a clientes con puntos de fidelidad.",
+        )
+        .with_data(serde_json::json!({ "count": 0 })));
+    }
+    let listado: Vec<String> = stats
+        .top_customers
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(i, c)| format!("{}. {} ({} pts)", i + 1, c.name, c.points))
+        .collect();
+    let text = format!("Tus mejores clientes: {}.", listado.join("; "));
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": stats.top_customers.len(),
+        "members": stats.members,
+        "top": stats.top_customers.iter().take(5).map(|c| serde_json::json!({
+            "name": c.name,
+            "points": c.points,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+async fn margen_producto(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    term: &str,
+) -> DomainResult<Answer> {
+    let products = catalog::list_products(
+        db,
+        tenant,
+        ProductFilters {
+            search: Some(term.to_string()),
+            category: None,
+            active: None,
+            low_stock: None,
+            limit: Some(1),
+            offset: None,
+        },
+    )
+    .await?;
+    let Some(p) = products.into_iter().next() else {
+        return Ok(Answer::new(
+            intent,
+            format!("No encontré ningún producto que coincida con «{term}»."),
+        ));
+    };
+    let Some(cost) = p.cost_price else {
+        return Ok(Answer::new(
+            intent,
+            format!(
+                "{} se vende a {}, pero no tiene costo registrado, así que no puedo \
+                 calcular el margen. Agrega el costo en el producto.",
+                p.name,
+                clp(p.price)
+            ),
+        )
+        .with_data(serde_json::json!({ "name": p.name, "price": p.price.to_string() })));
+    };
+    let margin = p.price - cost;
+    let pct = if p.price.is_zero() {
+        Decimal::ZERO
+    } else {
+        (margin / p.price * Decimal::from(100)).round_dp(1)
+    };
+    let text = format!(
+        "{}: se vende a {}, cuesta {}; margen unitario {} ({}%).",
+        p.name,
+        clp(p.price),
+        clp(cost),
+        clp(margin),
+        pct,
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "name": p.name,
+        "price": p.price.to_string(),
+        "cost": cost.to_string(),
+        "margin": margin.to_string(),
+        "margin_pct": pct.to_string(),
+    })))
+}
+
+async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let range = month_range();
+    let rows = reports::list_expenses(
+        db,
+        tenant,
+        ExpenseFilters {
+            category: None,
+            payment_method: None,
+            from: range.from,
+            to: range.to,
+            limit: Some(500),
+            offset: None,
+        },
+    )
+    .await?;
+    if rows.is_empty() {
+        return Ok(Answer::new(intent, "No registras gastos este mes.")
+            .with_data(serde_json::json!({ "count": 0, "total": "0" })));
+    }
+    let total: Decimal = rows.iter().map(|e| e.amount).sum();
+    // Aggregate by category, keep the top 3 for the prose.
+    let mut by_cat: std::collections::HashMap<String, Decimal> = std::collections::HashMap::new();
+    for e in &rows {
+        *by_cat.entry(e.category.clone()).or_insert(Decimal::ZERO) += e.amount;
+    }
+    let mut cats: Vec<(String, Decimal)> = by_cat.into_iter().collect();
+    cats.sort_by_key(|(_, v)| std::cmp::Reverse(*v));
+    let detalle: Vec<String> = cats
+        .iter()
+        .take(3)
+        .map(|(c, v)| format!("{c} {}", clp(*v)))
+        .collect();
+    let text = format!(
+        "Este mes llevas {} en gastos ({} {}). Principales: {}.",
+        clp(total),
+        rows.len(),
+        plural(rows.len() as i64, "gasto", "gastos"),
+        detalle.join(", "),
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": rows.len(),
+        "total": total.to_string(),
+        "by_category": cats.iter().map(|(c, v)| serde_json::json!({
+            "category": c,
+            "amount": v.to_string(),
+        })).collect::<Vec<_>>(),
+    })))
+}
+
 fn ayuda(intent: &Intent) -> Answer {
     Answer::new(
         intent,
-        "Puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «¿qué se vence?», \
-         «stock de paracetamol», «¿cuánto hay en caja?», «top productos», \
+        "Puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «ventas de ayer», \
+         «ventas de hoy vs ayer», «ventas del mes pasado», «ventas por método de pago», \
+         «gastos del mes», «mejores clientes», «margen de paracetamol», «¿qué se vence \
+         esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario».",
     )
 }
@@ -367,6 +635,45 @@ fn today_range() -> SalesReportFilters {
         .single()
         .unwrap_or(now);
     let to = from + chrono::Duration::days(1) - chrono::Duration::nanoseconds(1);
+    SalesReportFilters {
+        from: Some(from),
+        to: Some(to),
+    }
+}
+
+/// `[from, to]` covering all of "yesterday" in UTC.
+fn yesterday_range() -> SalesReportFilters {
+    let d = (Utc::now() - chrono::Duration::days(1)).date_naive();
+    let from = Utc
+        .with_ymd_and_hms(d.year(), d.month(), d.day(), 0, 0, 0)
+        .single()
+        .unwrap_or_else(Utc::now);
+    let to = from + chrono::Duration::days(1) - chrono::Duration::nanoseconds(1);
+    SalesReportFilters {
+        from: Some(from),
+        to: Some(to),
+    }
+}
+
+/// `[from, to]` covering the previous calendar month (full month) in UTC.
+fn last_month_range() -> SalesReportFilters {
+    let now = Utc::now();
+    let (year, month) = (now.year(), now.month());
+    let (py, pm) = if month == 1 {
+        (year - 1, 12)
+    } else {
+        (year, month - 1)
+    };
+    let from = Utc
+        .with_ymd_and_hms(py, pm, 1, 0, 0, 0)
+        .single()
+        .unwrap_or(now);
+    // First instant of the current month, minus a nanosecond = end of last month.
+    let this_month_start = Utc
+        .with_ymd_and_hms(year, month, 1, 0, 0, 0)
+        .single()
+        .unwrap_or(now);
+    let to = this_month_start - chrono::Duration::nanoseconds(1);
     SalesReportFilters {
         from: Some(from),
         to: Some(to),

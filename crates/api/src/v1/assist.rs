@@ -23,7 +23,7 @@ use crate::middleware::auth::AuthUser;
 use crate::role::cashier_plus;
 use crate::AppState;
 
-use assist::{Answer, AssistProvider, AssistQuery, Deterministic, Intent};
+use assist::{Answer, AssistConfig, AssistQuery, Intent};
 
 #[derive(Debug, Deserialize)]
 struct AskRequest {
@@ -58,16 +58,17 @@ async fn ask(
     let tenant = tenant_of(&claims)?;
     let intent = assist::parse(question);
 
-    // Gross margin is a paid capability. Degrade (not 402) on the Free tier so
-    // the agent stays friendly: it still tells the owner *how* to unlock it.
-    if matches!(intent, Intent::MargenMes) {
+    // Gross margin (monthly or per-product) is a paid capability. Degrade (not
+    // 402) on the Free tier so the agent stays friendly: it still tells the
+    // owner *how* to unlock it.
+    if matches!(intent, Intent::MargenMes | Intent::MargenProducto(_)) {
         let lic = state.license.load();
         if !license::entitled(&lic, "reports.margins_daily") {
             let answer = Answer::new(
                 &intent,
-                "El margen del mes es parte del plan Pro. Actualiza tu plan para \
-                 ver ganancias y rentabilidad. Mientras tanto puedo darte tus \
-                 ventas: pregúntame «ventas del mes».",
+                "El margen es parte del plan Pro. Actualiza tu plan para ver \
+                 ganancias y rentabilidad. Mientras tanto puedo darte tus ventas: \
+                 pregúntame «ventas del mes».",
             );
             return Ok(Json(answer));
         }
@@ -79,6 +80,11 @@ async fn ask(
         db: db.as_ref(),
         tenant: &tenant,
     };
-    let answer = Deterministic.answer(&query).await?;
+    // Offline-first: `select_provider` returns the deterministic provider unless
+    // the owner opted into an LLM (default OFF, ADR-0016). No network in this
+    // build regardless of config.
+    let answer = assist::select_provider(&AssistConfig::default())
+        .answer(&query)
+        .await?;
     Ok(Json(answer))
 }
