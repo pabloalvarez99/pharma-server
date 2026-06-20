@@ -380,3 +380,344 @@
     transform: none;
   }
 }
+
+/* ===========================================================================
+ * SHARED — produced primitives for the rest of the cashier loop (caja /
+ * devoluciones / clientes). The POS surface above proved the vara; these three
+ * views were still on the plain base chrome, so the loop felt like two products.
+ * Everything here is scoped to one of the three view roots (or a modal mounted
+ * inside one) so nothing leaks into ye/dashboard or the shared styles.css base —
+ * we only *refine* the base: hierarchy, brand accent, focus rings, calm motion,
+ * produced empty/loading/error states. Motion stays in the 150–200ms band and
+ * yields to prefers-reduced-motion at the foot of the file.
+ *
+ * One staggered mount reveal, reused by every list/grid in the three views. The
+ * cashier sees the surface settle once on entry, never on every keystroke. */
+@keyframes rb-loop-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Modals mounted inside the three views share the POS-grade chrome: a brand
+ * panel, brand-tinted inputs with a visible focus ring (keyboard-first), and a
+ * primary confirm that reads as the close of the action. */
+.view-caja .modal,
+.view-devoluciones .modal,
+.view-clientes .modal {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius);
+  box-shadow: var(--rb-shadow);
+}
+.view-caja .modal-title,
+.view-devoluciones .modal-title,
+.view-clientes .modal-title {
+  color: var(--rb-txt);
+}
+.view-caja .modal-field input,
+.view-devoluciones .modal-field input,
+.view-clientes .modal-field input,
+.view-devoluciones .dev-order-row input,
+.view-devoluciones .view-select,
+.view-clientes .view-search input {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  color: var(--rb-txt);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+.view-caja .modal-field input::placeholder,
+.view-devoluciones .modal-field input::placeholder,
+.view-clientes .modal-field input::placeholder,
+.view-clientes .view-search input::placeholder {
+  color: var(--rb-txt-3);
+}
+.view-caja .modal-field input:focus,
+.view-caja .modal-field input:focus-visible,
+.view-devoluciones .modal-field input:focus,
+.view-devoluciones .modal-field input:focus-visible,
+.view-devoluciones .dev-order-row input:focus,
+.view-devoluciones .view-select:focus,
+.view-devoluciones .view-select:focus-visible,
+.view-clientes .modal-field input:focus,
+.view-clientes .modal-field input:focus-visible,
+.view-clientes .view-search input:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  background: var(--rb-surface-2);
+  box-shadow: 0 0 0 4px var(--rb-brand-soft);
+}
+
+/* Ghost + primary buttons in the three views pick up the brand focus ring so a
+ * mouseless operator always sees where the keyboard is. */
+.view-caja .btn-ghost:focus-visible,
+.view-caja .btn-ghost-danger:focus-visible,
+.view-caja .btn-primary:focus-visible,
+.view-devoluciones .btn-ghost:focus-visible,
+.view-devoluciones .btn-primary:focus-visible,
+.view-clientes .btn-ghost:focus-visible,
+.view-clientes .btn-primary:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+
+/* Produced empty / error states across the three views — a calm dashed brand
+ * card instead of bare base text, matching the POS empty cart/picker. */
+.view-caja .empty,
+.view-devoluciones .empty,
+.view-clientes .empty {
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--rb-txt-3);
+  border: 1px dashed var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  background: color-mix(in srgb, var(--rb-surface) 60%, transparent);
+}
+.view-caja .view-error,
+.view-devoluciones .view-error,
+.view-clientes .view-error {
+  background: color-mix(in srgb, var(--rb-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rb-danger) 45%, transparent);
+  color: var(--rb-txt);
+  border-radius: var(--rb-radius-sm);
+}
+.view-caja .table-skel .sk,
+.view-devoluciones .table-skel .sk,
+.view-clientes .table-skel .sk {
+  background: linear-gradient(
+    90deg,
+    var(--rb-surface) 25%,
+    var(--rb-surface-2) 50%,
+    var(--rb-surface) 75%
+  );
+}
+
+/* ===========================================================================
+ * 4. CAJA PRODUCED SURFACE — the turn's open/close/arqueo, raised to the POS
+ *    vara: open-register cards read as objects, the arqueo total + discrepancy
+ *    carry the figure the operator acts on, the empty state invites the first
+ *    open instead of stating a void.
+ * ======================================================================== */
+
+/* empty state: the brand mark + an inviting open CTA (not a dead "sin caja"). */
+.view-caja .caja-empty {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px dashed var(--rb-line);
+  border-radius: var(--rb-radius);
+}
+.view-caja .caja-empty-mark {
+  color: var(--rb-brand);
+  background: var(--rb-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--rb-brand) 40%, var(--rb-line));
+}
+.view-caja .caja-empty h3 {
+  color: var(--rb-txt);
+}
+
+/* one card per open register — a real object: brand raise, hover lift, focus
+ * ring, and a calm mount reveal so the list settles once on entry. */
+.view-caja .caja-card {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius);
+  box-shadow: var(--rb-shadow);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
+  animation: rb-loop-rise 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.view-caja .caja-card:hover {
+  border-color: color-mix(in srgb, var(--rb-brand) 45%, var(--rb-line));
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -20px rgba(0, 0, 0, 0.75);
+}
+.view-caja .caja-card-head strong {
+  color: var(--rb-txt);
+  font-weight: 600;
+}
+.view-caja .caja-card-meta strong {
+  color: var(--rb-txt);
+}
+.view-caja .caja-count {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-txt-3);
+}
+.view-caja .caja-close-one:hover {
+  border-color: color-mix(in srgb, var(--rb-danger) 55%, transparent);
+  color: var(--rb-danger);
+}
+
+/* arqueo preview inside the close modal: brand surface, the expected-cash total
+ * in brand, and the discrepancy badge toned ok/warn/danger off brand tokens. */
+.view-caja .arqueo-preview {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+}
+.view-caja .arqueo-total strong {
+  color: var(--rb-brand);
+}
+.view-caja .arqueo-diff.arqueo-ok {
+  color: var(--rb-brand);
+  border-color: color-mix(in srgb, var(--rb-brand) 40%, transparent);
+  background: var(--rb-brand-soft);
+}
+.view-caja .arqueo-diff.arqueo-warn {
+  color: var(--rb-amber);
+  border-color: color-mix(in srgb, var(--rb-amber) 40%, transparent);
+  background: color-mix(in srgb, var(--rb-amber) 10%, transparent);
+}
+.view-caja .arqueo-diff.arqueo-danger {
+  color: var(--rb-danger);
+  border-color: color-mix(in srgb, var(--rb-danger) 40%, transparent);
+  background: color-mix(in srgb, var(--rb-danger) 10%, transparent);
+}
+
+/* ===========================================================================
+ * 5. DEVOLUCIONES PRODUCED SURFACE — refund over a boleta. The list reads as a
+ *    produced table, the modal's item rows are real pick-rows with a brand
+ *    focus ring, and the derived Total/Parcial badge is a calm hint.
+ * ======================================================================== */
+
+.view-devoluciones .table-card {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius);
+  box-shadow: var(--rb-shadow);
+}
+.view-devoluciones .section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-txt-3);
+}
+.view-devoluciones .data-table tbody tr {
+  transition: background 0.14s ease;
+}
+.view-devoluciones .data-table tbody tr:hover {
+  background: color-mix(in srgb, var(--rb-surface-2) 70%, transparent);
+}
+/* refund pick-rows in the modal: brand surface + a clear focus ring on the qty
+ * input, so the cashier can tab line-to-line and type quantities mouse-free. */
+.view-devoluciones .dev-line {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line-soft);
+  border-radius: var(--rb-radius-sm);
+  padding: 10px 12px;
+  transition: border-color 0.16s ease;
+}
+.view-devoluciones .dev-line:focus-within {
+  border-color: color-mix(in srgb, var(--rb-brand) 45%, var(--rb-line));
+}
+.view-devoluciones .dev-l-qty {
+  background: var(--rb-surface-2);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+  color: var(--rb-txt);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.view-devoluciones .dev-l-qty:focus,
+.view-devoluciones .dev-l-qty:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-devoluciones .dev-tipo-badge {
+  align-self: flex-start;
+}
+.view-devoluciones .dev-restock-note {
+  color: var(--rb-txt-3);
+}
+
+/* ===========================================================================
+ * 6. CLIENTES PRODUCED SURFACE — counter lookup. Result rows become keyboard-
+ *    landable list items with a brand ring, the detail stats read as KPI tiles,
+ *    and the loyalty figures carry the brand accent.
+ * ======================================================================== */
+
+.view-clientes .table-card {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius);
+  box-shadow: var(--rb-shadow);
+}
+.view-clientes .section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rb-txt-3);
+}
+
+/* result rows: a focus-visible brand ring (these are <button>s — Enter selects
+ * natively) + a brand-tinted active row matching the POS picker's selection. */
+.view-clientes .cli-result {
+  border-radius: var(--rb-radius-sm);
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.view-clientes .cli-result:hover {
+  background: color-mix(in srgb, var(--rb-surface-2) 70%, transparent);
+}
+.view-clientes .cli-result:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-clientes .cli-result.active {
+  background: var(--rb-brand-soft);
+  border-color: color-mix(in srgb, var(--rb-brand) 45%, transparent);
+}
+.view-clientes .cli-points {
+  color: var(--rb-brand);
+}
+
+/* detail header + KPI tiles */
+.view-clientes .cli-detail-name {
+  color: var(--rb-txt);
+  font-weight: 600;
+}
+.view-clientes .cli-stat {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-radius-sm);
+}
+.view-clientes .cli-stat strong {
+  color: var(--rb-txt);
+}
+.view-clientes .cli-stat:first-child strong {
+  color: var(--rb-brand);
+}
+
+/* graceful-degrade card (module missing): same calm brand chrome as caja-empty
+ * so a missing customers module reads as a state, never a crash. */
+.view-clientes .cli-missing {
+  background: linear-gradient(180deg, var(--rb-raise), var(--rb-surface));
+  border: 1px dashed var(--rb-line);
+  border-radius: var(--rb-radius);
+}
+.view-clientes .cli-missing .caja-empty-mark {
+  color: var(--rb-info);
+  background: color-mix(in srgb, var(--rb-info) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rb-info) 40%, var(--rb-line));
+}
+
+/* Motion discipline for the three views: the mount reveal + hover lifts live in
+ * the 150–200ms band and fully yield to prefers-reduced-motion (state colour +
+ * focus ring stay; movement stops). */
+@media (prefers-reduced-motion: reduce) {
+  .view-caja .caja-card,
+  .view-caja .caja-card:hover {
+    transition: none;
+    transform: none;
+    animation: none;
+  }
+}
