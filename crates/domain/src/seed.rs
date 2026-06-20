@@ -70,13 +70,6 @@ const DEMO_SALE_PREFIX: &str = "DEMO-SALE-";
 /// Vencimiento (días) de un bien no perecible (retail): lejano a propósito para
 /// que el lote exista por el invariante del ledger pero nunca dispare near-expiry.
 const SHELF_STABLE_DAYS: i64 = 1825; // ~5 años
-/// Stock con que se siembra un *servicio* (rubro belleza/servicios). El servicio
-/// no es un bien físico, pero el server chequea `stock < qty` de forma
-/// incondicional (no hay flag `physical_stock`): para que el servicio se venda
-/// N veces sin "agotarse", se siembra con un stock muy alto que actúa como
-/// proxy de "ilimitado". El invariante del ledger se mantiene igual
-/// (`product.stock == Σ batch == Σ movement`) porque el stock entra por un lote.
-const SERVICE_STOCK: i64 = 9999;
 
 /// Vertical de negocio para elegir el pack de datos demo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,10 +83,10 @@ pub enum SeedVertical {
     /// en near-expiry. Coherente con `featuresForRubro("tienda").lotes = false`.
     Tienda,
     /// Belleza / servicios: el core agnóstico vendiendo un **servicio** (corte,
-    /// manicure, color…), NO un bien físico. Sin lote/vencimiento real: el stock
-    /// entra por un lote con vencimiento lejano y monto alto (`SERVICE_STOCK`)
-    /// que actúa como "ilimitado", porque el server chequea `stock < qty` sin
-    /// distinguir servicio de bien. El invariante del ledger se respeta igual.
+    /// manicure, color…), NO un bien físico. Se siembra con
+    /// `physical_stock = false`, stock 0 y SIN lote: la venta salta el chequeo de
+    /// stock y el plan FEFO (migración 0031), así el servicio se vende N veces sin
+    /// "agotarse" y sin emitir movimientos de inventario.
     Servicios,
 }
 
@@ -887,11 +880,10 @@ fn servicios_suppliers() -> Vec<DemoSupplier> {
 
 /// Pack belleza/servicios: ítems vendibles que son **servicios**, no bienes
 /// físicos (corte, manicure, color…). Sin campos clínicos, precios CLP
-/// plausibles. El stock se siembra muy alto (`SERVICE_STOCK`) como proxy de
-/// "ilimitado": el server chequea `stock < qty` sin distinguir servicio de
-/// bien, así que un stock alto deja que el servicio se venda N veces sin
-/// agotarse. Vencimiento lejano (`SHELF_STABLE_DAYS`) → el lote existe sólo por
-/// el invariante del ledger, nunca cae en near-expiry.
+/// plausibles. Se siembran con `stock = 0` y SIN lote: el seed los marca
+/// `physical_stock = false` (migración 0031), así la venta salta el chequeo de
+/// stock y no toca inventario. `expiry_in_days`/`batch_code` quedan en el
+/// `SeedItem` por uniformidad del struct pero NO se usan (no se crea lote).
 fn servicios_pack() -> Vec<SeedItem> {
     // Helper local: todos los servicios comparten stock/vencimiento/clínica.
     fn svc(
@@ -908,7 +900,9 @@ fn servicios_pack() -> Vec<SeedItem> {
             barcode,
             price,
             cost,
-            stock: SERVICE_STOCK,
+            // Servicio = sin inventario: se siembra con stock 0 y SIN lote (el
+            // seed lo trata como `physical_stock = false`). No hay stock-proxy.
+            stock: 0,
             expiry_in_days: SHELF_STABLE_DAYS,
             batch_code,
             supplier_idx,
@@ -1158,6 +1152,10 @@ pub async fn seed_demo(
     let mut movements_emitted = 0usize;
     let mut catalogued: Vec<(String, i64, usize)> = Vec::new(); // (product_id, cost, supplier_idx)
 
+    // Un vertical de servicios siembra ítems no físicos (`physical_stock =
+    // false`): sin lote, sin movimiento, la venta salta el chequeo de stock.
+    let physical_stock = v != SeedVertical::Servicios;
+
     for item in &pack {
         let product = catalog::create_product(
             db,
@@ -1168,7 +1166,7 @@ pub async fn seed_demo(
                 description: None,
                 price: Decimal::from(item.price),
                 cost_price: Some(Decimal::from(item.cost)),
-                stock: 0, // el stock entra por el lote → emite movimiento
+                stock: 0, // el stock físico entra por el lote → emite movimiento
                 category: None,
                 image_url: None,
                 external_id: Some(demo_external_id(item.name)),
@@ -1188,24 +1186,37 @@ pub async fn seed_demo(
             .map_err(|e| DomainError::Other(anyhow::anyhow!("product id parse: {e}")))?;
         catalog_repo::upsert_barcode(db, tenant, &product_thing, item.barcode).await?;
 
-        let expiry = Utc::now() + Duration::days(item.expiry_in_days);
-        inventory::create_batch(
-            db,
-            tenant,
-            NewBatch {
-                product: product.id.clone(),
-                batch_code: item.batch_code.to_string(),
-                expiry_date: expiry,
-                stock: item.stock,
-                cost: Some(Decimal::from(item.cost)),
-                notes: Some("Lote demo".to_string()),
-            },
-            None,
-        )
-        .await?;
-        batches_created += 1;
-        if item.stock > 0 {
-            movements_emitted += 1;
+        // Servicio = no físico: marcarlo `physical_stock = false` (migración
+        // 0031). `create_product` deja el DEFAULT `true`; este UPDATE lo baja
+        // para los servicios antes de (no) sembrar lote.
+        if !physical_stock {
+            catalog_repo::set_physical_stock(db, tenant, &product_thing, false).await?;
+        }
+
+        // Un servicio (`physical_stock = false`) no tiene inventario: no se crea
+        // lote ni se emite movimiento. Los bienes físicos entran su stock por un
+        // lote (emite `stock_movement`), preservando
+        // `product.stock == Σ batch == Σ movement`.
+        if physical_stock {
+            let expiry = Utc::now() + Duration::days(item.expiry_in_days);
+            inventory::create_batch(
+                db,
+                tenant,
+                NewBatch {
+                    product: product.id.clone(),
+                    batch_code: item.batch_code.to_string(),
+                    expiry_date: expiry,
+                    stock: item.stock,
+                    cost: Some(Decimal::from(item.cost)),
+                    notes: Some("Lote demo".to_string()),
+                },
+                None,
+            )
+            .await?;
+            batches_created += 1;
+            if item.stock > 0 {
+                movements_emitted += 1;
+            }
         }
 
         catalogued.push((product.id, item.cost, item.supplier_idx));
@@ -1481,26 +1492,19 @@ mod tests {
     }
 
     #[test]
-    fn servicios_pack_is_service_no_clinical_high_stock() {
+    fn servicios_pack_is_service_no_clinical_no_stock() {
         let pack = servicios_pack();
         assert!(pack.len() >= 10, "catálogo de servicios creíble (≥10)");
         for item in &pack {
             assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
             assert!(item.active_ingredient.is_none());
-            // Servicio = proxy de stock ilimitado: stock alto + no perecible.
+            // Servicio honesto: sin inventario → stock 0 (sin stock-proxy). El
+            // seed lo siembra `physical_stock = false`, sin lote: la venta salta
+            // el chequeo de stock (migración 0031).
             assert_eq!(
-                item.stock, SERVICE_STOCK,
-                "{} debe tener stock de servicio (proxy ilimitado)",
+                item.stock, 0,
+                "{} es servicio: stock 0, sin proxy de inventario",
                 item.name
-            );
-            assert_eq!(
-                item.expiry_in_days, SHELF_STABLE_DAYS,
-                "{} no es perecible",
-                item.name
-            );
-            assert!(
-                !item.batch_code.is_empty(),
-                "lote por invariante del ledger"
             );
         }
     }

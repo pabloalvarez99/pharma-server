@@ -49,6 +49,8 @@ struct ProductRow {
     price: Decimal,
     cost_price: Option<Decimal>,
     stock: i64,
+    #[serde(default = "default_true")]
+    physical_stock: bool,
     category: Option<Thing>,
     image_url: Option<String>,
     active: bool,
@@ -73,6 +75,7 @@ impl From<ProductRow> for ProductDto {
             price: r.price,
             cost_price: r.cost_price,
             stock: r.stock,
+            physical_stock: r.physical_stock,
             category: r.category.map(|c| c.to_string()),
             image_url: r.image_url,
             active: r.active,
@@ -90,6 +93,12 @@ impl From<ProductRow> for ProductDto {
 }
 
 type Db = surrealdb::Surreal<surrealdb::engine::local::Db>;
+
+/// Serde fallback for `ProductRow.physical_stock` so rows persisted before
+/// migration 0031 (or any select missing the column) decode as físico.
+fn default_true() -> bool {
+    true
+}
 
 /// `rust_decimal` (with `serde-with-str`) serializes as a JSON string, which
 /// the SurrealQL `decimal` schema rejects on bind. Convert to a native
@@ -310,6 +319,25 @@ pub async fn create_product(
     row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
+/// Set `product.physical_stock` (tenant-scoped). `false` marks an item as a
+/// service: the sale path then skips its stock check + FEFO plan (migración
+/// 0031). Used by the demo seed for the servicios vertical; `create_product`
+/// leaves the DB DEFAULT (`true`) for every normal SKU.
+pub async fn set_physical_stock(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    physical_stock: bool,
+) -> DomainResult<()> {
+    db.query("UPDATE $p SET physical_stock = $v WHERE tenant = $t")
+        .bind(("p", product.clone()))
+        .bind(("t", tenant.clone()))
+        .bind(("v", physical_stock))
+        .await?
+        .check()?;
+    Ok(())
+}
+
 pub async fn list_products(
     db: &Db,
     tenant: &Thing,
@@ -331,7 +359,9 @@ pub async fn list_products(
         conds.push("active = $active".to_string());
     }
     if f.low_stock.is_some() {
-        conds.push("stock <= $low".to_string());
+        // Servicios (physical_stock = false) no tienen inventario → nunca son
+        // "stock bajo"; se excluyen de la alerta.
+        conds.push("stock <= $low AND physical_stock = true".to_string());
     }
     let limit = f.limit.unwrap_or(100).min(500);
     let offset = f.offset.unwrap_or(0);
@@ -534,8 +564,8 @@ async fn stats_scan(db: &Db, tenant: &Thing, low: i64) -> DomainResult<ProductSt
             "SELECT \
                count() AS total, \
                count(active = true) AS active, \
-               count(stock <= $low AND active = true) AS low_stock, \
-               count(stock <= 0 AND active = true) AS out_of_stock, \
+               count(stock <= $low AND active = true AND physical_stock = true) AS low_stock, \
+               count(stock <= 0 AND active = true AND physical_stock = true) AS out_of_stock, \
                math::sum(stock * (cost_price ?? 0dec)) AS inventory_value \
              FROM product WHERE tenant = $t GROUP ALL",
         )

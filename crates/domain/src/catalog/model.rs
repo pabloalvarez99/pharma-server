@@ -36,6 +36,9 @@ pub struct ProductDto {
     #[schema(value_type = Option<String>)]
     pub cost_price: Option<Decimal>,
     pub stock: i64,
+    /// `false` = servicio (no descuenta inventario, sin lotes). DEFAULT `true`
+    /// en DB (migración 0031): todo producto físico mantiene el chequeo de stock.
+    pub physical_stock: bool,
     pub category: Option<String>,
     pub image_url: Option<String>,
     pub active: bool,

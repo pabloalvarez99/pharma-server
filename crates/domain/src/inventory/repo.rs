@@ -147,6 +147,8 @@ struct ProductFull {
     price: Decimal,
     cost_price: Option<Decimal>,
     stock: i64,
+    #[serde(default = "default_true")]
+    physical_stock: bool,
     category: Option<Thing>,
     image_url: Option<String>,
     active: bool,
@@ -161,6 +163,11 @@ struct ProductFull {
     updated_at: DateTime<Utc>,
 }
 
+/// Serde fallback for rows persisted before migration 0031.
+fn default_true() -> bool {
+    true
+}
+
 impl From<ProductFull> for ProductDto {
     fn from(r: ProductFull) -> Self {
         Self {
@@ -171,6 +178,7 @@ impl From<ProductFull> for ProductDto {
             price: r.price,
             cost_price: r.cost_price,
             stock: r.stock,
+            physical_stock: r.physical_stock,
             category: r.category.map(|c| c.to_string()),
             image_url: r.image_url,
             active: r.active,
