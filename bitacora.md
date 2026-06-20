@@ -3829,3 +3829,38 @@ servicio sin-ventas/con-ventas/unknown; `otro`=producto). GATE cliente:
 `npm run build` ✅ · `npm test` **420/420** (1 flake aislado en
 `rubro-configurator.dom.test.ts` por timeout bajo carga paralela → 14/14 verde en
 aislado con `--testTimeout=20000`; no es de esta lane).
+
+---
+
+## 2026-06-19 · bob · V5 insight accionable + BUG-bob-001 cerrado (lane reports)
+
+**Reportes = insight accionable, no tablas.** Nueva tira "Qué pasa en tu negocio
+hoy" sobre los feeds existentes: cada tarjeta dice qué pasa Y qué hacer, voz de
+dueño. Cards (ordenadas por urgencia): 🛑 $ ya vencido · ⏳ $ en riesgo por vencer
+(≤30 días) · ventas vs día previo (delta) · margen vs día previo (Pro; gated →
+upsell calmo, sin dead-end) · stock parado ($ inmovilizado) · ⭐ producto estrella.
+
+- `client/src/views/reports-insights.ts` (NEW) — math pura testeada: `pctDelta`
+  (sin div/0), `computeExpiryExposure` ($ vencido vs por-vencer, join precio),
+  `computeStalledStock`, `priceMap`, + builders de tarjeta + `buildInsights`
+  (orquesta + ranking de urgencia). Money-at-risk = Σ stock × precio venta
+  (precio desconocido → 0 en valor, sigue en unidades, nunca NaN).
+- `client/src/views/reports.ts` — strip headline + `loadInsights`
+  (Promise.allSettled de los 6 feeds, gated→upsell, fallo total→placeholder
+  calmo). Gating respetado: márgenes Pro, insights core (near-expiry $, top
+  seller) Free.
+- `client/src/styles.css` — tarjetas producidas toneadas por urgencia (vara
+  vitrina rubro-select §9), skeleton shimmer.
+- `client/src/views/reports-insights.test.ts` (NEW) — 23 tests: deltas,
+  money-at-risk, ranking, tono+acción de cada tarjeta, ambos verticales.
+
+**BUG-bob-001 CERRADO (xfail → verde).** Root cause confirmado: fix canónico de
+paul ya vivo — `devoluciones.ts` manda `tipo: DEFAULT_RETURN_MOTIVO` ("venta",
+eje MOTIVO que el schema 0007_sales.surql acepta); total/parcial es solo badge
+presentacional. La harness e2e estaba STALE (mandaba `tipo:"total"` viejo).
+De-xfaileado `flows.mjs` step 8 → asserts `devolución created` + `stock restored`
+(sin debilitar). `/products` agregado a `reports402Matrix` (price source del
+money-at-risk), ambos verticales.
+
+GATE verde: `npm run build` ok · `vitest` **436/436** · `npm run e2e`
+**171 passed / 0 failed / 0 xfail** (BUG-bob-001 ya no existe). Mig libre = 0031.

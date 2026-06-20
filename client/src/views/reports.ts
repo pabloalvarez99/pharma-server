@@ -16,12 +16,16 @@ import {
   inventorySummary,
   marginsDaily,
   stockRotation,
+  nearExpiry,
+  listProducts,
   type DailySalesRow,
   type TopProductRow,
   type DailyMarginRow,
   type StockRotationRow,
+  type NearExpiryRow,
 } from "../api";
 import { clp, num } from "../format";
+import { buildInsights, priceMap, type Insight } from "./reports-insights";
 import {
   kpiCard,
   kpiSkeleton,
@@ -60,6 +64,9 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
           <button id="rep-export-all" class="btn btn-ghost" type="button">Exportar todo (JSON)</button>
         </div>
       </div>
+
+      <h3 class="section-title rb-display">Qué pasa en tu negocio hoy</h3>
+      <div id="rep-insights" class="insight-strip">${insightSkeleton(3)}</div>
 
       <h3 class="section-title rb-display">Ventas de hoy</h3>
       <div id="rep-sales" class="kpi-grid">${kpiSkeleton(4)}</div>
@@ -117,11 +124,81 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
     });
   });
 
+  void loadInsights(host.querySelector<HTMLElement>("#rep-insights")!, serverUrl);
   void loadSales(host.querySelector<HTMLElement>("#rep-sales")!, serverUrl, loaded);
   void loadMargins(host.querySelector<HTMLElement>("#rep-margins")!, serverUrl, loaded);
   void loadTop(host, serverUrl, loaded);
   void loadInventory(host.querySelector<HTMLElement>("#rep-inv")!, serverUrl, loaded);
   void loadRotation(host, serverUrl, loaded);
+}
+
+/** The headline strip: the reasons the dueño opens the app daily. Loads its own
+ *  feeds in parallel (independent of the panels below, mirroring the file's
+ *  "each panel loads alone" design) and renders actionable cards. Margins is
+ *  Pro-gated — a rejection is classified so a Free user gets a soft upsell card,
+ *  never an error. A total feed failure degrades to a calm placeholder, never a
+ *  blank or a crash. */
+async function loadInsights(host: HTMLElement, serverUrl: string): Promise<void> {
+  const [sales, margins, expiry, rotation, top, products] = await Promise.allSettled([
+    salesDaily(serverUrl),
+    marginsDaily(serverUrl),
+    nearExpiry(serverUrl),
+    stockRotation(serverUrl),
+    topProducts(serverUrl, TOP_LIMIT),
+    listProducts(serverUrl),
+  ]);
+
+  const ok = <T>(r: PromiseSettledResult<T>, fallback: T): T =>
+    r.status === "fulfilled" ? r.value : fallback;
+
+  // Margins: a fulfilled value feeds the real delta; a FEATURE_REQUIRES_UPGRADE
+  // rejection flips the soft upsell; any other rejection just drops the card.
+  let marginsData: DailyMarginRow[] | null = null;
+  let marginsGated = false;
+  if (margins.status === "fulfilled") {
+    marginsData = margins.value;
+  } else {
+    marginsGated = classifyMarginError(margins.reason).gated;
+  }
+
+  const insights = buildInsights({
+    sales: ok(sales, [] as DailySalesRow[]),
+    margins: marginsData,
+    marginsGated,
+    nearExpiry: ok(expiry, [] as NearExpiryRow[]),
+    rotation: ok(rotation, [] as StockRotationRow[]),
+    top: ok(top, [] as TopProductRow[]),
+    prices: priceMap(ok(products, [])),
+  });
+
+  if (insights.length === 0) {
+    host.innerHTML = `<p class="empty insight-empty">Aún no hay suficientes datos. Registra ventas y stock para ver tus alertas y oportunidades del día.</p>`;
+    return;
+  }
+  host.innerHTML = insights.map(insightCard).join("");
+}
+
+/** Render one insight as a produced card (icon + headline + context + the
+ *  suggested action), toned by urgency. Aligned with the vitrina bar
+ *  (rubro-select-experience §9): cards, not raw rows. */
+function insightCard(i: Insight): string {
+  return `
+    <article class="insight-card insight-${i.tone}">
+      <div class="insight-icon" aria-hidden="true">${i.icon}</div>
+      <div class="insight-body">
+        <h4 class="insight-title">${escapeHtml(i.title)}</h4>
+        <p class="insight-detail">${escapeHtml(i.detail)}</p>
+        <p class="insight-action">${escapeHtml(i.action)}</p>
+      </div>
+    </article>
+  `;
+}
+
+/** Shimmer placeholders while the insight feeds resolve. */
+function insightSkeleton(n: number): string {
+  return Array.from({ length: n })
+    .map(() => `<div class="insight-card insight-skeleton"><div class="sk-line"></div><div class="sk-line sk-short"></div></div>`)
+    .join("");
 }
 
 async function loadSales(

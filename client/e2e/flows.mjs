@@ -100,42 +100,29 @@ export async function goldenPath({ tenant, email, password, vertical }) {
   }
 
   // 8. devolución (return) — restock the unit -----------------------------
-  //    Mirrors devoluciones.ts verbatim: it derives tipo "total"|"parcial" from
-  //    the quantities and sends that. BUG-bob-001: the devolucion schema
-  //    (migrations/0007_sales.surql:66) asserts tipo IN
-  //    ['venta','cancelacion','garantia','error'], so EVERY refund from the app
-  //    500s (DB_ERROR). xfail until paul/paxoloop reconcile client↔schema; when
-  //    fixed, refund.ok flips true and the restock assertion runs for real.
-  const refund = await c.post(
-    "/pos/returns",
-    {
-      order: orderId,
-      tipo: "total", // what devoluciones.ts deriveTipo() sends
-      motivo: "E2E devolución de prueba",
-      items: [
-        {
-          product: sellable.id,
-          product_name: sellable.name,
-          quantity: 1,
-          unit_price: String(sellable.price),
-          restock: true,
-        },
-      ],
-      metodo_reembolso: "pos_cash",
-    },
-    { expectOk: false },
-  );
-  if (refund.ok) {
-    check(true, "devolución created");
-    const afterRefund = (await c.get(`/products/${encodeURIComponent(sellable.id)}`)).body;
-    eq(afterRefund.stock, stockBefore, "stock restored after restock=true return");
-  } else {
-    knownBug(
-      `BUG-bob-001 devoluciones.ts: tipo "total/parcial" rechazado por schema ` +
-        `0007_sales.surql (tipo IN venta/cancelacion/garantia/error) → ${refund.status} ` +
-        `${refund.body?.error?.code ?? ""}`,
-    );
-  }
+  //    BUG-bob-001 RESOLVED: devoluciones.ts now sends `tipo: DEFAULT_RETURN_MOTIVO`
+  //    ("venta"), the MOTIVO axis the schema (migrations/0007_sales.surql) asserts
+  //    (venta|cancelacion|garantia|error) — the total/parcial scope it used to send
+  //    (which 500'd every refund) is now a presentational badge only. This flow
+  //    mirrors the wire payload verbatim and asserts the refund succeeds + restocks.
+  const refund = await c.post("/pos/returns", {
+    order: orderId,
+    tipo: "venta", // motivo axis — what createRefund sends (DEFAULT_RETURN_MOTIVO)
+    motivo: "E2E devolución de prueba",
+    items: [
+      {
+        product: sellable.id,
+        product_name: sellable.name,
+        quantity: 1,
+        unit_price: String(sellable.price),
+        restock: true,
+      },
+    ],
+    metodo_reembolso: "pos_cash",
+  });
+  check(refund.ok, "devolución created");
+  const afterRefund = (await c.get(`/products/${encodeURIComponent(sellable.id)}`)).body;
+  eq(afterRefund.stock, stockBefore, "stock restored after restock=true return");
 
   // 9. arqueo (close preview) + cierre ------------------------------------
   const arqueo = (await c.get(`/cash-sessions/${sessionId}/arqueo`)).body;
@@ -617,12 +604,17 @@ export async function reports402Matrix({ tenant, email, password }) {
   const c = new Client();
   await c.login(tenant, email, password);
 
-  // Core (Free) reports — 200 + JSON array, both verticals.
+  // Core (Free) reports — 200 + JSON array, both verticals. This is exactly the
+  // feed set the Reportes "insight strip" reads (sales delta, money-at-risk by
+  // expiry, top seller, stalled stock) — `/products` is the price source the
+  // money-at-risk/stalled math joins to value the units. A green row here means
+  // the actionable-insight view never hits a missing/5xx endpoint on Free.
   for (const path of [
     "/reports/sales-daily",
     "/reports/top-products",
     "/reports/stock-rotation",
     "/reports/near-expiry",
+    "/products",
   ]) {
     const r = await c.get(path, { expectOk: false });
     check(r.status === 200 && Array.isArray(r.body), `core ${path} → 200 array`);
