@@ -2,13 +2,23 @@ import { describe, it, expect } from "vitest";
 import {
   answerState,
   errorState,
+  responseState,
+  doneState,
+  isProposal,
   suggestedQuestions,
   renderAskOutput,
   UNKNOWN_INTENT,
   FALLBACK_TEXT,
+  FALLBACK_DONE_TEXT,
   type AskState,
 } from "./askbar";
-import type { AssistAnswer } from "../api";
+import type { AssistAnswer, AgentProposal } from "../api";
+
+const PROPOSAL: AgentProposal = {
+  action: "gasto.crear",
+  resumen: "Vas a registrar un gasto de $5.000 (nafta).",
+  confirm_token: "tok_abc123",
+};
 
 describe("answerState", () => {
   it("flags a recognised intent as understood", () => {
@@ -139,5 +149,91 @@ describe("renderAskOutput", () => {
     const html = renderAskOutput({ kind: "error", question: "q", message: "Sin conexión." }, "otro");
     expect(html).toContain('role="alert"');
     expect(html).toContain("Sin conexión.");
+  });
+});
+
+describe("isProposal", () => {
+  it("is true for an answer carrying a usable confirm_token", () => {
+    const ans: AssistAnswer = { intent: "gasto_crear", text: "…", proposal: PROPOSAL };
+    expect(isProposal(ans)).toBe(true);
+  });
+
+  it("is false for a read-only answer (no proposal)", () => {
+    expect(isProposal({ intent: "ventas_hoy", text: "Hoy vendiste $1." })).toBe(false);
+  });
+
+  it("is false when the token is empty/blank (never confirm nothing)", () => {
+    const ans: AssistAnswer = {
+      intent: "gasto_crear",
+      text: "…",
+      proposal: { ...PROPOSAL, confirm_token: "   " },
+    };
+    expect(isProposal(ans)).toBe(false);
+  });
+});
+
+describe("responseState", () => {
+  it("maps a write proposal to a proposal state (NOT an answer)", () => {
+    const s = responseState("registra un gasto de 5000 nafta", {
+      intent: "gasto_crear",
+      text: "…",
+      proposal: PROPOSAL,
+    });
+    expect(s.kind).toBe("proposal");
+    if (s.kind === "proposal") expect(s.proposal.confirm_token).toBe("tok_abc123");
+  });
+
+  it("routes a normal answer through answerState", () => {
+    const s = responseState("¿cuánto vendí hoy?", { intent: "ventas_hoy", text: "Hoy $10." });
+    expect(s).toMatchObject({ kind: "answer", understood: true, intent: "ventas_hoy" });
+  });
+});
+
+describe("doneState", () => {
+  it("uses the server receipt prose", () => {
+    const s = doneState("q", { text: "Gasto de $5.000 registrado." });
+    expect(s).toEqual({ kind: "done", question: "q", text: "Gasto de $5.000 registrado." });
+  });
+
+  it("falls back to a friendly receipt when prose is empty", () => {
+    const s = doneState("q", { text: "  " });
+    if (s.kind === "done") expect(s.text).toBe(FALLBACK_DONE_TEXT);
+  });
+});
+
+describe("renderAskOutput — action states", () => {
+  it("renders a proposal card with Confirmar/Cancelar and the resumen", () => {
+    const html = renderAskOutput({ kind: "proposal", question: "q", proposal: PROPOSAL }, "otro");
+    expect(html).toContain("data-confirm");
+    expect(html).toContain("data-cancel");
+    expect(html).toContain("Confirmar");
+    expect(html).toContain("Cancelar");
+    expect(html).toContain("Vas a registrar un gasto de $5.000 (nafta).");
+    expect(html).toContain("no hará nada hasta que confirmes");
+  });
+
+  it("never leaks the confirm_token into the markup", () => {
+    const html = renderAskOutput({ kind: "proposal", question: "q", proposal: PROPOSAL }, "otro");
+    expect(html).not.toContain("tok_abc123");
+  });
+
+  it("escapes the resumen (no HTML injection from the agent)", () => {
+    const evil: AgentProposal = { ...PROPOSAL, resumen: "<img src=x onerror=alert(1)>" };
+    const html = renderAskOutput({ kind: "proposal", question: "q", proposal: evil }, "otro");
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("locks the buttons and shows progress while executing", () => {
+    const html = renderAskOutput({ kind: "executing", question: "q", proposal: PROPOSAL }, "otro");
+    expect(html).toContain("Registrando…");
+    expect(html).toContain("disabled");
+  });
+
+  it("renders the done receipt as a success bubble", () => {
+    const html = renderAskOutput({ kind: "done", question: "q", text: "Gasto registrado." }, "otro");
+    expect(html).toContain("agent-bubble-ok");
+    expect(html).toContain("Gasto registrado.");
+    expect(html).toContain('role="status"');
   });
 });
