@@ -14,6 +14,11 @@ import {
   effectiveTender,
   vuelto,
   quickCashAmounts,
+  pctDelta,
+  signedPct,
+  blendedMarginPct,
+  reorderUnits,
+  weekdayEs,
 } from "./format";
 
 // RUT verifier vectors computed by hand from the mód-11 rule (multiply the body
@@ -242,5 +247,74 @@ describe("quickCashAmounts", () => {
   it("empty for a non-positive total", () => {
     expect(quickCashAmounts(0)).toEqual([]);
     expect(quickCashAmounts(-5)).toEqual([]);
+  });
+});
+
+// --- insight math (canonical) ------------------------------------------------
+// These are the single source the Reportes cards AND the future agent both call,
+// so the math is pinned here once — a card and a chat reply can never drift.
+
+describe("pctDelta — canonical trend primitive", () => {
+  it("alza +10.0% / baja -8.0%, 1dp", () => {
+    expect(pctDelta(88000, 80000)).toBe(10);
+    expect(pctDelta(73600, 80000)).toBe(-8);
+  });
+  it("base ≤ 0 → null (no +∞%, no div/0)", () => {
+    expect(pctDelta(5000, 0)).toBeNull();
+    expect(pctDelta(100, -1)).toBeNull();
+  });
+});
+
+describe("signedPct — sign in the string, magnitude in the number", () => {
+  it("renders es-CL comma + a real minus sign (U+2212)", () => {
+    expect(signedPct(10)).toBe("+10,0%");
+    expect(signedPct(-8)).toBe("−8,0%"); // U+2212, not a hyphen
+    expect(signedPct(0)).toBe("+0,0%");
+  });
+  it("the minus is U+2212, never an ASCII hyphen", () => {
+    expect(signedPct(-3.5)).toContain("−");
+    expect(signedPct(-3.5)).not.toContain("-");
+  });
+});
+
+describe("blendedMarginPct — revenue-weighted, not a naïve average", () => {
+  it("a big low-margin day dominates a tiny high-margin day", () => {
+    // $1M @ 30% (margin 300k) + $1k @ 60% (margin 600) → 300600/1001000 ≈ 30.0%
+    expect(blendedMarginPct(300_600, 1_001_000)).toBe(30);
+  });
+  it("Σmargin/Σrevenue rounded to 1dp", () => {
+    expect(blendedMarginPct(36000, 80000)).toBe(45);
+  });
+  it("no revenue → null (no base for a percentage)", () => {
+    expect(blendedMarginPct(100, 0)).toBeNull();
+  });
+});
+
+describe("reorderUnits — cuántas comprar para cubrir el horizonte", () => {
+  it("a mover running low → buy up to the cover target (ceil)", () => {
+    // stock 10 lasts 10 days → rate 1/day; cover 30 → target 30 → buy 20.
+    expect(reorderUnits(10, 10, 30)).toBe(20);
+  });
+  it("rounds the fractional run-rate up (never short the cover)", () => {
+    // stock 5 lasts 20 days → rate 0.25/day; cover 30 → target 7.5 → buy ceil(2.5)=3.
+    expect(reorderUnits(5, 20, 30)).toBe(3);
+  });
+  it("already covers the horizon → 0 (don't over-order)", () => {
+    expect(reorderUnits(40, 30, 30)).toBe(0);
+  });
+  it("not selling / not computable → 0 (that's dead stock, not reorder)", () => {
+    expect(reorderUnits(10, 0, 30)).toBe(0);
+    expect(reorderUnits(0, 10, 30)).toBe(0);
+    expect(reorderUnits(10, 10, 0)).toBe(0);
+  });
+});
+
+describe("weekdayEs — peak-day naming, TZ-stable", () => {
+  it("names the weekday at local midnight (no UTC day-slip)", () => {
+    expect(weekdayEs("2026-06-19")).toBe("viernes");
+    expect(weekdayEs("2026-06-21")).toBe("domingo");
+  });
+  it("unparseable date → empty string (not 'Invalid Date')", () => {
+    expect(weekdayEs("not-a-date")).toBe("");
   });
 });

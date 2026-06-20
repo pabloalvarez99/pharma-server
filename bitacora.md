@@ -3927,3 +3927,39 @@ tocado.
 GATE verde: `npm run build` ok · `vitest` **462/462** · `cargo fmt --check` ok ·
 `cargo clippy -- -D warnings` **0** (target aislado). Branch `feat/agent-client-askbar`
 off `origin/feature/erp-parity@0db051e`.
+
+---
+
+## 2026-06-20 — bob · Wave2: insight más hondo + compliance e2e (ND chain)
+
+Lane `feat/insight-depth-compliance` off `feature/erp-parity` @0db051e.
+
+**Insight más hondo (cliente).** Tres tarjetas accionables nuevas en
+`reports-insights.ts`, cada una dice qué HACER:
+- **Reposición en $** (`computeReorder`/`reorderInsight`, tono warn, core/Free):
+  movers que se agotan bajo el horizonte de cobertura (30d) → cuánto comprar y
+  **de qué** (mayor contribuyente en $). Cada quiebre = venta perdida.
+- **Tendencia de margen MES vs MES** (`computeMarginTrend`/`marginTrendInsight`,
+  Pro): margen ponderado por ingreso del mes actual vs el anterior, en puntos.
+  Sólo con dato Pro real (nunca del stub gated).
+- **Día pico de ventas** (`computePeakDay`/`peakDayInsight`, core/Free): el día
+  de la semana que más factura (≥5 días con venta para evitar ruido) → reforzar
+  personal/caja/stock ahí.
+
+**Capa canónica de insight-math** (`format.ts`, append, testeada): `pctDelta`
+(movido desde reports-insights, re-exportado para no romper imports), `signedPct`
+(signo en el string, U+2212), `blendedMarginPct` (ponderado por ingreso),
+`reorderUnits` (unidades a comprar para cubrir N días), `weekdayEs`/`WEEKDAYS_ES`.
+Fuente ÚNICA de cálculo: Reportes hoy + agente (milton/ye) mañana dan la misma
+respuesta. Sin duplicar math.
+
+**Compliance e2e — cadena DTE completa.** Cerrada la brecha **nota-débito (56)**
+en `dteLifecycleFlow`: CAF 56 (folios 1..10) en `run.mjs`; emite ND referenciando
+la factura (cod_ref 3, recargo) y asienta `<TpoDocRef>33`/`<FolioRef>` al folio de
+la factura — misma contrata de referencia que la NC(61). Ledger ahora exige 1 de
+cada {39,33,61,56}. `libro-ventas` reforzado: `<Caratula>` + `PeriodoTributario`
+== período pedido + `RutEmisorLibro` == emisor (no sólo "es XML"). Cadena viva:
+boleta 39 → factura 33 → NC 61 → **ND 56** → guía 52 (sin-CAF gate).
+
+GATE verde: `npm run build` ok · `vitest` **475/475** · `npm run e2e`
+**178 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin tocar backend/db).

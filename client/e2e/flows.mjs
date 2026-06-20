@@ -556,6 +556,35 @@ export async function dteLifecycleFlow({ tenant, email, password }) {
   eq(xmlInt(ncXml, "TpoDocRef"), 33, "NC reference TpoDocRef points at factura (33)");
   eq(xmlInt(ncXml, "FolioRef"), facturaFolio, "NC reference FolioRef = factura folio");
 
+  // --- 3b. nota-débito(56) referencing the factura — completes the NC/ND chain.
+  //     56 = nota de débito per SII (crates/dte/src/lib.rs); it corrects amounts
+  //     upward (cod_ref 3) and, like the NC, MUST carry a <Referencia> to the doc
+  //     it adjusts (emit.rs gates 56/61 on a reference). Same reference contract:
+  //     the persisted XML points <TpoDocRef>/<FolioRef> at the factura's folio.
+  const nd = await c.post(
+    "/dte/documentos",
+    {
+      tipo: 56,
+      cert_passphrase: DTE_CERT_PASS,
+      receptor,
+      referencias: [
+        {
+          tipo_doc_ref: "33",
+          folio_ref: String(facturaFolio),
+          fecha_ref: today,
+          cod_ref: 3, // corrige montos (recargo)
+          razon_ref: `Recargo factura ${facturaFolio}`,
+        },
+      ],
+      items: [{ nombre: "Recargo factura E2E", cantidad: "1", precio_unitario: "1190" }],
+    },
+    { expectOk: false },
+  );
+  eq(nd.status, 201, "nota-débito 56 emitted referencing the factura");
+  const ndXml = (await c.get(`/dte/${encodeURIComponent(nd.body.id)}/xml`)).body;
+  eq(xmlInt(ndXml, "TpoDocRef"), 33, "ND reference TpoDocRef points at factura (33)");
+  eq(xmlInt(ndXml, "FolioRef"), facturaFolio, "ND reference FolioRef = factura folio");
+
   // --- 5. CAF agotado: the 1-folio factura CAF is now spent → clean 409 ------
   const factura2 = await c.post(
     "/dte/documentos",
@@ -580,18 +609,27 @@ export async function dteLifecycleFlow({ tenant, email, password }) {
   eq(byTipo(39).length, 1, "ledger has exactly the 1 boleta emitted");
   eq(byTipo(33).length, 1, "ledger has exactly the 1 factura emitted");
   eq(byTipo(61).length, 1, "ledger has exactly the 1 nota-crédito emitted");
+  eq(byTipo(56).length, 1, "ledger has exactly the 1 nota-débito emitted");
   const billed = byTipo(39)[0].folio === 1 && byTipo(33)[0].folio === facturaFolio;
   check(billed, "ledger folios match what we emitted (day's book cuadra)");
 
-  // libro-ventas XML: renders cleanly. It aggregates only SII-'accepted' docs;
-  // offline (no SII send/poll) everything stays 'signed', so the book is empty
-  // by design — we assert it's well-formed + no 5xx, not that it lists drafts.
+  // libro-ventas XML: renders cleanly and carries the right shape/period. It
+  // aggregates only SII-'accepted' docs; offline (no SII send/poll) everything
+  // stays 'signed', so the BODY is empty by design — we assert the envelope is
+  // well-formed and stamped for the period we asked, not that it lists drafts.
   const period = today.slice(0, 7); // YYYY-MM
   const libro = await c.get(`/dte/libro-ventas?period=${period}`, { expectOk: false });
   check(libro.status === 200, `libro-ventas renders (status ${libro.status})`);
+  const libroXml = typeof libro.body === "string" ? libro.body : "";
+  check(libroXml.includes("LibroCompraVenta"), "libro-ventas is well-formed XML");
+  check(libroXml.includes("<Caratula"), "libro-ventas carries a <Caratula>");
   check(
-    typeof libro.body === "string" && libro.body.includes("LibroCompraVenta"),
-    "libro-ventas is well-formed XML",
+    libroXml.includes(`<PeriodoTributario>${period}</PeriodoTributario>`),
+    `libro-ventas PeriodoTributario == ${period}`,
+  );
+  check(
+    libroXml.includes(`<RutEmisorLibro>${DTE_EMISOR_RUT}</RutEmisorLibro>`),
+    "libro-ventas RutEmisorLibro == emisor RUT",
   );
 }
 

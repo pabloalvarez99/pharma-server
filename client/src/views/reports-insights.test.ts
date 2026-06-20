@@ -18,6 +18,9 @@ import {
   priceMap,
   computeExpiryExposure,
   computeStalledStock,
+  computeReorder,
+  computeMarginTrend,
+  computePeakDay,
   salesDeltaInsight,
   marginDeltaInsight,
   marginGatedInsight,
@@ -25,6 +28,9 @@ import {
   nearExpiryInsight,
   stalledInsight,
   topSellerInsight,
+  reorderInsight,
+  marginTrendInsight,
+  peakDayInsight,
   buildInsights,
 } from "./reports-insights";
 
@@ -283,5 +289,180 @@ describe("buildInsights — orquestación + ranking de urgencia", () => {
       sales: [], margins: null, marginsGated: false, nearExpiry: [], rotation: [], top: [], prices: new Map(), today: TODAY,
     });
     expect(cards).toEqual([]);
+  });
+});
+
+// --------------------------------------------------------------------------
+// computeReorder — sugerencia de reposición en $ (cuánto comprar y de qué).
+// --------------------------------------------------------------------------
+describe("computeReorder — reposición de los que se venden y se agotan", () => {
+  const prices = new Map<string, number>([["a1", 1000], ["a2", 3000], ["a3", 500]]);
+  const rows: StockRotationRow[] = [
+    // mover por agotarse: stock 5 dura 5 días → rate 1/día; cubrir 30 → comprar 25.
+    { product_id: "a1", product_name: "Mover rápido", qty_sold: 30, current_stock: 5, turnover: "6.0", days_of_inventory: "5" },
+    // mover por agotarse, mayor $: stock 4 dura 8 días → rate 0.5; objetivo 15 → comprar 11; 11×3000=33000.
+    { product_id: "a2", product_name: "Caro por agotarse", qty_sold: 10, current_stock: 4, turnover: "2.5", days_of_inventory: "8" },
+    // ya cubierto (60 días) → no se repone.
+    { product_id: "a3", product_name: "Bien surtido", qty_sold: 8, current_stock: 80, turnover: "0.1", days_of_inventory: "60" },
+    // no vende → no es reposición (es stock parado).
+    { product_id: "z", product_name: "Parado", qty_sold: 0, current_stock: 9, turnover: null, days_of_inventory: null },
+  ];
+
+  it("suma unidades y $ de los movers por agotarse; ignora cubiertos y parados", () => {
+    const n = computeReorder(rows, prices, 30);
+    expect(n.count).toBe(2); // a1 + a2
+    expect(n.units).toBe(25 + 11);
+    expect(n.value).toBe(25 * 1000 + 11 * 3000); // 58000
+    expect(n.coverDays).toBe(30);
+  });
+
+  it("el «de qué» = el mayor contribuyente en $ (a2), no el de más unidades", () => {
+    const n = computeReorder(rows, prices, 30);
+    expect(n.topName).toBe("Caro por agotarse");
+    expect(n.topUnits).toBe(11);
+  });
+
+  it("sin movers por agotarse → todo cero (no inventa una compra)", () => {
+    const n = computeReorder([rows[2], rows[3]], prices, 30);
+    expect(n).toEqual({ count: 0, units: 0, value: 0, topName: "", topUnits: 0, coverDays: 30 });
+  });
+});
+
+// --------------------------------------------------------------------------
+// computeMarginTrend — tendencia del margen MES vs MES (ponderado por ingreso).
+// --------------------------------------------------------------------------
+describe("computeMarginTrend — margen mensual ponderado", () => {
+  const may: DailyMarginRow[] = [
+    { date: "2026-05-10", revenue: "50000", cost: "30000", margin: "20000", margin_pct: "40.0", items_without_cost: 0 },
+    { date: "2026-05-20", revenue: "50000", cost: "30000", margin: "20000", margin_pct: "40.0", items_without_cost: 0 },
+  ];
+  const jun: DailyMarginRow[] = [
+    { date: "2026-06-10", revenue: "60000", cost: "42000", margin: "18000", margin_pct: "30.0", items_without_cost: 0 },
+    { date: "2026-06-15", revenue: "40000", cost: "28000", margin: "12000", margin_pct: "30.0", items_without_cost: 0 },
+  ];
+
+  it("compara el mes más reciente vs el anterior (junio 30% vs mayo 40% → -10 pts)", () => {
+    const t = computeMarginTrend([...may, ...jun])!;
+    expect(t.currMonth).toBe("2026-06");
+    expect(t.prevMonth).toBe("2026-05");
+    expect(t.currPct).toBe(30);
+    expect(t.prevPct).toBe(40);
+    expect(t.pts).toBe(-10);
+  });
+
+  it("un solo mes → null (no hay comparación honesta)", () => {
+    expect(computeMarginTrend(jun)).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------------------
+// computePeakDay — día de la semana con más ventas (cuándo reforzar).
+// --------------------------------------------------------------------------
+describe("computePeakDay — día pico de ventas", () => {
+  const rows: DailySalesRow[] = [
+    { date: "2026-06-15", orders: 5, revenue: "10000", cash: "10000", card: "0" }, // lunes
+    { date: "2026-06-16", orders: 5, revenue: "10000", cash: "10000", card: "0" }, // martes
+    { date: "2026-06-17", orders: 5, revenue: "10000", cash: "10000", card: "0" }, // miércoles
+    { date: "2026-06-18", orders: 5, revenue: "10000", cash: "10000", card: "0" }, // jueves
+    { date: "2026-06-19", orders: 20, revenue: "50000", cash: "50000", card: "0" }, // viernes (pico)
+    { date: "2026-06-20", orders: 5, revenue: "10000", cash: "10000", card: "0" }, // sábado
+  ];
+
+  it("elige el viernes y reporta su participación (50%)", () => {
+    const p = computePeakDay(rows)!;
+    expect(p.weekday).toBe("viernes");
+    expect(p.value).toBe(50000);
+    expect(p.sharePct).toBe(50);
+  });
+
+  it("menos de 5 días con venta → null (un pico de 2 días es ruido)", () => {
+    expect(computePeakDay(rows.slice(0, 4))).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------------------
+// Nuevas tarjetas — copy accionable + omisión cuando no aplica.
+// --------------------------------------------------------------------------
+describe("tarjetas nuevas — reposición, tendencia mensual, día pico", () => {
+  it("reorderInsight: warn, $ en título, nombra qué comprar", () => {
+    const c = reorderInsight({ count: 2, units: 36, value: 58000, topName: "Caro por agotarse", topUnits: 11, coverDays: 30 })!;
+    expect(c.tone).toBe("warn");
+    expect(c.title).toContain("58.000");
+    expect(c.action).toContain("Caro por agotarse");
+    expect(c.action).toContain("11");
+  });
+
+  it("reorderInsight: sin necesidad → null", () => {
+    expect(reorderInsight({ count: 0, units: 0, value: 0, topName: "", topUnits: 0, coverDays: 30 })).toBeNull();
+  });
+
+  it("marginTrendInsight: baja mensual → warn + acción de costos/precios", () => {
+    const c = marginTrendInsight({ currMonth: "2026-06", prevMonth: "2026-05", currPct: 30, prevPct: 40, pts: -10 })!;
+    expect(c.tone).toBe("warn");
+    expect(c.title).toContain("−10,0%"); // signo menos real
+    expect(c.action.toLowerCase()).toContain("costo");
+  });
+
+  it("marginTrendInsight: sin cambio o sin dato → null", () => {
+    expect(marginTrendInsight(null)).toBeNull();
+    expect(marginTrendInsight({ currMonth: "2026-06", prevMonth: "2026-05", currPct: 40, prevPct: 40, pts: 0 })).toBeNull();
+  });
+
+  it("peakDayInsight: good + nombra el día", () => {
+    const c = peakDayInsight({ weekday: "viernes", value: 50000, sharePct: 50 })!;
+    expect(c.tone).toBe("good");
+    expect(c.title.toLowerCase()).toContain("viernes");
+    expect(c.detail).toContain("50");
+  });
+
+  it("peakDayInsight: sin dato → null", () => {
+    expect(peakDayInsight(null)).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------------------
+// buildInsights — las tarjetas nuevas entran sin romper el orden de urgencia.
+// --------------------------------------------------------------------------
+describe("buildInsights — integra reposición/tendencia/día pico", () => {
+  const prices = new Map<string, number>([["m1", 2000]]);
+  // 6 días de ventas → habilita día pico; el viernes es el más fuerte.
+  const sales: DailySalesRow[] = [
+    { date: "2026-06-15", orders: 5, revenue: "10000", cash: "10000", card: "0" },
+    { date: "2026-06-16", orders: 5, revenue: "10000", cash: "10000", card: "0" },
+    { date: "2026-06-17", orders: 5, revenue: "10000", cash: "10000", card: "0" },
+    { date: "2026-06-18", orders: 5, revenue: "10000", cash: "10000", card: "0" },
+    { date: "2026-06-19", orders: 20, revenue: "50000", cash: "50000", card: "0" },
+    { date: "2026-06-20", orders: 6, revenue: "12000", cash: "12000", card: "0" },
+  ];
+  // un mover por agotarse → habilita reposición.
+  const rotation: StockRotationRow[] = [
+    { product_id: "m1", product_name: "Mover", qty_sold: 30, current_stock: 5, turnover: "6.0", days_of_inventory: "5" },
+  ];
+  // dos meses de margen → habilita tendencia mensual.
+  const margins: DailyMarginRow[] = [
+    { date: "2026-05-15", revenue: "100000", cost: "60000", margin: "40000", margin_pct: "40.0", items_without_cost: 0 },
+    { date: "2026-06-15", revenue: "100000", cost: "70000", margin: "30000", margin_pct: "30.0", items_without_cost: 0 },
+  ];
+
+  it("Pro: incluye reorder, margin-trend y peak-day, manteniendo el orden", () => {
+    const cards = buildInsights({
+      sales, margins, marginsGated: false, nearExpiry: [], rotation, top: [], prices, today: "2026-06-20",
+    });
+    const ids = cards.map((c) => c.id);
+    expect(ids).toContain("reorder");
+    expect(ids).toContain("margin-trend");
+    expect(ids).toContain("peak-day");
+    // reposición antes del pulso diario; tendencia mensual tras el margen diario.
+    expect(ids.indexOf("reorder")).toBeLessThan(ids.indexOf("sales-delta"));
+    expect(ids.indexOf("margin-delta")).toBeLessThan(ids.indexOf("margin-trend"));
+  });
+
+  it("Free (margins gated): NO aparece la tendencia mensual (dato Pro)", () => {
+    const ids = buildInsights({
+      sales, margins: null, marginsGated: true, nearExpiry: [], rotation, top: [], prices, today: "2026-06-20",
+    }).map((c) => c.id);
+    expect(ids).not.toContain("margin-trend");
+    expect(ids).toContain("reorder"); // reposición es core (Free)
+    expect(ids).toContain("peak-day"); // día pico es core (Free)
   });
 });

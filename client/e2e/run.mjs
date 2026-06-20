@@ -84,7 +84,8 @@ async function main() {
   // DTE lifecycle prerequisites (server still down — CLI holds the file lock):
   // a digital cert + folio CAFs the live emit path needs. Boleta 39 gets a
   // 2-folio range (advance assertion), factura 33 a single folio (exhaustion
-  // assertion), nota-crédito 61 a wider range; guía 52 gets NONE (sin-CAF case).
+  // assertion), nota-crédito 61 + nota-débito 56 wider ranges (the NC/ND
+  // reference chain); guía 52 gets NONE (sin-CAF case).
   section("dte fixtures (cert + CAF, server down)");
   await cli(
     [
@@ -102,7 +103,8 @@ async function main() {
   const cafs = [
     { tipo: 39, desde: 1, hasta: 2 },
     { tipo: 33, desde: 1, hasta: 1 },
-    { tipo: 61, desde: 1, hasta: 10 },
+    { tipo: 61, desde: 1, hasta: 10 }, // nota-crédito
+    { tipo: 56, desde: 1, hasta: 10 }, // nota-débito (completes the NC/ND chain)
   ];
   for (const spec of cafs) {
     const path = writeCaf(dbPath, { rut: DTE_EMISOR_RUT, ...spec });
