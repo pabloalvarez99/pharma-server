@@ -3695,3 +3695,36 @@ issues) + `test` **700 passed / 4 ignored / 104 suites**. Cliente `build` ✓ +
 
 Único PR no-ola abierto = **#159** (DTE SII cert, BLOQUEADO por creds SII — no
 autónomo). Pendiente founder (no autónomo): cert Authenticode + piloto real.
+
+## 2026-06-19 — marvin V2: rubro SERVICIO real (belleza/servicios) end-to-end
+
+- **qué**: nuevo vertical `Servicios` en el seed pack (`crates/domain/src/seed.rs`).
+  12 servicios vendibles es-CL (corte dama/varón, manicure, pedicure, color,
+  balayage, peinado, depilación, masaje, facial, keratina, cejas) — SIN bien
+  físico. CLI `pharma seed-demo --vertical servicios` (+ sinónimos
+  belleza/peluqueria/salon/estetica/barberia). 3 proveedores de insumos de
+  belleza para que OC demo tengan con quién operar.
+- **por qué**: la vitrina RutBusiness vende 8 rubros, sólo farmacia/minimarket
+  eran reales. Servicio = prueba de fuego del core agnóstico (vender sin
+  stock/lotes físicos).
+- **hallazgo (a paxoloop)**: el server chequea `stock < qty` de forma
+  INCONDICIONAL — no existe flag `physical_stock` (`agent_orders/service.rs:212`
+  + path POS). Approach honesto elegido: el servicio se siembra con stock alto
+  `SERVICE_STOCK=9999` como proxy de "ilimitado" + vencimiento lejano
+  (`SHELF_STABLE_DAYS`); el stock entra por un lote, así el invariante del ledger
+  (`product.stock == Σ batch == Σ movement`) se respeta igual. Si más adelante se
+  quiere modelar servicios "puros" (sin stock), haría falta un flag de producto
+  no-stockeable en el path de venta — fuera de scope de esta lane.
+- **test EN VIVO**: `crates/domain/tests/seed_service_rubro.rs` (kv-mem) — siembra
+  servicios → venta POS de un servicio (qty=2, pos_debit) con éxito → invariante
+  del ledger pre y post-venta (`product.stock == Σ delta`) → boleta 39
+  (`dte::xml::render_unsigned`) produce XML válido para la línea de servicio
+  (TipoDTE 39 + nombre del servicio + MntTotal). `dte` agregado como
+  dev-dependency de `domain` (test-only; domain NO depende de dte en runtime).
+- **archivos**: `crates/domain/src/seed.rs`, `crates/domain/Cargo.toml`
+  (dev-dep dte), `crates/cli/src/main.rs` (doc del flag --vertical),
+  `crates/domain/tests/seed_service_rubro.rs` (nuevo). Sin migración (no hace
+  falta).
+- **GATE**: `cargo fmt --all -- --check` ✓ · `cargo clippy --workspace
+  --all-targets -- -D warnings` ✓ (exit 0) · `cargo test --workspace` ✓
+  (0 failed). Inner: `cargo test -p domain --test seed_service_rubro` 1 passed.
