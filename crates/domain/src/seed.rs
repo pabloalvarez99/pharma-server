@@ -70,6 +70,13 @@ const DEMO_SALE_PREFIX: &str = "DEMO-SALE-";
 /// Vencimiento (días) de un bien no perecible (retail): lejano a propósito para
 /// que el lote exista por el invariante del ledger pero nunca dispare near-expiry.
 const SHELF_STABLE_DAYS: i64 = 1825; // ~5 años
+/// Stock con que se siembra un *servicio* (rubro belleza/servicios). El servicio
+/// no es un bien físico, pero el server chequea `stock < qty` de forma
+/// incondicional (no hay flag `physical_stock`): para que el servicio se venda
+/// N veces sin "agotarse", se siembra con un stock muy alto que actúa como
+/// proxy de "ilimitado". El invariante del ledger se mantiene igual
+/// (`product.stock == Σ batch == Σ movement`) porque el stock entra por un lote.
+const SERVICE_STOCK: i64 = 9999;
 
 /// Vertical de negocio para elegir el pack de datos demo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +89,12 @@ pub enum SeedVertical {
     /// por lote (invariante del ledger) pero con vencimiento lejano → nunca cae
     /// en near-expiry. Coherente con `featuresForRubro("tienda").lotes = false`.
     Tienda,
+    /// Belleza / servicios: el core agnóstico vendiendo un **servicio** (corte,
+    /// manicure, color…), NO un bien físico. Sin lote/vencimiento real: el stock
+    /// entra por un lote con vencimiento lejano y monto alto (`SERVICE_STOCK`)
+    /// que actúa como "ilimitado", porque el server chequea `stock < qty` sin
+    /// distinguir servicio de bien. El invariante del ledger se respeta igual.
+    Servicios,
 }
 
 impl SeedVertical {
@@ -93,8 +106,10 @@ impl SeedVertical {
             "minimarket" | "general" | "almacen" | "almacén" | "market" => Ok(Self::Minimarket),
             "cafe" | "café" | "pasteleria" | "pastelería" | "coffee" => Ok(Self::Cafe),
             "tienda" | "retail" | "store" | "boutique" => Ok(Self::Tienda),
+            "servicios" | "belleza" | "peluqueria" | "peluquería" | "salon" | "salón"
+            | "estetica" | "estética" | "barberia" | "barbería" => Ok(Self::Servicios),
             other => Err(DomainError::Invalid(format!(
-                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda)"
+                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda|servicios)"
             ))),
         }
     }
@@ -105,6 +120,7 @@ impl SeedVertical {
             Self::Minimarket => "minimarket",
             Self::Cafe => "cafe",
             Self::Tienda => "tienda",
+            Self::Servicios => "servicios",
         }
     }
 }
@@ -842,12 +858,184 @@ fn tienda_pack() -> Vec<SeedItem> {
     ]
 }
 
+/// Proveedores de insumos que abastecen el salón de belleza demo. Un salón
+/// igual compra insumos (tinturas, esmaltes, ceras), así que las órdenes de
+/// compra demo siguen teniendo con quién operar aunque el catálogo sea de
+/// servicios.
+fn servicios_suppliers() -> Vec<DemoSupplier> {
+    vec![
+        DemoSupplier {
+            name: "Insumos Profesionales Belleza Ltda.",
+            rut: "76.540.210-8",
+            contact_name: "Ventas Insumos Belleza",
+            contact_phone: "+56 2 2588 7700",
+        },
+        DemoSupplier {
+            name: "Distribuidora Capilar Chile",
+            rut: "77.310.450-2",
+            contact_name: "Pedidos Capilar",
+            contact_phone: "+56 2 2477 3300",
+        },
+        DemoSupplier {
+            name: "Cosmética y Estética del Sur",
+            rut: "78.660.920-K",
+            contact_name: "Reparto del Sur",
+            contact_phone: "+56 9 6543 2109",
+        },
+    ]
+}
+
+/// Pack belleza/servicios: ítems vendibles que son **servicios**, no bienes
+/// físicos (corte, manicure, color…). Sin campos clínicos, precios CLP
+/// plausibles. El stock se siembra muy alto (`SERVICE_STOCK`) como proxy de
+/// "ilimitado": el server chequea `stock < qty` sin distinguir servicio de
+/// bien, así que un stock alto deja que el servicio se venda N veces sin
+/// agotarse. Vencimiento lejano (`SHELF_STABLE_DAYS`) → el lote existe sólo por
+/// el invariante del ledger, nunca cae en near-expiry.
+fn servicios_pack() -> Vec<SeedItem> {
+    // Helper local: todos los servicios comparten stock/vencimiento/clínica.
+    fn svc(
+        name: &'static str,
+        barcode: &'static str,
+        price: i64,
+        cost: i64,
+        batch_code: &'static str,
+        supplier_idx: usize,
+        presentation: &'static str,
+    ) -> SeedItem {
+        SeedItem {
+            name,
+            barcode,
+            price,
+            cost,
+            stock: SERVICE_STOCK,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code,
+            supplier_idx,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some(presentation),
+        }
+    }
+    vec![
+        svc(
+            "Corte de pelo dama",
+            "7805000100010",
+            12990,
+            3000,
+            "SVC-CORTE-D",
+            1,
+            "Servicio · 45 min",
+        ),
+        svc(
+            "Corte de pelo varón",
+            "7805000100027",
+            8990,
+            2000,
+            "SVC-CORTE-V",
+            1,
+            "Servicio · 30 min",
+        ),
+        svc(
+            "Manicure tradicional",
+            "7805000100034",
+            9990,
+            2500,
+            "SVC-MANICURE",
+            0,
+            "Servicio · 40 min",
+        ),
+        svc(
+            "Pedicure spa",
+            "7805000100041",
+            13990,
+            3500,
+            "SVC-PEDICURE",
+            0,
+            "Servicio · 60 min",
+        ),
+        svc(
+            "Color / tintura completa",
+            "7805000100058",
+            29990,
+            9000,
+            "SVC-COLOR",
+            2,
+            "Servicio · 90 min",
+        ),
+        svc(
+            "Mechas balayage",
+            "7805000100065",
+            49990,
+            15000,
+            "SVC-BALAYAGE",
+            2,
+            "Servicio · 150 min",
+        ),
+        svc(
+            "Peinado de evento",
+            "7805000100072",
+            19990,
+            4000,
+            "SVC-PEINADO",
+            1,
+            "Servicio · 60 min",
+        ),
+        svc(
+            "Depilación cera media pierna",
+            "7805000100089",
+            11990,
+            3000,
+            "SVC-DEPILA",
+            0,
+            "Servicio · 30 min",
+        ),
+        svc(
+            "Masaje relajación 60 min",
+            "7805000100096",
+            24990,
+            6000,
+            "SVC-MASAJE",
+            2,
+            "Servicio · 60 min",
+        ),
+        svc(
+            "Tratamiento facial hidratante",
+            "7805000100102",
+            22990,
+            6500,
+            "SVC-FACIAL",
+            0,
+            "Servicio · 50 min",
+        ),
+        svc(
+            "Alisado keratina",
+            "7805000100119",
+            39990,
+            12000,
+            "SVC-KERATINA",
+            1,
+            "Servicio · 120 min",
+        ),
+        svc(
+            "Diseño de cejas",
+            "7805000100126",
+            6990,
+            1500,
+            "SVC-CEJAS",
+            0,
+            "Servicio · 20 min",
+        ),
+    ]
+}
+
 fn pack_for(v: SeedVertical) -> Vec<SeedItem> {
     match v {
         SeedVertical::Pharmacy => pharmacy_pack(),
         SeedVertical::Minimarket => minimarket_pack(),
         SeedVertical::Cafe => cafe_pack(),
         SeedVertical::Tienda => tienda_pack(),
+        SeedVertical::Servicios => servicios_pack(),
     }
 }
 
@@ -857,6 +1045,7 @@ fn suppliers_for(v: SeedVertical) -> Vec<DemoSupplier> {
         SeedVertical::Minimarket => minimarket_suppliers(),
         SeedVertical::Cafe => cafe_suppliers(),
         SeedVertical::Tienda => tienda_suppliers(),
+        SeedVertical::Servicios => servicios_suppliers(),
     }
 }
 
@@ -869,6 +1058,7 @@ fn all_demo_supplier_names() -> Vec<String> {
         .chain(minimarket_suppliers())
         .chain(cafe_suppliers())
         .chain(tienda_suppliers())
+        .chain(servicios_suppliers())
         .map(|s| s.name.to_string())
         .collect()
 }
@@ -1200,11 +1390,12 @@ mod tests {
 
     /// Todos los verticales con pack demo. Fuente única para los tests que
     /// barren los cuatro rubros.
-    const ALL_VERTICALS: [SeedVertical; 4] = [
+    const ALL_VERTICALS: [SeedVertical; 5] = [
         SeedVertical::Pharmacy,
         SeedVertical::Minimarket,
         SeedVertical::Cafe,
         SeedVertical::Tienda,
+        SeedVertical::Servicios,
     ];
 
     #[test]
@@ -1236,6 +1427,18 @@ mod tests {
         assert_eq!(
             SeedVertical::parse("  Retail ").unwrap(),
             SeedVertical::Tienda
+        );
+        assert_eq!(
+            SeedVertical::parse("servicios").unwrap(),
+            SeedVertical::Servicios
+        );
+        assert_eq!(
+            SeedVertical::parse("Belleza").unwrap(),
+            SeedVertical::Servicios
+        );
+        assert_eq!(
+            SeedVertical::parse("  peluquería ").unwrap(),
+            SeedVertical::Servicios
         );
         assert!(SeedVertical::parse("casino").is_err());
     }
@@ -1273,6 +1476,31 @@ mod tests {
                 item.expiry_in_days, SHELF_STABLE_DAYS,
                 "{} debe ser no perecible",
                 item.name
+            );
+        }
+    }
+
+    #[test]
+    fn servicios_pack_is_service_no_clinical_high_stock() {
+        let pack = servicios_pack();
+        assert!(pack.len() >= 10, "catálogo de servicios creíble (≥10)");
+        for item in &pack {
+            assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
+            assert!(item.active_ingredient.is_none());
+            // Servicio = proxy de stock ilimitado: stock alto + no perecible.
+            assert_eq!(
+                item.stock, SERVICE_STOCK,
+                "{} debe tener stock de servicio (proxy ilimitado)",
+                item.name
+            );
+            assert_eq!(
+                item.expiry_in_days, SHELF_STABLE_DAYS,
+                "{} no es perecible",
+                item.name
+            );
+            assert!(
+                !item.batch_code.is_empty(),
+                "lote por invariante del ledger"
             );
         }
     }

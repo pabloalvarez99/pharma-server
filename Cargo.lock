@@ -2112,6 +2112,7 @@ dependencies = [
  "chrono",
  "criterion",
  "db",
+ "dte",
  "futures",
  "pharma-core",
  "proptest",

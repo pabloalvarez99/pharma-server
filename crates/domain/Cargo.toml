@@ -32,6 +32,10 @@ proptest = "1"
 futures = { workspace = true }
 # POS hot-path bench (benches/pos_hotpath.rs). Mirrors crates/api/benches.
 criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+# Render a boleta 39 for a *service* line in the agnostic-core integration test
+# (tests/seed_service_rubro.rs). Test-only — domain never depends on dte at
+# runtime (the API layer owns the DTE wiring).
+dte = { path = "../dte" }
 
 [[bench]]
 name = "pos_hotpath"
