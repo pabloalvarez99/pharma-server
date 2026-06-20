@@ -4157,3 +4157,36 @@ tenant propio `e2e-servicios` (siembra pack `servicios`):
 
 GATE verde: `npm run build` ok · `vitest` **490/490** · `npm run e2e`
 **233 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin nuevas migraciones).
+
+---
+
+## 2026-06-20 · ye · W4 — agente proactivo + onboarding del agente
+
+Branch `feat/agent-proactive-onboarding` (off `feature/erp-parity` @283107a).
+
+El agente deja de esperar a que le pregunten. Dos piezas, **cero backend nuevo**,
+solo endpoints de LECTURA ya existentes:
+
+- **Cards proactivas en el Panel** (`views/agent-proactive.ts`, puro + testeado):
+  componen `cashSessions("open")` + `nearExpiry(7)` + `inventorySummary` en los
+  pocos avisos accionables al abrir — «caja sin cerrar de ayer» (danger),
+  «productos vencidos/por vencer» (danger/warn), «stock agotado/bajo» (danger/warn).
+  Cada card → acción: ir a la vista (`caja`/`inventory`) **o** pasarle la pregunta
+  al ask-bar («¿Qué se está por vencer?»). Multi-rubro: rubro de servicio (sin
+  stock) nunca ve expiry/stock; rubro no-perecible nunca ve expiry (gated por
+  `featuresForRubro`). Montadas en `dashboard.ts` (#dash-alerts), settle por fuente.
+- **Onboarding del agente** (`askbar.ts`): coach-mark de una sola vez «Nuevo:
+  háblale a tu negocio» con ejemplo nativo por rubro, dismissible permanente.
+
+**Anti-dark-pattern (ADR-0005), codificado no solo intencional**: cap `MAX_CARDS=3`,
+cada card dismissible **por día** (un aviso genuinamente nuevo mañana re-aparece;
+silenciamos ruido, no señal), cero en POS hot path. Intro = hint, no modal.
+
+Scope: `views/{dashboard,shell? no,askbar}.ts` + nuevo `views/agent-proactive.ts`
++ `brand.css` (.agent-intro / .agent-alert; sin tocar rutbrand). format.ts solo
+lectura. Sin src-tauri nuevo (reusa assist_ask/assist_act).
+
+GATE: `npm run build` ok (tsc + vite). `vitest` lane file **16/16**; suite global
+**529/530** — el único fallo es `inventory-perf.test.ts` (presupuesto wall-clock
+16ms, 69ms en esta máquina cargada), archivo de otra lane (marvin/bob), **ajeno a
+este cambio** (diff disjunto). → reportado a paxoloop, NO debilitado.

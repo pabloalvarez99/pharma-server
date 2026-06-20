@@ -451,7 +451,56 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
 @keyframes agent-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes agent-blink{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
 
+/* --- One-time agent intro (coach mark) ----------------------------------- */
+.agent-intro{display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;
+  padding:11px 13px;border-radius:var(--rb-radius-sm);
+  border:1px solid color-mix(in srgb,var(--rb-brand) 35%,var(--rb-line));
+  background:var(--rb-brand-soft)}
+.agent-intro-spark{flex:none;font-size:15px;line-height:1.4}
+.agent-intro-txt{margin:0;font-size:13px;line-height:1.5;color:var(--rb-txt-2)}
+.agent-intro-txt strong{color:var(--rb-txt)}
+.agent-intro-txt em{font-style:normal;color:var(--rb-brand);font-weight:500}
+.agent-intro-close{flex:none;display:inline-grid;place-items:center;width:24px;height:24px;
+  cursor:pointer;border:none;background:transparent;color:var(--rb-txt-3);border-radius:6px}
+.agent-intro-close:hover{color:var(--rb-txt);background:var(--rb-line)}
+.agent-intro-close svg{width:14px;height:14px}
+.agent-intro-close:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+/* --- Proactive agent cards (dashboard) ----------------------------------- */
+.agent-alerts{display:flex;flex-direction:column;gap:10px;margin:0 0 18px}
+.agent-alert{display:flex;align-items:center;gap:13px;padding:13px 15px;
+  border-radius:var(--rb-radius);border:1px solid var(--rb-line);
+  background:var(--rb-surface);border-left-width:3px}
+.agent-alert-danger{border-left-color:var(--rb-danger)}
+.agent-alert-warn{border-left-color:var(--rb-amber)}
+.agent-alert-ico{flex:none;display:inline-grid;place-items:center;width:34px;height:34px;
+  border-radius:9px;background:var(--rb-line)}
+.agent-alert-danger .agent-alert-ico{color:var(--rb-danger);
+  background:color-mix(in srgb,var(--rb-danger) 14%,transparent)}
+.agent-alert-warn .agent-alert-ico{color:var(--rb-amber);
+  background:color-mix(in srgb,var(--rb-amber) 16%,transparent)}
+.agent-alert-text{flex:1;min-width:0}
+.agent-alert-text strong{display:block;font-size:14px;color:var(--rb-txt)}
+.agent-alert-text p{margin:2px 0 0;font-size:13px;color:var(--rb-txt-2);line-height:1.4}
+.agent-alert-actions{flex:none;display:flex;align-items:center;gap:8px}
+.agent-alert-btn{cursor:pointer;border:1px solid var(--rb-line);background:var(--rb-bg);
+  color:var(--rb-txt);font-size:13px;font-weight:500;padding:8px 13px;border-radius:var(--rb-radius-sm)}
+.agent-alert-btn:hover{border-color:var(--rb-brand);color:var(--rb-brand)}
+.agent-alert-btn:active{transform:translateY(1px)}
+.agent-alert-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-alert-dismiss{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;
+  cursor:pointer;border:none;background:transparent;color:var(--rb-txt-3);border-radius:7px}
+.agent-alert-dismiss:hover{color:var(--rb-txt);background:var(--rb-line)}
+.agent-alert-dismiss svg{width:15px;height:15px}
+.agent-alert-dismiss:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+@media (prefers-reduced-motion:no-preference){
+  .agent-alert{animation:agent-rise .26s ease both}
+}
+
 @media (max-width:640px){
   .agent-ask-form{flex-direction:column}
   .agent-ask-send{padding:12px 18px}
+  .agent-alert{flex-wrap:wrap}
+  .agent-alert-actions{width:100%;justify-content:flex-end}
 }
