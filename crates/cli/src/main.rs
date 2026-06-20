@@ -105,7 +105,7 @@ enum Cmd {
         #[arg(long)]
         tenant: String,
         /// Vertical del pack: pharmacy (default) | minimarket | cafe | tienda
-        /// | servicios.
+        /// | servicios | restaurant.
         #[arg(long, default_value = "pharmacy")]
         vertical: String,
         /// Si ya hay data demo, regenerarla (wipe + reseed) en vez de fallar.

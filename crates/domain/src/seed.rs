@@ -88,6 +88,15 @@ pub enum SeedVertical {
     /// stock y el plan FEFO (migración 0031), así el servicio se vende N veces sin
     /// "agotarse" y sin emitir movimientos de inventario.
     Servicios,
+    /// Restaurant / comida preparada: rubro **mixto** que prueba el core con
+    /// ambos modos a la vez. Los **insumos** (harina, aceite, carne) son bienes
+    /// físicos con lote + vencimiento (stock entra por lote → emite movimiento).
+    /// Los **platos preparados** (lomo a lo pobre, empanada) se venden SIN
+    /// descontar inventario: se siembran `physical_stock = false`, stock 0 y SIN
+    /// lote (`batch_code` vacío) — como un servicio, pero conviviendo con
+    /// insumos físicos en el mismo catálogo. La señal por-ítem de "es físico" es
+    /// `batch_code` no vacío.
+    Restaurant,
 }
 
 impl SeedVertical {
@@ -101,8 +110,11 @@ impl SeedVertical {
             "tienda" | "retail" | "store" | "boutique" => Ok(Self::Tienda),
             "servicios" | "belleza" | "peluqueria" | "peluquería" | "salon" | "salón"
             | "estetica" | "estética" | "barberia" | "barbería" => Ok(Self::Servicios),
+            "restaurant" | "restaurante" | "restorant" | "comida" | "food" | "cocina" => {
+                Ok(Self::Restaurant)
+            }
             other => Err(DomainError::Invalid(format!(
-                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda|servicios)"
+                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda|servicios|restaurant)"
             ))),
         }
     }
@@ -114,6 +126,7 @@ impl SeedVertical {
             Self::Cafe => "cafe",
             Self::Tienda => "tienda",
             Self::Servicios => "servicios",
+            Self::Restaurant => "restaurant",
         }
     }
 }
@@ -1023,6 +1036,233 @@ fn servicios_pack() -> Vec<SeedItem> {
     ]
 }
 
+/// Proveedores que abastecen el restaurant demo (insumos: abarrotes, carnes,
+/// verduras). Los platos preparados no se compran, pero los insumos sí, así que
+/// Compras igual tiene con quién operar.
+fn restaurant_suppliers() -> Vec<DemoSupplier> {
+    vec![
+        DemoSupplier {
+            name: "Distribuidora de Alimentos del Pacífico",
+            rut: "76.455.330-1",
+            contact_name: "Pedidos Alimentos Pacífico",
+            contact_phone: "+56 2 2630 7700",
+        },
+        DemoSupplier {
+            name: "Frigorífico Carnes del Sur",
+            rut: "77.620.140-5",
+            contact_name: "Ventas Carnes del Sur",
+            contact_phone: "+56 2 2444 9900",
+        },
+        DemoSupplier {
+            name: "Verdulería Mayorista La Vega",
+            rut: "78.330.910-K",
+            contact_name: "Reparto La Vega",
+            contact_phone: "+56 9 8765 1234",
+        },
+    ]
+}
+
+/// Pack restaurant: rubro **mixto**. Dos clases de ítem en un mismo catálogo:
+///
+/// * **Insumos** (harina, aceite, carne, verduras) — bienes físicos: `batch_code`
+///   no vacío → el seed les crea lote + movimiento (stock entra por el ledger),
+///   con vencimientos escalonados (sanos / próximos a vencer / stock bajo).
+/// * **Platos preparados** (lomo a lo pobre, empanada de pino…) — vendibles SIN
+///   inventario físico: `batch_code` vacío, `stock = 0` → el seed los marca
+///   `physical_stock = false`, sin lote y sin movimiento. La venta de un plato
+///   salta el chequeo de stock (igual que un servicio).
+///
+/// La señal por-ítem que el seed usa para decidir "físico vs. vendible-sin-stock"
+/// es `batch_code.is_empty()`.
+fn restaurant_pack() -> Vec<SeedItem> {
+    // Insumo físico (entra stock por lote). Mismos campos que un `SeedItem`
+    // físico; helper local para no repetir `laboratory/active_ingredient: None`.
+    #[allow(clippy::too_many_arguments)]
+    fn insumo(
+        name: &'static str,
+        barcode: &'static str,
+        price: i64,
+        cost: i64,
+        stock: i64,
+        expiry_in_days: i64,
+        batch_code: &'static str,
+        supplier_idx: usize,
+        presentation: &'static str,
+    ) -> SeedItem {
+        SeedItem {
+            name,
+            barcode,
+            price,
+            cost,
+            stock,
+            expiry_in_days,
+            batch_code,
+            supplier_idx,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some(presentation),
+        }
+    }
+    // Plato preparado: vendible sin inventario. `batch_code` vacío = señal de
+    // "no físico"; stock 0 y vencimiento lejano (no se usa, no hay lote).
+    fn plato(
+        name: &'static str,
+        barcode: &'static str,
+        price: i64,
+        cost: i64,
+        supplier_idx: usize,
+        presentation: &'static str,
+    ) -> SeedItem {
+        SeedItem {
+            name,
+            barcode,
+            price,
+            cost,
+            stock: 0,
+            expiry_in_days: SHELF_STABLE_DAYS,
+            batch_code: "", // vacío = no físico (sin lote)
+            supplier_idx,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some(presentation),
+        }
+    }
+    vec![
+        // --- Insumos físicos (con lote + vencimiento) ---
+        insumo(
+            "Harina sin polvos 1kg",
+            "7806000100013",
+            1490,
+            900,
+            40,
+            365,
+            "HARINA-LOTE",
+            0,
+            "1 kg",
+        ),
+        insumo(
+            "Aceite vegetal 5L",
+            "7806000100020",
+            9990,
+            6800,
+            25,
+            365,
+            "ACEITE-LOTE",
+            0,
+            "5 litros",
+        ),
+        insumo(
+            "Carne molida 1kg",
+            "7806000100037",
+            7990,
+            5200,
+            12,
+            5, // próximo a vencer
+            "CARNE-NEAR",
+            1,
+            "1 kg",
+        ),
+        insumo(
+            "Tomate kg",
+            "7806000100044",
+            1290,
+            700,
+            30,
+            6, // perecible próximo a vencer
+            "TOMATE-NEAR",
+            2,
+            "1 kg",
+        ),
+        insumo(
+            "Papa saco 25kg",
+            "7806000100051",
+            18990,
+            12000,
+            8,
+            90,
+            "PAPA-LOTE",
+            2,
+            "Saco 25 kg",
+        ),
+        insumo(
+            "Queso laminado 1kg",
+            "7806000100068",
+            8990,
+            5800,
+            4, // stock bajo
+            20,
+            "QUESO-LOW",
+            1,
+            "1 kg",
+        ),
+        // --- Platos preparados (vendibles sin stock físico) ---
+        plato(
+            "Lomo a lo pobre",
+            "7806000100075",
+            8990,
+            3500,
+            1,
+            "Plato · 1 porción",
+        ),
+        plato(
+            "Churrasco italiano",
+            "7806000100082",
+            6490,
+            2400,
+            1,
+            "Sándwich · 1 unidad",
+        ),
+        plato(
+            "Empanada de pino",
+            "7806000100099",
+            2490,
+            900,
+            0,
+            "Unidad horneada",
+        ),
+        plato(
+            "Completo italiano",
+            "7806000100105",
+            3490,
+            1300,
+            1,
+            "Hot dog · 1 unidad",
+        ),
+        plato(
+            "Cazuela de vacuno",
+            "7806000100112",
+            6990,
+            2800,
+            1,
+            "Plato · 1 porción",
+        ),
+        plato(
+            "Papas fritas familiares",
+            "7806000100129",
+            4990,
+            1600,
+            2,
+            "Porción familiar",
+        ),
+        plato(
+            "Ensalada césar",
+            "7806000100136",
+            5490,
+            2000,
+            2,
+            "Plato · 1 porción",
+        ),
+        plato(
+            "Menú del día",
+            "7806000100143",
+            5990,
+            2600,
+            0,
+            "Almuerzo · entrada+fondo",
+        ),
+    ]
+}
+
 fn pack_for(v: SeedVertical) -> Vec<SeedItem> {
     match v {
         SeedVertical::Pharmacy => pharmacy_pack(),
@@ -1030,6 +1270,7 @@ fn pack_for(v: SeedVertical) -> Vec<SeedItem> {
         SeedVertical::Cafe => cafe_pack(),
         SeedVertical::Tienda => tienda_pack(),
         SeedVertical::Servicios => servicios_pack(),
+        SeedVertical::Restaurant => restaurant_pack(),
     }
 }
 
@@ -1040,6 +1281,7 @@ fn suppliers_for(v: SeedVertical) -> Vec<DemoSupplier> {
         SeedVertical::Cafe => cafe_suppliers(),
         SeedVertical::Tienda => tienda_suppliers(),
         SeedVertical::Servicios => servicios_suppliers(),
+        SeedVertical::Restaurant => restaurant_suppliers(),
     }
 }
 
@@ -1053,6 +1295,7 @@ fn all_demo_supplier_names() -> Vec<String> {
         .chain(cafe_suppliers())
         .chain(tienda_suppliers())
         .chain(servicios_suppliers())
+        .chain(restaurant_suppliers())
         .map(|s| s.name.to_string())
         .collect()
 }
@@ -1152,11 +1395,13 @@ pub async fn seed_demo(
     let mut movements_emitted = 0usize;
     let mut catalogued: Vec<(String, i64, usize)> = Vec::new(); // (product_id, cost, supplier_idx)
 
-    // Un vertical de servicios siembra ítems no físicos (`physical_stock =
-    // false`): sin lote, sin movimiento, la venta salta el chequeo de stock.
-    let physical_stock = v != SeedVertical::Servicios;
-
     for item in &pack {
+        // Físico por-ítem = entra stock por lote. Es no físico si (a) el vertical
+        // es servicios (catálogo entero de servicios), o (b) el ítem no trae lote
+        // (`batch_code` vacío) — p.ej. un plato preparado en un restaurant, que
+        // se vende sin descontar inventario. Restaurant mezcla ambos.
+        let physical_stock = v != SeedVertical::Servicios && !item.batch_code.is_empty();
+
         let product = catalog::create_product(
             db,
             tenant,
@@ -1401,12 +1646,13 @@ mod tests {
 
     /// Todos los verticales con pack demo. Fuente única para los tests que
     /// barren los cuatro rubros.
-    const ALL_VERTICALS: [SeedVertical; 5] = [
+    const ALL_VERTICALS: [SeedVertical; 6] = [
         SeedVertical::Pharmacy,
         SeedVertical::Minimarket,
         SeedVertical::Cafe,
         SeedVertical::Tienda,
         SeedVertical::Servicios,
+        SeedVertical::Restaurant,
     ];
 
     #[test]
@@ -1507,6 +1753,39 @@ mod tests {
                 item.name
             );
         }
+    }
+
+    #[test]
+    fn restaurant_pack_mixes_physical_insumos_and_serviceable_platos() {
+        let pack = restaurant_pack();
+        // Insumo físico = trae lote (`batch_code` no vacío) y stock > 0.
+        let insumos: Vec<&SeedItem> = pack.iter().filter(|i| !i.batch_code.is_empty()).collect();
+        // Plato vendible sin stock = `batch_code` vacío y stock 0.
+        let platos: Vec<&SeedItem> = pack.iter().filter(|i| i.batch_code.is_empty()).collect();
+        assert!(
+            insumos.len() >= 3,
+            "restaurant debe traer insumos físicos (con lote)"
+        );
+        assert!(
+            platos.len() >= 3,
+            "restaurant debe traer platos vendibles sin stock"
+        );
+        for i in &insumos {
+            assert!(i.stock > 0, "{} es insumo físico → stock > 0", i.name);
+            assert!(i.laboratory.is_none() && i.active_ingredient.is_none());
+        }
+        for p in &platos {
+            assert_eq!(
+                p.stock, 0,
+                "{} es plato vendible-sin-stock → stock 0",
+                p.name
+            );
+        }
+        // Al menos un insumo perecible próximo a vencer (≤7 días) para alertas.
+        assert!(
+            insumos.iter().any(|i| i.expiry_in_days <= 7),
+            "restaurant debe tener insumos perecibles próximos a vencer"
+        );
     }
 
     #[test]
