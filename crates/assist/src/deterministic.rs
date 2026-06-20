@@ -696,7 +696,7 @@ fn month_range() -> SalesReportFilters {
 
 /// Format a Decimal as Chilean pesos: rounded to whole pesos with `.` thousands
 /// separators, e.g. `Decimal(1234567) -> "$1.234.567"`.
-fn clp(v: Decimal) -> String {
+pub(crate) fn clp(v: Decimal) -> String {
     let rounded = v.round();
     let neg = rounded.is_sign_negative();
     let digits = rounded.abs().trunc().to_string();

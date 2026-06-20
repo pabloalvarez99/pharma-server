@@ -166,6 +166,54 @@ El seam ya está listo. Cuando el fundador lo decida:
   north-star quedaría sin implementar indefinidamente; el determinístico ya
   entrega el 80% del valor offline.
 
+## Wave 3 — el agente actúa (write actions)
+
+Fecha: 2026-06-20. El agente deja de ser solo read-only: ahora puede **ejecutar
+un set cerrado y seguro de escrituras** sobre el ERP. El ERP se vuelve "las
+manos del agente". Seguridad primero — cuatro candados, no negociables:
+
+1. **Dos pasos PROPOSE → CONFIRM.** Una pregunta de escritura **nunca** ejecuta
+   en el acto. `POST /assist/ask` devuelve una `ActionProposal`
+   `{name, summary, params, confirm_token, expires_at}` y **no escribe nada**.
+   La ejecución ocurre sólo cuando `POST /assist/act` recibe de vuelta ese
+   `confirm_token`. Los `params` quedan **congelados server-side** al proponer y
+   **no viajan** desde el cliente al confirmar → no se pueden manipular entre
+   ambos pasos. El cliente sólo reenvía el token opaco.
+2. **Whitelist CERRADA.** Sólo las variantes del enum `Action` pueden correr; no
+   hay path de escritura arbitraria. v1 = `registrar_gasto` +
+   `crear_orden_compra_draft`. Cada acción **reusa** el servicio de dominio de
+   escritura existente (`expenses::create_expense`,
+   `purchasing::create_purchase_order`); no se reimplementa lógica. La OC se crea
+   en estado `draft` (emitir/recepcionar siguen siendo pasos humanos).
+3. **Token server-issued, de un solo uso, expirable, tenant-bound.** Se consume
+   atómicamente en el primer confirm válido (replay → rechazado), expira a los
+   `TOKEN_TTL_SECS` (180 s), y está atado al tenant que lo propuso (un token de
+   tenant A jamás ejecuta contra tenant B). Store en memoria, proceso-local
+   (`assist::actions::ActionStore`): offline-first, sin DB ni red; un restart
+   bota proposals pendientes (fallo seguro — el dueño vuelve a preguntar).
+4. **Rol admin/owner + auditoría.** Las escrituras requieren `admin`/`owner`:
+   `POST /assist/act` está gated por `role::layer(admin_plus())` → **403** claro
+   para roles menores. `POST /assist/ask` sigue `cashier_plus` (read), pero si un
+   rol menor pide una escritura, no se le emite token — se le responde un nudge
+   amistoso (nunca 403 en `/ask`, que siempre responde algo). Cada ejecución
+   escribe una fila en `audit_log` (`method='ACTION'`, `path='assist/act/<label>'`)
+   — la **tabla existente** (migración `0002`), sin schema nuevo. El middleware
+   HTTP de auditoría además registra el POST `/assist/act` genérico; la fila
+   explícita agrega la granularidad de *qué acción* corrió.
+
+**Contrato FROZEN para el cliente (ye):**
+- `POST /assist/ask` → si es escritura, `Answer` con campo opcional `action`
+  (`{name, summary, params, confirm_token, expires_at}`). Las respuestas de
+  lectura **omiten** `action` (contrato de lectura intacto).
+- `POST /assist/act` body `{confirm_token}` → `{action, text, data}` al ejecutar;
+  `400` con mensaje es-CL si el token es inválido/expirado/reusado; `403` si el
+  rol no alcanza.
+
+**Determinismo:** el parser de acciones (`parse_action`) es keyword-based es-CL,
+conservador — texto ambiguo → `Incomplete` (nudge) o `NotAnAction` (cae al
+agente de lectura); **nunca** adivina una escritura. Mismo trade-off offline que
+el resto del agente.
+
 ## Referencias
 
 - [ADR-0005](./0005-core-gratis-no-locked-in.md) — invariantes offline-first / opt-in.

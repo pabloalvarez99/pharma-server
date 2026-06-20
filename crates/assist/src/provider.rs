@@ -28,6 +28,11 @@ pub struct Answer {
     /// Optional structured payload backing the prose.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+    /// Present only when the question is a WRITE request: a two-step action
+    /// proposal the client confirms via `POST /assist/act` (ADR-0016, Wave 3).
+    /// Omitted for every read answer, so the read contract is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<crate::actions::ActionProposal>,
 }
 
 impl Answer {
@@ -36,12 +41,35 @@ impl Answer {
             intent: intent.label().to_string(),
             text: text.into(),
             data: None,
+            action: None,
         }
     }
 
     pub fn with_data(mut self, data: serde_json::Value) -> Self {
         self.data = Some(data);
         self
+    }
+
+    /// Build a write-action proposal answer. `intent` label is a fixed
+    /// `accion_propuesta`; the structured proposal rides in `action`.
+    pub fn proposal(proposal: crate::actions::ActionProposal) -> Self {
+        Self {
+            intent: "accion_propuesta".to_string(),
+            text: format!("{} Confírmala para que la ejecute.", proposal.summary),
+            data: None,
+            action: Some(proposal),
+        }
+    }
+
+    /// A plain es-CL note carrying no proposal (e.g. missing data, no
+    /// permission, unknown supplier). `intent` label is `accion`.
+    pub fn note(text: impl Into<String>) -> Self {
+        Self {
+            intent: "accion".to_string(),
+            text: text.into(),
+            data: None,
+            action: None,
+        }
     }
 }
 

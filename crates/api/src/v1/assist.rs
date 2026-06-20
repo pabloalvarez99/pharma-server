@@ -20,14 +20,19 @@ use surrealdb::sql::Thing;
 
 use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
-use crate::role::cashier_plus;
+use crate::role::{admin_plus, cashier_plus, RoleSet};
 use crate::AppState;
 
-use assist::{Answer, AssistConfig, AssistQuery, Intent};
+use assist::{Answer, AssistConfig, AssistQuery, BuildOutcome, Intent};
 
 #[derive(Debug, Deserialize)]
 struct AskRequest {
     question: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActRequest {
+    confirm_token: String,
 }
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
@@ -38,10 +43,44 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
     s.db.clone().ok_or_else(ApiError::service_unavailable)
 }
 
+/// Whether the caller may run write actions (admin/owner). Read questions stay
+/// open to `cashier_plus`; only the agent's *hands* are gated.
+fn can_write(claims: &auth::Claims) -> bool {
+    RoleSet::from_claim(&claims.roles).contains_any(RoleSet::ADMIN | RoleSet::OWNER)
+}
+
 pub fn router(state: AppState) -> Router<AppState> {
-    Router::new()
+    // `/ask` is open to counter staff (read questions + proposing actions the
+    // server itself re-gates). `/act` — the actual write — is admin/owner only.
+    let ask = Router::new()
         .route("/api/v1/assist/ask", post(ask))
-        .route_layer(crate::role::layer(state, cashier_plus()))
+        .route_layer(crate::role::layer(state.clone(), cashier_plus()));
+    let act = Router::new()
+        .route("/api/v1/assist/act", post(act))
+        .route_layer(crate::role::layer(state, admin_plus()));
+    ask.merge(act)
+}
+
+/// Execute a previously-proposed action. Admin/owner gated (route layer); the
+/// `confirm_token` is single-use, tenant-bound, and short-lived (ADR-0016).
+async fn act(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<ActRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let token = req.confirm_token.trim();
+    if token.is_empty() {
+        return Err(ApiError::invalid("confirm_token requerido"));
+    }
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    let actor = surrealdb::sql::thing(&claims.sub).ok();
+
+    let action = assist::store()
+        .consume(token, &tenant)
+        .map_err(|e| ApiError::invalid(e.message()))?;
+    let outcome = assist::execute(db.as_ref(), &tenant, actor.as_ref(), action).await?;
+    Ok(Json(outcome))
 }
 
 async fn ask(
@@ -56,6 +95,29 @@ async fn ask(
 
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
+
+    // WRITE-ACTION path first: a write request never reaches the read agent.
+    // The proposal writes NOTHING — execution waits for `POST /assist/act`.
+    let parsed = assist::parse_action(question);
+    if !matches!(parsed, assist::ActionParse::NotAnAction) {
+        // Friendly (not 403) gate at propose time: don't even mint a token for a
+        // user who couldn't execute it. `/act` re-checks via the admin layer.
+        if !can_write(&claims) {
+            return Ok(Json(Answer::note(
+                "Solo un administrador o dueño puede registrar gastos o crear órdenes de \
+                 compra. Pídeselo a quien administra el negocio.",
+            )));
+        }
+        return match assist::build(db.as_ref(), &tenant, parsed).await? {
+            BuildOutcome::NotAnAction => unreachable!("guarded by parse_action above"),
+            BuildOutcome::Reject(msg) => Ok(Json(Answer::note(msg))),
+            BuildOutcome::Ready(action) => {
+                let proposal = assist::store().propose(action, &tenant);
+                Ok(Json(Answer::proposal(proposal)))
+            }
+        };
+    }
+
     let intent = assist::parse(question);
 
     // Gross margin (monthly or per-product) is a paid capability. Degrade (not

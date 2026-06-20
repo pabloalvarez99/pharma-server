@@ -3964,3 +3964,47 @@ boleta 39 → factura 33 → NC 61 → **ND 56** → guía 52 (sin-CAF gate).
 
 GATE verde: `npm run build` ok · `vitest` **475/475** · `npm run e2e`
 **178 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin tocar backend/db).
+
+## 2026-06-20 — Agente ACTÚA: framework de write-actions (ADR-0016 Wave 3, milton)
+
+**Qué.** El agente `assist` deja de ser read-only: ahora ejecuta un set CERRADO
+y seguro de escrituras. Nuevo módulo `crates/assist/src/actions.rs` + endpoint
+`POST /assist/act` + campo opcional `action` en `Answer`.
+
+**Flujo dos pasos PROPOSE → CONFIRM.** `POST /assist/ask` ante una pregunta de
+escritura devuelve `ActionProposal {name, summary, params, confirm_token,
+expires_at}` y **no escribe nada**. `POST /assist/act {confirm_token}` ejecuta.
+Params congelados server-side al proponer; el cliente sólo reenvía el token
+opaco → no se pueden manipular entre pasos.
+
+**Whitelist cerrada (2 acciones v1):** `registrar_gasto`
+(reusa `expenses::create_expense`) + `crear_orden_compra_draft`
+(reusa `purchasing::create_purchase_order`, queda en `draft`). Sin path de
+escritura arbitraria. `parse_action` es keyword-based es-CL, conservador:
+ambiguo → `Incomplete` (nudge) o `NotAnAction` (cae al agente de lectura);
+nunca adivina.
+
+**Token server-issued:** un solo uso (consumo atómico, replay rechazado),
+expira 180s, tenant-bound (token de A jamás ejecuta contra B). Store en memoria
+proceso-local (`ActionStore` + `LazyLock`), offline-first, sin DB/red.
+
+**Gating + auditoría:** `/assist/act` gated `admin_plus` → 403 a cashier/
+pharmacist. `/assist/ask` sigue `cashier_plus` (read) pero a rol menor que pide
+escritura le responde nudge (no token, no 403 — ask siempre responde). Cada
+ejecución escribe fila en `audit_log` (`method='ACTION'`,
+`path='assist/act/<label>'`) — tabla existente (mig 0002), sin schema nuevo.
+
+**Contrato FROZEN para ye:** `Answer.action` opcional (omitido en reads);
+`/assist/act` → `{action, text, data}` | 400 token inválido/expirado/usado | 403.
+
+**Archivos.** `crates/assist/src/actions.rs` (nuevo), `lib.rs`, `provider.rs`
+(`Answer.action` + `proposal`/`note`), `intent.rs`/`deterministic.rs`
+(`normalize`/`clp` → `pub(crate)`), `Cargo.toml` (+uuid),
+`crates/api/src/v1/assist.rs` (act handler + router 2 gates),
+`crates/api/tests/assist_act_gate.rs` (nuevo, 403 matrix),
+`crates/assist/tests/actions.rs` (nuevo, e2e propose/confirm/audit/token),
+`docs/adr/0016-agent-assist-architecture.md` (sección Wave 3).
+
+**GATE.** fmt ok · clippy `-D warnings` ok · `cargo test -p assist` 6 e2e + unit
++ 24 deterministic verdes. Workspace test en verificación. Mig libre = sin tocar
+(0032 es de marvin).
