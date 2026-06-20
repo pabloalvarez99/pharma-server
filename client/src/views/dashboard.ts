@@ -38,6 +38,7 @@ import {
   type Rubro,
 } from "../vertical";
 import { rubroIconSvg } from "../brand/rubro-icons";
+import { mountAgentAskBar } from "./askbar";
 
 const TOP_LIMIT = 5;
 /** Window (days) for the service-rubro "ventas del período" tile. */
@@ -54,6 +55,8 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
         </div>
         <span class="dash-hero-glow" aria-hidden="true"></span>
       </header>
+
+      <div id="dash-agent"></div>
 
       <div id="dash-activate" class="dash-activate" hidden></div>
 
@@ -80,6 +83,12 @@ async function hydrate(host: HTMLElement, serverUrl: string): Promise<void> {
     loadBusinessName(serverUrl),
   ]);
   renderHero(host, rubro, name);
+
+  // The agent ask-bar — the north star made visible (1 RUT = 1 agente). Mounted
+  // right under the hero so "háblale a tu negocio" is the first thing the owner
+  // can do, before the KPI strip. It owns its own loading/error states.
+  const agentHost = host.querySelector<HTMLElement>("#dash-agent");
+  if (agentHost) mountAgentAskBar(agentHost, serverUrl, rubro);
 
   const f = featuresForRubro(rubro);
   await Promise.all([
