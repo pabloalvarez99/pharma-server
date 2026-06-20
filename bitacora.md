@@ -3865,3 +3865,36 @@ money-at-risk), ambos verticales.
 
 GATE verde: `npm run build` ok · `vitest` **436/436** · `npm run e2e`
 **171 passed / 0 failed / 0 xfail** (BUG-bob-001 ya no existe). Mig libre = 0031.
+
+---
+
+## 2026-06-20 · paul · W2 cashier-loop producido (consistencia)
+
+Lane `feat/cashier-loop-produced` off `origin/feature/erp-parity` @0db051e (Wave1
+integrada — POS grado-vitrina ya en base). Apliqué la MISMA vara del POS (rutbrand.css
+§3 + rubro-select-experience §1/§9) al RESTO del loop del cajero para que la
+experiencia se sienta de un solo producto: **caja** (apertura/arqueo/cierre),
+**devoluciones** (reembolso sobre boleta) y **clientes** (CRUD/lookup) seguían en el
+chrome base plano.
+
+Trabajo 100% presentacional (keyboard-first + estados ya estaban en el TS:
+`bindModalKeys` en los 3 modales, empty/loading/error, multi-rubro/es). Append-only a
+`views/rutbrand.css` (§4 caja, §5 devoluciones, §6 clientes + primitivas shared),
+todo scopeado a `.view-caja`/`.view-devoluciones`/`.view-clientes` (o modal montado
+dentro) con tokens `--rb-*` — cero fuga a styles.css/brand.css de otras lanes:
+- **Shared**: modales grado-POS (panel brand, inputs con focus ring brand,
+  keyboard-first), focus-visible ring en ghost/primary, empty/error/skeleton
+  producidos, `@keyframes rb-loop-rise` (reveal de montaje único).
+- **§4 caja**: empty state con marca brand + CTA, caja-card como objeto (raise
+  gradient + hover lift + reveal), arqueo total en brand, discrepancia ok/warn/danger
+  toneada con tokens brand (tones verificados en cashier-loop.ts).
+- **§5 devoluciones**: table-card + section-title producidos, hover de filas, pick-rows
+  del modal con focus-within + ring brand en `dev-l-qty` (tab línea-a-línea sin mouse).
+- **§6 clientes**: cli-result con focus-visible ring (botones → Enter selecciona) +
+  active brand-tint (espeja el picker POS), cli-points/cli-stat en brand, cli-missing
+  con chrome calmo (estado, no crash).
+- Motion en banda 150–200ms, `prefers-reduced-motion` respetado (color/ring quedan,
+  movimiento muere). Cero supuesto farmacia (multi-rubro).
+
+GATE verde: `npm run build` ok (tsc + vite) · `vitest` **447/447**. Sin lógica nueva →
+sin tests nuevos (math del loop ya cubierta por cashier-loop.test.ts, no duplicada).
