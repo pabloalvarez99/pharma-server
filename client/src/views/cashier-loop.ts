@@ -136,6 +136,124 @@ export function payableTotal(cart: CartLine[], global = 0): number {
   return cartTotal(cart) - orderDiscount(cart, global);
 }
 
+// --- POS quick-discount entry (monto OR %) -----------------------------------
+// The per-line and global discount inputs accept a flat peso amount ("1500") OR
+// a percentage of the relevant base ("10%", "10 %", "10,5%"). A percentage is
+// resolved to whole pesos AT ENTRY against the current base (line gross for a
+// line, subtotal for the global) and stored as that peso amount — so it survives
+// later qty edits exactly like a typed monto, and the wire still carries a single
+// peso `discount` (money discipline: never a rate). The result is clamped into
+// `[0, base]` via `clampDiscount`, so a "200%" or a huge monto can't go negative
+// or exceed what it discounts.
+
+/** Parse a discount entry that is either flat pesos ("1.500") or a percentage of
+ *  `base` ("10%"). Returns integer pesos clamped into `[0, base]`; blank/garbage
+ *  → 0. A percentage rounds to the nearest peso (CLP has no minor unit). */
+export function parseDiscountEntry(raw: string, base: number): number {
+  const s = (raw ?? "").trim();
+  if (s === "") return 0;
+  const pct = /^(\d+(?:[.,]\d+)?)\s*%$/.exec(s);
+  if (pct) {
+    const p = Number(pct[1].replace(",", "."));
+    if (!Number.isFinite(p) || p <= 0) return 0;
+    return clampDiscount(Math.round((base * p) / 100), base);
+  }
+  // Flat pesos: keep digits only (drop grouping dots/spaces), mirror parseCash.
+  const n = Number(s.replace(/[^\d]/g, ""));
+  return clampDiscount(Number.isFinite(n) ? n : 0, base);
+}
+
+// --- POS hold / recall (ventas en espera) ------------------------------------
+// A real counter parks a sale ("voy por la otra cosa") and rings up the next
+// customer without losing the cart, then recalls it. We snapshot the whole POS
+// draft (cart lines DEEP-COPIED, the global discount, the picked customer) so a
+// held sale is frozen — mutating the live cart after holding can't bleed into
+// what was parked. Multiple holds coexist; recall pops one back and removes it
+// from the parked list (you can't double-recall the same ticket).
+
+/** The loyalty customer attached to a sale, snapshotted into a hold. */
+export interface HeldCustomer {
+  id: string;
+  name: string;
+  points: number;
+}
+
+/** A parked sale: a frozen snapshot of the POS draft plus an identifier and a
+ *  cashier-facing label ("Espera N" by default). */
+export interface HeldSale {
+  id: string;
+  label: string;
+  lines: CartLine[];
+  globalDiscount: number;
+  customer: HeldCustomer | null;
+  heldAt: number; // epoch ms — for "hace 3 min" / ordering
+}
+
+/** What the view hands `holdSale`: the live draft plus optional overrides
+ *  (`label`, and `id`/`heldAt` for deterministic tests). */
+export interface HoldDraft {
+  lines: CartLine[];
+  globalDiscount?: number;
+  customer?: HeldCustomer | null;
+  label?: string;
+  id?: string;
+  heldAt?: number;
+}
+
+/** Shallow-copy each cart line so a hold is independent of the live cart. Lines
+ *  are flat (no nested objects), so a per-line spread is a full deep copy. */
+export function cloneCart(cart: CartLine[]): CartLine[] {
+  return cart.map((l) => ({ ...l }));
+}
+
+/** Suggest the next "Espera N" label given the parked sales — `N` = (max numeric
+ *  suffix already used) + 1, so recalling #1 and parking again doesn't reuse #1.
+ *  Mirrors `nextDrawerName`'s max-suffix rule. */
+export function nextHoldLabel(held: HeldSale[]): string {
+  let maxN = 0;
+  for (const h of held) {
+    const m = /^Espera (\d+)$/.exec(h.label.trim());
+    if (m) {
+      const n = Number(m[1]);
+      if (n > maxN) maxN = n;
+    }
+  }
+  return `Espera ${maxN + 1}`;
+}
+
+function makeHoldId(): string {
+  return `hold-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Park `draft` as a frozen held sale. Returns the new parked list (the input is
+ *  never mutated) and the created sale. An empty cart is the caller's guard — the
+ *  pure op parks whatever it's given. */
+export function holdSale(held: HeldSale[], draft: HoldDraft): { held: HeldSale[]; sale: HeldSale } {
+  const sale: HeldSale = {
+    id: draft.id ?? makeHoldId(),
+    label: draft.label?.trim() || nextHoldLabel(held),
+    lines: cloneCart(draft.lines),
+    globalDiscount: Math.max(0, Math.trunc(draft.globalDiscount ?? 0)),
+    customer: draft.customer ?? null,
+    heldAt: draft.heldAt ?? Date.now(),
+  };
+  return { held: [...held, sale], sale };
+}
+
+/** Pop the parked sale `id` back: returns the remaining parked list (without it)
+ *  and the recalled sale, or `null` if no such id (already recalled / unknown).
+ *  The recalled `lines` are re-cloned so editing the restored cart can't mutate
+ *  any other reference that still points at the old snapshot. */
+export function recallSale(
+  held: HeldSale[],
+  id: string,
+): { held: HeldSale[]; sale: HeldSale } | null {
+  const found = held.find((h) => h.id === id);
+  if (!found) return null;
+  const sale: HeldSale = { ...found, lines: cloneCart(found.lines) };
+  return { held: held.filter((h) => h.id !== id), sale };
+}
+
 // --- POS split / mixed payment (multi-tender) --------------------------------
 // The server's pos_mixed accepts cash_amount + card_amount and only requires
 // cash + card ≥ total (crate::domain::sales::service). The overpayment falls on

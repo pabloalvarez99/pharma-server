@@ -721,3 +721,92 @@
     animation: none;
   }
 }
+
+/* ── POS quality-of-life (W4): hold/recall + scan-miss feedback ───────────── */
+.view-pos .pos-cart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.view-pos .pos-hold-btn {
+  background: var(--rb-surface);
+  border: 1px solid var(--rb-line);
+  color: var(--rb-txt-2);
+  border-radius: var(--rb-radius-sm);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+}
+.view-pos .pos-hold-btn:hover:not(:disabled),
+.view-pos .pos-hold-btn:focus-visible:not(:disabled) {
+  outline: none;
+  border-color: var(--rb-brand);
+  color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .pos-hold-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.view-pos .pos-held-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.25rem;
+}
+.view-pos .pos-held-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.view-pos .pos-held-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  background: var(--rb-brand-soft);
+  border: 1px solid color-mix(in srgb, var(--rb-brand) 40%, var(--rb-line));
+  color: var(--rb-brand);
+  border-radius: var(--rb-radius-sm);
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  line-height: 1.15;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease;
+}
+.view-pos .pos-held-chip:hover,
+.view-pos .pos-held-chip:focus-visible {
+  outline: none;
+  border-color: var(--rb-brand);
+  box-shadow: 0 0 0 3px var(--rb-brand-soft);
+}
+.view-pos .pos-held-chip:active {
+  transform: translateY(1px);
+}
+.view-pos .pos-held-chip-name {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+.view-pos .pos-held-chip-meta {
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+/* Scanned code with no match: a brief shake on the search box. */
+.view-pos #pos-search.pos-scan-miss {
+  border-color: var(--rb-danger);
+  animation: rb-scan-miss 0.32s ease;
+}
+@keyframes rb-scan-miss {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .view-pos #pos-search.pos-scan-miss { animation: none; }
+}
