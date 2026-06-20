@@ -3768,3 +3768,31 @@ off `origin/feature/erp-parity@5262607`.
 - **GATE**: `cargo fmt --all -- --check` ✓ · `cargo clippy --workspace
   --all-targets -- -D warnings` ✓ (exit 0) · `cargo test --workspace` ✓
   (0 failed). Inner: `cargo test -p domain --test seed_service_rubro` 1 passed.
+
+## 2026-06-19 · paul · V3 POS PRODUCIDO (lane feat/pos-produced-ux)
+
+Elevación del POS a la vara de craft del rubro-select
+(`docs/strategy/rubro-select-experience.md` §1/§9): el POS es donde el cajero vive
+todo el día → misma producción visual + corrección de estados, sin tocar la lógica
+money/stock.
+
+**Rubro de servicio (`physicalStock:false`) vende sin stock** — el "acid test" del
+core agnóstico:
+- `cashier-loop.ts` `addToCart`/`changeQty` reciben `CartOpts { trackStock }`
+  (default `true` = comportamiento físico idéntico, cero regresión). Con
+  `trackStock:false` se sueltan el reject por stock≤0 y el cap de qty.
+- `pos.ts` resuelve el rubro con `loadRubro`+`featuresForRubro` (nunca throwea);
+  para servicios pone `trackStock=false` y repinta el picker. Enter/click agregan
+  sin importar stock; el botón `+` no se deshabilita; `resultCard` muestra
+  "Servicio" (pill) en vez de "Stock 0 · agotado" engañoso. Sin dead-end.
+- Tests: `cashier-loop.test.ts` journey 13 (4 casos: agrega zero-stock, incrementa
+  sin cap, dropa en qty 0, y default-físico sigue rechazando = no regresión).
+
+**Producción visual** (`rutbrand.css` §3, append, todo scoped a `.view-pos`; cero
+choque con ye/dashboard ni `styles.css`/`main.ts`): jerarquía/tipografía de totales,
+accent system `--rb-*` (search/results/cart/methods/quick/charge), focus-visible
+ring en cada superficie que toca el teclado, micro-motion 150–200ms con guard
+`prefers-reduced-motion`, estados empty/error/skeleton producidos, pill de servicio.
+
+`format.ts` sin tocar (solo lectura). Lógica money/stock intacta — pura elevación
+de presentación + 1 parámetro de gating por rubro.

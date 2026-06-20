@@ -36,29 +36,51 @@ export interface Sellable {
   stock: number;
 }
 
-/** Add one unit of `p` to `cart` (in place). Out-of-stock items are rejected;
- *  an existing line increments only while it stays at or below its known stock,
- *  so the cart can never promise more units than the shelf holds. */
-export function addToCart(cart: CartLine[], p: Sellable): void {
-  if (p.stock <= 0) return;
+/** Cart-mutation options.
+ *
+ *  `trackStock` (default `true`) gates the stock guards. A **service rubro**
+ *  (`physicalStock: false` — peluquería, oficios) sells with no inventory: its
+ *  products carry a meaningless `stock` (often 0), so the out-of-stock reject and
+ *  the qty cap would dead-end the sale. Passing `{ trackStock: false }` drops both
+ *  guards so a service line adds and increments freely; the money math is
+ *  untouched. Physical rubros omit it and keep the exact shelf-bound behaviour. */
+export interface CartOpts {
+  trackStock?: boolean;
+}
+
+/** Add one unit of `p` to `cart` (in place). With stock tracking (default),
+ *  out-of-stock items are rejected and an existing line increments only while it
+ *  stays at or below its known stock, so the cart can never promise more units
+ *  than the shelf holds. With `{ trackStock: false }` (service rubro) neither
+ *  guard applies — there is no shelf to bound. */
+export function addToCart(cart: CartLine[], p: Sellable, opts: CartOpts = {}): void {
+  const track = opts.trackStock !== false;
+  if (track && p.stock <= 0) return;
   const existing = cart.find((l) => l.product === p.id);
   if (existing) {
-    if (existing.qty < existing.stock) existing.qty += 1;
+    if (!track || existing.qty < existing.stock) existing.qty += 1;
   } else {
     cart.push({ product: p.id, name: p.name, unit_price: p.price, qty: 1, stock: p.stock });
   }
 }
 
 /** Nudge a line's quantity by `delta` (in place). Hitting 0 (or below) drops the
- *  line; exceeding stock clamps to stock. Returns the resulting cart so callers
- *  can chain, but the mutation is in place to match the view's array identity. */
-export function changeQty(cart: CartLine[], id: string, delta: number): CartLine[] {
+ *  line; exceeding stock clamps to stock UNLESS stock tracking is off (service
+ *  rubro), where qty grows unbounded. Returns the resulting cart so callers can
+ *  chain, but the mutation is in place to match the view's array identity. */
+export function changeQty(
+  cart: CartLine[],
+  id: string,
+  delta: number,
+  opts: CartOpts = {},
+): CartLine[] {
+  const track = opts.trackStock !== false;
   const line = cart.find((l) => l.product === id);
   if (!line) return cart;
   line.qty += delta;
   if (line.qty <= 0) {
     cart.splice(cart.indexOf(line), 1);
-  } else if (line.qty > line.stock) {
+  } else if (track && line.qty > line.stock) {
     line.qty = line.stock;
   }
   return cart;

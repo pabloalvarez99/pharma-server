@@ -399,3 +399,46 @@ describe("journey 11 · pago dividido efectivo + tarjeta (multi-tender)", () => 
     expect(s).toEqual({ ok: true, tendered: 3000, change: 0, short: 0 });
   });
 });
+
+// A service rubro (physicalStock:false — peluquería, oficios) sells with no
+// inventory: products carry a meaningless stock (typically 0). With stock
+// tracking off, the cart must add and increment those lines freely — the agnostic
+// core's acid test (rubro-select-experience §3). Money math is identical.
+const SERVICE: Record<string, Sellable> = {
+  corte: { id: "service:corte", name: "Corte de pelo", price: "8000", stock: 0 },
+  color: { id: "service:color", name: "Coloración", price: "25000", stock: 0 },
+};
+
+describe("journey 13 · service rubro sells with no physical stock", () => {
+  const noStock = { trackStock: false };
+
+  it("adds a zero-stock service line instead of rejecting it", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, SERVICE.corte, noStock);
+    expect(cart).toHaveLength(1);
+    expect(cart[0].qty).toBe(1);
+    expect(cartTotal(cart)).toBe(8000);
+  });
+
+  it("increments a service line past its (meaningless) stock with no cap", () => {
+    const cart: CartLine[] = [];
+    for (let i = 0; i < 4; i++) addToCart(cart, SERVICE.corte, noStock);
+    expect(cart[0].qty).toBe(4); // would have capped at 0 under stock tracking
+    changeQty(cart, SERVICE.corte.id, +3, noStock);
+    expect(cart[0].qty).toBe(7);
+    expect(cartTotal(cart)).toBe(8000 * 7);
+  });
+
+  it("still drops the line at qty 0 (the empty-cart path is unchanged)", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, SERVICE.color, noStock);
+    changeQty(cart, SERVICE.color.id, -1, noStock);
+    expect(cart).toHaveLength(0);
+  });
+
+  it("default (physical rubro) still rejects a zero-stock line — no regression", () => {
+    const cart: CartLine[] = [];
+    addToCart(cart, SERVICE.corte); // no opts → stock tracked → rejected
+    expect(cart).toHaveLength(0);
+  });
+});
