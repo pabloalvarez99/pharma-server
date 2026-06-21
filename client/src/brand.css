@@ -504,3 +504,182 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .agent-alert{flex-wrap:wrap}
   .agent-alert-actions{width:100%;justify-content:flex-end}
 }
+
+/* ============================================================================
+ * Configuración HUB (ye, W5) — side-nav + curated cards over the flat scroll.
+ * Reuses the generic tokens (--bg-N/--line/--text/--muted/--accent/--ok) so it
+ * tracks the theme; the legacy .cfg-list/.cfg-row/.cfg-switch/.field rules in
+ * styles.css still style the controls inside each card. Only the NEW hub
+ * chrome lives here (ye owns .cfg-*). Append-only.
+ * ========================================================================== */
+.cfg-hub .view-head{margin-bottom:14px}
+
+/* search */
+.cfg-search-wrap{margin-bottom:16px}
+.cfg-search{width:100%;max-width:520px}
+.cfg-search-hits{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.cfg-hit-chip{padding:5px 12px;border-radius:var(--radius-pill,999px);
+  border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));
+  background:color-mix(in srgb,var(--accent) 10%,transparent);
+  color:var(--accent);font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:background .12s ease,transform .12s ease}
+.cfg-hit-chip:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);transform:translateY(-1px)}
+.cfg-hit-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cfg-no-hits{font-size:13px}
+
+/* layout: nav rail + panel */
+.cfg-hub-body{display:grid;grid-template-columns:260px 1fr;gap:22px;align-items:start}
+.cfg-nav{display:flex;flex-direction:column;gap:4px;position:sticky;top:8px}
+.cfg-nav-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  padding:11px 13px;border-radius:var(--radius-card,14px);border:1px solid transparent;
+  background:transparent;color:var(--text);cursor:pointer;
+  transition:background .12s ease,border-color .12s ease}
+.cfg-nav-item:hover{background:var(--bg-1)}
+.cfg-nav-item.active{background:color-mix(in srgb,var(--accent) 12%,var(--bg-1));
+  border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.cfg-nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cfg-nav-icon{flex:0 0 auto;width:20px;height:20px;color:var(--muted)}
+.cfg-nav-item.active .cfg-nav-icon{color:var(--accent)}
+.cfg-nav-icon svg{width:20px;height:20px;display:block}
+.cfg-nav-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.cfg-nav-label{font-size:14px;font-weight:600;line-height:1.2}
+.cfg-nav-blurb{font-size:11.5px;color:var(--muted);line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfg-nav-soon{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--muted);padding:2px 7px;border-radius:var(--radius-pill,999px);
+  border:1px solid var(--line)}
+
+/* panel + section heads + cards */
+.cfg-panel{min-width:0;display:flex;flex-direction:column;gap:18px}
+.cfg-sec-head{display:flex;align-items:flex-start;gap:13px}
+.cfg-sec-icon{flex:0 0 auto;width:30px;height:30px;color:var(--accent);
+  display:grid;place-items:center;border-radius:11px;
+  background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line))}
+.cfg-sec-icon svg{width:18px;height:18px}
+.cfg-sec-title{margin:0;font-size:18px;letter-spacing:-.3px}
+.cfg-card{border:1px solid var(--line);border-radius:var(--radius-card,16px);
+  background:var(--bg-1);padding:18px 20px}
+.cfg-card-title{margin:0 0 6px;font-size:14.5px;font-weight:650;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.cfg-card-soon{border-style:dashed;background:transparent}
+.cfg-soon-chip{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);padding:2px 9px;border-radius:var(--radius-pill,999px);border:1px dashed var(--line)}
+
+/* pending save state (the new transition the state machine adds) */
+.cfg-status-pending{color:var(--muted)}
+
+/* CAF folios summary */
+.cfg-caf-summary{display:flex;align-items:baseline;gap:9px;margin-bottom:8px}
+.cfg-caf-big{font-size:30px;font-weight:750;color:var(--accent);letter-spacing:-.5px}
+.cfg-caf-big.low{color:var(--rb-amber,#f5b53d)}
+.cfg-caf-list{margin:0;padding-left:18px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+
+/* licencia */
+.cfg-license-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.cfg-license-status{font-size:14px;font-weight:600;color:var(--text)}
+.cfg-deflist{display:flex;gap:34px;margin:0 0 16px}
+.cfg-deflist dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.cfg-deflist dd{margin:2px 0 0;font-size:15px;font-weight:600;color:var(--text)}
+.cfg-feature-list{margin:6px 0 14px;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.cfg-feature-list li{position:relative;padding-left:22px;font-size:13.5px;color:var(--text)}
+.cfg-feature-list li::before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700}
+
+@media (max-width:820px){
+  .cfg-hub-body{grid-template-columns:1fr}
+  .cfg-nav{position:static;flex-direction:row;flex-wrap:wrap}
+  .cfg-nav-item{width:auto;flex:1 1 auto}
+  .cfg-nav-blurb{display:none}
+}
+||||||| ae17e6f
+
+/* ── Command palette (Ctrl/Cmd+K) + cheatsheet (?) ─────────────────────────
+ * Lane feat/command-palette (paul). Keyboard-first accelerator: search + run
+ * any view/action and reach the agent, fully mouseless. Append-only; uses the
+ * tokens above. Logic in views/command-palette.ts + keymap.ts; mounted once
+ * from shell.ts (installCommandPalette). */
+.cmdk-backdrop{position:fixed;inset:0;z-index:1000;display:grid;
+  justify-items:center;align-items:start;padding:12vh 16px 16px;
+  background:rgba(4,7,12,.55);backdrop-filter:blur(4px)}
+:root[data-theme="light"] .cmdk-backdrop{background:rgba(40,30,10,.28)}
+
+.cmdk,.cmdk-sheet{width:min(640px,94vw);background:var(--rb-surface);
+  border:1px solid var(--rb-line);border-radius:var(--rb-radius);
+  box-shadow:0 30px 80px -30px rgba(0,0,0,.85),var(--rb-shadow);
+  display:flex;flex-direction:column;overflow:hidden;max-height:74vh}
+.cmdk-sheet{width:min(560px,94vw)}
+
+/* search row */
+.cmdk-search{display:flex;align-items:center;gap:11px;padding:14px 16px;
+  border-bottom:1px solid var(--rb-line-soft)}
+.cmdk-search:focus-within{box-shadow:inset 0 -1px 0 var(--rb-brand)}
+.cmdk-search-icon{width:19px;height:19px;color:var(--rb-txt-3);flex:none}
+.cmdk-input{flex:1;min-width:0;border:none;background:transparent;outline:none;
+  color:var(--rb-txt);font-family:var(--rb-ff-sans);font-size:16px;letter-spacing:-.01em}
+.cmdk-input::placeholder{color:var(--rb-txt-3)}
+.cmdk-esc-hint{flex:none}
+
+/* results */
+.cmdk-list{list-style:none;margin:0;padding:7px;overflow-y:auto;flex:1 1 auto}
+.cmdk-item{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:10px 12px;border-radius:10px;cursor:pointer;scroll-margin:8px}
+.cmdk-item:hover{background:var(--rb-surface-2)}
+.cmdk-item.is-active{background:var(--rb-brand-soft);box-shadow:inset 2px 0 0 var(--rb-brand)}
+.cmdk-item-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cmdk-item-title{color:var(--rb-txt);font-size:14px;font-weight:500;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmdk-item-sub{color:var(--rb-txt-3);font-size:12px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmdk-item-sec{flex:none;font-family:var(--rb-ff-mono);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--rb-txt-3);
+  border:1px solid var(--rb-line);border-radius:6px;padding:2px 7px}
+.cmdk-item.is-active .cmdk-item-sec{color:var(--rb-brand);
+  border-color:color-mix(in srgb,var(--rb-brand) 40%,transparent)}
+
+.cmdk-empty{padding:30px 16px;text-align:center;color:var(--rb-txt-3);font-size:13.5px}
+
+/* footer */
+.cmdk-foot{display:flex;align-items:center;gap:14px;padding:9px 14px;
+  border-top:1px solid var(--rb-line-soft);color:var(--rb-txt-3);font-size:11.5px}
+.cmdk-foot-grow{flex:1}
+
+/* keycaps (scoped so the global kbd style stays untouched) */
+.cmdk kbd,.cmdk-sheet kbd{display:inline-grid;place-items:center;min-width:18px;
+  height:18px;padding:0 5px;font-family:var(--rb-ff-mono);font-size:11px;line-height:1;
+  color:var(--rb-txt-2);background:var(--rb-raise);border:1px solid var(--rb-line);
+  border-bottom-width:2px;border-radius:5px}
+.cmdk-foot kbd+kbd{margin-left:3px}
+.cmdk-plus{color:var(--rb-txt-3);font-size:10px;margin:0 3px}
+
+/* cheatsheet */
+.cmdk-sheet-head{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px;border-bottom:1px solid var(--rb-line-soft)}
+.cmdk-sheet-title{margin:0;font-family:var(--rb-ff-display);font-weight:600;
+  font-size:18px;letter-spacing:-.02em;color:var(--rb-txt)}
+.cmdk-sheet-close{display:grid;place-items:center;width:30px;height:30px;border:none;
+  background:transparent;color:var(--rb-txt-3);border-radius:8px;cursor:pointer}
+.cmdk-sheet-close:hover{color:var(--rb-txt);background:var(--rb-line)}
+.cmdk-sheet-close svg{width:16px;height:16px}
+.cmdk-sheet-close:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.cmdk-sheet-body{padding:8px 18px 16px;overflow-y:auto;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:4px 26px}
+.cmdk-sheet-group{padding-top:10px}
+.cmdk-sheet-group-title{margin:0 0 4px;font-family:var(--rb-ff-mono);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--rb-txt-3)}
+.cmdk-sheet-list{margin:0}
+.cmdk-sheet-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:6px 0}
+.cmdk-keys{display:flex;align-items:center;flex:none;order:2}
+.cmdk-sheet-label{margin:0;color:var(--rb-txt-2);font-size:13px;order:1}
+
+@media (prefers-reduced-motion:no-preference){
+  .cmdk-backdrop{animation:cmdk-fade .14s ease both}
+  .cmdk,.cmdk-sheet{animation:cmdk-pop .18s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes cmdk-fade{from{opacity:0}to{opacity:1}}
+  @keyframes cmdk-pop{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}
+}
+
+@media (max-width:640px){
+  .cmdk-backdrop{padding:8vh 10px 10px}
+  .cmdk-item-sec{display:none}
+  .cmdk-sheet-body{grid-template-columns:1fr}
+}

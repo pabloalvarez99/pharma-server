@@ -4341,3 +4341,84 @@ memoria box-build-resource-tuning) — flake de entorno, target distinto cada co
 diagnóstico de rustc** (no es error de fuente) y ajeno a este cambio api-only. dte verificado en
 aislamiento (`caf_folio_atomic` 3/3). CI (runner limpio) corre la suite completa. Scope = sólo
 `crates/api`; router +2 líneas en `v1/mod.rs` → paxoloop reconcilia si marvin tocó el archivo.
+
+---
+
+## 2026-06-21 — ye · W5 Centro de Configuración (Pilar A flagship)
+
+`client/src/views/configuracion.ts` reconstruido de **scroll plano que mostraba keys
+crudas** (`admin_setting`/`dte.emisor`) → **hub multi-sección** con nav lateral + tarjetas
+cuidadas. El operador ya **nunca** ve una key técnica: cada control lleva label humano.
+
+**Modelo puro nuevo** `client/src/views/config-center.ts` (sin DOM, sin Tauri):
+- `CONFIG_SECTIONS` — catálogo de 8 secciones (Negocio · Facturación SII · Licencia y
+  plan · Agente · Preferencias · + Usuarios/Sucursales/Respaldo como monturas honestas).
+- `searchConfig(q)` — búsqueda-en-settings accent-insensitive sobre labels **y** sinónimos
+  (keywords); devuelve secciones + field-hits para chips "saltar al ajuste".
+- `resolveSection` / `defaultSection` — navegación robusta (id desconocido → default).
+- Máquina de estado de guardado (`toSaving/toSaved/toFailed` + `saveStatusClass`) →
+  feedback uniforme en cada tarjeta.
+- Validadores puros (`validateBusinessRut` mód-11+canónico, `validateNonNegativeInt`,
+  `validateActeco`, `validateRequiredText`).
+
+**Hub (renderer)**: nav sticky + panel; cada sección es su propio render+wiring.
+- **Negocio** — vitrina rubro (grid ARIA + preview en vivo, montada adentro) + nombre +
+  datos tributarios (emisor DTE con validación RUT live).
+- **Facturación SII** — ambiente sandbox/prod (confirm en prod) + folios CAF (lectura
+  `dteCafStatus` tipo 39) + montura cert/CAF honesta.
+- **Licencia y plan** — `licenseStatus`: tier/estado/vencimiento/asientos + features con
+  labels humanos; nota honesta de activación (núcleo gratis nunca caduca, ADR-0005).
+- **Agente** — federación B2B + fidelidad (keys reales) + montura LLM opt-in (ADR-0016).
+- **Preferencias** — tema, idioma (es-CL), conexión al servidor, telemetría **opt-in
+  default OFF** (Ley 19.628).
+- **Usuarios/Sucursales/Respaldo** — monturas "próximamente" con la ruta CLI honesta de
+  hoy (`pharma user-create`/`backup`), cero dead-end.
+
+**Tests**: `config-center.test.ts` — 23 unit (catálogo sin keys crudas, navegación,
+búsqueda, save-state, validadores). CSS nuevo `.cfg-*` append en `src/brand.css` (rail +
+tarjetas + chips + responsive). Sin tocar src-tauri (no hizo falta command nuevo; todo
+vía `get_setting`/`set_setting`/`license_status`/`dte_caf_status` existentes).
+
+GATE verde: `npm run build` ok · `vitest` **573/573** (+50, incl. config-center 23) ·
+`cargo fmt` src-tauri ok · `clippy -D warnings` src-tauri ok. Scope: `configuracion.ts` +
+`config-center.ts`(+test) + `brand.css`. No se tocó pos/caja/reports ni `vertical.ts`/
+`format.ts` (solo import lectura).
+
+## 2026-06-21 — W5 Paleta de comandos (Ctrl/Cmd+K) + cheatsheet `?` (paul · feat/command-palette)
+
+**Acelerador UX keyboard-first (Pilar B).** El producto se vuelve "pro": un overlay
+global que busca y EJECUTA — navegar a cualquier vista, acciones comunes y llamar al
+agente ("Pregúntale a tu negocio") — sin tocar el mouse.
+
+- **`views/keymap.ts`** (núcleo puro, sin DOM): modelo `Command`, matcher fuzzy es-CL
+  **insensible a acentos** (`normalize` NFD → "Configuración" matchea "configuracion"),
+  scoring por niveles (prefijo título > palabra > substring > keyword > subsecuencia)
+  con **AND multi-token** y orden estable (query vacía = orden autoral). `nextIndex`
+  (wrap teclado), tabla `GOTO` del chord `g` (g d/p/c/i/r/s → Panel/POS/Caja/Inventario/
+  Reportes/Config) y catálogo `SHORTCUTS` (fuente única del cheatsheet).
+- **`views/command-palette.ts`** (mount DOM + hotkeys globales): `buildCommands` arma
+  la lista — comandos de navegación derivados **en vivo del DOM** de `.nav-item[data-nav]`
+  (auto-respeta módulos ocultos por rubro) + acciones (Nueva venta, Abrir/cerrar caja,
+  Importar, Exportar) + comando del agente + ayuda. `openCommandPalette` (filtra al
+  tipear, ↑/↓ con wrap, Enter ejecuta, Esc cierra, **focus-trap** al input, click en
+  fila, click backdrop, restaura foco previo) y `openCheatsheet` (`?`, atajos agrupados).
+  `installCommandPalette` (idempotente) cablea: **Ctrl/Cmd+K** toggle (incluso dentro de
+  inputs), `?` y chord `g` **solo fuera de campos de texto** (no secuestra el tipeo).
+- Navegación **reusa el router del shell** (click en el nav button real) → cero
+  duplicación de estado activo/fetch. Todo texto dinámico **escapado** (`escapeHtml`)
+  antes de `innerHTML` (los títulos vienen de labels de rubro = data).
+- **`brand.css`** append-only `.cmdk-*` (tokens del sistema; backdrop blur, keycaps
+  scoped, reduced-motion + responsive). **`shell.ts`**: 1 línea de mount
+  (`installCommandPalette()`) junto a `installAskShortcut()` — coord con ye (dueño de
+  shell.ts), sin tocar el resto.
+
+Tests (TDD, RED→GREEN): `keymap.test.ts` 18 (normalize/score/filter/nextIndex/goto/
+shortcuts) + `command-palette.test.ts` 9 (buildCommands + renderResults, incl. **no
+inyección**) + `command-palette.dom.test.ts` 14 (happy-dom: abrir/filtrar/empty/flechas+
+wrap/Enter/click/Esc/trap + Ctrl+K toggle/`?`/g-chord/no-hijack-typing). **41 nuevos**.
+
+GATE: `npm run build` ok (tsc + vite, exit 0) · `vitest` **590/591** — el único fail es
+`inventory-perf.test.ts` (50k SKUs, journey FEFO) por **timeout de 5s bajo saturación**
+del suite completo (transform 282s); **aislado pasa 8/8 (4406ms)**. Es flake ambiental
+de otra lane (marvin, `inventory.ts`), NO regresión de W5 y NO se debilitó (ver
+[[integration-gate-concurrency]] / [[box-build-resource-tuning]]). Reportado a paxoloop.

@@ -28,6 +28,7 @@ import { renderBoletas } from "./boletas";
 import { renderFacturas } from "./facturas";
 import { loadRubro, loadBusinessName } from "../vertical";
 import { visibleModulesForRubro } from "./first-run";
+import { installCommandPalette } from "./command-palette";
 
 const NAV = [
   { id: "dashboard", label: "Panel", hint: "Resumen ejecutivo" },
@@ -216,6 +217,7 @@ export function renderShell(
   void hydrateHealth(root, serverUrl);
   void hydrateBranding(root, serverUrl);
   installAskShortcut();
+  installCommandPalette(); // global Ctrl/Cmd+K palette + `?` cheatsheet (idempotent)
 }
 
 // Keyboard-first access to the agent ask-bar: pressing "/" anywhere (except

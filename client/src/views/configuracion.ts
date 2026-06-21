@@ -1,10 +1,10 @@
-// Configuración view — admin read/write of the server's known `admin_setting`
-// keys (GET/PUT /api/v1/settings/{key}). Mutation is admin+ server-side; a
-// non-admin save surfaces the server's 403 inline. Each known key is described
-// by a small catalog (label, help, control type) so the view renders a typed
-// editor per setting rather than a raw key/value grid. Unset keys (404 → null)
-// fall back to a documented default. Same skeleton → fetch → swap pattern as the
-// other views; Spanish throughout.
+// Configuración — the configuration HUB. A side-nav of human sections (Negocio,
+// Facturación SII, Licencia, Agente, Preferencias + honest "próximamente" mounts
+// for Usuarios/Sucursales/Respaldo) over a content panel, with an in-settings
+// search that filters the nav and jumps to a field. The operator NEVER sees a
+// raw `admin_setting` key — every control wears a Spanish label. The section
+// catalog, search, save-state machine and validators live DOM-free in
+// ./config-center (unit-tested); this file is the renderer + wiring.
 import {
   getSetting,
   setSetting,
@@ -12,9 +12,13 @@ import {
   seedDemo,
   storedServerUrl,
   rememberServerUrl,
+  licenseStatus,
+  dteCafStatus,
   SEED_ALREADY_EXISTS,
+  type LicenseSummary,
+  type CafStatus,
 } from "../api";
-import { isValidRut, canonicalRut, formatRut } from "../format";
+import { isValidRut, formatRut } from "../format";
 import {
   VERTICAL_KEY,
   BUSINESS_NAME_KEY,
@@ -26,46 +30,28 @@ import {
 import { rubroPreview } from "./first-run";
 import { rubroIconSvg } from "../brand/rubro-icons";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import {
+  CONFIG_SECTIONS,
+  resolveSection,
+  searchConfig,
+  saveStatusClass,
+  toSaving,
+  toSaved,
+  toFailed,
+  validateBusinessRut,
+  validateRequiredText,
+  validateNonNegativeInt,
+  validateActeco,
+  type SectionId,
+  type SaveState,
+} from "./config-center";
 
-type SettingKind = "boolean" | "number";
-
-interface SettingDef {
-  key: string;
-  label: string;
-  help: string;
-  kind: SettingKind;
-  /** Value used when the key is unset server-side (404). */
-  fallback: string;
-}
-
-// Closed catalog of keys the server actually reads (grep crates: agent.rs reads
-// `federation_enabled`; sales/service.rs reads `loyalty_points_per_clp`).
-const SETTINGS: readonly SettingDef[] = [
-  {
-    key: "federation_enabled",
-    label: "Federación B2B",
-    help: "Permite que esta sucursal reciba cotizaciones y órdenes de otros nodos del ecosistema. Requiere reinicio de los agentes para tomar efecto.",
-    kind: "boolean",
-    fallback: "false",
-  },
-  {
-    key: "loyalty_points_per_clp",
-    label: "Puntos de fidelidad por CLP",
-    help: "Puntos otorgados al cliente por cada peso vendido. 0 desactiva la acumulación de fidelidad.",
-    kind: "number",
-    fallback: "0",
-  },
-] as const;
-
-// --- DTE emisor (dte.emisor + dte.sii_env) ----------------------------------
-// The DTE wiring (crates/api/src/v1/dte.rs) reads the emitter identity from the
-// `dte.emisor` admin_setting as a JSON `EmisorConfig` (rut, razon_social, giro,
-// direccion, comuna + optional ciudad/acteco), and the SII environment from
-// `dte.sii_env` ("sandbox" | "prod"). This form edits both — it's the client
-// counterpart of the "Falta configurar el emisor DTE" 400 the emission throws.
-
+// --- setting keys (technical — never surfaced to the operator) --------------
 const EMISOR_KEY = "dte.emisor";
 const SII_ENV_KEY = "dte.sii_env";
+const FEDERATION_KEY = "federation_enabled";
+const LOYALTY_KEY = "loyalty_points_per_clp";
+const TELEMETRY_KEY = "telemetry_enabled";
 
 interface EmisorField {
   name: string;
@@ -83,63 +69,96 @@ const EMISOR_FIELDS: readonly EmisorField[] = [
   { name: "ciudad", label: "Ciudad (opcional)", placeholder: "Coquimbo", required: false },
 ] as const;
 
+// Human labels for license features — the operator reads "Reporte de márgenes",
+// not `reports.margins_daily`. Unknown features fall back to a de-emphasised raw
+// id (forward-compatible: a new server feature still renders, just unlabelled).
+const FEATURE_LABELS: Record<string, string> = {
+  "reports.margins_daily": "Reporte de márgenes diario",
+  "reports.top_products": "Top de productos",
+  "reports.stock_rotation": "Rotación de inventario",
+  "dte.sii": "Boleta y factura electrónica (SII)",
+  "federation.quote": "Federación — cotizaciones B2B",
+  "federation.po": "Federación — órdenes de compra B2B",
+  "sync.online": "Sincronización en línea",
+  "branding.pack": "Personalización de marca",
+};
+
+// Minimal line icons for the nav (self-hosted, no CDN). Keyed by section.icon.
+function sectionIconSvg(id: string): string {
+  const paths: Record<string, string> = {
+    store: '<path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v10h16V9"/><path d="M9 19v-5h6v5"/>',
+    receipt: '<path d="M5 3v18l2-1.5L9 21l2-1.5L13 21l2-1.5L17 21l2-1.5V3l-2 1.5L15 3l-2 1.5L11 3 9 4.5 7 3 5 4.5"/><path d="M8 8h8M8 12h8"/>',
+    key: '<circle cx="8" cy="8" r="4"/><path d="M11 11l9 9M17 17l2-2M14 14l2-2"/>',
+    robot: '<rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4M9 13h.01M15 13h.01M9 17h6"/>',
+    sliders: '<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/>',
+    users: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><path d="M16 5a3 3 0 0 1 0 6M21 20c0-2-1.5-3.5-3.5-4.2"/>',
+    building: '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h.01M12 7h.01M15 7h.01M9 11h.01M12 11h.01M15 11h.01M10 21v-4h4v4"/>',
+    shield: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[id] ?? paths.sliders}</svg>`;
+}
+
+/** Apply a {@link SaveState} to an inline status element (uniform feedback). */
+function applyStatus(el: HTMLElement, state: SaveState): void {
+  el.className = saveStatusClass(state);
+  if (state.message) {
+    el.textContent = state.message;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+
+function readBool(setting: { value: string } | null, fallback = false): boolean {
+  if (!setting) return fallback;
+  return setting.value === "true";
+}
+
 export function renderConfiguracion(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
-    <section class="view view-configuracion">
+    <section class="view view-configuracion cfg-hub">
       <div class="view-head">
         <div>
           <h2>Configuración</h2>
-          <p class="muted">Parámetros del servidor. Sólo administradores pueden guardar cambios.</p>
+          <p class="muted">Todo lo que define tu negocio, en un solo lugar. Sólo administradores pueden guardar cambios.</p>
         </div>
       </div>
 
-      <h3 class="section-title">Conexión al servidor</h3>
-      <p class="muted">Apunta este terminal al servidor de tu local. <code>localhost</code> si el servidor corre en este mismo equipo; la IP de red (ej: <code>http://192.168.1.50:8080</code>) si usas una tablet u otro equipo como caja. Se aplica al volver a iniciar sesión.</p>
-      <div class="cfg-emisor-form rb">
-        <div class="field">
-          <label class="rb-label" for="cfg-server-url">URL del servidor</label>
-          <input id="cfg-server-url" class="rb-input" type="text" spellcheck="false"
-                 placeholder="http://127.0.0.1:8080" value="${escapeHtml(storedServerUrl())}" autocomplete="off" />
-          <p class="muted cfg-help">Sesión actual: <code>${escapeHtml(serverUrl)}</code>.</p>
-        </div>
-        <div class="cfg-edit">
-          <button class="rb-btn ghost" id="cfg-server-test" type="button">Probar conexión</button>
-          <button class="rb-btn" id="cfg-server-save" type="button">Guardar URL</button>
-          <span class="cfg-status" id="cfg-server-status" hidden></span>
-        </div>
+      <div class="cfg-search-wrap">
+        <input id="cfg-search" class="rb-input cfg-search" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Buscar un ajuste… (rubro, folios, tema, respaldo…)" aria-label="Buscar en configuración" />
+        <div id="cfg-search-hits" class="cfg-search-hits" hidden></div>
       </div>
 
-      <h3 class="section-title">Apariencia</h3>
-      <p class="muted">Tema de la interfaz. Se guarda en este equipo.</p>
-      <div class="cfg-emisor-form rb">
-        <div class="field">
-          <label class="rb-label" for="cfg-theme">Tema</label>
-          <select id="cfg-theme" class="rb-input">
-            <option value="dark">Oscuro</option>
-            <option value="light">Claro</option>
-          </select>
-        </div>
+      <div class="cfg-hub-body">
+        <nav class="cfg-nav" id="cfg-nav" aria-label="Secciones de configuración">
+          ${CONFIG_SECTIONS.map(
+            (s) => `
+            <button class="cfg-nav-item" type="button" data-section="${s.id}" role="tab">
+              <span class="cfg-nav-icon" aria-hidden="true">${sectionIconSvg(s.icon)}</span>
+              <span class="cfg-nav-text">
+                <span class="cfg-nav-label">${escapeHtml(s.label)}</span>
+                <span class="cfg-nav-blurb">${escapeHtml(s.blurb)}</span>
+              </span>
+              ${s.placeholder ? `<span class="cfg-nav-soon">pronto</span>` : ""}
+            </button>`,
+          ).join("")}
+        </nav>
+        <div class="cfg-panel" id="cfg-panel" role="tabpanel"></div>
       </div>
-
-      <h3 class="section-title">Rubro del negocio</h3>
-      <p class="muted">Elige el rubro de tu negocio. Define qué secciones del ERP se muestran: el módulo de Recetas y el Libro de controlados (Ley 20.000) sólo aparecen en Farmacia. Las boletas y facturas electrónicas (SII) funcionan en todos los rubros.</p>
-      <div id="cfg-vertical">${tableSkeleton(2)}</div>
-
-      <h3 class="section-title">Parámetros del servidor</h3>
-      <div id="cfg-body">${tableSkeleton(SETTINGS.length)}</div>
-
-      <h3 class="section-title">Boleta electrónica — datos del emisor</h3>
-      <p class="muted">Identidad tributaria con la que se firman las boletas (SII). Requerido antes de emitir el primer DTE.</p>
-      <div id="cfg-emisor">${tableSkeleton(3)}</div>
 
       <div id="cfg-toast" class="toast" hidden></div>
     </section>
   `;
 
-  const verticalEl = host.querySelector<HTMLElement>("#cfg-vertical")!;
-  const bodyEl = host.querySelector<HTMLElement>("#cfg-body")!;
-  const emisorEl = host.querySelector<HTMLElement>("#cfg-emisor")!;
+  const navEl = host.querySelector<HTMLElement>("#cfg-nav")!;
+  const panelEl = host.querySelector<HTMLElement>("#cfg-panel")!;
+  const searchEl = host.querySelector<HTMLInputElement>("#cfg-search")!;
+  const hitsEl = host.querySelector<HTMLElement>("#cfg-search-hits")!;
   const toastEl = host.querySelector<HTMLElement>("#cfg-toast")!;
+  const navButtons = Array.from(navEl.querySelectorAll<HTMLButtonElement>(".cfg-nav-item"));
+
+  let activeSection: SectionId = resolveSection(null);
 
   function toast(msg: string): void {
     toastEl.textContent = msg;
@@ -151,102 +170,255 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     }, 2800);
   }
 
-  async function load(): Promise<void> {
-    bodyEl.innerHTML = tableSkeleton(SETTINGS.length);
-    try {
-      const current = await Promise.all(
-        SETTINGS.map((s) => getSetting(serverUrl, s.key)),
-      );
-      bodyEl.innerHTML = `<div class="cfg-list">${SETTINGS.map((def, i) =>
-        rowHtml(def, current[i]?.value ?? def.fallback, current[i]?.updated_at ?? null),
-      ).join("")}</div>`;
-      SETTINGS.forEach((def) => wireRow(def));
-    } catch (err) {
-      bodyEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+  function selectSection(id: SectionId): void {
+    activeSection = id;
+    navButtons.forEach((b) => {
+      const on = b.dataset.section === id;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", String(on));
+    });
+    renderSection(id);
+    panelEl.scrollTop = 0;
+  }
+
+  navButtons.forEach((b) => {
+    b.addEventListener("click", () => selectSection(b.dataset.section as SectionId));
+  });
+
+  // In-settings search: filter the nav to matching sections and offer "jump to
+  // field" chips. If the active section is filtered away, hop to the first hit.
+  function applySearch(): void {
+    const res = searchConfig(searchEl.value);
+    navButtons.forEach((b) => {
+      b.hidden = !res.sectionIds.includes(b.dataset.section as SectionId);
+    });
+    if (!res.filtered) {
+      hitsEl.hidden = true;
+      hitsEl.innerHTML = "";
+      return;
+    }
+    if (res.fieldHits.length) {
+      hitsEl.hidden = false;
+      hitsEl.innerHTML = res.fieldHits
+        .slice(0, 10)
+        .map(
+          (h) =>
+            `<button class="cfg-hit-chip" type="button" data-section="${h.section}">${escapeHtml(h.label)}</button>`,
+        )
+        .join("");
+      hitsEl.querySelectorAll<HTMLButtonElement>(".cfg-hit-chip").forEach((c) => {
+        c.addEventListener("click", () => {
+          searchEl.value = "";
+          applySearch();
+          selectSection(c.dataset.section as SectionId);
+        });
+      });
+    } else if (res.sectionIds.length === 0) {
+      hitsEl.hidden = false;
+      hitsEl.innerHTML = `<span class="muted cfg-no-hits">Sin resultados para "${escapeHtml(searchEl.value.trim())}".</span>`;
+    } else {
+      hitsEl.hidden = true;
+      hitsEl.innerHTML = "";
+    }
+    if (res.sectionIds.length && !res.sectionIds.includes(activeSection)) {
+      selectSection(res.sectionIds[0]);
+    }
+  }
+  searchEl.addEventListener("input", applySearch);
+
+  // --- section dispatcher ----------------------------------------------------
+  function renderSection(id: SectionId): void {
+    switch (id) {
+      case "negocio":
+        renderNegocio();
+        break;
+      case "sii":
+        renderSii();
+        break;
+      case "licencia":
+        renderLicencia();
+        break;
+      case "agente":
+        renderAgente();
+        break;
+      case "preferencias":
+        renderPreferencias();
+        break;
+      default:
+        renderPlaceholder(id);
+        break;
     }
   }
 
-  function rowHtml(def: SettingDef, value: string, updatedAt: string | null): string {
-    const stamp = updatedAt
-      ? `actualizado ${fmtDate(updatedAt)}`
-      : "valor por defecto (sin guardar)";
-    const control =
-      def.kind === "boolean"
-        ? `<label class="cfg-switch">
-             <input type="checkbox" id="cfg-${def.key}" ${value === "true" ? "checked" : ""} />
-             <span>Activado</span>
-           </label>`
-        : `<input type="number" id="cfg-${def.key}" class="cfg-number" inputmode="numeric"
-                 min="0" step="1" value="${escapeHtml(value)}" />`;
+  function sectionHead(id: SectionId): string {
+    const s = CONFIG_SECTIONS.find((x) => x.id === id)!;
     return `
-      <div class="cfg-row" data-key="${def.key}">
-        <div class="cfg-meta">
-          <strong class="cfg-label">${escapeHtml(def.label)}</strong>
-          <code class="cfg-key">${escapeHtml(def.key)}</code>
-          <p class="muted cfg-help">${escapeHtml(def.help)}</p>
-          <span class="cfg-stamp muted">${stamp}</span>
+      <header class="cfg-sec-head">
+        <span class="cfg-sec-icon" aria-hidden="true">${sectionIconSvg(s.icon)}</span>
+        <div>
+          <h3 class="cfg-sec-title">${escapeHtml(s.label)}</h3>
+          <p class="muted">${escapeHtml(s.blurb)}</p>
         </div>
-        <div class="cfg-edit">
-          ${control}
-          <button class="btn-primary cfg-save" id="cfg-save-${def.key}">Guardar</button>
-          <span class="cfg-status" id="cfg-status-${def.key}" hidden></span>
+      </header>`;
+  }
+
+  // --- Negocio: rubro + nombre + identidad tributaria ------------------------
+  function renderNegocio(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("negocio")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Rubro y nombre</h4>
+        <p class="muted cfg-help">Elige el rubro de tu negocio. Define qué secciones del ERP se muestran: Recetas y el Libro de controlados (Ley 20.000) sólo aparecen en Farmacia. Las boletas y facturas (SII) funcionan en todos los rubros.</p>
+        <div id="cfg-vertical">${tableSkeleton(2)}</div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Datos tributarios</h4>
+        <p class="muted cfg-help">Identidad con la que se firman tus documentos ante el SII. Requerido antes de emitir el primer DTE.</p>
+        <div id="cfg-emisor">${tableSkeleton(3)}</div>
+      </div>
+    `;
+    void loadVerticalForm();
+    void loadEmisor();
+  }
+
+  // --- Facturación SII: ambiente + folios + certificado ----------------------
+  function renderSii(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("sii")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Ambiente del SII</h4>
+        <p class="muted cfg-help">Certificación (sandbox) para pruebas; Producción para documentos con validez tributaria real.</p>
+        <div id="cfg-sii-env">${tableSkeleton(1)}</div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Folios disponibles (CAF)</h4>
+        <p class="muted cfg-help">Folios autorizados restantes para boleta electrónica (tipo 39).</p>
+        <div id="cfg-caf">${tableSkeleton(2)}</div>
+      </div>
+      <div class="cfg-card cfg-card-soon">
+        <h4 class="cfg-card-title">Certificado y archivos CAF <span class="cfg-soon-chip">próximamente</span></h4>
+        <p class="muted cfg-help">La carga del certificado digital (.pfx) y de los archivos CAF desde esta pantalla llegará pronto. Por ahora se cargan en el servidor durante la puesta en marcha.</p>
+      </div>
+    `;
+    void loadSiiEnv();
+    void loadCaf();
+  }
+
+  // --- Licencia y plan -------------------------------------------------------
+  function renderLicencia(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("licencia")}
+      <div class="cfg-card" id="cfg-license">${tableSkeleton(3)}</div>
+    `;
+    void loadLicense();
+  }
+
+  // --- Agente ----------------------------------------------------------------
+  function renderAgente(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("agente")}
+      <div class="cfg-card" id="cfg-agent">${tableSkeleton(2)}</div>
+      <div class="cfg-card cfg-card-soon">
+        <h4 class="cfg-card-title">Asistente con IA <span class="cfg-soon-chip">próximamente</span></h4>
+        <p class="muted cfg-help">Tu agente ya responde con los datos de tu negocio sin conexión. La conexión opcional a un modelo de lenguaje (opt-in, lo decides tú) llegará en una próxima versión.</p>
+      </div>
+    `;
+    void loadAgent();
+  }
+
+  // --- Preferencias ----------------------------------------------------------
+  function renderPreferencias(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("preferencias")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Apariencia e idioma</h4>
+        <div class="cfg-emisor-form rb">
+          <div class="field">
+            <label class="rb-label" for="cfg-theme">Tema</label>
+            <select id="cfg-theme" class="rb-input">
+              <option value="dark">Oscuro</option>
+              <option value="light">Claro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="rb-label" for="cfg-lang">Idioma</label>
+            <select id="cfg-lang" class="rb-input" disabled title="Por ahora sólo español de Chile">
+              <option value="es-CL" selected>Español (Chile)</option>
+            </select>
+            <p class="muted cfg-help">Más idiomas próximamente.</p>
+          </div>
         </div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Conexión al servidor</h4>
+        <p class="muted cfg-help">Apunta este terminal al servidor de tu local. <code>localhost</code> si el servidor corre en este mismo equipo; la IP de red (ej: <code>http://192.168.1.50:8080</code>) si usas una tablet u otro equipo como caja. Se aplica al volver a iniciar sesión.</p>
+        <div class="cfg-emisor-form rb">
+          <div class="field">
+            <label class="rb-label" for="cfg-server-url">URL del servidor</label>
+            <input id="cfg-server-url" class="rb-input" type="text" spellcheck="false"
+                   placeholder="http://127.0.0.1:8080" value="${escapeHtml(storedServerUrl())}" autocomplete="off" />
+            <p class="muted cfg-help">Sesión actual: <code>${escapeHtml(serverUrl)}</code>.</p>
+          </div>
+          <div class="cfg-edit">
+            <button class="rb-btn ghost" id="cfg-server-test" type="button">Probar conexión</button>
+            <button class="rb-btn" id="cfg-server-save" type="button">Guardar URL</button>
+            <span class="cfg-status" id="cfg-server-status" hidden></span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Telemetría anónima</h4>
+        <p class="muted cfg-help">Estadísticas de uso anónimas para mejorar el producto. <strong>Desactivada por defecto</strong>, sin datos personales (Ley 19.628). Tú decides si la activas.</p>
+        <div id="cfg-telemetry">${tableSkeleton(1)}</div>
+      </div>
+    `;
+    wireServerAndTheme();
+    void loadTelemetry();
+  }
+
+  // --- Placeholder sections (honest "próximamente", never a dead-end) --------
+  const PLACEHOLDER_COPY: Record<string, { what: string; today: string }> = {
+    usuarios: {
+      what: "Crear cajeros, químicos y administradores, con sus roles y permisos por módulo, desde esta pantalla.",
+      today: "Hoy las cuentas se crean por terminal: <code>pharma user-create</code>. La gestión visual llega en esta misma tanda de mejoras.",
+    },
+    sucursales: {
+      what: "Administrar varias sucursales y puntos de caja desde una sola instalación.",
+      today: "Tu instalación ya opera una sucursal. El alta de sucursales y cajas adicionales desde la UI llega pronto.",
+    },
+    respaldo: {
+      what: "Programar respaldos automáticos, ejecutarlos ahora y restaurar con una guía paso a paso.",
+      today: "Hoy el respaldo se ejecuta por terminal: <code>pharma backup</code>. El respaldo programado y la restauración guiada llegan pronto.",
+    },
+  };
+
+  function renderPlaceholder(id: SectionId): void {
+    const copy = PLACEHOLDER_COPY[id];
+    panelEl.innerHTML = `
+      ${sectionHead(id)}
+      <div class="cfg-card cfg-card-soon">
+        <span class="cfg-soon-chip">próximamente</span>
+        <p>${copy?.what ?? "Esta sección estará disponible pronto."}</p>
+        <p class="muted cfg-help">${copy?.today ?? ""}</p>
       </div>
     `;
   }
 
-  function wireRow(def: SettingDef): void {
-    const saveBtn = bodyEl.querySelector<HTMLButtonElement>(`#cfg-save-${def.key}`)!;
-    const statusEl = bodyEl.querySelector<HTMLElement>(`#cfg-status-${def.key}`)!;
-    const input = bodyEl.querySelector<HTMLInputElement>(`#cfg-${def.key}`)!;
+  // ===========================================================================
+  // Loaders + wiring (ported from the previous flat view; logic unchanged).
+  // ===========================================================================
 
-    saveBtn.addEventListener("click", async () => {
-      const value =
-        def.kind === "boolean"
-          ? input.checked
-            ? "true"
-            : "false"
-          : String(Math.trunc(Number(input.value || "0")));
-      if (def.kind === "number" && (!Number.isFinite(Number(input.value)) || Number(input.value) < 0)) {
-        statusEl.textContent = "Ingresa un número válido (0 o más).";
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
-        return;
-      }
-      saveBtn.disabled = true;
-      statusEl.hidden = true;
-      try {
-        const saved = await setSetting(serverUrl, def.key, value);
-        statusEl.textContent = "Guardado";
-        statusEl.className = "cfg-status cfg-status-ok";
-        statusEl.hidden = false;
-        const stamp = bodyEl.querySelector<HTMLElement>(`.cfg-row[data-key="${def.key}"] .cfg-stamp`);
-        if (stamp) stamp.textContent = `actualizado ${fmtDate(saved.updated_at)}`;
-        toast(`${def.label} guardado`);
-      } catch (err) {
-        statusEl.textContent = asMessage(err);
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
-      } finally {
-        saveBtn.disabled = false;
-      }
-    });
-  }
-
-  // --- DTE emisor form -------------------------------------------------------
-
+  // --- DTE emisor (identidad tributaria, sección Negocio) --------------------
   async function loadEmisor(): Promise<void> {
+    const emisorEl = panelEl.querySelector<HTMLElement>("#cfg-emisor");
+    if (!emisorEl) return;
     emisorEl.innerHTML = tableSkeleton(3);
     try {
-      const [emisorSetting, envSetting] = await Promise.all([
-        getSetting(serverUrl, EMISOR_KEY),
-        getSetting(serverUrl, SII_ENV_KEY),
-      ]);
+      const emisorSetting = await getSetting(serverUrl, EMISOR_KEY);
       let current: Record<string, unknown> = {};
       if (emisorSetting) {
         try { current = JSON.parse(emisorSetting.value) as Record<string, unknown>; } catch { /* corrupt → empty form */ }
       }
-      const env = envSetting?.value === "prod" ? "prod" : "sandbox";
       emisorEl.innerHTML = `
         <div class="cfg-emisor-form">
           ${EMISOR_FIELDS.map((f) => `
@@ -261,135 +433,334 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
             <input id="cfg-em-acteco" type="number" min="0" step="1" inputmode="numeric"
                    placeholder="477301" value="${current.acteco != null ? escapeHtml(String(current.acteco)) : ""}" />
           </div>
-          <div class="field">
-            <label for="cfg-em-env">Entorno SII</label>
-            <select id="cfg-em-env">
-              <option value="sandbox" ${env === "sandbox" ? "selected" : ""}>Certificación (sandbox)</option>
-              <option value="prod" ${env === "prod" ? "selected" : ""}>Producción</option>
-            </select>
-          </div>
           <div class="cfg-edit">
-            <button class="btn-primary" id="cfg-em-save">Guardar emisor</button>
+            <button class="btn-primary" id="cfg-em-save">Guardar datos tributarios</button>
             <span class="cfg-status" id="cfg-em-status" hidden></span>
           </div>
         </div>
       `;
-      wireEmisor();
+      wireEmisor(emisorEl);
     } catch (err) {
       emisorEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     }
   }
 
-  function wireEmisor(): void {
+  function wireEmisor(emisorEl: HTMLElement): void {
     const saveBtn = emisorEl.querySelector<HTMLButtonElement>("#cfg-em-save")!;
     const statusEl = emisorEl.querySelector<HTMLElement>("#cfg-em-status")!;
     const rutEl = emisorEl.querySelector<HTMLInputElement>("#cfg-em-rut")!;
     const rutHint = emisorEl.querySelector<HTMLElement>("#cfg-em-rut-hint")!;
 
-    // The emisor RUT identifies the pharmacy to the SII — a wrong one breaks
-    // every boleta/factura. Validate mód-11 live (same UX as the Facturas
-    // receptor) and store the canonical `NNNNNNNN-D` form on save.
-    const validateRut = (): boolean => {
+    // Live mód-11 echo (same UX as the Facturas receptor); canonicalisation +
+    // the authoritative gate live in config-center.validateBusinessRut on save.
+    const echoRut = (): void => {
       const raw = rutEl.value.trim();
       if (!raw) {
         rutEl.classList.remove("invalid");
         rutHint.hidden = true;
         rutHint.className = "field-hint";
-        return false;
+        return;
       }
       if (isValidRut(raw)) {
         rutEl.classList.remove("invalid");
         rutHint.hidden = false;
         rutHint.className = "field-hint ok";
         rutHint.textContent = `RUT válido — ${formatRut(raw)}`;
-        return true;
+      } else {
+        rutEl.classList.add("invalid");
+        rutHint.hidden = false;
+        rutHint.className = "field-hint err";
+        rutHint.textContent = "RUT inválido: revisa el dígito verificador.";
       }
-      rutEl.classList.add("invalid");
-      rutHint.hidden = false;
-      rutHint.className = "field-hint err";
-      rutHint.textContent = "RUT inválido: revisa el dígito verificador.";
-      return false;
     };
-    rutEl.addEventListener("input", validateRut);
+    rutEl.addEventListener("input", echoRut);
     rutEl.addEventListener("blur", () => {
       if (isValidRut(rutEl.value)) rutEl.value = formatRut(rutEl.value);
     });
-    validateRut();
+    echoRut();
 
     saveBtn.addEventListener("click", async () => {
-      statusEl.hidden = true;
       const emisor: Record<string, unknown> = {};
       for (const f of EMISOR_FIELDS) {
-        const v = emisorEl.querySelector<HTMLInputElement>(`#cfg-em-${f.name}`)!.value.trim();
-        if (f.required && !v) {
-          statusEl.textContent = `Completa el campo "${f.label}".`;
-          statusEl.className = "cfg-status cfg-status-err";
-          statusEl.hidden = false;
-          return;
+        const raw = emisorEl.querySelector<HTMLInputElement>(`#cfg-em-${f.name}`)!.value;
+        if (f.required) {
+          const r = validateRequiredText(raw, f.label);
+          if (!r.ok) {
+            applyStatus(statusEl, toFailed(r.message!));
+            return;
+          }
+          emisor[f.name] = r.value;
+        } else if (raw.trim()) {
+          emisor[f.name] = raw.trim();
         }
-        if (v) emisor[f.name] = v;
       }
-      if (!validateRut()) {
-        statusEl.textContent = "El RUT de la empresa no es válido (revisa el dígito verificador mód-11).";
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
+      const rut = validateBusinessRut(rutEl.value);
+      if (!rut.ok) {
+        applyStatus(statusEl, toFailed(rut.message!));
         return;
       }
-      emisor.rut = canonicalRut(rutEl.value);
-      const actecoRaw = emisorEl.querySelector<HTMLInputElement>("#cfg-em-acteco")!.value.trim();
-      if (actecoRaw) {
-        const n = Number(actecoRaw);
-        if (!Number.isInteger(n) || n < 0) {
-          statusEl.textContent = "El código acteco debe ser un número entero.";
-          statusEl.className = "cfg-status cfg-status-err";
-          statusEl.hidden = false;
-          return;
-        }
-        emisor.acteco = n;
-      }
-      const env = emisorEl.querySelector<HTMLSelectElement>("#cfg-em-env")!.value;
-      if (env === "prod" && !window.confirm(
-        "Vas a apuntar el envío de boletas al SII de PRODUCCIÓN. Cada DTE enviado tendrá validez tributaria real. ¿Continuar?",
-      )) {
+      emisor.rut = rut.value;
+      const acteco = validateActeco(emisorEl.querySelector<HTMLInputElement>("#cfg-em-acteco")!.value);
+      if (!acteco.ok) {
+        applyStatus(statusEl, toFailed(acteco.message!));
         return;
       }
+      if (acteco.value !== undefined) emisor.acteco = acteco.value;
+
       saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
       try {
         await setSetting(serverUrl, EMISOR_KEY, JSON.stringify(emisor));
-        await setSetting(serverUrl, SII_ENV_KEY, env);
-        statusEl.textContent = "Guardado";
-        statusEl.className = "cfg-status cfg-status-ok";
-        statusEl.hidden = false;
-        toast("Emisor DTE guardado");
+        applyStatus(statusEl, toSaved());
+        toast("Datos tributarios guardados");
       } catch (err) {
-        statusEl.textContent = asMessage(err);
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
+        applyStatus(statusEl, toFailed(asMessage(err)));
       } finally {
         saveBtn.disabled = false;
       }
     });
   }
 
-  // --- Rubro / vertical (grid del catálogo) ----------------------------------
-  //
-  // The onboarding "elige tu rubro" grid (docs/strategy/rubro-catalog.md). The
-  // chosen card is persisted as `business.vertical`; the seed button below uses
-  // it (es→en mapped) to fill the tenant with the matching DEMO pack.
+  // --- SII environment (sección Facturación) ---------------------------------
+  async function loadSiiEnv(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-sii-env");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(1);
+    try {
+      const envSetting = await getSetting(serverUrl, SII_ENV_KEY);
+      const env = envSetting?.value === "prod" ? "prod" : "sandbox";
+      box.innerHTML = `
+        <div class="cfg-emisor-form">
+          <div class="field">
+            <label for="cfg-sii-select">Entorno</label>
+            <select id="cfg-sii-select" class="rb-input">
+              <option value="sandbox" ${env === "sandbox" ? "selected" : ""}>Certificación (sandbox)</option>
+              <option value="prod" ${env === "prod" ? "selected" : ""}>Producción</option>
+            </select>
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-sii-save">Guardar ambiente</button>
+            <span class="cfg-status" id="cfg-sii-status" hidden></span>
+          </div>
+        </div>
+      `;
+      const select = box.querySelector<HTMLSelectElement>("#cfg-sii-select")!;
+      const saveBtn = box.querySelector<HTMLButtonElement>("#cfg-sii-save")!;
+      const statusEl = box.querySelector<HTMLElement>("#cfg-sii-status")!;
+      saveBtn.addEventListener("click", async () => {
+        const chosen = select.value === "prod" ? "prod" : "sandbox";
+        if (chosen === "prod" && !window.confirm(
+          "Vas a apuntar el envío de boletas al SII de PRODUCCIÓN. Cada DTE enviado tendrá validez tributaria real. ¿Continuar?",
+        )) {
+          return;
+        }
+        saveBtn.disabled = true;
+        applyStatus(statusEl, toSaving());
+        try {
+          await setSetting(serverUrl, SII_ENV_KEY, chosen);
+          applyStatus(statusEl, toSaved());
+          toast("Ambiente SII guardado");
+        } catch (err) {
+          applyStatus(statusEl, toFailed(asMessage(err)));
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    } catch (err) {
+      box.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
 
-  // Currently selected card value (kept in closure so the demo button + save
-  // act on the operator's pick before they hit "Guardar rubro").
+  async function loadCaf(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-caf");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(2);
+    try {
+      const caf: CafStatus = await dteCafStatus(serverUrl, 39);
+      if (!caf.cafs.length) {
+        box.innerHTML = `<p class="muted cfg-help">Aún no hay folios CAF cargados para boleta electrónica. Se cargan en el servidor durante la puesta en marcha.</p>`;
+        return;
+      }
+      const low = caf.folios_restantes <= 20;
+      box.innerHTML = `
+        <div class="cfg-caf-summary">
+          <span class="cfg-caf-big ${low ? "low" : ""}">${caf.folios_restantes}</span>
+          <span class="muted">folios restantes${low ? " — quedan pocos" : ""}</span>
+        </div>
+        <ul class="cfg-caf-list">
+          ${caf.cafs.map((c) => `
+            <li>Rango ${c.folio_desde}–${c.folio_hasta} · próximo folio ${c.next_folio} · ${c.restantes} disponibles</li>`).join("")}
+        </ul>
+      `;
+    } catch (err) {
+      box.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  // --- Licencia --------------------------------------------------------------
+  async function loadLicense(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-license");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(3);
+    try {
+      const lic: LicenseSummary = await licenseStatus(serverUrl);
+      const exp = lic.expires_at ? lic.expires_at.slice(0, 10) : "sin vencimiento";
+      const statusLabel: Record<string, string> = {
+        active: "Activa",
+        grace: "En período de gracia",
+        expired: "Vencida",
+      };
+      const features = lic.features.length
+        ? `<ul class="cfg-feature-list">${lic.features
+            .map((f) => `<li>${escapeHtml(FEATURE_LABELS[f] ?? f)}</li>`)
+            .join("")}</ul>`
+        : `<p class="muted cfg-help">El núcleo gratuito (POS, inventario, caja, recetas, respaldo local) está siempre disponible. Aún no hay funcionalidades de pago activadas.</p>`;
+      box.innerHTML = `
+        <div class="cfg-license-head">
+          <span class="badge tier-${escapeHtml(lic.tier.toLowerCase())}">${escapeHtml(lic.tier.toUpperCase())}</span>
+          <span class="cfg-license-status">${escapeHtml(statusLabel[lic.status] ?? lic.status)}</span>
+        </div>
+        <dl class="cfg-deflist">
+          <div><dt>Vencimiento</dt><dd>${escapeHtml(exp)}</dd></div>
+          <div><dt>Asientos</dt><dd>${lic.seat_count}</dd></div>
+        </dl>
+        <h4 class="cfg-card-title">Funcionalidades habilitadas</h4>
+        ${features}
+        <p class="muted cfg-help">¿Necesitas activar un plan o una funcionalidad? La activación desde la UI llega pronto; por ahora se importa la licencia en el servidor (<code>pharma license import</code>). El núcleo gratuito nunca caduca.</p>
+      `;
+    } catch (err) {
+      box.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  // --- Agente: federación + fidelidad ----------------------------------------
+  async function loadAgent(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-agent");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(2);
+    try {
+      const [fed, loyalty] = await Promise.all([
+        getSetting(serverUrl, FEDERATION_KEY),
+        getSetting(serverUrl, LOYALTY_KEY),
+      ]);
+      const fedOn = readBool(fed, false);
+      const points = loyalty?.value ?? "0";
+      box.innerHTML = `
+        <div class="field">
+          <label class="cfg-switch">
+            <input type="checkbox" id="cfg-fed" ${fedOn ? "checked" : ""} />
+            <span>Federación B2B activada</span>
+          </label>
+          <p class="muted cfg-help">Permite que esta sucursal reciba cotizaciones y órdenes de otros nodos del ecosistema. Requiere reiniciar los agentes para tomar efecto.</p>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-fed-save">Guardar federación</button>
+            <span class="cfg-status" id="cfg-fed-status" hidden></span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="cfg-loyalty">Puntos de fidelidad por peso vendido</label>
+          <input type="number" id="cfg-loyalty" class="cfg-number" inputmode="numeric" min="0" step="1" value="${escapeHtml(points)}" />
+          <p class="muted cfg-help">Puntos que acumula el cliente por cada $1 vendido. 0 desactiva la fidelidad.</p>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-loyalty-save">Guardar fidelidad</button>
+            <span class="cfg-status" id="cfg-loyalty-status" hidden></span>
+          </div>
+        </div>
+      `;
+      const fedInput = box.querySelector<HTMLInputElement>("#cfg-fed")!;
+      const fedBtn = box.querySelector<HTMLButtonElement>("#cfg-fed-save")!;
+      const fedStatus = box.querySelector<HTMLElement>("#cfg-fed-status")!;
+      fedBtn.addEventListener("click", async () => {
+        fedBtn.disabled = true;
+        applyStatus(fedStatus, toSaving());
+        try {
+          await setSetting(serverUrl, FEDERATION_KEY, fedInput.checked ? "true" : "false");
+          applyStatus(fedStatus, toSaved());
+          toast("Federación guardada");
+        } catch (err) {
+          applyStatus(fedStatus, toFailed(asMessage(err)));
+        } finally {
+          fedBtn.disabled = false;
+        }
+      });
+
+      const loyaltyInput = box.querySelector<HTMLInputElement>("#cfg-loyalty")!;
+      const loyaltyBtn = box.querySelector<HTMLButtonElement>("#cfg-loyalty-save")!;
+      const loyaltyStatus = box.querySelector<HTMLElement>("#cfg-loyalty-status")!;
+      loyaltyBtn.addEventListener("click", async () => {
+        const r = validateNonNegativeInt(loyaltyInput.value, "Puntos de fidelidad");
+        if (!r.ok) {
+          applyStatus(loyaltyStatus, toFailed(r.message!));
+          return;
+        }
+        loyaltyBtn.disabled = true;
+        applyStatus(loyaltyStatus, toSaving());
+        try {
+          await setSetting(serverUrl, LOYALTY_KEY, String(r.value));
+          applyStatus(loyaltyStatus, toSaved());
+          toast("Fidelidad guardada");
+        } catch (err) {
+          applyStatus(loyaltyStatus, toFailed(asMessage(err)));
+        } finally {
+          loyaltyBtn.disabled = false;
+        }
+      });
+    } catch (err) {
+      box.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  // --- Telemetría (Preferencias) ---------------------------------------------
+  async function loadTelemetry(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-telemetry");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(1);
+    try {
+      const setting = await getSetting(serverUrl, TELEMETRY_KEY);
+      const on = readBool(setting, false);
+      box.innerHTML = `
+        <label class="cfg-switch">
+          <input type="checkbox" id="cfg-telemetry-toggle" ${on ? "checked" : ""} />
+          <span>Enviar estadísticas anónimas de uso</span>
+        </label>
+        <div class="cfg-edit">
+          <button class="btn-primary" id="cfg-telemetry-save">Guardar preferencia</button>
+          <span class="cfg-status" id="cfg-telemetry-status" hidden></span>
+        </div>
+      `;
+      const toggle = box.querySelector<HTMLInputElement>("#cfg-telemetry-toggle")!;
+      const btn = box.querySelector<HTMLButtonElement>("#cfg-telemetry-save")!;
+      const statusEl = box.querySelector<HTMLElement>("#cfg-telemetry-status")!;
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        applyStatus(statusEl, toSaving());
+        try {
+          await setSetting(serverUrl, TELEMETRY_KEY, toggle.checked ? "true" : "false");
+          applyStatus(statusEl, toSaved());
+          toast("Preferencia guardada");
+        } catch (err) {
+          applyStatus(statusEl, toFailed(asMessage(err)));
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    } catch (err) {
+      box.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    }
+  }
+
+  // --- Rubro / vertical grid (vitrina) ---------------------------------------
   let selectedVertical = "otro";
 
   async function loadVerticalForm(): Promise<void> {
+    const verticalEl = panelEl.querySelector<HTMLElement>("#cfg-vertical");
+    if (!verticalEl) return;
     verticalEl.innerHTML = tableSkeleton(2);
     try {
       const [vSetting, nameSetting] = await Promise.all([
         getSetting(serverUrl, VERTICAL_KEY),
         getSetting(serverUrl, BUSINESS_NAME_KEY),
       ]);
-      // Highlight the stored raw value (not parseVertical) so catalog extras
-      // beyond the gated trio still show as selected.
       const stored = (vSetting?.value ?? "").trim();
       selectedVertical = RUBRO_CATALOG.some((r) => r.value === stored) ? stored : "otro";
       const name = nameSetting?.value ?? "";
@@ -398,9 +769,6 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
           <div class="rubro-grid" role="radiogroup" aria-label="Rubro del negocio">
             ${RUBRO_CATALOG.map((r) => {
               const on = r.value === selectedVertical;
-              // Tag: an accent "datos demo" chip when a seed pack exists, else a
-              // muted "pronto" for the future rubros (still fully selectable —
-              // no dead-end), and nothing for the generic `otro`.
               const tag = r.seedVertical
                 ? `<span class="rubro-tag demo">datos demo</span>`
                 : r.value !== "otro"
@@ -444,35 +812,32 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
           </div>
         </div>
       `;
-      wireVertical();
-      wireDemo();
+      wireVertical(verticalEl);
+      wireDemo(verticalEl);
     } catch (err) {
       verticalEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     }
   }
 
-  function wireVertical(): void {
+  function wireVertical(verticalEl: HTMLElement): void {
     const cards = Array.from(verticalEl.querySelectorAll<HTMLButtonElement>(".rubro-card"));
     const nameEl = verticalEl.querySelector<HTMLInputElement>("#cfg-vert-name")!;
     const saveBtn = verticalEl.querySelector<HTMLButtonElement>("#cfg-vert-save")!;
     const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-vert-status")!;
 
-    // Pin = the operator's confirmed choice (drives save + demo). Peek = the card
-    // they're hovering/focusing — the preview shows peek if any, else the pin, so
-    // they can browse the ERP of each rubro before committing ("mostrar, no contar").
     const pin = (value: string): void => {
       selectedVertical = value;
       cards.forEach((c) => {
         const on = c.dataset.vertical === value;
         c.classList.toggle("selected", on);
         c.setAttribute("aria-checked", String(on));
-        c.tabIndex = on ? 0 : -1; // roving tabindex: only the selected card is tab-reachable
+        c.tabIndex = on ? 0 : -1;
       });
-      renderPreview(value);
-      refreshDemoHelp();
+      renderPreview(verticalEl, value);
+      refreshDemoHelp(verticalEl);
     };
-    const peek = (value: string): void => renderPreview(value);
-    const unpeek = (): void => renderPreview(selectedVertical);
+    const peek = (value: string): void => renderPreview(verticalEl, value);
+    const unpeek = (): void => renderPreview(verticalEl, selectedVertical);
 
     cards.forEach((c, i) => {
       const value = c.dataset.vertical!;
@@ -481,8 +846,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       c.addEventListener("focus", () => peek(value));
       c.addEventListener("blur", unpeek);
       c.addEventListener("keydown", (ev) => {
-        // Grid keyboard model: arrows move focus (roving), Enter/Espacio selects.
-        const cols = 4; // visual grid width; arrow Down/Up jump a row, Left/Right one card
+        const cols = 4;
         let next = -1;
         switch (ev.key) {
           case "ArrowRight": next = (i + 1) % cards.length; break;
@@ -503,43 +867,33 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         cards[next].focus();
       });
     });
-    // Grid leaves → snap preview back to the pinned rubro.
     verticalEl.querySelector<HTMLElement>(".rubro-grid")?.addEventListener("mouseleave", unpeek);
-    renderPreview(selectedVertical);
+    renderPreview(verticalEl, selectedVertical);
 
     saveBtn.addEventListener("click", async () => {
-      statusEl.hidden = true;
       saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
       try {
         await setSetting(serverUrl, VERTICAL_KEY, selectedVertical);
         await setSetting(serverUrl, BUSINESS_NAME_KEY, nameEl.value.trim());
-        statusEl.textContent = "Guardado — reinicia la app para aplicar a todo el menú.";
-        statusEl.className = "cfg-status cfg-status-ok";
-        statusEl.hidden = false;
+        applyStatus(statusEl, toSaved("Guardado — reinicia la app para aplicar a todo el menú."));
         toast("Rubro guardado");
       } catch (err) {
-        statusEl.textContent = asMessage(err);
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
+        applyStatus(statusEl, toFailed(asMessage(err)));
       } finally {
         saveBtn.disabled = false;
       }
     });
   }
 
-  // Live "Vista previa de tu ERP": renders the EXACT ERP a rubro gives — section
-  // categories on/off, rubro-native capabilities, hidden sections, demo + SII
-  // compliance notes. Reads the pure `rubroPreview` model (same nav gate shell.ts
-  // applies), so preview and real ERP can never drift. `value` is the peeked or
-  // pinned card; the panel updates <100ms with no layout shift.
-  function renderPreview(value: string): void {
+  // Live "Vista previa de tu ERP" — reads the pure rubroPreview model (same nav
+  // gate shell.ts applies) so preview and real ERP can never drift.
+  function renderPreview(verticalEl: HTMLElement, value: string): void {
     const box = verticalEl.querySelector<HTMLElement>("#cfg-vert-preview");
     if (!box) return;
     const rubro = parseRubro(value);
     const card = RUBRO_CATALOG.find((r) => r.value === value);
     const p = rubroPreview(rubro);
-    // Theme the whole preview panel to the rubro's accent so the header, the
-    // category checks and the native bullets read as that rubro's identity.
     if (card) box.style.setProperty("--rubro-accent", card.accent);
     else box.style.removeProperty("--rubro-accent");
 
@@ -552,9 +906,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     const nativeBlock = p.native.length
       ? `<div class="rubro-pv-block">
            <h5 class="rubro-pv-title">Específico de tu rubro</h5>
-           <ul class="rubro-native">${p.native
-             .map((t) => `<li>${escapeHtml(t)}</li>`)
-             .join("")}</ul>
+           <ul class="rubro-native">${p.native.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>
          </div>`
       : `<div class="rubro-pv-block">
            <h5 class="rubro-pv-title">Específico de tu rubro</h5>
@@ -564,21 +916,14 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     const hiddenBlock = p.hidden.length
       ? `<div class="rubro-pv-block">
            <h5 class="rubro-pv-title">Secciones que se ocultan</h5>
-           <div class="rubro-chips">${p.hidden
-             .map((t) => `<span class="rubro-chip off">${escapeHtml(t)}</span>`)
-             .join("")}</div>
+           <div class="rubro-chips">${p.hidden.map((t) => `<span class="rubro-chip off">${escapeHtml(t)}</span>`).join("")}</div>
          </div>`
       : "";
 
-    // Roadmap "Próximamente": documented direction per rubro, shown sober (muted,
-    // dashed) so it reads as where the rubro is headed — NOT a feature claim and
-    // never a dead-end (the rubro already gives a working ERP today).
     const comingBlock = p.comingSoon.length
       ? `<div class="rubro-pv-block rubro-pv-soon">
            <h5 class="rubro-pv-title">Próximamente para tu rubro</h5>
-           <ul class="rubro-coming">${p.comingSoon
-             .map((t) => `<li>${escapeHtml(t)}</li>`)
-             .join("")}</ul>
+           <ul class="rubro-coming">${p.comingSoon.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>
            <p class="muted rubro-pv-muted">Hoy ya funciona como ERP completo; esto llega más adelante.</p>
          </div>`
       : "";
@@ -608,9 +953,7 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     `;
   }
 
-  // --- Datos demo ------------------------------------------------------------
-
-  function refreshDemoHelp(): void {
+  function refreshDemoHelp(verticalEl: HTMLElement): void {
     const help = verticalEl.querySelector<HTMLElement>("#cfg-demo-help");
     const btn = verticalEl.querySelector<HTMLButtonElement>("#cfg-demo-btn");
     if (!help || !btn) return;
@@ -621,24 +964,18 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       btn.hidden = false;
       btn.disabled = false;
     } else {
-      // No demo pack for this rubro yet — never a dead button: the operator still
-      // gets a working empty ERP, so point them at the real paths forward instead
-      // of leaving a greyed, inert control (ULTRA-PLAN §8: "no dead-end").
       help.textContent =
         "Aún no hay datos demo para este rubro. Podés empezar igual: importá tu catálogo (CSV) o créalo a mano en Inventario.";
       btn.hidden = true;
     }
   }
 
-  function wireDemo(): void {
+  function wireDemo(verticalEl: HTMLElement): void {
     const btn = verticalEl.querySelector<HTMLButtonElement>("#cfg-demo-btn")!;
     const statusEl = verticalEl.querySelector<HTMLElement>("#cfg-demo-status")!;
-    refreshDemoHelp();
+    refreshDemoHelp(verticalEl);
 
-    const run = async (
-      pack: NonNullable<SeedVertical>,
-      force: boolean,
-    ): Promise<void> => {
+    const run = async (pack: NonNullable<SeedVertical>, force: boolean): Promise<void> => {
       statusEl.hidden = true;
       btn.disabled = true;
       const prev = btn.textContent;
@@ -651,11 +988,9 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         toast("Datos demo cargados");
       } catch (err) {
         if (err === SEED_ALREADY_EXISTS) {
-          if (
-            window.confirm(
-              "Ya hay datos demo cargados. ¿Regenerarlos? Se borrará el pack demo anterior y se volverá a sembrar.",
-            )
-          ) {
+          if (window.confirm(
+            "Ya hay datos demo cargados. ¿Regenerarlos? Se borrará el pack demo anterior y se volverá a sembrar.",
+          )) {
             await run(pack, true);
             return;
           }
@@ -667,38 +1002,33 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         }
       } finally {
         btn.textContent = prev;
-        refreshDemoHelp();
+        refreshDemoHelp(verticalEl);
       }
     };
 
     btn.addEventListener("click", () => {
       const pack = seedVerticalFor(selectedVertical);
       if (!pack) return;
-      if (
-        !window.confirm(
-          `Vas a cargar DATOS DE EJEMPLO para el rubro seleccionado. Úsalo solo en una instalación de prueba, no sobre datos reales. ¿Continuar?`,
-        )
-      ) {
+      if (!window.confirm(
+        `Vas a cargar DATOS DE EJEMPLO para el rubro seleccionado. Úsalo solo en una instalación de prueba, no sobre datos reales. ¿Continuar?`,
+      )) {
         return;
       }
       void run(pack, false);
     });
   }
 
-  // --- Conexión al servidor + tema -------------------------------------------
-
+  // --- Conexión al servidor + tema (Preferencias) ----------------------------
   function wireServerAndTheme(): void {
-    const urlEl = host.querySelector<HTMLInputElement>("#cfg-server-url")!;
-    const testBtn = host.querySelector<HTMLButtonElement>("#cfg-server-test")!;
-    const saveBtn = host.querySelector<HTMLButtonElement>("#cfg-server-save")!;
-    const statusEl = host.querySelector<HTMLElement>("#cfg-server-status")!;
+    const urlEl = panelEl.querySelector<HTMLInputElement>("#cfg-server-url")!;
+    const testBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-server-test")!;
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-server-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-server-status")!;
 
     testBtn.addEventListener("click", async () => {
       const url = urlEl.value.trim();
       if (!url) {
-        statusEl.textContent = "Escribe una URL primero.";
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
+        applyStatus(statusEl, toFailed("Escribe una URL primero."));
         return;
       }
       testBtn.disabled = true;
@@ -723,19 +1053,15 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     saveBtn.addEventListener("click", () => {
       const url = urlEl.value.trim();
       if (!url) {
-        statusEl.textContent = "La URL no puede estar vacía.";
-        statusEl.className = "cfg-status cfg-status-err";
-        statusEl.hidden = false;
+        applyStatus(statusEl, toFailed("La URL no puede estar vacía."));
         return;
       }
       rememberServerUrl(url);
-      statusEl.textContent = "Guardado — se usará al volver a iniciar sesión.";
-      statusEl.className = "cfg-status cfg-status-ok";
-      statusEl.hidden = false;
+      applyStatus(statusEl, toSaved("Guardado — se usará al volver a iniciar sesión."));
       toast("URL del servidor guardada");
     });
 
-    const themeEl = host.querySelector<HTMLSelectElement>("#cfg-theme")!;
+    const themeEl = panelEl.querySelector<HTMLSelectElement>("#cfg-theme")!;
     themeEl.value = currentTheme();
     themeEl.addEventListener("change", () => {
       applyTheme(themeEl.value === "light" ? "light" : "dark");
@@ -743,10 +1069,8 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     });
   }
 
-  wireServerAndTheme();
-  void loadVerticalForm();
-  void load();
-  void loadEmisor();
+  // Initial paint.
+  selectSection(activeSection);
 }
 
 /** localStorage key for the operator's UI theme preference. */
@@ -769,15 +1093,4 @@ export function applyTheme(theme: "dark" | "light"): void {
   } catch {
     /* noop */
   }
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
