@@ -8,6 +8,7 @@ pub mod assist;
 pub mod audit;
 pub mod backup;
 pub use backup::{backup_now, prune_backups, BackupReport};
+pub mod branches;
 pub mod cash_register;
 pub mod catalog;
 pub mod config;
@@ -45,6 +46,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(dashboard::router(state.clone()))
         .merge(dte::router(state.clone()))
         .merge(backup::router(state.clone()))
+        .merge(branches::router(state.clone()))
         .merge(license::router(state.clone()))
         .merge(audit::router(state.clone()))
         .merge(seed::router(state.clone()))

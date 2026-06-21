@@ -90,6 +90,7 @@ impl Modify for SecurityAddon {
         (name = "AgentOrders", description = "Operador supplier maneja órdenes federadas \
             entrantes (list/get/accept/reject/fulfill). JWT + tenant-scoped."),
         (name = "Backup", description = "Backup on-demand del data dir (SurrealKv + agent.key)."),
+        (name = "ConfigCenter", description = "Sucursales + cajas: CRUD admin para multi-sucursal / multi-caja."),
         (name = "License", description = "Hot-reload + status de licencia activa. Admin only."),
     ),
     paths(
@@ -199,6 +200,17 @@ impl Modify for SecurityAddon {
         crate::v1::agent_orders::fulfill,
         // Backup (PR #64)
         crate::v1::backup::create_backup,
+        // Config center: sucursales + cajas (mig 0032)
+        crate::v1::branches::list_branches,
+        crate::v1::branches::get_branch,
+        crate::v1::branches::create_branch,
+        crate::v1::branches::update_branch,
+        crate::v1::branches::delete_branch,
+        crate::v1::branches::list_registers,
+        crate::v1::branches::get_register,
+        crate::v1::branches::create_register,
+        crate::v1::branches::update_register,
+        crate::v1::branches::delete_register,
         // License admin (PR #64)
         crate::v1::license::reload_license,
         crate::v1::license::license_status,
