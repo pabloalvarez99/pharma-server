@@ -4297,6 +4297,51 @@ GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helper
 `npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
 backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).
 
+## 2026-06-21 · milton · W5 — Config Center backend: usuarios/roles + medios de pago + perfil de negocio
+
+Lane `feat/config-users-api` (off `feature/erp-parity` @ae17e6f). Cierra el gap CLI→UI:
+hasta hoy crear usuarios/roles sólo existía en `pharma user-create`, así que el dueño no
+podía gestionar su equipo sin terminal. Backend nuevo para que ye cablee el Centro de
+Configuración. **Módulo único** `crates/api/src/v1/config.rs` + 2 líneas en `v1/mod.rs`
+(`mod config;` + `.merge(config::router())`). **Cero migración** (reusa tablas existentes),
+cero cambios en domain/auth.
+
+**Usuarios/roles** (admin/owner, tenant-scoped vía claim `tenant_id`):
+- `GET/POST /api/v1/config/users` — listar (sin hash) / crear (argon2id, reusa
+  `auth::password::hash` + el patrón `CREATE user` de `setup.rs`).
+- `PATCH /api/v1/config/users/{id}` — editar roles.
+- `POST /api/v1/config/users/{id}/disable|enable` — toggle `active` (campo ya en `0001_init`
+  → por eso cero migración).
+- Validación: email, password ≥8, roles ∈ {cashier,pharmacist,admin,owner}, unique
+  (tenant,email) → 409.
+- **Dos invariantes de seguridad** sobre el role gate: (a) *owner-grant* — sólo un `owner`
+  puede asignar el rol `owner` (un admin no escala a sí mismo/otros); (b) *last-owner* — el
+  único `owner` activo no se puede deshabilitar ni degradar (el negocio nunca queda sin
+  dueño; regla "owner cannot be locked out" de `crate::role`).
+
+**Medios de pago** — `GET/PUT /api/v1/config/payment-methods` (GET cualquier auth → el POS
+necesita los medios aceptados; PUT admin+). Catálogo `{efectivo,debito,credito,convenio}`,
+validado + dedup, persistido JSON en `admin_setting` `business.payment_methods`; GET expone
+`available` (catálogo completo) para la UI.
+
+**Perfil de negocio** — `GET/PUT /api/v1/config/business` (GET cualquier auth → header de
+boleta; PUT admin+). `{razon_social,giro,direccion,telefono,email}`, razón social
+obligatoria, JSON en `business.profile`. Distinto de `dte.emisor` (RUT/comuna SII, lane de
+marvin) — documentado en el módulo; cero colisión.
+
+Tests nuevos `crates/api/tests/config_center.rs` (12, todos verdes): CRUD, gating
+cajero→403/admin→ok, aislamiento de tenant (404 cross-tenant), owner-grant, last-owner
+lockout, medios de pago persist/read + validación, perfil persist/read.
+
+GATE: `cargo fmt --all -- --check` ✓ · `cargo clippy --workspace --all-targets -- -D warnings`
+✓ (compila TODOS los targets, incl. tests de dte/domain) · `config_center` 12/12 ✓. La corrida
+`cargo test --workspace` completa NO se pudo cerrar localmente: `link.exe` OOM transitorio al
+linkear binarios de test pesados (dte/domain, crypto) bajo contención del box (5 worktrees, ver
+memoria box-build-resource-tuning) — flake de entorno, target distinto cada corrida, **cero
+diagnóstico de rustc** (no es error de fuente) y ajeno a este cambio api-only. dte verificado en
+aislamiento (`caf_folio_atomic` 3/3). CI (runner limpio) corre la suite completa. Scope = sólo
+`crates/api`; router +2 líneas en `v1/mod.rs` → paxoloop reconcilia si marvin tocó el archivo.
+
 ---
 
 ## 2026-06-21 — ye · W5 Centro de Configuración (Pilar A flagship)
