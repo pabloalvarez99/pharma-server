@@ -27,6 +27,7 @@ import {
   reports402Matrix,
   rubroShowcaseFlow,
   agentAskFlow,
+  agentActionFlow,
   serviceSaleFlow,
   DTE_EMISOR_RUT,
   DTE_CERT_PASS,
@@ -36,6 +37,10 @@ import { join } from "node:path";
 
 const PASSWORD = "e2e-pass-1234";
 const EMAIL = "admin@e2e.cl";
+// A non-admin (cashier) user used by the agent WRITE-action flow to prove the
+// role gate: a cashier may ask read questions but may NOT execute write actions.
+const CASHIER_EMAIL = "cajero@e2e.cl";
+const CASHIER_PASSWORD = "e2e-cajero-1234";
 const TENANTS = [
   { slug: "e2e-farmacia", name: "Farmacia E2E", vertical: "pharmacy" },
   { slug: "e2e-mini", name: "Minimarket E2E", vertical: "minimarket" },
@@ -53,6 +58,10 @@ const SHOWCASE_TENANT = { slug: "e2e-rubro", name: "Rubro Showcase E2E" };
 // false, migración 0031): the flow seeds the `servicios` pack itself and sells a
 // stock-0 service, so it bootstraps with no fixed vertical.
 const SERVICE_TENANT = { slug: "e2e-servicios", name: "Servicios E2E" };
+// Dedicated tenant for the agent WRITE-action flow (propose/confirm + role gate).
+// It gets an admin user (created in the common loop) AND an extra cashier user
+// (created below) so the flow can assert a cashier is blocked from /assist/act.
+const ACTION_TENANT = { slug: "e2e-accion", name: "Agente Acción E2E", vertical: "pharmacy" };
 const TEST_PFX = join(REPO_ROOT, "crates", "dte", "tests", "assets", "test-cert.pfx");
 
 let server;
@@ -68,7 +77,7 @@ async function main() {
   section("bootstrap (CLI, server down)");
   await cli(["migrate"], dbPath);
   console.log("  ✓ migrations applied");
-  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT, SERVICE_TENANT]) {
+  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT, SERVICE_TENANT, ACTION_TENANT]) {
     await cli(["tenant-create", t.name, "--slug", t.slug], dbPath);
     await cli(
       [
@@ -86,6 +95,24 @@ async function main() {
     );
     console.log(`  ✓ tenant + admin user: ${t.slug}`);
   }
+
+  // The agent-action tenant also needs a non-admin (cashier) user to prove the
+  // /assist/act role gate (admin/owner only). Created with the server still down.
+  await cli(
+    [
+      "user-create",
+      "--tenant",
+      ACTION_TENANT.slug,
+      "--email",
+      CASHIER_EMAIL,
+      "--roles",
+      "cashier",
+      "--password",
+      CASHIER_PASSWORD,
+    ],
+    dbPath,
+  );
+  console.log(`  ✓ cashier user: ${ACTION_TENANT.slug}`);
 
   // DTE lifecycle prerequisites (server still down — CLI holds the file lock):
   // a digital cert + folio CAFs the live emit path needs. Boleta 39 gets a
@@ -155,6 +182,17 @@ async function main() {
     tenant: SERVICE_TENANT.slug,
     email: EMAIL,
     password: PASSWORD,
+  });
+
+  // Business agent WRITE actions (W3, "el agente actúa"): two-step propose/confirm
+  // over HTTP — propose writes nothing, confirm executes the real domain write,
+  // the token is single-use, and a cashier is blocked from /assist/act (403).
+  await agentActionFlow({
+    tenant: ACTION_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+    cashierEmail: CASHIER_EMAIL,
+    cashierPassword: CASHIER_PASSWORD,
   });
 
   // DTE document lifecycle on its dedicated, fully-provisioned tenant.

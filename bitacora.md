@@ -4257,3 +4257,41 @@ GATE: `npm run build` ok (tsc + vite). `vitest` lane file **16/16**; suite globa
 **529/530** — el único fallo es `inventory-perf.test.ts` (presupuesto wall-clock
 16ms, 69ms en esta máquina cargada), archivo de otra lane (marvin/bob), **ajeno a
 este cambio** (diff disjunto). → reportado a paxoloop, NO debilitado.
+
+## 2026-06-20 · bob · W4 — export sin lock-in (gastos) + e2e acciones del agente
+
+Lane `feat/export-and-action-e2e` (off `feature/erp-parity` @283107a). Dos entregas:
+(1) cumplir el invariante **ADR-0005 #4 "sin lock-in"** donde faltaba export; (2)
+cubrir con e2e el flujo de **ACCIÓN del agente** que aterrizó en W3 (ADR-0016 Wave 3).
+
+**Export sin lock-in (gastos)** — `client/src/views/export-helpers.ts` (NUEVO,
+view-agnóstico, cero colisión): builder `buildExport(columns, rows)` column-driven →
+CSV (headers es-CL) + JSON (keys máquina estables), reusando los primitivos RFC-4180
+ya probados (`toCsv`/`csvField`/`exportFilename` de stock-helpers). `downloadExport`
+compartido (Blob, guardado para no-DOM) + `exportRows` baja CSV+JSON en un click
+(CSV con BOM para Excel es-CL). Botón **"Exportar"** cableado en `gastos.ts` (aditivo:
+exporta las filas en vista; `monto` queda STRING crudo → re-importa sin pérdida).
+Tests `export-helpers.test.ts` (9): headers es-CL, escaping comas/comillas/saltos,
+**neutraliza inyección CSV** (`=+-@` → prefijo tab), money sin formato local, JSON
+round-trip, lista vacía = header-only, columnas de gastos (label es-CL + fallback al
+código crudo). Superficies restantes (ventas ya en reports.ts; clientes = search-only
+sin list endpoint; movimientos = sin vista cliente) → follow-up cross-lane, no se
+tocaron archivos de otros workers.
+
+**e2e acciones del agente** — `agentActionFlow` (`client/e2e/flows.mjs` + tenant
+propio `e2e-accion` con admin **y** un cajero en `run.mjs`). Prueba la handshake de
+dos pasos `propose → confirm` sobre HTTP real (contraparte live de los unit tests de
+`crates/assist`):
+- **PROPONER NO ESCRIBE**: `/assist/ask` "registra un gasto de 5000 en arriendo" →
+  `intent=accion_propuesta` + `confirm_token`, pero el nº de gastos NO se mueve.
+- **CONFIRMAR EJECUTA**: `/assist/act` con el token → crea el gasto real (visible en
+  `/expenses`) y la OC draft (`/purchase-orders`, `status=draft`).
+- **TOKEN DE UN SOLO USO**: replay del mismo token rechazado limpio (4xx, no 5xx) y
+  **sin doble escritura**.
+- **ROLE GATE**: un cajero NO puede ejecutar (`/assist/act` admin/owner → **403**); su
+  *ask* de escritura DEGRADA a nota amable SIN token (las manos del agente gated, nunca
+  las preguntas de lectura) y no escribe nada.
+
+GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helpers 9) ·
+`npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
+backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).

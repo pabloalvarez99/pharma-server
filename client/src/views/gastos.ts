@@ -18,8 +18,20 @@ import {
   errorStateHtml,
 } from "./inventory";
 import { toRfc3339Noon, parseExpense, expenseTotal, gastosEmpty } from "./stock-helpers";
+import { exportRows, type ExportColumn } from "./export-helpers";
 
 const PAGE_LIMIT = 100;
+
+// Export columns (sin lock-in, ADR-0005 #4): es-CL headers the owner reads;
+// `monto` stays the raw Decimal STRING so the file re-imports losslessly. Built
+// once and reused for the CSV + JSON download.
+export const GASTO_EXPORT_COLUMNS: ExportColumn<Expense>[] = [
+  { header: "categoria", key: "category", value: (e) => categoryLabel(e.category) },
+  { header: "descripcion", key: "description", value: (e) => e.description ?? "" },
+  { header: "medio_pago", key: "payment_method", value: (e) => paymentLabel(e.payment_method) },
+  { header: "monto", key: "amount", value: (e) => e.amount },
+  { header: "fecha", key: "incurred_at", value: (e) => e.incurred_at },
+];
 
 // Closed category set (value sent to the server / English; label shown / Spanish).
 // "Otros" is the catch-all. The same list drives the filter and the form select.
@@ -65,6 +77,9 @@ export function renderGastos(host: HTMLElement, serverUrl: string): void {
               (c) => `<option value="${escapeHtml(c.value)}">${escapeHtml(c.label)}</option>`,
             ).join("")}
           </select>
+          <button id="gastos-export-btn" class="btn-ghost" type="button" disabled>
+            Exportar
+          </button>
           <button id="gastos-new-btn" class="btn-primary">
             <span class="btn-label">Nuevo gasto</span>
             <span class="btn-pulse"></span>
@@ -89,6 +104,10 @@ export function renderGastos(host: HTMLElement, serverUrl: string): void {
   const modalHost = host.querySelector<HTMLElement>("#gastos-modal-host")!;
   const toastEl = host.querySelector<HTMLElement>("#gastos-toast")!;
   const newBtn = host.querySelector<HTMLButtonElement>("#gastos-new-btn")!;
+  const exportBtn = host.querySelector<HTMLButtonElement>("#gastos-export-btn")!;
+
+  // Rows currently in view — what the "Exportar" button writes out (sin lock-in).
+  let currentRows: Expense[] = [];
 
   function toast(msg: string): void {
     toastEl.textContent = msg;
@@ -106,15 +125,24 @@ export function renderGastos(host: HTMLElement, serverUrl: string): void {
     const category = categoryEl.value || undefined;
     try {
       const rows = await listExpenses(serverUrl, category, undefined, PAGE_LIMIT);
+      currentRows = rows;
+      exportBtn.disabled = rows.length === 0;
       renderKpis(kpiHost, rows);
       renderTable(tableHost, rows, category !== undefined);
     } catch (err) {
+      currentRows = [];
+      exportBtn.disabled = true;
       kpiHost.innerHTML = "";
       tableHost.innerHTML = renderError(err);
     }
   }
 
   categoryEl.addEventListener("change", () => void reload());
+  exportBtn.addEventListener("click", () => {
+    if (currentRows.length === 0) return;
+    exportRows("gastos", GASTO_EXPORT_COLUMNS, currentRows);
+    toast(`Exportados ${currentRows.length} gasto(s)`);
+  });
   newBtn.addEventListener("click", () =>
     openModal(modalHost, serverUrl, async () => {
       toast("Gasto registrado");
