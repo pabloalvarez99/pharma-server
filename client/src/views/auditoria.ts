@@ -9,8 +9,9 @@
 // DEGRADES GRACEFULLY: the endpoint is admin/owner only — a 403 shows a friendly
 // note instead of a hard error. Spanish throughout; same skeleton → fetch → swap.
 import { queryAuditLog, type AuditEntry, type AuditFilters } from "../api";
-import { num } from "../format";
+import { num, fechaHora } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { emptyState, errorState } from "./ui";
 
 const PAGE_SIZE = 50;
 
@@ -90,7 +91,10 @@ function renderTable(
   go: (offset: number) => void,
 ): void {
   if (rows.length === 0) {
-    host.innerHTML = `<p class="empty">Sin registros de auditoría para el filtro seleccionado.</p>`;
+    host.innerHTML = emptyState({
+      title: "Sin registros de auditoría",
+      hint: "No hay cambios para el filtro seleccionado. Ajusta el rango de fechas, la acción o la tabla.",
+    });
     return;
   }
   const from = offset + 1;
@@ -136,7 +140,7 @@ function auditRow(a: AuditEntry): string {
     a.status === null ? "" : a.status >= 500 ? "pill-danger" : a.status >= 400 ? "pill-warn" : "pill-ok";
   return `
     <tr>
-      <td><span class="muted">${escapeHtml(fmtDateTime(a.created_at))}</span></td>
+      <td><span class="muted">${escapeHtml(fechaHora(a.created_at))}</span></td>
       <td><div class="cell-main">${escapeHtml(who)}</div></td>
       <td>${actionPill(a.action)}</td>
       <td><div class="cell-sub muted">${escapeHtml(tabla)}</div></td>
@@ -163,25 +167,10 @@ function actionPill(action: string): string {
 function renderError(err: unknown): string {
   const msg = asMessage(err);
   if (msg.includes("403") || msg.includes("denegado") || msg.includes("Permiso")) {
-    return `
-      <div class="caja-empty">
-        <div class="caja-empty-mark">●</div>
-        <h3>Auditoría restringida</h3>
-        <p class="muted">El registro de auditoría sólo está disponible para administradores. Contacta al dueño o admin de la farmacia.</p>
-      </div>
-    `;
+    return emptyState({
+      title: "Auditoría restringida",
+      hint: "El registro de auditoría sólo está disponible para administradores. Contacta al dueño o administrador del negocio.",
+    });
   }
-  return `<div class="view-error">${escapeHtml(msg)}</div>`;
-}
-
-function fmtDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return errorState(msg);
 }

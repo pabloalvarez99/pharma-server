@@ -17,9 +17,10 @@ import {
   type Prescription,
   type NewPrescriptionInput,
 } from "../api";
-import { isValidRut, canonicalRut, formatRut } from "../format";
+import { fecha, isValidRut, canonicalRut, formatRut } from "../format";
 import { loadVertical, hasRecetas, verticalLabel } from "../vertical";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { emptyState, errorState, loadingState } from "./ui";
 
 const PAGE_LIMIT = 100;
 
@@ -31,7 +32,7 @@ const PAGE_LIMIT = 100;
 export function renderRecetas(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
     <section class="view view-recetas">
-      <div class="table-card rb-card"><p class="empty rb-muted">Cargando…</p></div>
+      <div class="table-card rb-card">${loadingState()}</div>
     </section>`;
   void loadVertical(serverUrl).then((vertical) => {
     if (!hasRecetas(vertical)) {
@@ -154,9 +155,14 @@ function renderRecetasModule(host: HTMLElement, serverUrl: string): void {
 
 function renderTable(host: HTMLElement, rows: Prescription[], ledger: boolean): void {
   if (rows.length === 0) {
-    host.innerHTML = `<p class="empty">${
-      ledger ? "Sin recetas controladas registradas." : "Sin recetas para el filtro seleccionado."
-    }</p>`;
+    host.innerHTML = emptyState({
+      title: ledger
+        ? "Sin recetas controladas registradas"
+        : "Sin recetas para el filtro seleccionado",
+      hint: ledger
+        ? "El libro de controlados (Ley 20.000) se llena al dispensar recetas controladas."
+        : "Registra una receta con «+ Nueva receta» o ajusta el filtro de RUT.",
+    });
     return;
   }
   // The ledger is controlled-only, so the "Tipo" column is redundant there.
@@ -189,7 +195,7 @@ function prescriptionRow(r: Prescription, ledger: boolean): string {
   const tipoCell = ledger ? "" : `<td>${tipo}</td>`;
   return `
     <tr>
-      <td><span class="muted">${escapeHtml(fmtDate(r.dispensed_at))}</span></td>
+      <td><span class="muted">${escapeHtml(fecha(r.dispensed_at))}</span></td>
       <td><div class="cell-main">${escapeHtml(r.patient_name)}</div></td>
       <td><span class="muted">${escapeHtml(r.patient_rut)}</span></td>
       <td><div class="cell-sub muted">${escapeHtml(doctor)}</div></td>
@@ -372,19 +378,10 @@ async function doExport(
 function renderError(err: unknown): string {
   const msg = asMessage(err);
   if (msg.includes("403") || msg.includes("denegado")) {
-    return `
-      <div class="caja-empty">
-        <div class="caja-empty-mark">●</div>
-        <h3>Sin acceso a recetas</h3>
-        <p class="muted">Tu rol no tiene permiso para registrar o ver recetas. Contacta al administrador.</p>
-      </div>
-    `;
+    return emptyState({
+      title: "Sin acceso a recetas",
+      hint: "Tu rol no tiene permiso para registrar o ver recetas. Contacta al administrador.",
+    });
   }
-  return `<div class="view-error">${escapeHtml(msg)}</div>`;
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return errorState(msg);
 }

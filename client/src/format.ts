@@ -50,6 +50,23 @@ export function fecha(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : FECHA.format(d);
 }
 
+// Local wall-clock HH:MM (24h) — the operator's time, not UTC. Paired with FECHA
+// for the one date+time formatter every list shares.
+const HORA = new Intl.DateTimeFormat("es-CL", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** Canonical operator-facing date+time (`dd-mm-yyyy HH:MM`, es-CL, 4-digit year)
+ *  for audit/DTE listings. The single source so boletas, facturas and auditoría
+ *  never drift to a 2-digit year or a per-view `fmtDate`. Unparseable input is
+ *  echoed verbatim (never "Invalid Date"). */
+export function fechaHora(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : `${FECHA.format(d)} ${HORA.format(d)}`;
+}
+
 // --- POS cash math -----------------------------------------------------------
 // Pure helpers behind the POS checkout. Extracted so the vuelto/quick-cash logic
 // (the cashier-loop money path) is regression-tested without a DOM. CLP has no
