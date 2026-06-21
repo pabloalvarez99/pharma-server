@@ -4296,3 +4296,45 @@ dos pasos `propose → confirm` sobre HTTP real (contraparte live de los unit te
 GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helpers 9) ·
 `npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
 backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).
+
+---
+
+## 2026-06-21 — ye · W5 Centro de Configuración (Pilar A flagship)
+
+`client/src/views/configuracion.ts` reconstruido de **scroll plano que mostraba keys
+crudas** (`admin_setting`/`dte.emisor`) → **hub multi-sección** con nav lateral + tarjetas
+cuidadas. El operador ya **nunca** ve una key técnica: cada control lleva label humano.
+
+**Modelo puro nuevo** `client/src/views/config-center.ts` (sin DOM, sin Tauri):
+- `CONFIG_SECTIONS` — catálogo de 8 secciones (Negocio · Facturación SII · Licencia y
+  plan · Agente · Preferencias · + Usuarios/Sucursales/Respaldo como monturas honestas).
+- `searchConfig(q)` — búsqueda-en-settings accent-insensitive sobre labels **y** sinónimos
+  (keywords); devuelve secciones + field-hits para chips "saltar al ajuste".
+- `resolveSection` / `defaultSection` — navegación robusta (id desconocido → default).
+- Máquina de estado de guardado (`toSaving/toSaved/toFailed` + `saveStatusClass`) →
+  feedback uniforme en cada tarjeta.
+- Validadores puros (`validateBusinessRut` mód-11+canónico, `validateNonNegativeInt`,
+  `validateActeco`, `validateRequiredText`).
+
+**Hub (renderer)**: nav sticky + panel; cada sección es su propio render+wiring.
+- **Negocio** — vitrina rubro (grid ARIA + preview en vivo, montada adentro) + nombre +
+  datos tributarios (emisor DTE con validación RUT live).
+- **Facturación SII** — ambiente sandbox/prod (confirm en prod) + folios CAF (lectura
+  `dteCafStatus` tipo 39) + montura cert/CAF honesta.
+- **Licencia y plan** — `licenseStatus`: tier/estado/vencimiento/asientos + features con
+  labels humanos; nota honesta de activación (núcleo gratis nunca caduca, ADR-0005).
+- **Agente** — federación B2B + fidelidad (keys reales) + montura LLM opt-in (ADR-0016).
+- **Preferencias** — tema, idioma (es-CL), conexión al servidor, telemetría **opt-in
+  default OFF** (Ley 19.628).
+- **Usuarios/Sucursales/Respaldo** — monturas "próximamente" con la ruta CLI honesta de
+  hoy (`pharma user-create`/`backup`), cero dead-end.
+
+**Tests**: `config-center.test.ts` — 23 unit (catálogo sin keys crudas, navegación,
+búsqueda, save-state, validadores). CSS nuevo `.cfg-*` append en `src/brand.css` (rail +
+tarjetas + chips + responsive). Sin tocar src-tauri (no hizo falta command nuevo; todo
+vía `get_setting`/`set_setting`/`license_status`/`dte_caf_status` existentes).
+
+GATE verde: `npm run build` ok · `vitest` **573/573** (+50, incl. config-center 23) ·
+`cargo fmt` src-tauri ok · `clippy -D warnings` src-tauri ok. Scope: `configuracion.ts` +
+`config-center.ts`(+test) + `brand.css`. No se tocó pos/caja/reports ni `vertical.ts`/
+`format.ts` (solo import lectura).
