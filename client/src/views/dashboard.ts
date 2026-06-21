@@ -17,6 +17,8 @@ import {
   salesDaily,
   topProducts,
   inventorySummary,
+  cashSessions,
+  nearExpiry,
   type DailySalesRow,
   type TopProductRow,
   type InventorySummary,
@@ -39,6 +41,14 @@ import {
 } from "../vertical";
 import { rubroIconSvg } from "../brand/rubro-icons";
 import { mountAgentAskBar } from "./askbar";
+import {
+  buildProactiveCards,
+  filterDismissed,
+  markDismissed,
+  NEAR_EXPIRY_DAYS,
+  type ProactiveCard,
+  type ProactiveAction,
+} from "./agent-proactive";
 
 const TOP_LIMIT = 5;
 /** Window (days) for the service-rubro "ventas del período" tile. */
@@ -57,6 +67,8 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
       </header>
 
       <div id="dash-agent"></div>
+
+      <div id="dash-alerts" class="agent-alerts" hidden></div>
 
       <div id="dash-activate" class="dash-activate" hidden></div>
 
@@ -89,6 +101,12 @@ async function hydrate(host: HTMLElement, serverUrl: string): Promise<void> {
   // can do, before the KPI strip. It owns its own loading/error states.
   const agentHost = host.querySelector<HTMLElement>("#dash-agent");
   if (agentHost) mountAgentAskBar(agentHost, serverUrl, rubro);
+
+  // Proactive cards — the agent surfaces what to act on before being asked.
+  // Own region, own settle: a failed probe just yields fewer cards, never blanks
+  // the panel. Fire-and-forget so the KPI strip below loads in parallel.
+  const alertsHost = host.querySelector<HTMLElement>("#dash-alerts");
+  if (alertsHost) void loadProactive(alertsHost, serverUrl, rubro);
 
   const f = featuresForRubro(rubro);
   await Promise.all([
@@ -148,6 +166,126 @@ function todayLine(at: Date = new Date()): string {
   } catch {
     return "Resumen de hoy";
   }
+}
+
+// --- Proactive agent cards --------------------------------------------------
+//
+// Compose existing READ endpoints into the few things worth acting on now. Each
+// source settles independently (a failed one just drops its card). The selection
+// / ordering / dismissal rules live in agent-proactive.ts (pure, tested); this
+// only fetches, renders, and wires the buttons.
+
+async function loadProactive(
+  host: HTMLElement,
+  serverUrl: string,
+  rubro: Rubro,
+): Promise<void> {
+  const f = featuresForRubro(rubro);
+  const [sessRes, expRes, invRes] = await Promise.all([
+    settle(cashSessions(serverUrl, "open")),
+    f.lotes ? settle(nearExpiry(serverUrl, NEAR_EXPIRY_DAYS)) : Promise.resolve(null),
+    f.physicalStock ? settle(inventorySummary(serverUrl)) : Promise.resolve(null),
+  ]);
+
+  const cards = buildProactiveCards({
+    rubro,
+    openSessions: sessRes.ok ? sessRes.value : null,
+    expiry: expRes && expRes.ok ? expRes.value : null,
+    inventory: invRes && invRes.ok ? invRes.value : null,
+  });
+
+  paintProactive(host, cards, serverUrl);
+}
+
+/** Render (or hide) the proactive cards, applying per-day dismissals. */
+function paintProactive(host: HTMLElement, cards: ProactiveCard[], serverUrl: string): void {
+  void serverUrl;
+  const visible = filterDismissed(cards, dismissStore());
+  if (visible.length === 0) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  host.hidden = false;
+  host.innerHTML = visible.map(proactiveCardHtml).join("");
+
+  host.querySelectorAll<HTMLElement>(".agent-alert").forEach((el) => {
+    const card = visible.find((c) => c.id === el.dataset.card);
+    if (!card) return;
+    el.querySelector<HTMLButtonElement>("[data-act]")?.addEventListener("click", () => {
+      runProactiveAction(card.action);
+    });
+    el.querySelector<HTMLButtonElement>("[data-dismiss]")?.addEventListener("click", () => {
+      markDismissed(dismissStore(), card.id);
+      // Re-filter from the SAME built list so a second card isn't re-fetched.
+      paintProactive(host, cards, serverUrl);
+    });
+  });
+}
+
+/** Run a card's action: jump to a view, or hand the question to the ask-bar so
+ *  the proactive nudge flows straight into a conversation. */
+function runProactiveAction(action: ProactiveAction): void {
+  if (action.kind === "nav") {
+    navJump(action.nav as ActivationNav);
+    return;
+  }
+  // ask → seed + submit the agent ask-bar (already mounted above).
+  const input = document.querySelector<HTMLInputElement>(".agent-ask-input");
+  const form = document.querySelector<HTMLFormElement>(".agent-ask-form");
+  if (input && form) {
+    input.value = action.question;
+    input.focus();
+    form.requestSubmit();
+  }
+}
+
+function proactiveCardHtml(card: ProactiveCard): string {
+  return `
+    <div class="agent-alert agent-alert-${card.severity}" data-card="${card.id}" role="region" aria-label="${escapeHtml(card.title)}">
+      <span class="agent-alert-ico" aria-hidden="true">${proactiveIcon(card.icon)}</span>
+      <div class="agent-alert-text">
+        <strong>${escapeHtml(card.title)}</strong>
+        <p>${escapeHtml(card.body)}</p>
+      </div>
+      <div class="agent-alert-actions">
+        <button type="button" class="agent-alert-btn" data-act>${escapeHtml(card.action.label)}</button>
+        <button type="button" class="agent-alert-dismiss" data-dismiss aria-label="Descartar aviso" title="Descartar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+    </div>`;
+}
+
+/** Small contextual glyph per card type (drawer / expiry / stock). */
+function proactiveIcon(icon: ProactiveCard["icon"]): string {
+  const path =
+    icon === "drawer"
+      ? '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 14h6"/>'
+      : icon === "expiry"
+        ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+        : '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>';
+  return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">${path}</svg>`;
+}
+
+/** localStorage-backed dismissal store (no-throw via the pure helpers' guards). */
+function dismissStore() {
+  return {
+    getItem: (k: string) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (k: string, v: string) => {
+      try {
+        localStorage.setItem(k, v);
+      } catch {
+        /* noop */
+      }
+    },
+  };
 }
 
 // --- Activation band (guided first value) -----------------------------------

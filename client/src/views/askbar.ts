@@ -22,6 +22,7 @@ import {
 } from "../api";
 import { escapeHtml } from "./inventory";
 import { featuresForRubro, type Rubro } from "../vertical";
+import { shouldShowAgentIntro, dismissAgentIntro, type KeyStore } from "./agent-proactive";
 
 /** The intent label the server returns when it could not classify the question
  *  (mirrors `assist::Intent::Unknown.label()`). */
@@ -205,13 +206,55 @@ export interface AskBarHandle {
 /** Mount the agent ask-bar into `host`. Wires the input + suggestion chips to
  *  the `assist_ask` Tauri command and renders each state into a live region.
  *  Keyboard-first: returns a `focus()` so the shell's "/" shortcut lands here. */
+/** localStorage-backed KeyStore (no-throw) for the one-time intro flag. */
+function introStore(): KeyStore {
+  return {
+    getItem: (k) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (k, v) => {
+      try {
+        localStorage.setItem(k, v);
+      } catch {
+        /* noop */
+      }
+    },
+  };
+}
+
+/** One-time coach mark teaching the owner they can talk to their business. Pure
+ *  HTML; the example is rubro-native (reuses the seeded suggestions). Empty when
+ *  already dismissed so it never nags. */
+export function agentIntroHtml(rubro: Rubro, show: boolean): string {
+  if (!show) return "";
+  const example = suggestedQuestions(rubro)[0] ?? "¿Cuánto vendí hoy?";
+  return `
+    <div class="agent-intro" role="note">
+      <span class="agent-intro-spark" aria-hidden="true">✨</span>
+      <p class="agent-intro-txt">
+        <strong>Nuevo:</strong> ahora puedes hablarle a tu negocio. Pregúntale en
+        español —por ejemplo <em>“${escapeHtml(example)}”</em>— y te responde con tus propios datos.
+      </p>
+      <button type="button" class="agent-intro-close" data-intro-close aria-label="Entendido" title="Entendido">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>`;
+}
+
 export function mountAgentAskBar(
   host: HTMLElement,
   serverUrl: string,
   rubro: Rubro,
 ): AskBarHandle {
+  const store = introStore();
+  const showIntro = shouldShowAgentIntro(store);
   host.innerHTML = `
     <section class="agent-ask" aria-label="Pregúntale a tu negocio">
+      ${agentIntroHtml(rubro, showIntro)}
       <div class="agent-ask-head">
         <span class="agent-spark" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -244,6 +287,15 @@ export function mountAgentAskBar(
   const input = host.querySelector<HTMLInputElement>(".agent-ask-input")!;
   const send = host.querySelector<HTMLButtonElement>(".agent-ask-send")!;
   const out = host.querySelector<HTMLElement>(".agent-ask-out")!;
+
+  // One-time intro: dismiss permanently on the owner's first acknowledgement.
+  if (showIntro) {
+    const intro = host.querySelector<HTMLElement>(".agent-intro");
+    intro?.querySelector<HTMLButtonElement>("[data-intro-close]")?.addEventListener("click", () => {
+      dismissAgentIntro(store);
+      intro.remove();
+    });
+  }
 
   let seq = 0; // guards against an out-of-order late response overwriting a newer one
 
