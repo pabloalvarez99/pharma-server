@@ -46,6 +46,16 @@ fn parse_thing(s: &str) -> DomainResult<Thing> {
     surrealdb::sql::thing(s).map_err(|_| DomainError::Invalid(format!("id inválido: {s}")))
 }
 
+/// Round a weighted-average cost to whole CLP. Money in this system is integer
+/// pesos everywhere (catalog prices, boleta totals, `invariants::iva_breakdown`
+/// rounds with `round_dp(0)`), so the WAC `cost_price` must too: a fractional
+/// cost (e.g. `(10·100 + 30·150)/40 = 137.5`) would make every reported margin
+/// `revenue − qty·cost` drift off the integer-peso books and stop being veraz.
+/// Same rounding strategy as `iva_breakdown` for consistency.
+fn wac_round_clp(cost: Decimal) -> Decimal {
+    cost.round_dp(0)
+}
+
 fn parse_typed(s: &str, table: &str) -> DomainResult<Thing> {
     let t = parse_thing(s)?;
     if t.tb != table {
@@ -414,7 +424,7 @@ pub async fn receive_purchase_order(
                 DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
             })?;
         let line_avg_cost = cost_sum / Decimal::from(add_qty);
-        let new_cost = match old_cost_opt {
+        let new_cost = wac_round_clp(match old_cost_opt {
             // No prior cost → first receipt seeds the cost with the line
             // average; otherwise old_cost weight would dilute to zero.
             None => line_avg_cost,
@@ -423,7 +433,7 @@ pub async fn receive_purchase_order(
                 let total_qty = Decimal::from(old_stock + add_qty);
                 (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
             }
-        };
+        });
         effects.push(repo::ReceiveEffect {
             product: pid,
             add_qty,
@@ -610,14 +620,14 @@ pub async fn receive_purchase_order_lines(
                 DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
             })?;
         let line_avg_cost = cost_sum / Decimal::from(add_qty);
-        let new_cost = match old_cost_opt {
+        let new_cost = wac_round_clp(match old_cost_opt {
             None => line_avg_cost,
             Some(_) if old_stock <= 0 => line_avg_cost,
             Some(old_cost) => {
                 let total_qty = Decimal::from(old_stock + add_qty);
                 (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
             }
-        };
+        });
         product_effects.push(repo::ReceiveLineProductEffect {
             product: pid,
             add_qty,

@@ -536,6 +536,48 @@ async fn po_receive_bumps_stock_recomputes_wac_logs_movement_and_marks_received(
 }
 
 #[tokio::test]
+async fn po_receive_rounds_wac_to_whole_clp() {
+    let (db, t) = setup().await;
+    let s = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    // Seed 10 @ 100. Receive 30 @ 175 → raw WAC = (10*100 + 30*175)/40 =
+    // 6250/40 = 156.25 → must persist as whole CLP 156, not 156.25, so every
+    // reported margin stays on the integer-peso books.
+    let prod = catalog::create_product(&db, &t, new_product("Ibuprofeno", "2990", Some("100")))
+        .await
+        .unwrap();
+    let pid_thing = surrealdb::sql::thing(&prod.id).unwrap();
+    db.query("UPDATE product SET stock = 10 WHERE id = $p")
+        .bind(("p", pid_thing.clone()))
+        .await
+        .unwrap();
+
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: s.id.clone(),
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&prod.id), "Ibuprofeno", 30, "175")],
+        },
+    )
+    .await
+    .unwrap();
+    service::receive_purchase_order(&db, &t, &po.id, None)
+        .await
+        .unwrap();
+
+    let (stock, cost) = product_stock_cost(&db, &prod.id).await;
+    assert_eq!(stock, 40);
+    assert_eq!(cost, Some(dec("156")), "WAC must round to whole CLP");
+    let c = cost.unwrap();
+    assert_eq!(c.scale(), 0, "cost_price must carry no fractional pesos");
+}
+
+#[tokio::test]
 async fn po_receive_first_receipt_seeds_cost_price_without_diluting_to_zero() {
     let (db, t) = setup().await;
     let s = service::create_supplier(&db, &t, new_supplier("S"))
