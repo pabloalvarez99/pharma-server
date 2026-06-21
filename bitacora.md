@@ -4157,3 +4157,29 @@ tenant propio `e2e-servicios` (siembra pack `servicios`):
 
 GATE verde: `npm run build` ok · `vitest` **490/490** · `npm run e2e`
 **233 passed / 0 failed / 0 xfail**. Mig libre = 0031 (sin nuevas migraciones).
+
+## 2026-06-20 — assist W4: más acciones del agente (crear cliente/producto, ajustar precio) + read intents
+
+- **qué**: amplié el whitelist de write-actions del agente (`crates/assist`, framework
+  propose→confirm→act de W3) con 3 acciones nuevas, reusando servicios de dominio
+  existentes (cero reimplementación): `crear_cliente`
+  (`domain::customers::create_customer`), `crear_producto_rapido`
+  (`domain::catalog::create_product`, slug auto, sin categoría/costo),
+  `ajustar_precio` (`domain::catalog::update_product`, resuelve producto+precio actual
+  en propose). Cada una mantiene el mismo envelope: token single-use/expirable/
+  tenant-bound, confirm en `/assist/act`, role-gate admin/owner, audit_log row.
+- **read intents nuevos**: `buscar_cliente` (search por nombre/RUT/tel),
+  `clientes_resumen` (cuántos clientes + puntos), `precio_producto` (precio de venta).
+- **por qué**: "el agente corre el negocio" — el dueño hace por chat las altas del día
+  a día (cliente, producto, reprice) sin abrir pantallas, bajo el mismo gate seguro.
+- **scope**: SOLO catalog + customers domain (sin tocar inventory/sales/compras de
+  marvin). Contrato `/assist/ask` + `/assist/act` ADITIVO (ye no rompe). Sin migración.
+- **parsing es-CL determinístico**: verbos CREATE vs PRICE separados (`crea producto X
+  precio N` = alta; `cambia el precio de X a N` = reprice). Nombres propios capturados
+  se title-casean para display (acentos plegados por `normalize`). Producto/precio
+  desconocido → Reject amable SIN emitir token.
+- **archivos**: `crates/assist/src/{actions,intent,deterministic}.rs` +
+  `crates/assist/tests/actions.rs` + nota de gate en `crates/api/src/v1/assist.rs`.
+- **GATE verde**: `cargo fmt --all -- --check` ok · `cargo clippy --workspace
+  --all-targets -- -D warnings` 0 warnings · `cargo test --workspace` 0 failed
+  (assist inner: 49 unit + 10 deterministic + 24 actions). Mig libre: ninguna nueva.

@@ -7,6 +7,10 @@
 use std::str::FromStr;
 
 use assist::{build, execute, parse_action, Action, ActionParse, ActionStore, BuildOutcome};
+use domain::catalog::model::{NewProduct, ProductFilters};
+use domain::catalog::service as catalog;
+use domain::customers::model::CustomerFilters;
+use domain::customers::service as customers;
 use domain::expenses::model::ExpenseFilters;
 use domain::expenses::service as expenses;
 use domain::purchasing::model::{NewSupplier, PurchaseOrderFilters};
@@ -217,4 +221,153 @@ async fn read_questions_are_not_actions() {
         parse_action("stock de paracetamol"),
         ActionParse::NotAnAction
     );
+}
+
+// ---- crear_cliente end-to-end -----------------------------------------------
+
+#[tokio::test]
+async fn crear_cliente_propose_no_write_then_confirm_executes_and_audits() {
+    let (db, tenant, user) = setup().await;
+    let store = ActionStore::new();
+
+    let parsed = parse_action("crea un cliente Juan Pérez rut 12.345.678-9");
+    let action = match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Ready(a) => a,
+        _ => panic!("expected Ready"),
+    };
+    assert!(matches!(action, Action::CrearCliente { .. }));
+    let proposal = store.propose(action, &tenant);
+
+    let before = customers::list_customers(&db, &tenant, CustomerFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(before.len(), 0, "propose must not create a customer");
+    assert_eq!(audit_action_count(&db, &tenant).await, 0);
+
+    let action = store.consume(&proposal.confirm_token, &tenant).unwrap();
+    let outcome = execute(&db, &tenant, Some(&user), action).await.unwrap();
+    assert_eq!(outcome.action, "crear_cliente");
+
+    let after = customers::list_customers(&db, &tenant, CustomerFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(after.len(), 1, "confirm creates exactly one customer");
+    assert_eq!(after[0].name, "Juan Perez");
+    assert_eq!(after[0].rut.as_deref(), Some("123456789"));
+    assert_eq!(audit_action_count(&db, &tenant).await, 1);
+}
+
+// ---- crear_producto_rapido end-to-end ---------------------------------------
+
+#[tokio::test]
+async fn crear_producto_propose_no_write_then_confirm_executes_and_audits() {
+    let (db, tenant, user) = setup().await;
+    let store = ActionStore::new();
+
+    let parsed = parse_action("crea un producto Aspirina a $1000 stock 15");
+    let action = match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Ready(a) => a,
+        _ => panic!("expected Ready"),
+    };
+    assert!(matches!(action, Action::CrearProductoRapido { .. }));
+    let proposal = store.propose(action, &tenant);
+
+    let before = catalog::list_products(&db, &tenant, ProductFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(before.len(), 0, "propose must not create a product");
+
+    let action = store.consume(&proposal.confirm_token, &tenant).unwrap();
+    let outcome = execute(&db, &tenant, Some(&user), action).await.unwrap();
+    assert_eq!(outcome.action, "crear_producto_rapido");
+
+    let after = catalog::list_products(&db, &tenant, ProductFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(after.len(), 1, "confirm creates exactly one product");
+    assert_eq!(after[0].name, "Aspirina");
+    assert_eq!(after[0].price, dec("1000"));
+    assert_eq!(after[0].stock, 15);
+    assert_eq!(audit_action_count(&db, &tenant).await, 1);
+}
+
+// ---- ajustar_precio end-to-end ----------------------------------------------
+
+async fn seed_product(db: &Db, tenant: &Thing, name: &str, price: &str) {
+    catalog::create_product(
+        db,
+        tenant,
+        NewProduct {
+            name: name.into(),
+            slug: None,
+            description: None,
+            price: dec(price),
+            cost_price: None,
+            stock: 0,
+            category: None,
+            image_url: None,
+            external_id: None,
+            laboratory: None,
+            therapeutic_action: None,
+            active_ingredient: None,
+            prescription_type: None,
+            presentation: None,
+            discount_percent: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn ajustar_precio_resolves_product_and_updates_price() {
+    let (db, tenant, user) = setup().await;
+    let store = ActionStore::new();
+    seed_product(&db, &tenant, "Paracetamol", "500").await;
+
+    let parsed = parse_action("cambia el precio de paracetamol a $1500");
+    let action = match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Ready(a) => a,
+        _ => panic!("expected Ready"),
+    };
+    match &action {
+        Action::AjustarPrecio {
+            product_name,
+            old_price,
+            new_price,
+            ..
+        } => {
+            assert_eq!(product_name, "Paracetamol");
+            assert_eq!(*old_price, dec("500"));
+            assert_eq!(*new_price, dec("1500"));
+        }
+        _ => panic!("expected AjustarPrecio"),
+    }
+    let proposal = store.propose(action, &tenant);
+
+    // Propose must not change the price.
+    let before = catalog::list_products(&db, &tenant, ProductFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(before[0].price, dec("500"), "propose must not reprice");
+
+    let action = store.consume(&proposal.confirm_token, &tenant).unwrap();
+    let outcome = execute(&db, &tenant, Some(&user), action).await.unwrap();
+    assert_eq!(outcome.action, "ajustar_precio");
+
+    let after = catalog::list_products(&db, &tenant, ProductFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(after[0].price, dec("1500"), "confirm applies the new price");
+    assert_eq!(audit_action_count(&db, &tenant).await, 1);
+}
+
+#[tokio::test]
+async fn ajustar_precio_unknown_product_is_rejected_without_token() {
+    let (db, tenant, _user) = setup().await;
+    let parsed = parse_action("cambia el precio de inexistente a $1500");
+    match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Reject(msg) => assert!(msg.to_lowercase().contains("producto")),
+        _ => panic!("unknown product must be rejected, no token issued"),
+    }
 }

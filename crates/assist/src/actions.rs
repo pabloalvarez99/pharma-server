@@ -70,6 +70,32 @@ pub enum Action {
         quantity: i64,
         unit_cost: Decimal,
     },
+    /// Register a new customer — reuses `domain::customers::create_customer`
+    /// (which validates the name and app-level RUT uniqueness per tenant).
+    CrearCliente {
+        name: String,
+        rut: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+    },
+    /// Quick-create a product with just a name and price — reuses
+    /// `domain::catalog::create_product` (slug auto-generated, no category, no
+    /// cost). The owner refines the rest in the catalog screen later.
+    CrearProductoRapido {
+        name: String,
+        price: Decimal,
+        stock: i64,
+    },
+    /// Reprice a single existing product — reuses
+    /// `domain::catalog::update_product`. `product_id` + `old_price` are
+    /// resolved server-side at propose time (see [`build`]); `old_price` is for
+    /// the confirmation prose only.
+    AjustarPrecio {
+        product_id: String,
+        product_name: String,
+        old_price: Decimal,
+        new_price: Decimal,
+    },
 }
 
 impl Action {
@@ -78,6 +104,9 @@ impl Action {
         match self {
             Action::RegistrarGasto { .. } => "registrar_gasto",
             Action::CrearOrdenCompraDraft { .. } => "crear_orden_compra_draft",
+            Action::CrearCliente { .. } => "crear_cliente",
+            Action::CrearProductoRapido { .. } => "crear_producto_rapido",
+            Action::AjustarPrecio { .. } => "ajustar_precio",
         }
     }
 
@@ -105,6 +134,28 @@ impl Action {
                 quantity,
                 product_name,
                 clp(*unit_cost),
+            ),
+            Action::CrearCliente { name, rut, .. } => match rut {
+                Some(r) => format!("Registrar al cliente «{name}» (RUT {r})."),
+                None => format!("Registrar al cliente «{name}»."),
+            },
+            Action::CrearProductoRapido { name, price, stock } => format!(
+                "Crear el producto «{}» a {} ({} {} de stock inicial).",
+                name,
+                clp(*price),
+                stock,
+                if *stock == 1 { "unidad" } else { "unidades" },
+            ),
+            Action::AjustarPrecio {
+                product_name,
+                old_price,
+                new_price,
+                ..
+            } => format!(
+                "Cambiar el precio de {} de {} a {}.",
+                product_name,
+                clp(*old_price),
+                clp(*new_price),
             ),
         }
     }
@@ -136,6 +187,33 @@ impl Action {
                 "product_name": product_name,
                 "quantity": quantity,
                 "unit_cost": unit_cost.to_string(),
+            }),
+            Action::CrearCliente {
+                name,
+                rut,
+                phone,
+                email,
+            } => serde_json::json!({
+                "name": name,
+                "rut": rut,
+                "phone": phone,
+                "email": email,
+            }),
+            Action::CrearProductoRapido { name, price, stock } => serde_json::json!({
+                "name": name,
+                "price": price.to_string(),
+                "stock": stock,
+            }),
+            Action::AjustarPrecio {
+                product_id,
+                product_name,
+                old_price,
+                new_price,
+            } => serde_json::json!({
+                "product_id": product_id,
+                "product_name": product_name,
+                "old_price": old_price.to_string(),
+                "new_price": new_price.to_string(),
             }),
         }
     }
@@ -304,9 +382,30 @@ pub enum ActionParse {
         quantity: i64,
         unit_cost: Decimal,
     },
+    /// A "crear cliente" request with the text-derivable fields.
+    Cliente {
+        name: String,
+        rut: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+    },
+    /// A "crear producto" request (name + price, optional initial stock).
+    Producto {
+        name: String,
+        price: Decimal,
+        stock: i64,
+    },
+    /// An "ajustar precio" request; `product_name` still needs DB resolution
+    /// into a record id + current price (see [`build`]).
+    AjustePrecio {
+        product_name: String,
+        new_price: Decimal,
+    },
 }
 
-const GASTO_VERBS: &[&str] = &[
+/// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
+/// orden de compra).
+const CREATE_VERBS: &[&str] = &[
     "registra ",
     "registrar ",
     "anota ",
@@ -325,26 +424,70 @@ const GASTO_VERBS: &[&str] = &[
     "guardar ",
 ];
 
+/// Imperative verbs that introduce a price CHANGE on an existing product.
+/// Kept distinct from [`CREATE_VERBS`] so "crea un producto X precio 1000" is a
+/// create (price is an attribute) while "cambia el precio de X a 1000" is an
+/// adjust.
+const PRICE_VERBS: &[&str] = &[
+    "cambia ",
+    "cambiar ",
+    "ajusta ",
+    "ajustar ",
+    "actualiza ",
+    "actualizar ",
+    "modifica ",
+    "modificar ",
+    "sube ",
+    "subir ",
+    "baja ",
+    "bajar ",
+    "pon ",
+    "poner ",
+    "fija ",
+    "fijar ",
+    "deja ",
+    "dejar ",
+];
+
 /// Parse a question into a write [`ActionParse`]. Purely textual and
 /// conservative: anything it cannot confidently turn into a whitelisted action
 /// stays [`ActionParse::NotAnAction`] (→ read path) or becomes
 /// [`ActionParse::Incomplete`] (→ friendly nudge). It NEVER guesses an action.
 pub fn parse_action(question: &str) -> ActionParse {
     let q = normalize(question);
-    let has_verb = GASTO_VERBS.iter().any(|v| q.contains(v));
+    let has_create = CREATE_VERBS.iter().any(|v| q.contains(v));
+    let has_price_verb = PRICE_VERBS.iter().any(|v| q.contains(v));
 
-    // Purchase order before expense: "orden de compra" is unambiguous.
+    // Purchase order before everything else: "orden de compra" is unambiguous.
     if q.contains("orden de compra") || q.contains(" oc ") || q.starts_with("oc ") {
-        if !has_verb {
+        if !has_create {
             return ActionParse::NotAnAction;
         }
         return parse_oc(&q);
     }
 
-    // Expense: needs an imperative verb AND the word "gasto" so we don't steal
-    // the read intent ("gastos del mes", "cuánto gasté").
-    if has_verb && q.contains("gasto") {
+    // Price adjustment BEFORE the create branches: a price verb + "precio" is a
+    // reprice of an existing product, even when the text also says "producto".
+    if has_price_verb && q.contains("precio") {
+        return parse_ajuste(&q);
+    }
+
+    // Expense: needs a create verb AND the word "gasto" so we don't steal the
+    // read intent ("gastos del mes", "cuánto gasté").
+    if has_create && q.contains("gasto") {
         return parse_gasto(&q);
+    }
+
+    // New customer: create verb + "cliente". Read intents ("mejores clientes",
+    // "cuántos clientes tengo") carry no create verb → fall through to the
+    // read agent.
+    if has_create && q.contains("cliente") {
+        return parse_cliente(&q);
+    }
+
+    // Quick product: create verb + "producto".
+    if has_create && q.contains("producto") {
+        return parse_producto(&q);
     }
 
     ActionParse::NotAnAction
@@ -364,6 +507,186 @@ fn parse_gasto(q: &str) -> ActionParse {
         amount,
         payment_method: "cash".into(),
     }
+}
+
+/// Fields a "crear cliente" text may carry after the customer name.
+const CLIENTE_FIELD_MARKERS: &[&str] = &[
+    " rut ",
+    " telefono ",
+    " fono ",
+    " celular ",
+    " cel ",
+    " email ",
+    " correo ",
+    " mail ",
+    " con ",
+];
+
+fn parse_cliente(q: &str) -> ActionParse {
+    let hint = ActionParse::Incomplete(
+        "Para crear un cliente dime su nombre. Por ejemplo: «crea un cliente Juan Pérez \
+         rut 12.345.678-9»."
+            .into(),
+    );
+    let Some((_, after)) = q.split_once("cliente") else {
+        return hint;
+    };
+    let mut rest = after.trim();
+    // Strip filler that can sit between "cliente" and the actual name.
+    for lead in [
+        "llamado ",
+        "llamada ",
+        "de nombre ",
+        "nombre ",
+        "nuevo ",
+        "nueva ",
+        ": ",
+    ] {
+        if let Some(s) = rest.strip_prefix(lead) {
+            rest = s.trim();
+        }
+    }
+    // Pad with a leading space so a marker like " rut " is also found when the
+    // field word sits at the very start ("cliente rut 11..." → no name).
+    let scan = format!(" {rest}");
+    // The name runs until the first field marker (rut/phone/email/…).
+    let mut name_end = scan.len();
+    for m in CLIENTE_FIELD_MARKERS {
+        if let Some(p) = scan.find(m) {
+            name_end = name_end.min(p);
+        }
+    }
+    let name = titlecase(strip_trailing_punct(scan[..name_end].trim()).trim());
+    if name.is_empty() {
+        return hint;
+    }
+    ActionParse::Cliente {
+        name,
+        rut: token_after(&scan, &[" rut "]).map(|s| s.to_uppercase()),
+        phone: token_after(&scan, &[" telefono ", " fono ", " celular ", " cel "]),
+        email: token_after(&scan, &[" email ", " correo ", " mail ", " e-mail "]),
+    }
+}
+
+fn parse_producto(q: &str) -> ActionParse {
+    let hint = ActionParse::Incomplete(
+        "Para crear un producto dime nombre y precio. Por ejemplo: «crea un producto \
+         Aspirina a $1000»."
+            .into(),
+    );
+    let Some((_, after)) = q.split_once("producto") else {
+        return hint;
+    };
+    let mut rest = after.trim();
+    for lead in ["llamado ", "llamada ", "nuevo ", "nueva ", ": "] {
+        if let Some(s) = rest.strip_prefix(lead) {
+            rest = s.trim();
+        }
+    }
+    // Optional initial stock ("... stock 20").
+    let stock = token_after(rest, &[" stock ", " unidades "])
+        .and_then(|t| t.parse::<i64>().ok())
+        .filter(|n| *n >= 0)
+        .unwrap_or(0);
+    // Price: prefer a `$`-prefixed figure, else the one after "precio".
+    let (name_raw, price) = if let Some(p) = rest.find('$') {
+        (&rest[..p], parse_money(&digits_after(&rest[p + 1..])))
+    } else if let Some(p) = rest.find(" precio ") {
+        let tail = rest[p + " precio ".len()..].trim_start();
+        (&rest[..p], parse_money(&digits_after(tail)))
+    } else {
+        return hint;
+    };
+    let Some(price) = price else {
+        return hint;
+    };
+    let name = titlecase(&trim_price_connectors(name_raw));
+    if name.is_empty() {
+        return hint;
+    }
+    ActionParse::Producto { name, price, stock }
+}
+
+fn parse_ajuste(q: &str) -> ActionParse {
+    let hint = ActionParse::Incomplete(
+        "Para cambiar un precio dime el producto y el nuevo precio. Por ejemplo: \
+         «cambia el precio de paracetamol a $1500»."
+            .into(),
+    );
+    let after = q
+        .split_once("precio de ")
+        .or_else(|| q.split_once("precio del "))
+        .map(|(_, r)| r);
+    let Some(rest) = after else {
+        return hint;
+    };
+    let mut rest = rest.trim();
+    // "precio del producto X" → drop the redundant "producto" lead.
+    for lead in ["producto ", "el producto ", "del producto "] {
+        if let Some(s) = rest.strip_prefix(lead) {
+            rest = s.trim();
+        }
+    }
+    let (name_raw, price) = if let Some(p) = rest.find('$') {
+        (&rest[..p], parse_money(&digits_after(&rest[p + 1..])))
+    } else if let Some(p) = rest.rfind(" a ") {
+        (
+            &rest[..p],
+            parse_money(&digits_after(rest[p + 3..].trim_start())),
+        )
+    } else {
+        return hint;
+    };
+    let Some(new_price) = price else {
+        return hint;
+    };
+    let product_name = trim_price_connectors(name_raw);
+    if product_name.is_empty() {
+        return hint;
+    }
+    ActionParse::AjustePrecio {
+        product_name,
+        new_price,
+    }
+}
+
+/// Leading run of money digits (`0-9` and CL thousands `.`) of `s`.
+fn digits_after(s: &str) -> String {
+    s.trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect()
+}
+
+/// Trim price-introducing connectors off the tail of a captured product name.
+fn trim_price_connectors(name_raw: &str) -> String {
+    let mut head = name_raw.trim();
+    for cut in [
+        " a $", " a", " por $", " por", " precio", " en", " vale", " cuesta",
+    ] {
+        if let Some(stripped) = head.strip_suffix(cut) {
+            head = stripped.trim();
+            break;
+        }
+    }
+    strip_trailing_punct(head).trim().to_string()
+}
+
+/// First whitespace-delimited token following any of `cues`, punctuation
+/// stripped. Used to pull optional RUT/phone/email out of a "crear cliente"
+/// text. Returns `None` when no cue matches or the token is empty.
+fn token_after(hay: &str, cues: &[&str]) -> Option<String> {
+    for c in cues {
+        if let Some(p) = hay.find(c) {
+            let tail = hay[p + c.len()..].trim_start();
+            let tok: String = tail.chars().take_while(|ch| !ch.is_whitespace()).collect();
+            let t = strip_trailing_punct(&tok);
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn parse_oc(q: &str) -> ActionParse {
@@ -511,6 +834,18 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Title-case a parsed proper noun for display. `normalize` lower-cases the
+/// whole question for keyword matching, so a captured customer/product name
+/// arrives all-lowercase; this restores a presentable `Juan Perez` / `Coca
+/// Cola`. (Accents folded by `normalize` are not restored — a minor cosmetic
+/// loss the owner can fix in the detail screen.)
+fn titlecase(s: &str) -> String {
+    s.split_whitespace()
+        .map(capitalize_first)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 // ---- build (resolve to a ready Action) ---------------------------------------
 
 /// Outcome of turning a parsed request into a ready-to-store [`Action`].
@@ -575,7 +910,66 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 unit_cost,
             }))
         }
+        ActionParse::Cliente {
+            name,
+            rut,
+            phone,
+            email,
+        } => Ok(BuildOutcome::Ready(Action::CrearCliente {
+            name,
+            rut,
+            phone,
+            email,
+        })),
+        ActionParse::Producto { name, price, stock } => {
+            Ok(BuildOutcome::Ready(Action::CrearProductoRapido {
+                name,
+                price,
+                stock,
+            }))
+        }
+        ActionParse::AjustePrecio {
+            product_name,
+            new_price,
+        } => {
+            use domain::catalog::model::ProductFilters;
+            use domain::catalog::service as catalog;
+            let products = catalog::list_products(
+                db,
+                tenant,
+                ProductFilters {
+                    search: Some(product_name.clone()),
+                    limit: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            let Some(p) = pick_product(&products, &product_name) else {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré ningún producto que coincida con «{product_name}». \
+                     Revisa el nombre o créalo primero."
+                )));
+            };
+            Ok(BuildOutcome::Ready(Action::AjustarPrecio {
+                product_id: p.id.clone(),
+                product_name: p.name.clone(),
+                old_price: p.price,
+                new_price,
+            }))
+        }
     }
+}
+
+/// Prefer a case-insensitive exact name match, else the first hit.
+fn pick_product<'a>(
+    products: &'a [domain::catalog::model::ProductDto],
+    name: &str,
+) -> Option<&'a domain::catalog::model::ProductDto> {
+    let want = name.to_lowercase();
+    products
+        .iter()
+        .find(|p| p.name.to_lowercase() == want)
+        .or_else(|| products.first())
 }
 
 /// Prefer a case-insensitive exact name match, else the first hit.
@@ -681,6 +1075,105 @@ pub async fn execute(
                     "status": dto.status,
                     "supplier": supplier_name,
                     "total": dto.total.to_string(),
+                }),
+            }
+        }
+        Action::CrearCliente {
+            name,
+            rut,
+            phone,
+            email,
+        } => {
+            use domain::customers::model::NewCustomer;
+            use domain::customers::service as customers;
+            let dto = customers::create_customer(
+                db,
+                tenant,
+                NewCustomer {
+                    name,
+                    rut,
+                    phone,
+                    email,
+                },
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!("Cliente «{}» registrado.", dto.name),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "name": dto.name,
+                    "rut": dto.rut,
+                }),
+            }
+        }
+        Action::CrearProductoRapido { name, price, stock } => {
+            use domain::catalog::model::NewProduct;
+            use domain::catalog::service as catalog;
+            let dto = catalog::create_product(
+                db,
+                tenant,
+                NewProduct {
+                    name,
+                    slug: None,
+                    description: None,
+                    price,
+                    cost_price: None,
+                    stock,
+                    category: None,
+                    image_url: None,
+                    external_id: None,
+                    laboratory: None,
+                    therapeutic_action: None,
+                    active_ingredient: None,
+                    prescription_type: None,
+                    presentation: None,
+                    discount_percent: None,
+                },
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!("Producto «{}» creado a {}.", dto.name, clp(dto.price)),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "name": dto.name,
+                    "price": dto.price.to_string(),
+                    "stock": dto.stock,
+                }),
+            }
+        }
+        Action::AjustarPrecio {
+            product_id,
+            product_name: _,
+            old_price,
+            new_price,
+        } => {
+            use domain::catalog::model::UpdateProduct;
+            use domain::catalog::service as catalog;
+            let dto = catalog::update_product(
+                db,
+                tenant,
+                &product_id,
+                UpdateProduct {
+                    price: Some(new_price),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!(
+                    "Precio de {} actualizado: de {} a {}.",
+                    dto.name,
+                    clp(old_price),
+                    clp(dto.price),
+                ),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "name": dto.name,
+                    "old_price": old_price.to_string(),
+                    "new_price": dto.price.to_string(),
                 }),
             }
         }
@@ -804,6 +1297,134 @@ mod tests {
         assert_eq!(parse_action("cuánto vendí hoy"), ActionParse::NotAnAction);
         assert_eq!(
             parse_action("stock de paracetamol"),
+            ActionParse::NotAnAction
+        );
+    }
+
+    #[test]
+    fn parse_cliente_name_only() {
+        match parse_action("crea un cliente Juan Pérez") {
+            ActionParse::Cliente {
+                name, rut, phone, ..
+            } => {
+                assert_eq!(name, "Juan Perez");
+                assert_eq!(rut, None);
+                assert_eq!(phone, None);
+            }
+            other => panic!("expected Cliente, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cliente_with_rut_and_phone() {
+        match parse_action("registra al cliente Maria Soto rut 12.345.678-9 telefono 987654321") {
+            ActionParse::Cliente {
+                name, rut, phone, ..
+            } => {
+                assert_eq!(name, "Maria Soto");
+                assert_eq!(rut.as_deref(), Some("12.345.678-9"));
+                assert_eq!(phone.as_deref(), Some("987654321"));
+            }
+            other => panic!("expected Cliente, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cliente_without_name_is_incomplete() {
+        assert!(matches!(
+            parse_action("crea un cliente rut 11.111.111-1"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn read_customer_questions_are_not_actions() {
+        // These belong to the read agent, not the write path.
+        assert_eq!(parse_action("mejores clientes"), ActionParse::NotAnAction);
+        assert_eq!(
+            parse_action("cuántos clientes tengo"),
+            ActionParse::NotAnAction
+        );
+    }
+
+    #[test]
+    fn parse_producto_with_dollar_price() {
+        match parse_action("crea un producto Aspirina a $1000") {
+            ActionParse::Producto { name, price, stock } => {
+                assert_eq!(name, "Aspirina");
+                assert_eq!(price, dec("1000"));
+                assert_eq!(stock, 0);
+            }
+            other => panic!("expected Producto, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_producto_with_precio_word_and_stock() {
+        match parse_action("agrega producto Coca Cola precio 1500 stock 20") {
+            ActionParse::Producto { name, price, stock } => {
+                assert_eq!(name, "Coca Cola");
+                assert_eq!(price, dec("1500"));
+                assert_eq!(stock, 20);
+            }
+            other => panic!("expected Producto, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_producto_without_price_is_incomplete() {
+        assert!(matches!(
+            parse_action("crea un producto Aspirina"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn parse_ajuste_precio_dollar() {
+        match parse_action("cambia el precio de paracetamol a $1500") {
+            ActionParse::AjustePrecio {
+                product_name,
+                new_price,
+            } => {
+                assert_eq!(product_name, "paracetamol");
+                assert_eq!(new_price, dec("1500"));
+            }
+            other => panic!("expected AjustePrecio, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ajuste_precio_no_dollar() {
+        match parse_action("ajusta el precio de coca cola a 2000") {
+            ActionParse::AjustePrecio {
+                product_name,
+                new_price,
+            } => {
+                assert_eq!(product_name, "coca cola");
+                assert_eq!(new_price, dec("2000"));
+            }
+            other => panic!("expected AjustePrecio, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_product_with_precio_word_is_not_an_adjust() {
+        // "crea ... precio N" is a create (no price verb), not a reprice.
+        assert!(matches!(
+            parse_action("crea un producto Aspirina precio 1000"),
+            ActionParse::Producto { .. }
+        ));
+    }
+
+    #[test]
+    fn read_price_question_is_not_an_action() {
+        // No price verb → falls through to the read agent (PrecioProducto).
+        assert_eq!(
+            parse_action("precio de paracetamol"),
+            ActionParse::NotAnAction
+        );
+        assert_eq!(
+            parse_action("cuánto cuesta el ibuprofeno"),
             ActionParse::NotAnAction
         );
     }
