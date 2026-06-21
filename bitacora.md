@@ -4296,3 +4296,32 @@ dos pasos `propose → confirm` sobre HTTP real (contraparte live de los unit te
 GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helpers 9) ·
 `npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
 backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).
+
+## 2026-06-21 — W5 marvin: backend Config Center (sucursales + cajas)
+
+Backend del *montura* UI "Config Center" (commit cliente `722b48e`, client-only:
+secciones Sucursales/Respaldo apuntaban a "ruta CLI de hoy"). Ahora la UI tiene API
+real para administrar topología multi-sucursal / multi-caja.
+
+- **Mig 0032** `branches_registers.surql` (append-only, multi-tenant regla #4):
+  `branch` (sucursal) + `register` (caja). Ambas `tenant: record<tenant>` + índice
+  compuesto liderado por tenant; `updated_at VALUE time::now()` auto-bump (espejo de
+  `supplier`). `register.branch` = `option<record<branch>>` (caja standalone permitida
+  para single-site). NO se toca `cash_session.register_name` (mig 0011) — cablear
+  sesiones vivas a registros es paso futuro, cero blast-radius en POS hot path.
+- **`crates/domain/branches`** (model/repo/service): CRUD tenant-scoped. El link
+  `register.branch` se valida ownership del tenant antes de escribirse (un caja no
+  puede apuntar a la sucursal de otro tenant) y se bindea como `Thing` (SCHEMAFULL
+  `record<branch>` rechaza string crudo).
+- **`crates/api/v1/branches.rs`**: 10 endpoints `/api/v1/sucursales` + `/api/v1/cajas`
+  (list/get/create/patch/delete c/u). Lecturas = JWT (el POS necesita listar cajas);
+  mutaciones = admin+ (configurar topología es back-office). +1 línea router en
+  `v1/mod.rs`, paths + tag `ConfigCenter` en openapi.
+- **Soft-delete** (`active=false`): el filtro `active` se aplica SIEMPRE (default
+  `true`) → una entidad archivada cae del listado default; `?active=false` la revela.
+
+Tests `crates/api/tests/config_center.rs` (4): CRUD roundtrip (trim, soft-delete,
+filtro branch), aislamiento multi-tenant (B no ve/edita/enlaza sucursal de A → 404),
+role gate (cashier lee cajas pero no crea → 403; admin sí), validación (nombre vacío
+→ 400, branch id no-branch → 400). GATE: `cargo fmt` + `clippy --workspace -D warnings`
++ `cargo test --workspace` verde. Branch `feat/config-branches-sii` vs erp-parity.
