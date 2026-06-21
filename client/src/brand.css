@@ -591,3 +591,95 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .cfg-nav-item{width:auto;flex:1 1 auto}
   .cfg-nav-blurb{display:none}
 }
+||||||| ae17e6f
+
+/* ── Command palette (Ctrl/Cmd+K) + cheatsheet (?) ─────────────────────────
+ * Lane feat/command-palette (paul). Keyboard-first accelerator: search + run
+ * any view/action and reach the agent, fully mouseless. Append-only; uses the
+ * tokens above. Logic in views/command-palette.ts + keymap.ts; mounted once
+ * from shell.ts (installCommandPalette). */
+.cmdk-backdrop{position:fixed;inset:0;z-index:1000;display:grid;
+  justify-items:center;align-items:start;padding:12vh 16px 16px;
+  background:rgba(4,7,12,.55);backdrop-filter:blur(4px)}
+:root[data-theme="light"] .cmdk-backdrop{background:rgba(40,30,10,.28)}
+
+.cmdk,.cmdk-sheet{width:min(640px,94vw);background:var(--rb-surface);
+  border:1px solid var(--rb-line);border-radius:var(--rb-radius);
+  box-shadow:0 30px 80px -30px rgba(0,0,0,.85),var(--rb-shadow);
+  display:flex;flex-direction:column;overflow:hidden;max-height:74vh}
+.cmdk-sheet{width:min(560px,94vw)}
+
+/* search row */
+.cmdk-search{display:flex;align-items:center;gap:11px;padding:14px 16px;
+  border-bottom:1px solid var(--rb-line-soft)}
+.cmdk-search:focus-within{box-shadow:inset 0 -1px 0 var(--rb-brand)}
+.cmdk-search-icon{width:19px;height:19px;color:var(--rb-txt-3);flex:none}
+.cmdk-input{flex:1;min-width:0;border:none;background:transparent;outline:none;
+  color:var(--rb-txt);font-family:var(--rb-ff-sans);font-size:16px;letter-spacing:-.01em}
+.cmdk-input::placeholder{color:var(--rb-txt-3)}
+.cmdk-esc-hint{flex:none}
+
+/* results */
+.cmdk-list{list-style:none;margin:0;padding:7px;overflow-y:auto;flex:1 1 auto}
+.cmdk-item{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:10px 12px;border-radius:10px;cursor:pointer;scroll-margin:8px}
+.cmdk-item:hover{background:var(--rb-surface-2)}
+.cmdk-item.is-active{background:var(--rb-brand-soft);box-shadow:inset 2px 0 0 var(--rb-brand)}
+.cmdk-item-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cmdk-item-title{color:var(--rb-txt);font-size:14px;font-weight:500;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmdk-item-sub{color:var(--rb-txt-3);font-size:12px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmdk-item-sec{flex:none;font-family:var(--rb-ff-mono);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--rb-txt-3);
+  border:1px solid var(--rb-line);border-radius:6px;padding:2px 7px}
+.cmdk-item.is-active .cmdk-item-sec{color:var(--rb-brand);
+  border-color:color-mix(in srgb,var(--rb-brand) 40%,transparent)}
+
+.cmdk-empty{padding:30px 16px;text-align:center;color:var(--rb-txt-3);font-size:13.5px}
+
+/* footer */
+.cmdk-foot{display:flex;align-items:center;gap:14px;padding:9px 14px;
+  border-top:1px solid var(--rb-line-soft);color:var(--rb-txt-3);font-size:11.5px}
+.cmdk-foot-grow{flex:1}
+
+/* keycaps (scoped so the global kbd style stays untouched) */
+.cmdk kbd,.cmdk-sheet kbd{display:inline-grid;place-items:center;min-width:18px;
+  height:18px;padding:0 5px;font-family:var(--rb-ff-mono);font-size:11px;line-height:1;
+  color:var(--rb-txt-2);background:var(--rb-raise);border:1px solid var(--rb-line);
+  border-bottom-width:2px;border-radius:5px}
+.cmdk-foot kbd+kbd{margin-left:3px}
+.cmdk-plus{color:var(--rb-txt-3);font-size:10px;margin:0 3px}
+
+/* cheatsheet */
+.cmdk-sheet-head{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 18px;border-bottom:1px solid var(--rb-line-soft)}
+.cmdk-sheet-title{margin:0;font-family:var(--rb-ff-display);font-weight:600;
+  font-size:18px;letter-spacing:-.02em;color:var(--rb-txt)}
+.cmdk-sheet-close{display:grid;place-items:center;width:30px;height:30px;border:none;
+  background:transparent;color:var(--rb-txt-3);border-radius:8px;cursor:pointer}
+.cmdk-sheet-close:hover{color:var(--rb-txt);background:var(--rb-line)}
+.cmdk-sheet-close svg{width:16px;height:16px}
+.cmdk-sheet-close:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.cmdk-sheet-body{padding:8px 18px 16px;overflow-y:auto;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:4px 26px}
+.cmdk-sheet-group{padding-top:10px}
+.cmdk-sheet-group-title{margin:0 0 4px;font-family:var(--rb-ff-mono);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--rb-txt-3)}
+.cmdk-sheet-list{margin:0}
+.cmdk-sheet-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:6px 0}
+.cmdk-keys{display:flex;align-items:center;flex:none;order:2}
+.cmdk-sheet-label{margin:0;color:var(--rb-txt-2);font-size:13px;order:1}
+
+@media (prefers-reduced-motion:no-preference){
+  .cmdk-backdrop{animation:cmdk-fade .14s ease both}
+  .cmdk,.cmdk-sheet{animation:cmdk-pop .18s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes cmdk-fade{from{opacity:0}to{opacity:1}}
+  @keyframes cmdk-pop{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}
+}
+
+@media (max-width:640px){
+  .cmdk-backdrop{padding:8vh 10px 10px}
+  .cmdk-item-sec{display:none}
+  .cmdk-sheet-body{grid-template-columns:1fr}
+}
