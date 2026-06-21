@@ -4296,3 +4296,42 @@ dos pasos `propose → confirm` sobre HTTP real (contraparte live de los unit te
 GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helpers 9) ·
 `npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
 backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).
+
+## 2026-06-21 — W5 Paleta de comandos (Ctrl/Cmd+K) + cheatsheet `?` (paul · feat/command-palette)
+
+**Acelerador UX keyboard-first (Pilar B).** El producto se vuelve "pro": un overlay
+global que busca y EJECUTA — navegar a cualquier vista, acciones comunes y llamar al
+agente ("Pregúntale a tu negocio") — sin tocar el mouse.
+
+- **`views/keymap.ts`** (núcleo puro, sin DOM): modelo `Command`, matcher fuzzy es-CL
+  **insensible a acentos** (`normalize` NFD → "Configuración" matchea "configuracion"),
+  scoring por niveles (prefijo título > palabra > substring > keyword > subsecuencia)
+  con **AND multi-token** y orden estable (query vacía = orden autoral). `nextIndex`
+  (wrap teclado), tabla `GOTO` del chord `g` (g d/p/c/i/r/s → Panel/POS/Caja/Inventario/
+  Reportes/Config) y catálogo `SHORTCUTS` (fuente única del cheatsheet).
+- **`views/command-palette.ts`** (mount DOM + hotkeys globales): `buildCommands` arma
+  la lista — comandos de navegación derivados **en vivo del DOM** de `.nav-item[data-nav]`
+  (auto-respeta módulos ocultos por rubro) + acciones (Nueva venta, Abrir/cerrar caja,
+  Importar, Exportar) + comando del agente + ayuda. `openCommandPalette` (filtra al
+  tipear, ↑/↓ con wrap, Enter ejecuta, Esc cierra, **focus-trap** al input, click en
+  fila, click backdrop, restaura foco previo) y `openCheatsheet` (`?`, atajos agrupados).
+  `installCommandPalette` (idempotente) cablea: **Ctrl/Cmd+K** toggle (incluso dentro de
+  inputs), `?` y chord `g` **solo fuera de campos de texto** (no secuestra el tipeo).
+- Navegación **reusa el router del shell** (click en el nav button real) → cero
+  duplicación de estado activo/fetch. Todo texto dinámico **escapado** (`escapeHtml`)
+  antes de `innerHTML` (los títulos vienen de labels de rubro = data).
+- **`brand.css`** append-only `.cmdk-*` (tokens del sistema; backdrop blur, keycaps
+  scoped, reduced-motion + responsive). **`shell.ts`**: 1 línea de mount
+  (`installCommandPalette()`) junto a `installAskShortcut()` — coord con ye (dueño de
+  shell.ts), sin tocar el resto.
+
+Tests (TDD, RED→GREEN): `keymap.test.ts` 18 (normalize/score/filter/nextIndex/goto/
+shortcuts) + `command-palette.test.ts` 9 (buildCommands + renderResults, incl. **no
+inyección**) + `command-palette.dom.test.ts` 14 (happy-dom: abrir/filtrar/empty/flechas+
+wrap/Enter/click/Esc/trap + Ctrl+K toggle/`?`/g-chord/no-hijack-typing). **41 nuevos**.
+
+GATE: `npm run build` ok (tsc + vite, exit 0) · `vitest` **590/591** — el único fail es
+`inventory-perf.test.ts` (50k SKUs, journey FEFO) por **timeout de 5s bajo saturación**
+del suite completo (transform 282s); **aislado pasa 8/8 (4406ms)**. Es flake ambiental
+de otra lane (marvin, `inventory.ts`), NO regresión de W5 y NO se debilitó (ver
+[[integration-gate-concurrency]] / [[box-build-resource-tuning]]). Reportado a paxoloop.
