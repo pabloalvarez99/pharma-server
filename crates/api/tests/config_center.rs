@@ -567,4 +567,3 @@ async fn config_reads_open_writes_gated_for_cashier() {
     .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 }
-||||||| ae17e6f
