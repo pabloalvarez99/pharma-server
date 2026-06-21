@@ -37,6 +37,12 @@ pub enum Intent {
     TopProductos,
     /// Top customers by loyalty points.
     ClientesTop,
+    /// Look up a specific customer by name/RUT/phone (the captured search term).
+    BuscarCliente(String),
+    /// How many customers the business has (active count + loyalty points).
+    ResumenClientes,
+    /// Sale price of a specific product (the captured search term).
+    PrecioProducto(String),
     /// Gross margin month-to-date.
     MargenMes,
     /// Unit margin of a specific product (the captured search term).
@@ -70,6 +76,9 @@ impl Intent {
             Intent::CajaActual => "caja_actual",
             Intent::TopProductos => "top_productos",
             Intent::ClientesTop => "clientes_top",
+            Intent::BuscarCliente(_) => "buscar_cliente",
+            Intent::ResumenClientes => "clientes_resumen",
+            Intent::PrecioProducto(_) => "precio_producto",
             Intent::MargenMes => "margen_mes",
             Intent::MargenProducto(_) => "margen_producto",
             Intent::GastosMes => "gastos_mes",
@@ -207,6 +216,27 @@ pub fn parse(question: &str) -> Intent {
         return Intent::ClientesTop;
     }
 
+    // How many customers — before the per-customer lookup so "cuántos clientes
+    // tengo" isn't read as a name search.
+    if contains_any(
+        &q,
+        &[
+            "cuantos clientes",
+            "cuantos cliente",
+            "cuantas personas",
+            "cantidad de clientes",
+            "total de clientes",
+            "numero de clientes",
+        ],
+    ) {
+        return Intent::ResumenClientes;
+    }
+
+    // Look up a specific customer by name/RUT/phone.
+    if let Some(term) = capture_customer(&q) {
+        return Intent::BuscarCliente(term);
+    }
+
     // Margin — before "ventas mes" because both can mention "mes". A margin
     // question is per-product when a product name follows the cue; otherwise it
     // is the month-to-date margin.
@@ -281,6 +311,13 @@ pub fn parse(question: &str) -> Intent {
         ],
     ) {
         return Intent::ResumenInventario;
+    }
+
+    // Price of a specific product — captured term after a price cue. After the
+    // inventory summary ("valor inventario") so that doesn't get read as a
+    // product-price lookup.
+    if let Some(term) = capture_price_product(&q) {
+        return Intent::PrecioProducto(term);
     }
 
     // Sales — disambiguate by relative-date window.
@@ -392,6 +429,68 @@ fn capture_margin_product(q: &str) -> Option<String> {
             let tail = q[pos + cue.len()..].trim();
             let term = strip_trailing_punct(tail);
             if !term.is_empty() && !PERIODS.contains(&term) {
+                return Some(term.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Cues that introduce a customer name/RUT for a lookup ("busca el cliente X").
+fn capture_customer(q: &str) -> Option<String> {
+    const CUES: &[&str] = &[
+        "busca el cliente ",
+        "busca al cliente ",
+        "busca cliente ",
+        "buscar cliente ",
+        "buscame al cliente ",
+        "buscame el cliente ",
+        "encuentra al cliente ",
+        "encuentra el cliente ",
+        "datos del cliente ",
+        "datos de cliente ",
+        "ficha del cliente ",
+        "info del cliente ",
+        "informacion del cliente ",
+        "cliente llamado ",
+        "el cliente ",
+    ];
+    for cue in CUES {
+        if let Some(pos) = q.find(cue) {
+            let tail = q[pos + cue.len()..].trim();
+            let term = strip_trailing_punct(tail);
+            if !term.is_empty() {
+                return Some(term.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Cues that introduce a product name in a price question ("precio de X",
+/// "cuánto cuesta X"). Returns the trailing product term.
+fn capture_price_product(q: &str) -> Option<String> {
+    const CUES: &[&str] = &[
+        "precio de ",
+        "precio del ",
+        "cuanto cuesta ",
+        "cuanto vale ",
+        "cuanto sale ",
+        "a cuanto esta ",
+        "a como esta ",
+        "que precio tiene ",
+    ];
+    for cue in CUES {
+        if let Some(pos) = q.find(cue) {
+            let mut tail = q[pos + cue.len()..].trim();
+            // Drop a leading article so "precio del ibuprofeno" → "ibuprofeno".
+            for art in ["el ", "la ", "los ", "las ", "un ", "una ", "producto "] {
+                if let Some(s) = tail.strip_prefix(art) {
+                    tail = s.trim();
+                }
+            }
+            let term = strip_trailing_punct(tail);
+            if !term.is_empty() {
                 return Some(term.to_string());
             }
         }
@@ -615,6 +714,49 @@ mod tests {
     }
 
     #[test]
+    fn buscar_cliente_captures_term() {
+        assert_eq!(
+            parse("busca el cliente Juan Pérez"),
+            Intent::BuscarCliente("juan perez".into())
+        );
+        assert_eq!(
+            parse("datos del cliente maria"),
+            Intent::BuscarCliente("maria".into())
+        );
+    }
+
+    #[test]
+    fn resumen_clientes_synonyms() {
+        for q in [
+            "cuántos clientes tengo",
+            "cantidad de clientes",
+            "total de clientes",
+        ] {
+            assert_eq!(parse(q), Intent::ResumenClientes, "q={q}");
+        }
+        // Must not be stolen by the per-customer lookup or the top ranking.
+        assert_eq!(parse("mejores clientes"), Intent::ClientesTop);
+    }
+
+    #[test]
+    fn precio_producto_captures_term() {
+        assert_eq!(
+            parse("precio de paracetamol"),
+            Intent::PrecioProducto("paracetamol".into())
+        );
+        assert_eq!(
+            parse("cuánto cuesta el ibuprofeno"),
+            Intent::PrecioProducto("ibuprofeno".into())
+        );
+        assert_eq!(
+            parse("a cuánto está la coca cola"),
+            Intent::PrecioProducto("coca cola".into())
+        );
+        // "valor inventario" stays the inventory summary, not a price lookup.
+        assert_eq!(parse("valor inventario"), Intent::ResumenInventario);
+    }
+
+    #[test]
     fn labels_are_stable() {
         assert_eq!(Intent::VentasHoy.label(), "ventas_hoy");
         assert_eq!(Intent::VentasAyer.label(), "ventas_ayer");
@@ -624,6 +766,12 @@ mod tests {
         assert_eq!(Intent::VentasPorMetodo.label(), "ventas_metodo_pago");
         assert_eq!(Intent::PorVencerSemana.label(), "por_vencer_semana");
         assert_eq!(Intent::ClientesTop.label(), "clientes_top");
+        assert_eq!(Intent::BuscarCliente("x".into()).label(), "buscar_cliente");
+        assert_eq!(Intent::ResumenClientes.label(), "clientes_resumen");
+        assert_eq!(
+            Intent::PrecioProducto("x".into()).label(),
+            "precio_producto"
+        );
         assert_eq!(Intent::GastosMes.label(), "gastos_mes");
         assert_eq!(
             Intent::MargenProducto("x".into()).label(),

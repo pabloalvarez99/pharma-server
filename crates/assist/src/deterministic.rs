@@ -10,6 +10,7 @@ use surrealdb::sql::Thing;
 use db::Db;
 use domain::cash_register::{model::SessionFilters, service as caja};
 use domain::catalog::{model::ProductFilters, service as catalog};
+use domain::customers::model::CustomerSearchQuery;
 use domain::customers::service as customers;
 use domain::expenses::model::{
     ExpenseFilters, NearExpiryFilters, SalesReportFilters, TopProductsFilters,
@@ -46,6 +47,9 @@ impl AssistProvider for Deterministic {
             Intent::CajaActual => caja_actual(q.db, q.tenant, &q.intent).await,
             Intent::TopProductos => top_productos(q.db, q.tenant, &q.intent).await,
             Intent::ClientesTop => clientes_top(q.db, q.tenant, &q.intent).await,
+            Intent::BuscarCliente(term) => buscar_cliente(q.db, q.tenant, &q.intent, term).await,
+            Intent::ResumenClientes => resumen_clientes(q.db, q.tenant, &q.intent).await,
+            Intent::PrecioProducto(term) => precio_producto(q.db, q.tenant, &q.intent, term).await,
             Intent::MargenMes => margen_mes(q.db, q.tenant, &q.intent).await,
             Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &q.intent, term).await,
             Intent::GastosMes => gastos_mes(q.db, q.tenant, &q.intent).await,
@@ -496,6 +500,115 @@ async fn clientes_top(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<
     })))
 }
 
+async fn buscar_cliente(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    term: &str,
+) -> DomainResult<Answer> {
+    let matches = customers::search_customers(
+        db,
+        tenant,
+        CustomerSearchQuery {
+            q: Some(term.to_string()),
+        },
+    )
+    .await?;
+    if matches.is_empty() {
+        return Ok(Answer::new(
+            intent,
+            format!("No encontré ningún cliente que coincida con «{term}»."),
+        )
+        .with_data(serde_json::json!({ "count": 0 })));
+    }
+    let best = &matches[0];
+    let mut bits = vec![best.name.clone()];
+    if let Some(rut) = &best.rut {
+        bits.push(format!("RUT {rut}"));
+    }
+    if let Some(phone) = &best.phone {
+        bits.push(format!("tel. {phone}"));
+    }
+    bits.push(format!("{} pts", best.loyalty_points));
+    let mut text = format!("{}.", bits.join(", "));
+    if matches.len() > 1 {
+        let otros: Vec<String> = matches[1..]
+            .iter()
+            .take(3)
+            .map(|c| c.name.clone())
+            .collect();
+        text.push_str(&format!(" También coinciden: {}.", otros.join(", ")));
+    }
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": matches.len(),
+        "matches": matches.iter().take(5).map(|c| serde_json::json!({
+            "id": c.id,
+            "name": c.name,
+            "rut": c.rut,
+            "phone": c.phone,
+            "loyalty_points": c.loyalty_points,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+async fn resumen_clientes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let stats = customers::loyalty_stats(db, tenant).await?;
+    let text = if stats.members == 0 {
+        "Todavía no tienes clientes registrados.".to_string()
+    } else {
+        format!(
+            "Tienes {} {} ({} puntos de fidelidad acumulados).",
+            stats.members,
+            plural(stats.members, "cliente", "clientes"),
+            stats.points_outstanding,
+        )
+    };
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "members": stats.members,
+        "points_outstanding": stats.points_outstanding,
+    })))
+}
+
+async fn precio_producto(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    term: &str,
+) -> DomainResult<Answer> {
+    let products = catalog::list_products(
+        db,
+        tenant,
+        ProductFilters {
+            search: Some(term.to_string()),
+            limit: Some(5),
+            ..Default::default()
+        },
+    )
+    .await?;
+    if products.is_empty() {
+        return Ok(Answer::new(
+            intent,
+            format!("No encontré ningún producto que coincida con «{term}»."),
+        ));
+    }
+    let best = &products[0];
+    let mut text = format!("{} se vende a {}.", best.name, clp(best.price));
+    if products.len() > 1 {
+        let otros: Vec<String> = products[1..]
+            .iter()
+            .map(|p| format!("{} ({})", p.name, clp(p.price)))
+            .collect();
+        text.push_str(&format!(" También coinciden: {}.", otros.join(", ")));
+    }
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "matches": products.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "price": p.price.to_string(),
+            "stock": p.stock,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
 async fn margen_producto(
     db: &Db,
     tenant: &Thing,
@@ -610,9 +723,14 @@ fn ayuda(intent: &Intent) -> Answer {
         intent,
         "Puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «ventas de ayer», \
          «ventas de hoy vs ayer», «ventas del mes pasado», «ventas por método de pago», \
-         «gastos del mes», «mejores clientes», «margen de paracetamol», «¿qué se vence \
+         «gastos del mes», «mejores clientes», «¿cuántos clientes tengo?», «busca el \
+         cliente Juan», «precio de ibuprofeno», «margen de paracetamol», «¿qué se vence \
          esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
-         «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario».",
+         «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». También \
+         puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
+         cliente Juan Pérez», «crea un producto Aspirina a $1000», «cambia el precio de \
+         paracetamol a $1500» o «crea una orden de compra de 10 paracetamol a Farmaltda \
+         a $500».",
     )
 }
 
