@@ -4377,3 +4377,33 @@ GATE: `npm run build` ok (tsc + vite, exit 0) · `vitest` **590/591** — el ún
 del suite completo (transform 282s); **aislado pasa 8/8 (4406ms)**. Es flake ambiental
 de otra lane (marvin, `inventory.ts`), NO regresión de W5 y NO se debilitó (ver
 [[integration-gate-concurrency]] / [[box-build-resource-tuning]]). Reportado a paxoloop.
+
+## 2026-06-21 — W5 marvin: upload SII (cert + CAF) + listar respaldos
+
+Cierra los dead-ends del Config Center para Facturación SII y Respaldo: lo que antes
+sólo existía por CLI (`pharma cert import` / `pharma caf import` / `pharma backup`)
+ahora tiene endpoint para la UI.
+
+- **`POST /api/v1/dte/cert`** (admin+): sube el certificado digital (.pfx/.p12) en
+  base64 + passphrase + rut + vigencia. Reusa `dte::KeyMaterial::from_keystore_bytes`
+  (valida que el material sirva para firmar ANTES de cifrar), `dte::cert::encrypt_pfx`
+  (AES-256-GCM + Argon2id) y `store_cert`. La passphrase nunca se persiste ni loguea
+  (ADR-0011 §cert). Mismo encrypt-at-rest que la CLI.
+- **`POST /api/v1/dte/caf`** (admin+): sube el CAF (XML del SII). Reusa
+  `dte::caf::parse_xml` (valida rango de folios) y persiste activo; el XML completo se
+  conserva (el TED lo embebe). Espejo de `pharma caf import`.
+- **`GET /api/v1/admin/backup`** (admin+): lista el `backup_log` (auditoría
+  scheduled|manual|cli, más reciente primero) vía `db::backup_log::list`. Además el
+  POST manual ahora registra su fila `backup_log` (source=manual) — antes sólo el job
+  nocturno auditaba; el manual quedaba sin rastro. Best-effort: un fallo de logging
+  no falla el backup ya hecho.
+- `base64` pasa a dep principal de `crates/api` (era dev-only) para decodificar el PFX.
+
+Tests: `dte_caf_cert_upload.rs` (3) — upload cert+CAF por endpoint y luego **emitir
+boleta real** con ellos (prueba el round-trip encrypt→decrypt→firma de punta a punta);
+validación cert (base64 inválido, bytes no-cert, vigencia invertida, passphrase vacía,
+cashier→403, sin token→401); validación CAF (XML basura/vacío→400, cashier→403,
+401). `backup.rs` (+2): list vacío→crea→1 fila manual ok; list sin bearer→401. GATE:
+`cargo fmt` + `clippy --workspace -D warnings` + `cargo test --workspace`. Branch
+`feat/config-sii-backup-upload` vs erp-parity. Sin migraciones (reusa tablas
+`cert_digital`/`caf`/`backup_log` existentes).

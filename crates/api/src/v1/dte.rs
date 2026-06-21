@@ -36,6 +36,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -66,6 +68,8 @@ pub fn router(state: AppState) -> Router<AppState> {
 
     let admin = Router::new()
         .route("/api/v1/dte/documentos", post(emit_documento))
+        .route("/api/v1/dte/cert", post(upload_cert))
+        .route("/api/v1/dte/caf", post(upload_caf))
         .route("/api/v1/dte/libro-ventas", get(libro_ventas))
         .route("/api/v1/dte/libro-ventas/signed", post(libro_ventas_signed))
         .route("/api/v1/dte/{id}/send", post(send_dte))
@@ -708,6 +712,173 @@ pub async fn emit_documento(
     })?;
 
     Ok((StatusCode::CREATED, Json(DteDto::from(row))).into_response())
+}
+
+// --- POST /api/v1/dte/cert ---------------------------------------------------
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct UploadCertRequest {
+    /// Certificado digital PFX/PKCS#12 codificado en base64.
+    pfx_base64: String,
+    /// Passphrase del PFX (la misma que se teclea al emitir). No se persiste.
+    cert_passphrase: String,
+    /// RUT del propietario del cert (`12345678-9`).
+    rut: String,
+    /// Vigencia desde (YYYY-MM-DD).
+    vigencia_desde: String,
+    /// Vigencia hasta (YYYY-MM-DD).
+    vigencia_hasta: String,
+}
+
+/// Sube el certificado digital (.pfx/.p12) del tenant encrypt-at-rest desde la
+/// UI — mismo flujo que `pharma cert import`, pero el PFX viaja en base64. Se
+/// valida que el material sea utilizable para firmar (parse PKCS#12 + clave RSA)
+/// ANTES de cifrar y persistir, así una passphrase equivocada o un archivo que
+/// no es cert se atrapa en el upload y no recién en la primera emisión. La
+/// passphrase nunca se guarda ni se loguea (AES-256-GCM + Argon2id, ADR-0011
+/// §cert). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/dte/cert", tag = "DTE",
+    request_body = UploadCertRequest,
+    responses(
+        (status = 201, description = "Cert importado y cifrado", body = serde_json::Value),
+        (status = 400, description = "base64/PFX/passphrase/vigencia inválidos", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Requiere admin+", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn upload_cert(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<UploadCertRequest>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+
+    if req.cert_passphrase.is_empty() {
+        return Err(ApiError::invalid("cert_passphrase requerida."));
+    }
+    if req.rut.trim().is_empty() {
+        return Err(ApiError::invalid("rut del propietario requerido."));
+    }
+    let pfx = B64
+        .decode(req.pfx_base64.trim().as_bytes())
+        .map_err(|e| ApiError::invalid(format!("pfx_base64 inválido: {e}")))?;
+    if pfx.is_empty() {
+        return Err(ApiError::invalid("pfx_base64 vacío."));
+    }
+    let desde = parse_day(&req.vigencia_desde, "vigencia_desde")?;
+    let hasta = parse_day(&req.vigencia_hasta, "vigencia_hasta")?;
+    if hasta < desde {
+        return Err(ApiError::invalid(format!(
+            "vigencia invertida: {} > {}",
+            req.vigencia_desde, req.vigencia_hasta
+        )));
+    }
+    // Validar el material ANTES de cifrar/persistir (parse PKCS#12 o bundle PEM
+    // + clave RSA). Un PFX con passphrase incorrecta falla acá.
+    dte::KeyMaterial::from_keystore_bytes(&pfx, &req.cert_passphrase).map_err(|e| {
+        ApiError::invalid(format!("el certificado no es utilizable para firmar: {e}"))
+    })?;
+    let encrypted = dte::cert::encrypt_pfx(&pfx, &req.cert_passphrase)
+        .map_err(|e| ApiError::internal(format!("encrypt_pfx: {e}")))?;
+    let tenant_id = pharma_core::tenant::TenantId::new(tenant.id.to_raw());
+    let id = dte::cert::store_cert(
+        db.as_ref(),
+        tenant_id,
+        &encrypted,
+        (desde, hasta),
+        req.rut.trim(),
+    )
+    .await
+    .map_err(|e| ApiError::internal(format!("store_cert: {e}")))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": id.to_string(),
+            "rut": req.rut.trim(),
+            "vigencia_desde": desde,
+            "vigencia_hasta": hasta,
+            "blob_bytes": encrypted.blob.len(),
+        })),
+    )
+        .into_response())
+}
+
+// --- POST /api/v1/dte/caf ----------------------------------------------------
+
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct UploadCafRequest {
+    /// XML del CAF (Código de Autorización de Folios) entregado por el SII.
+    xml: String,
+}
+
+/// Sube un CAF del SII (XML) desde la UI — mismo flujo que `pharma caf import`:
+/// parsea + valida el rango de folios y lo persiste activo para el tenant. El
+/// XML completo se conserva (el TED lo embebe inline). Requiere admin+.
+#[utoipa::path(post, path = "/api/v1/dte/caf", tag = "DTE",
+    request_body = UploadCafRequest,
+    responses(
+        (status = 201, description = "CAF importado", body = serde_json::Value),
+        (status = 400, description = "XML del CAF inválido", body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Requiere admin+", body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn upload_caf(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<UploadCafRequest>,
+) -> Result<axum::response::Response, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+
+    if req.xml.trim().is_empty() {
+        return Err(ApiError::invalid("xml del CAF requerido."));
+    }
+    let caf = dte::caf::parse_xml(&req.xml)
+        .map_err(|e| ApiError::invalid(format!("CAF inválido: {e}")))?;
+    let mut q = db
+        .query(
+            "CREATE caf SET tenant = $tenant, tipo_dte = $tipo, \
+             folio_desde = $desde, folio_hasta = $hasta, next_folio = $next, \
+             fecha_autorizacion = $fa, rut_emisor = $rut, xml = $xml, \
+             activo = $activo RETURN AFTER",
+        )
+        .bind(("tenant", tenant.clone()))
+        .bind(("tipo", caf.tipo_dte.code()))
+        .bind(("desde", caf.folio_desde))
+        .bind(("hasta", caf.folio_hasta))
+        .bind(("next", caf.next_folio))
+        .bind(("fa", surrealdb::sql::Datetime::from(caf.fecha_autorizacion)))
+        .bind(("rut", caf.rut_emisor.clone()))
+        .bind(("xml", caf.xml.clone()))
+        .bind(("activo", caf.activo))
+        .await
+        .map_err(db_err("create caf upload"))?;
+    #[derive(Deserialize)]
+    struct CafCreated {
+        id: Thing,
+        tipo_dte: i32,
+        folio_desde: i64,
+        folio_hasta: i64,
+        next_folio: i64,
+    }
+    let row: Option<CafCreated> = q.take(0).map_err(db_err("decode caf upload"))?;
+    let row = row.ok_or_else(|| ApiError::internal("CREATE caf no retornó fila."))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": row.id.to_string(),
+            "tipo": row.tipo_dte,
+            "folio_desde": row.folio_desde,
+            "folio_hasta": row.folio_hasta,
+            "next_folio": row.next_folio,
+            "rut_emisor": caf.rut_emisor,
+        })),
+    )
+        .into_response())
 }
 
 // --- GET /api/v1/dte ---------------------------------------------------------

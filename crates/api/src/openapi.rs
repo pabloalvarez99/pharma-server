@@ -199,6 +199,7 @@ impl Modify for SecurityAddon {
         crate::v1::agent_orders::fulfill,
         // Backup (PR #64)
         crate::v1::backup::create_backup,
+        crate::v1::backup::list_backups,
         // License admin (PR #64)
         crate::v1::license::reload_license,
         crate::v1::license::license_status,
@@ -215,6 +216,8 @@ impl Modify for SecurityAddon {
         crate::v1::dte::libro_ventas,
         crate::v1::dte::libro_ventas_signed,
         crate::v1::dte::emit_documento,
+        crate::v1::dte::upload_cert,
+        crate::v1::dte::upload_caf,
     ),
     components(schemas(ErrorEnvelope, ErrorBody)),
     modifiers(&SecurityAddon),

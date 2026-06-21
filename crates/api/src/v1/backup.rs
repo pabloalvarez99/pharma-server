@@ -16,8 +16,14 @@
 use std::io::Write;
 use std::path::Path;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
-use serde::Serialize;
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::post,
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::ApiError;
@@ -27,7 +33,10 @@ use crate::AppState;
 const ADMIN_ROLES: &[&str] = &["admin", "owner"];
 
 pub fn router(_state: AppState) -> Router<AppState> {
-    Router::new().route("/api/v1/admin/backup", post(create_backup))
+    Router::new().route(
+        "/api/v1/admin/backup",
+        post(create_backup).get(list_backups),
+    )
 }
 
 fn require_admin(claims: &auth::Claims) -> Result<(), ApiError> {
@@ -106,7 +115,59 @@ pub async fn create_backup(
         .clone()
         .ok_or_else(ApiError::service_unavailable)?;
     let report = backup_now(&data_path).map_err(|e| ApiError::internal(format!("backup: {e}")))?;
+    // Audit row (best-effort): one per manual attempt, mirrors the scheduled
+    // job's `backup_log` write so the admin list shows manual + nightly alike.
+    // A logging failure must never fail the backup that already succeeded.
+    if let Some(db) = state.db.as_ref() {
+        let entry = db::backup_log::NewBackupLog::ok(
+            db::backup_log::BackupSource::Manual,
+            report.path.clone(),
+            report.bytes,
+            report.sha256.clone(),
+            report.duration_ms,
+        );
+        if let Err(e) = db::backup_log::record(db.as_ref(), entry).await {
+            tracing::warn!(error = %e, "no se pudo registrar backup_log (manual)");
+        }
+    }
     Ok((StatusCode::CREATED, Json(report)).into_response())
+}
+
+/// Query de `GET /api/v1/admin/backup` — cuántas filas del log devolver.
+#[derive(Debug, Deserialize)]
+pub struct BackupListQuery {
+    /// Máximo de filas (más reciente primero). Default 50, tope 500.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// Lista el `backup_log` (auditoría de snapshots: scheduled | manual | cli),
+/// más reciente primero. Requiere admin+. Las filas pueden sobrevivir a los
+/// `.tar.gz` que referencian (se podan independientemente), así que un `path`
+/// listado no garantiza que el archivo siga en disco.
+#[utoipa::path(
+    get, path = "/api/v1/admin/backup", tag = "Backup",
+    params(("limit" = Option<usize>, Query, description = "Máx filas (default 50, tope 500)")),
+    responses(
+        (status = 200, description = "Filas de backup_log, más reciente primero", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, description = "Rol insuficiente (requiere admin+)", body = crate::error::ErrorEnvelope),
+        (status = 503, description = "DB no disponible", body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = []))
+)]
+pub async fn list_backups(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(q): Query<BackupListQuery>,
+) -> Result<Json<Vec<db::backup_log::BackupLogEntry>>, ApiError> {
+    require_admin(&claims)?;
+    let db = state.db.clone().ok_or_else(ApiError::service_unavailable)?;
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
+    let rows = db::backup_log::list(db.as_ref(), limit)
+        .await
+        .map_err(|e| ApiError::internal(format!("backup_log: {e}")))?;
+    Ok(Json(rows))
 }
 
 pub fn backup_now(db_path: &Path) -> anyhow::Result<BackupReport> {
