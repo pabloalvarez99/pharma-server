@@ -4296,3 +4296,51 @@ dos pasos `propose → confirm` sobre HTTP real (contraparte live de los unit te
 GATE verde: `npm run build` ok · `vitest` **523/523** (+33, incl. export-helpers 9) ·
 `npm run e2e` **260 passed / 0 failed / 0 xfail** (+27). Sin migraciones; sin tocar
 backend/db ni archivos de otras lanes (solo `gastos.ts` aditivo + e2e + export nuevo).
+
+## 2026-06-21 · bob · W5 — design system .ui-* + pulido de vistas + fechaHora canónico
+
+Lane `feat/design-system` (off `feature/erp-parity` @ae17e6f). Pilar C del
+`professional-completeness-master-plan`: cerrar el "se siente de dev" en los bordes
+(estados empty/loading/error) con un **design system ADITIVO** + pasada de pulido a
+mis vistas.
+
+**Design system (NUEVO, aditivo)** — `client/src/views/ui.ts`: productores de markup
+puros (sin DOM, sin deps, testeables) para los estados producidos canónicos —
+`emptyState` (marca + título + copy que enseña + CTA opcional), `errorState`
+(`role=alert`, mensaje escapado, retry opcional), `loadingState` (spinner + label
+polite), `skeletonLines`, + primitivos `button`/`card`. Namespace `.ui-*` (disjunto de
+`.rb-`/`.rubro-`/`.dash-`/`.agent-` y de `.cfg-` de ye / `.cmdk-` de paul). CSS
+append-only en `brand.css` tematizado con los tokens globales de styles.css (`--bg`,
+`--line`, `--text`, `--muted`, `--accent`, `--danger`, `--radius`) + escala
+`--ui-space`; toda la animación (spinner/shimmer/reveal) cae bajo
+`prefers-reduced-motion`. Doc de uso en el header del módulo. Otras lanes adoptan en
+olas siguientes (este wave: solo el set + mis vistas). 24 tests (`ui.test.ts`):
+estructura, escaping, slots opcionales.
+
+**Pulido de mis vistas** — reports/boletas/facturas/recetas/auditoría reemplazan los
+`<p class="empty">` y `<div class="view-error">` crudos por `emptyState`/`errorState`
+producidos; recetas cambia el `Cargando…` pelado por `loadingState`. Las ramas 403 de
+recetas/auditoría dejan de depender del `.caja-empty` de paul → `emptyState` propio.
+Copy de auditoría des-pharma'd ("admin de la farmacia" → "administrador del negocio",
+directiva RutBusiness).
+
+**fechaHora canónico** — `format.ts` (append): consolida los `fmtDate`/`fmtDateTime`
+reimplementados por-vista (boletas/facturas/auditoría, con año a 2 dígitos) en UN
+formateador `fechaHora` (es-CL `dd-mm-yyyy HH:MM`, año 4 dígitos, h23, hora local;
+input inválido se devuelve verbatim). recetas pasa a usar el `fecha` ya canónico.
+Cumple el objetivo del propio archivo ("una sola cadena de fecha en todas las vistas").
+3 tests.
+
+**e2e config-center** — el hub de configuración de ye **no está en la base** todavía
+(`configuracion.ts` sigue siendo la lista plana "Parámetros del servidor"). Per charter:
+dejado `client/e2e/config-center.dom.test.ts` como scaffold `it.todo` (sin imports de
+app → cero riesgo, no rojo) con el contrato a cubrir cuando aterrice ye.
+
+GATE verde: `npm run build` ok (0 warnings) · `vitest` **577 passed / 0 failed** (+27:
+ui 24 + fechaHora 3; 7 todo = scaffold) · `npm run e2e` **260 passed / 0 failed / 0
+xfail** (sin cambios — mi diff es client-DOM, el e2e es HTTP). Sin migraciones; sin
+tocar backend/db, src-tauri, ni archivos de otras lanes (`ui.ts`/`ui.test.ts`/
+`config-center.dom.test.ts` nuevos; `brand.css`/`format*.ts` append; 5 vistas mías
+aditivas). Nota infra: el primer cold build cargo del worktree murió por contención de
+recursos (box pegado por builds paralelos), no por bug — reintento exit 0; flake
+conocido ([[integration-gate-concurrency]]), NO debilitado.

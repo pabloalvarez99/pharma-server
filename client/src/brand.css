@@ -504,3 +504,95 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .agent-alert{flex-wrap:wrap}
   .agent-alert-actions{width:100%;justify-content:flex-end}
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Design system — produced states + primitives (W5, Pilar C · lane
+ * feat/design-system, bob). The canonical empty/loading/error/button/card
+ * surface (helpers in client/src/views/ui.ts). ADDITIVE: this wave ships the
+ * set + bob's views adopt it; other lanes adopt later. Own ".ui-" namespace,
+ * separate from the ".rb-", ".rubro-", ".dash-", ".agent-" blocks above, ye's
+ * ".cfg-" and paul's ".cmdk-". Themed with the global styles.css tokens
+ * (--bg, --line, --text, --muted, --accent, --danger, --radius) which load
+ * AFTER this sheet, so var() resolves — same proven pattern as the ".rubro-"
+ * and ".dash-" blocks. Append-only.
+ * ════════════════════════════════════════════════════════════════════════ */
+:root{
+  --ui-space-1:6px; --ui-space-2:10px; --ui-space-3:16px; --ui-space-4:24px; --ui-space-5:40px;
+}
+
+/* buttons — primary (brand CTA) · ghost (secondary) · danger (destructive) */
+.ui-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;
+  font-family:var(--rb-ff-sans,system-ui,sans-serif);font-weight:600;font-size:14px;line-height:1;
+  padding:10px 16px;border-radius:var(--radius-field,10px);border:1px solid transparent;
+  transition:filter .15s ease,transform .12s ease,border-color .15s ease,background .15s ease,box-shadow .15s ease}
+.ui-btn:active{transform:translateY(1px)}
+.ui-btn:focus-visible{outline:none;box-shadow:var(--focus-ring,0 0 0 3px var(--accent-glow,rgba(24,209,168,.32)))}
+.ui-btn-primary{color:#04130d;
+  background:linear-gradient(180deg,var(--accent-3,var(--accent)),var(--accent-2,var(--accent)))}
+.ui-btn-primary:hover{filter:brightness(1.06)}
+.ui-btn-ghost{color:var(--text);background:var(--bg-2);border-color:var(--line)}
+.ui-btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.ui-btn-danger{color:#fff;background:var(--danger)}
+.ui-btn-danger:hover{filter:brightness(1.06)}
+
+/* empty state — a soft mark + title + teaching copy + optional CTA */
+.ui-empty{display:flex;flex-direction:column;align-items:center;text-align:center;
+  gap:var(--ui-space-2);padding:var(--ui-space-5) var(--ui-space-4);color:var(--muted)}
+.ui-empty-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:15px;
+  color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line))}
+.ui-empty-mark svg{width:26px;height:26px}
+.ui-empty-title{margin:var(--ui-space-1) 0 0;font-family:var(--rb-ff-display,inherit);
+  font-size:16px;font-weight:600;color:var(--text)}
+.ui-empty-hint{margin:0;max-width:46ch;font-size:13.5px;line-height:1.5;color:var(--muted)}
+.ui-empty-action{margin-top:var(--ui-space-2)}
+
+/* error state — danger-toned, role=alert; optional retry */
+.ui-error{display:flex;align-items:flex-start;gap:var(--ui-space-2);padding:var(--ui-space-3);
+  border-radius:var(--radius-card,14px);background:var(--danger-soft,rgba(255,93,108,.12));
+  border:1px solid color-mix(in srgb,var(--danger) 42%,var(--line))}
+.ui-error-mark{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;
+  color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+.ui-error-mark svg{width:19px;height:19px}
+.ui-error-body{min-width:0;display:flex;flex-direction:column;gap:var(--ui-space-2)}
+.ui-error-msg{margin:0;font-size:14px;line-height:1.5;color:var(--text)}
+.ui-error-retry{align-self:flex-start}
+
+/* loading state — spinner + polite label (non-table loads) */
+.ui-loading{display:flex;align-items:center;gap:var(--ui-space-2);padding:var(--ui-space-3);
+  color:var(--muted);font-size:14px}
+.ui-spinner{flex:none;width:18px;height:18px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--accent);animation:ui-spin .7s linear infinite}
+
+/* skeleton — generic shimmer lines */
+.ui-skeleton{display:block;padding:var(--ui-space-1) 0}
+.ui-sk-line{display:block;height:12px;border-radius:6px;
+  background:linear-gradient(90deg,var(--bg-2),var(--line),var(--bg-2));
+  background-size:200% 100%;animation:ui-sk 1.2s ease-in-out infinite}
+.ui-sk-line+.ui-sk-line{margin-top:10px}
+.ui-sk-line:nth-child(odd){width:90%}
+.ui-sk-line:nth-child(3n){width:70%}
+
+/* card shell */
+.ui-card{background:var(--bg-1);border:1px solid var(--line);
+  border-radius:var(--radius-card,18px);overflow:hidden}
+.ui-card-head{display:flex;align-items:center;justify-content:space-between;
+  gap:var(--ui-space-3);padding:var(--ui-space-3) var(--ui-space-3) 0}
+.ui-card-title{margin:0;font-family:var(--rb-ff-display,inherit);font-size:15px;font-weight:600;color:var(--text)}
+.ui-card-actions{display:flex;align-items:center;gap:8px}
+.ui-card-body{padding:var(--ui-space-3)}
+
+@keyframes ui-spin{to{transform:rotate(360deg)}}
+@keyframes ui-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes ui-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:no-preference){
+  .ui-empty,.ui-error{animation:ui-rise .3s ease both}
+}
+/* motion budget: spinner/shimmer/reveal all stop under reduced-motion (states
+ * still render instantly — the spinner becomes a static ring) */
+@media (prefers-reduced-motion:reduce){
+  .ui-btn{transition:none}
+  .ui-btn:active{transform:none}
+  .ui-spinner{animation:none}
+  .ui-sk-line{animation:none}
+}

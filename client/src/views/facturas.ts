@@ -20,9 +20,10 @@ import {
   type DocItem,
   type DocReferencia,
 } from "../api";
-import { clp, num, isValidRut, canonicalRut, formatRut } from "../format";
+import { clp, num, fechaHora, isValidRut, canonicalRut, formatRut } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
 import { facturaTotals } from "./facturas-helpers";
+import { emptyState, errorState } from "./ui";
 
 const LIST_LIMIT = 100;
 const LOW_FOLIOS = 20;
@@ -303,7 +304,10 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
       const tipo = Number(listTipoSel.value);
       const rows = await listDtes(serverUrl, { tipo, limit: LIST_LIMIT });
       if (rows.length === 0) {
-        listEl.innerHTML = `<p class="empty">No hay documentos de este tipo todavía.</p>`;
+        listEl.innerHTML = emptyState({
+          title: "No hay documentos de este tipo todavía",
+          hint: "Emite una factura, nota de crédito/débito o guía con el formulario de arriba.",
+        });
         return;
       }
       listEl.innerHTML = `
@@ -316,7 +320,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
       `;
       rows.forEach((d) => wireRow(d));
     } catch (err) {
-      listEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+      listEl.innerHTML = errorState(asMessage(err));
     }
   }
 
@@ -340,7 +344,7 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
     return `
       <tr data-dte="${escapeHtml(d.id)}">
         <td class="num">${num(d.folio)}</td>
-        <td>${fmtDate(d.fecha_emision)}</td>
+        <td>${fechaHora(d.fecha_emision)}</td>
         <td><div class="cell-main">${escapeHtml(d.razon_social_receptor)}</div><div class="muted">${escapeHtml(d.rut_receptor)}</div></td>
         <td class="num">${clp(d.monto_total)}</td>
         <td><span class="${badge.cls}">${badge.label}</span></td>
@@ -536,18 +540,6 @@ export function renderFacturas(host: HTMLElement, serverUrl: string): void {
 /** Record ids (`dte:abc`) are not valid in CSS selectors — strip to the key. */
 function cssKey(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("es-CL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function downloadXml(xml: string, filename: string): void {

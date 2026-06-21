@@ -25,6 +25,7 @@ import {
   type NearExpiryRow,
 } from "../api";
 import { clp, num } from "../format";
+import { emptyState, errorState } from "./ui";
 import { buildInsights, priceMap, type Insight } from "./reports-insights";
 import {
   kpiCard,
@@ -221,7 +222,7 @@ async function loadSales(
       kpiCard("Tarjeta", clp(today.card), "débito + crédito"),
     ].join("");
   } catch (err) {
-    host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    host.innerHTML = errorState(asMessage(err));
   }
 }
 
@@ -262,7 +263,7 @@ async function loadMargins(
         </div>`;
       return;
     }
-    host.innerHTML = `<div class="view-error">${escapeHtml(message)}</div>`;
+    host.innerHTML = errorState(message);
   }
 }
 
@@ -275,7 +276,10 @@ async function loadTop(
   try {
     const rows: TopProductRow[] = await topProducts(serverUrl, TOP_LIMIT);
     if (rows.length === 0) {
-      host.innerHTML = `<p class="empty">Aún no hay ventas para rankear.</p>`;
+      host.innerHTML = emptyState({
+        title: "Aún no hay ventas para rankear",
+        hint: "Cuando registres ventas en el POS, aquí verás tu ranking ABC de productos.",
+      });
       return;
     }
     loaded.top = rows;
@@ -289,7 +293,7 @@ async function loadTop(
       </table>
     `;
   } catch (err) {
-    host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    host.innerHTML = errorState(asMessage(err));
   }
 }
 
@@ -321,7 +325,7 @@ async function loadInventory(
       kpiCard("Sin stock", num(s.out_of_stock), "agotados", s.out_of_stock > 0 ? "danger" : ""),
     ].join("");
   } catch (err) {
-    host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    host.innerHTML = errorState(asMessage(err));
   }
 }
 
@@ -334,7 +338,10 @@ async function loadRotation(
   try {
     const rows: StockRotationRow[] = await stockRotation(serverUrl);
     if (rows.length === 0) {
-      host.innerHTML = `<p class="empty">Sin datos de rotación todavía.</p>`;
+      host.innerHTML = emptyState({
+        title: "Sin datos de rotación todavía",
+        hint: "La rotación aparece cuando hay ventas y stock que medir.",
+      });
       return;
     }
     loaded.rotation = rows;
@@ -348,7 +355,7 @@ async function loadRotation(
       </table>
     `;
   } catch (err) {
-    host.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    host.innerHTML = errorState(asMessage(err));
   }
 }
 

@@ -3,6 +3,7 @@ import {
   clp,
   num,
   fecha,
+  fechaHora,
   toNumber,
   cleanRut,
   rutDigitVerifier,
@@ -223,6 +224,24 @@ describe("fecha", () => {
   it("echoes unparseable input verbatim rather than 'Invalid Date'", () => {
     expect(fecha("not-a-date")).toBe("not-a-date");
     expect(fecha("")).toBe("");
+  });
+});
+
+describe("fechaHora — canonical date+time (one formatter for every list)", () => {
+  it("prefixes the canonical date, then a 24h HH:MM", () => {
+    const iso = "2026-06-16T15:30:00Z";
+    const s = fechaHora(iso);
+    expect(s.startsWith(fecha(iso))).toBe(true); // same 4-digit-year date as `fecha`
+    expect(s).toMatch(/ \d{2}:\d{2}$/); // " HH:MM" appended
+  });
+
+  it("keeps the full 4-digit year (no 2-digit drift the per-view copies had)", () => {
+    expect(fechaHora("2026-12-31T12:00:00Z")).toMatch(/^31-12-2026 \d{2}:\d{2}$/);
+  });
+
+  it("echoes unparseable input verbatim rather than 'Invalid Date'", () => {
+    expect(fechaHora("not-a-date")).toBe("not-a-date");
+    expect(fechaHora("")).toBe("");
   });
 });
 
