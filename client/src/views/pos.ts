@@ -41,7 +41,11 @@ import {
   payableTotal as payableTotalOf,
   lineDiscount as lineDiscountOf,
   splitPayment,
+  holdSale,
+  recallSale,
+  parseDiscountEntry,
   type CartLine,
+  type HeldSale,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
 
@@ -81,6 +85,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // (the physical-rubro behaviour) until the persisted rubro loads, then relax it
   // for services and repaint the picker so the cards read honestly.
   let trackStock = true;
+  // Parked sales (ventas en espera): each is a frozen snapshot of the draft. The
+  // cashier holds the current cart to ring up someone else, then recalls it.
+  let held: HeldSale[] = [];
   // The cart line to flash on the next render — set when a scan/click adds or
   // bumps a line, cleared once the flash is applied. A fast cashier scanning the
   // SAME SKU repeatedly only sees the qty tick up, so the flash is the signal the
@@ -100,13 +107,19 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
         <!-- right: cart + checkout -->
         <aside class="pos-cart">
-          <h3 class="section-title">Carrito</h3>
+          <div class="pos-cart-head">
+            <h3 class="section-title">Carrito</h3>
+            <button type="button" class="pos-hold-btn" id="pos-hold" disabled
+                    title="Poner la venta en espera (F2)">En espera</button>
+          </div>
+          <!-- parked sales (ventas en espera): click un chip para recuperar -->
+          <div class="pos-held-bar" id="pos-held-bar" hidden></div>
           <div id="pos-lines" class="pos-lines"></div>
 
           <!-- global discount (per-line discount lives on each cart line) -->
           <div class="pos-discount" id="pos-discount">
             <label class="pos-disc-label" for="pos-disc-in">Descuento global</label>
-            <input id="pos-disc-in" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+            <input id="pos-disc-in" type="text" inputmode="numeric" placeholder="$ o %" autocomplete="off" />
           </div>
 
           <div class="pos-totals" id="pos-totals">
@@ -179,6 +192,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   const linesEl = host.querySelector<HTMLElement>("#pos-lines")!;
   const totalEl = host.querySelector<HTMLElement>("#pos-total-val")!;
   const chargeBtn = host.querySelector<HTMLButtonElement>("#pos-charge")!;
+  const holdBtn = host.querySelector<HTMLButtonElement>("#pos-hold")!;
+  const heldBar = host.querySelector<HTMLElement>("#pos-held-bar")!;
   const errorEl = host.querySelector<HTMLElement>("#pos-error")!;
   const toastEl = host.querySelector<HTMLElement>("#pos-toast")!;
   const methodsEl = host.querySelector<HTMLElement>("#pos-methods")!;
@@ -219,20 +234,25 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     void loadResults(q);
   };
   searchEl.addEventListener("input", () => {
+    clearScanMiss(); // typing clears a previous "no encontrado" flag
     window.clearTimeout(timer);
     timer = window.setTimeout(() => runSearch(searchEl.value.trim()), 220);
   });
   // Scan-fast: Enter adds the first sellable result (USB scanners emit Enter). On
   // a physical rubro that's the first in-stock row; on a service rubro stock is
-  // meaningless, so the first row period.
+  // meaningless, so the first row period. A code with no hit flashes the box and
+  // keeps the cashier in the field — the scan flow never dead-ends.
   searchEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
+    const code = searchEl.value.trim();
     const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
     if (first) {
       addToCart(first);
       searchEl.value = "";
       runSearch("");
+    } else if (code) {
+      scanMiss(code);
     }
   });
   runSearch("");
@@ -291,7 +311,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   // ---- global discount ----
   discIn.addEventListener("input", () => {
-    globalDiscount = parseCash(discIn.value);
+    // Accepts a flat monto ("1500") or a percentage of the subtotal ("10%").
+    globalDiscount = parseDiscountEntry(discIn.value, subtotal());
     renderTotals();
     renderQuickChips();
     renderVuelto();
@@ -488,6 +509,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   function addToCart(p: Product): void {
     addCartLine(cart, p, { trackStock }); // pure: stock guards gated by rubro
     flashLineId = p.id; // confirm the scan/click on the affected line
+    beep(true); // audible "landed" cue for a head-down cashier
     clearError();
     renderCart();
     searchEl.focus(); // keep the scanner/keyboard flow going
@@ -534,7 +556,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             <span class="qty-val rb-num">${l.qty}</span>
             <button type="button" class="qty-btn" data-act="inc" aria-label="Agregar uno" ${trackStock && l.qty >= l.stock ? "disabled" : ""}>+</button>
           </div>
-          <input class="pos-line-disc" type="text" inputmode="numeric" placeholder="Desc."
+          <input class="pos-line-disc" type="text" inputmode="numeric" placeholder="$ o %"
                  value="${lineDiscountOf(l) > 0 ? lineDiscountOf(l) : ""}"
                  aria-label="Descuento para ${escapeHtml(l.name)}" />
           <div class="pos-line-sub num rb-num">${clp(toNumber(l.unit_price) * l.qty - lineDiscountOf(l))}</div>
@@ -579,7 +601,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
           const id = inp.closest<HTMLElement>(".pos-line")!.dataset.id!;
           const line = cart.find((l) => l.product === id);
           if (!line) return;
-          line.discount = parseCash(inp.value);
+          // Monto ("500") or % of this line's gross ("10%").
+          line.discount = parseDiscountEntry(inp.value, toNumber(line.unit_price) * line.qty);
           const subEl = inp.parentElement!.querySelector<HTMLElement>(".pos-line-sub");
           if (subEl) subEl.textContent = clp(toNumber(line.unit_price) * line.qty - lineDiscountOf(line));
           renderTotals();
@@ -591,6 +614,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       });
     }
     flashLineId = null; // one-shot: don't re-flash on later discount/qty renders
+    holdBtn.disabled = cart.length === 0; // can't park an empty cart
     renderTotals();
     renderQuickChips();
     renderVuelto();
@@ -617,6 +641,129 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       window.setTimeout(() => (toastEl.hidden = true), 250);
     }, 3200);
   }
+
+  // ---- scan feedback (audible + visual) ----
+  // A short WebAudio blip confirms a scan landed without the cashier looking up;
+  // a lower tone marks a miss. Best-effort: muted/blocked audio (no AudioContext,
+  // autoplay policy) never throws, so the sale flow is untouched.
+  let audioCtx: AudioContext | null = null;
+  function beep(ok: boolean): void {
+    try {
+      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return;
+      audioCtx ??= new Ctor();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = ok ? 880 : 220;
+      gain.gain.value = 0.04; // quiet — a tick, not a siren
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const t = audioCtx.currentTime;
+      osc.start(t);
+      osc.stop(t + 0.06);
+    } catch {
+      /* audio is optional polish — never block the sale */
+    }
+  }
+
+  // A scanned code with no match: tone + shake + keep the cashier in the box with
+  // the code selected, so the next scan (or a retype) just works.
+  function scanMiss(code: string): void {
+    beep(false);
+    showError(`Sin producto para «${code}». Revisa el código.`);
+    searchEl.classList.remove("pos-scan-miss");
+    void searchEl.offsetWidth; // reflow so the CSS animation restarts
+    searchEl.classList.add("pos-scan-miss");
+    searchEl.select();
+  }
+  function clearScanMiss(): void {
+    searchEl.classList.remove("pos-scan-miss");
+    clearError();
+  }
+
+  // ---- hold / recall (ventas en espera) ----
+  function clearDraft(): void {
+    cart.length = 0;
+    globalDiscount = 0;
+    discIn.value = "";
+    cashIn.value = "";
+    splitCashIn.value = "";
+    splitCardIn.value = "";
+    selectedCustomer = null;
+  }
+
+  function holdCurrent(): void {
+    if (cart.length === 0) return;
+    const res = holdSale(held, { lines: cart, globalDiscount, customer: selectedCustomer });
+    held = res.held;
+    clearDraft();
+    clearError();
+    renderCart();
+    renderCustomer();
+    renderVuelto();
+    renderHeld();
+    toast(`Venta en espera · ${res.sale.label}`);
+    searchEl.focus();
+  }
+
+  function recall(id: string): void {
+    const r = recallSale(held, id);
+    if (!r) return;
+    let nextHeld = r.held;
+    // Don't lose the current cart: park it before swapping in the recalled one.
+    if (cart.length > 0) {
+      const parked = holdSale(nextHeld, { lines: cart, globalDiscount, customer: selectedCustomer });
+      nextHeld = parked.held;
+    }
+    held = nextHeld;
+    clearDraft();
+    for (const l of r.sale.lines) cart.push(l);
+    globalDiscount = r.sale.globalDiscount;
+    discIn.value = globalDiscount > 0 ? String(globalDiscount) : "";
+    selectedCustomer = r.sale.customer;
+    clearError();
+    renderCart();
+    renderCustomer();
+    renderVuelto();
+    renderHeld();
+    toast(`Venta recuperada · ${r.sale.label}`);
+    searchEl.focus();
+  }
+
+  function renderHeld(): void {
+    holdBtn.disabled = cart.length === 0;
+    if (held.length === 0) {
+      heldBar.hidden = true;
+      heldBar.innerHTML = "";
+      return;
+    }
+    heldBar.hidden = false;
+    heldBar.innerHTML =
+      `<span class="pos-held-title muted">En espera</span>` +
+      held
+        .map((h) => {
+          const count = h.lines.reduce((n, l) => n + l.qty, 0);
+          const total = payableTotalOf(h.lines, h.globalDiscount);
+          return `<button type="button" class="pos-held-chip" data-id="${escapeHtml(h.id)}"
+                  title="Recuperar ${escapeHtml(h.label)}">
+            <span class="pos-held-chip-name">${escapeHtml(h.label)}</span>
+            <span class="pos-held-chip-meta rb-num">${num(count)} ít · ${clp(total)}</span>
+          </button>`;
+        })
+        .join("");
+    heldBar.querySelectorAll<HTMLButtonElement>(".pos-held-chip").forEach((b) => {
+      b.addEventListener("click", () => recall(b.dataset.id!));
+    });
+  }
+
+  holdBtn.addEventListener("click", holdCurrent);
+  // F2 parks the current sale from anywhere in the view (keyboard-first).
+  host.addEventListener("keydown", (e) => {
+    if (e.key === "F2") {
+      e.preventDefault();
+      holdCurrent();
+    }
+  });
 
   // ---- checkout ----
   // Keyboard-first: the click handler and the cash-input Enter both route here,
@@ -958,6 +1105,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // initial paint + scan-ready focus
   renderCart();
   renderCustomer();
+  renderHeld();
   syncPayment();
   searchEl.focus();
 }

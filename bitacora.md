@@ -4183,3 +4183,44 @@ GATE verde: `npm run build` ok · `vitest` **490/490** · `npm run e2e`
 - **GATE verde**: `cargo fmt --all -- --check` ok · `cargo clippy --workspace
   --all-targets -- -D warnings` 0 warnings · `cargo test --workspace` 0 failed
   (assist inner: 49 unit + 10 deterministic + 24 actions). Mig libre: ninguna nueva.
+
+---
+
+## 2026-06-20 — paul · W4 POS quality-of-life (cajero más rápido)
+
+Lane `feat/pos-cashier-qol` off `feature/erp-parity@283107a`. Velocidad real de
+mostrador sobre el POS ya producido. Tres piezas, lógica pura en `cashier-loop.ts`
+(testeada), wiring en `views/pos.ts`, estilos `views/rutbrand.css` (append).
+
+**Hold/Recall (ventas en espera)** — el cajero parquea una venta ("voy por la otra
+cosa") y atiende a otro cliente sin perder el carrito; múltiples en espera coexisten.
+- `holdSale`/`recallSale`/`nextHoldLabel`/`cloneCart` puros: el snapshot es FROZEN
+  (líneas deep-copiadas + descuento global + cliente), mutar el carrito vivo después
+  de poner en espera NO sangra al parqueado; recall lo saca exactamente una vez (no
+  doble-recall) y re-clona al restaurar.
+- Etiquetas `Espera N` por máximo-sufijo (espejo de `nextDrawerName`): recuperar #1 y
+  volver a parquear NO reusa #1.
+- UI: botón "En espera" (deshabilitado con carrito vacío) + barra de chips clicables
+  `pos-held-bar` con ít/total por ticket. **F2 = poner en espera** (keyboard-first).
+- Cero pérdida de datos: recuperar con carrito no vacío PARQUEA el actual antes de
+  intercambiar.
+
+**Scan flow polish** — foco ya persistente + flash de línea (base). Nuevo:
+- **Beep WebAudio** al agregar (880Hz) / al fallar (220Hz), best-effort (sin
+  AudioContext / autoplay bloqueado → no throw, jamás bloquea la venta).
+- **Código no encontrado**: Enter sin match → tono grave + shake del buscador
+  (`pos-scan-miss`, respeta `prefers-reduced-motion`) + mensaje es-CL + `select()` para
+  reescanear/retipear al toque. El flujo nunca queda en dead-end; tipear limpia la marca.
+
+**Quick-discount monto OR %** — `parseDiscountEntry(raw, base)` pura: lee monto plano
+("1.500") o porcentaje ("10%", "12,5%") del base (gross de línea o subtotal), resuelve
+a pesos enteros AL TIPEAR y clampa en `[0, base]` (no negativo, no sobre-base). El wire
+sigue llevando UN `discount` en pesos (disciplina de plata: nunca una tasa). Aplica al
+descuento global y al por-línea; placeholders ahora `"$ o %"`.
+
+Scope: `views/{cashier-loop,pos}.ts` + `cashier-loop-qol.test.ts` + `rutbrand.css`
+(append). Sin `src-tauri`, sin backend, sin `vertical.ts`/`format.ts` (solo lectura).
+Money/stock intactos (reusa `payableTotal`/`clampDiscount`/`addToCart`).
+
+GATE verde: `npm run build` ok (tsc + vite) · `vitest` **525/525** (+11 QoL). Sin
+migraciones nuevas.
