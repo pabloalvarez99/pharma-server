@@ -997,6 +997,141 @@ export async function agentAskFlow({ tenant, email, password, vertical }) {
   eq(after.stock, probe.stock, "el agente es read-only: el stock no cambió tras preguntar");
 }
 
+// --- business agent WRITE actions (W3, two-step propose/confirm) -------------
+
+/** Business agent WRITE-action flow ("el agente actúa", ADR-0016 Wave 3) over
+ *  HTTP — the two-step `propose → confirm` handshake the ask-bar uses to let the
+ *  agent register an expense or draft a purchase order WITHOUT ever auto-writing.
+ *  This is the live counterpart to the unit tests in crates/assist: only a real
+ *  run proves the token round-trips through `/assist/ask` → `/assist/act`, the
+ *  domain write lands, and the security gates hold over HTTP. Four contracts:
+ *
+ *   (1) PROPOSE WRITES NOTHING — asking to register a gasto returns a proposal
+ *       with a `confirm_token` but the expense count does NOT move until `/act`.
+ *   (2) CONFIRM EXECUTES — posting the token to `/assist/act` creates the real
+ *       expense (visible in GET /expenses) and the OC draft (GET /purchase-orders).
+ *   (3) SINGLE-USE TOKEN — replaying the same token is rejected; no double-write.
+ *   (4) ROLE GATE — a cashier may NOT execute (`/assist/act` is admin/owner only
+ *       → 403), and a cashier's write *ask* degrades to a friendly note carrying
+ *       NO token (the agent's hands are gated, never the read questions).
+ *
+ *  Runs on its own tenant with an extra cashier user (run.mjs bootstraps both). */
+export async function agentActionFlow({
+  tenant,
+  email,
+  password,
+  cashierEmail,
+  cashierPassword,
+}) {
+  section(`agent ACTION (write, two-step) tenant=${tenant}`);
+  const c = new Client();
+  await c.login(tenant, email, password);
+
+  // Seed so a real catalog exists (the OC names a product line); harmless to
+  // expenses, whose baseline we capture next.
+  await c.post("/admin/seed-demo", { vertical: "pharmacy", force: true });
+
+  const countExpenses = async () => {
+    const body = (await c.get("/expenses")).body;
+    return Array.isArray(body) ? body.length : 0;
+  };
+  const nBefore = await countExpenses();
+
+  // (1) registrar_gasto — PROPOSE. Returns a token but writes nothing. --------
+  const propose = await c.post("/assist/ask", {
+    question: "registra un gasto de 5000 en arriendo",
+  });
+  eq(propose.status, 200, "ask (registrar gasto) → 200");
+  eq(propose.body?.intent, "accion_propuesta", "ask write → intent accion_propuesta");
+  const proposal = propose.body?.action;
+  check(!!proposal, "la respuesta trae una propuesta de acción");
+  eq(proposal?.name, "registrar_gasto", "propuesta name = registrar_gasto");
+  check(
+    typeof proposal?.confirm_token === "string" && proposal.confirm_token.length > 10,
+    "la propuesta trae un confirm_token opaco",
+  );
+  eq(
+    await countExpenses(),
+    nBefore,
+    "PROPONER NO ESCRIBE: el nº de gastos no cambia hasta confirmar",
+  );
+
+  // (2) registrar_gasto — CONFIRM. The expense is created for real. -----------
+  const act = await c.post("/assist/act", { confirm_token: proposal.confirm_token });
+  eq(act.status, 200, "act (confirmar gasto) → 200");
+  eq(act.body?.action, "registrar_gasto", "outcome action = registrar_gasto");
+  check(!!act.body?.data?.id, "el outcome trae el id del gasto creado");
+  eq(Number(act.body?.data?.amount), 5000, "el outcome reporta el monto 5000");
+  const expensesNow = (await c.get("/expenses")).body;
+  const expList = Array.isArray(expensesNow) ? expensesNow : [];
+  eq(expList.length, nBefore + 1, "CONFIRMAR ESCRIBE: se creó exactamente 1 gasto");
+  check(
+    expList.some((e) => Number(e.amount) === 5000),
+    "el gasto de 5000 existe en /expenses tras confirmar",
+  );
+
+  // (3) SINGLE-USE token — a replay is rejected and creates no second gasto. ---
+  const replay = await c.post(
+    "/assist/act",
+    { confirm_token: proposal.confirm_token },
+    { expectOk: false },
+  );
+  check(
+    replay.status >= 400 && replay.status < 500,
+    `token de un solo uso: replay rechazado limpio (${replay.status}, no 5xx)`,
+  );
+  eq(
+    await countExpenses(),
+    nBefore + 1,
+    "el replay NO crea un segundo gasto (sin doble escritura)",
+  );
+
+  // (2b) crear_orden_compra_draft — propose + confirm. -----------------------
+  //      build() resolves the supplier by name, so it must exist first.
+  const SUP = "Proveedor Agente E2E";
+  const sup = await c.post("/suppliers", { name: SUP });
+  check(!!sup.body?.id, "proveedor para la OC creado");
+  const proposeOc = await c.post("/assist/ask", {
+    question: `crea una orden de compra de 10 paracetamol a ${SUP} a $500`,
+  });
+  eq(proposeOc.status, 200, "ask (crear OC) → 200");
+  const ocProposal = proposeOc.body?.action;
+  check(!!ocProposal, "la respuesta trae una propuesta de OC");
+  eq(ocProposal?.name, "crear_orden_compra_draft", "propuesta name = crear_orden_compra_draft");
+
+  const actOc = await c.post("/assist/act", { confirm_token: ocProposal.confirm_token });
+  eq(actOc.status, 200, "act (confirmar OC) → 200");
+  eq(actOc.body?.action, "crear_orden_compra_draft", "outcome action = crear_orden_compra_draft");
+  const ocId = actOc.body?.data?.id;
+  check(!!ocId, "el outcome trae el id de la OC creada");
+  eq(actOc.body?.data?.status, "draft", "la OC se crea en estado draft (no compromete stock)");
+  const ocDetail = (await c.get(`/purchase-orders/${encodeURIComponent(ocId)}`)).body;
+  eq(ocDetail?.status, "draft", "la OC existe en /purchase-orders como draft (efecto real)");
+
+  // (4) ROLE GATE — a cashier may NOT execute write actions. ------------------
+  const cashier = new Client();
+  await cashier.login(tenant, cashierEmail, cashierPassword);
+  // /assist/act is admin/owner only (route layer) → 403 before any token check.
+  const forbidden = await cashier.post(
+    "/assist/act",
+    { confirm_token: "no-importa" },
+    { expectOk: false },
+  );
+  eq(forbidden.status, 403, "el cashier NO puede ejecutar /assist/act → 403");
+  // A cashier's write *ask* degrades to a friendly note with NO token (the
+  // agent's hands are gated at propose time too — it never even mints a token).
+  const cashierAsk = await cashier.post("/assist/ask", {
+    question: "registra un gasto de 3000 en luz",
+  });
+  eq(cashierAsk.status, 200, "el ask de escritura del cashier → 200 (nota amable, no 403)");
+  check(cashierAsk.body?.action == null, "el cashier no recibe confirm_token (sin manos)");
+  eq(
+    await countExpenses(),
+    nBefore + 1,
+    "el ask del cashier no escribió nada (cuenta de gastos intacta)",
+  );
+}
+
 // --- service sale: physical_stock = false (W2) -------------------------------
 
 /** A SERVICE rubro sells items that are NOT physical goods — a haircut has no
