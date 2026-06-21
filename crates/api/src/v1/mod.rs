@@ -10,6 +10,7 @@ pub mod backup;
 pub use backup::{backup_now, prune_backups, BackupReport};
 pub mod cash_register;
 pub mod catalog;
+pub mod config;
 pub mod customers;
 pub mod dashboard;
 pub mod dte;
@@ -33,6 +34,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(inventory::router(state.clone()))
         .merge(stock_movements::router(state.clone()))
         .merge(customers::router(state.clone()))
+        .merge(config::router(state.clone()))
         .merge(prescriptions::router(state.clone()))
         .merge(purchasing::router(state.clone()))
         .merge(sales::router(state.clone()))
