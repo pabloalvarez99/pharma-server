@@ -4565,3 +4565,54 @@ Tests: ningún test asertaba sobre el markup/copy cambiado → cero roturas. GAT
 `npm run build` (tsc `--noEmit` limpio + vite) + `npm test` (29 archivos, 641 passed /
 7 todo, `ui.test.ts` verde). Branch `feat/ui-adopt-cashier` vs `feature/erp-parity`.
 Sin backend, sin migraciones, sin `src-tauri`.
+
+## 2026-06-22 — W6 bob: e2e real del Centro de Configuración + DS adoption verificada
+
+Convierte el scaffold `client/e2e/config-center.dom.test.ts` (7 `it.todo` de W5,
+escritos cuando el hub de ye aún no estaba en base) en e2e DOM **real** contra
+`renderConfiguracion` — el hub de configuración ya vive en erp-parity (@33ebdb3).
+
+- **12 tests verdes + 4 `it.todo`** (16 casos). Maneja el contrato del hub sin
+  duplicar `rubro-configurator.dom.test.ts` (que ya cubre a fondo la grilla de rubro):
+  - **nav lateral** = catálogo `CONFIG_SECTIONS` en orden; labels humanas en español
+    (cero raw `admin_setting`/`cfg-` — "cero de dev").
+  - **búsqueda in-settings**: filtra el nav (`facturacion` → sólo Facturación SII),
+    chip jump-to-field (`rut` → Negocio) y "sin resultados" explícito (nunca un panel
+    muerto en blanco).
+  - **máquina save-state**: guardar Ambiente SII → estado producido `cfg-status-ok`
+    + persiste de verdad (setSetting llamado).
+  - **validación inline**: RUT mód-11 inválido → eco legible (`field-hint err`) y
+    **bloquea** el write (setSetting NO se llama); un RUT válido limpia el error.
+  - **vitrina de rubro** monta dentro del hub (radiogroup + preview vivo).
+  - **estados producidos**: loading = skeleton (`table-skel`, cero texto "Cargando…"
+    crudo); error = `.view-error` humanizado (nunca crash/stack). *Nota de contrato*:
+    el hub usa el skeleton de `inventory` + `view-error` (renderer de ye); las 5 vistas
+    de bob (reports/boletas/facturas/recetas/auditoría) usan los helpers `.ui-*` de
+    `ui.ts` — ambos cumplen "producido, nunca `<p>` crudo".
+  - **`it.todo` honestos** para lo aún no cableado en base (Usuarios CRUD, Sucursales/
+    cajas, upload cert/CAF desde la UI, respaldo programado+restore). Esas secciones hoy
+    son `placeholder` ("próximamente" + ruta CLI: `pharma user-create` / `pharma backup`);
+    el test asegura el contrato honesto (cero dead-end, ADR-0005), no una UI falsa. Los
+    endpoints server cert/CAF/backup ya existen (W5 marvin) — sólo falta la UI.
+- **Hallazgo**: `asMessage` (inventory.ts) humaniza errores no-string a "No se pudo
+  cargar la información."; la capa `../api` (Tauri invoke) rechaza con **strings** → el
+  mock lanza string (fiel a la realidad: el mensaje del backend aflora).
+- **DS adoption (Pilar C) ya completa**: las 5 vistas de bob enrutan empty/loading/error
+  por `ui.ts` (`emptyState`/`errorState`/`loadingState`); cero anti-patrón
+  `<p class="empty">`. Sin churn.
+
+**Infra (box) — bloqueante de `npm run e2e` detectado + workaround**: el box tiene
+`CARGO_INCREMENTAL=1` (setx persistente) que rompe sccache ("incremental compilation is
+prohibited: Unset CARGO_INCREMENTAL"); además sccache 0.16.0 falla no-determinístico con
+rustc 1.95 bajo el perfil release-LTO (aborta sin diagnóstico en un crate distinto cada
+corrida). Build verde con: `RUSTC_WRAPPER= CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_LTO=false
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_BUILD_JOBS=2` (desactivar LTO/sccache = sólo
+perf de build, cero impacto en correctitud del server). Fix box-wide recomendado: quitar /
+poner en 0 el `CARGO_INCREMENTAL` y revisar sccache vs rustc 1.95.
+
+GATE (verde): `cd client && npm run build` ✓ · `npm test` ✓ (30 files, **653 passed /
+4 todo / 0 failed**, incl. config-center.dom.test.ts 16 y rubro-configurator 14) ·
+`npm run e2e` ✓ (**260 passed, 0 failed, 0 known-bug xfail** — golden + DTE 39/33/61/56
++ CAF folio gates + libro-ventas + assist actions, ambos verticales). Branch
+`feat/ui-adopt-compliance-e2e` vs feature/erp-parity. Diff = 1 archivo de test cliente;
+sin cambios de server/Rust.
