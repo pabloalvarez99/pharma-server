@@ -21,7 +21,7 @@ mod types;
 use tauri::Manager;
 
 use commands::{
-    assist, audit, auth, cash, catalog, customers, dte, expenses, license, pos, prescriptions,
+    assist, audit, auth, cash, catalog, config, customers, dte, expenses, license, pos, prescriptions,
     print, purchases, reports, rubro, seed, settings,
 };
 
@@ -110,7 +110,21 @@ pub fn run() {
             print::print_ticket,
             print::open_cash_drawer,
             assist::assist_ask,
-            assist::assist_act
+            assist::assist_act,
+            config::config_list_users,
+            config::config_create_user,
+            config::config_update_user_roles,
+            config::config_set_user_active,
+            config::list_branches,
+            config::create_branch,
+            config::update_branch,
+            config::delete_branch,
+            config::list_registers,
+            config::create_register,
+            config::update_register,
+            config::delete_register,
+            config::run_backup,
+            config::list_backups,
         ])
         .run(tauri::generate_context!())
         .expect("error while running rutbusiness-client");

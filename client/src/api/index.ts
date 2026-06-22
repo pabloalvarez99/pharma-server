@@ -19,3 +19,4 @@ export * from "./audit";
 export * from "./seed";
 export * from "./assist";
 export * from "./print";
+export * from "./config";
