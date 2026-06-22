@@ -1734,3 +1734,119 @@ export function runBackup(serverUrl: string): Promise<BackupReport> {
 export function listBackups(serverUrl: string, limit?: number): Promise<BackupLogEntry[]> {
   return invoke<BackupLogEntry[]>("list_backups", { serverUrl, limit });
 }
+
+// --- config center: medios de pago + ficha de negocio -----------------------
+//
+// `crates/api/src/v1/config.rs`. Reads are any-auth (the POS needs accepted
+// tender + the receipt header); writes are admin/owner. The business profile is
+// the general UI/receipt card — SII emisor identity (RUT/comuna for DTE) lives
+// separately under the `dte.emisor` setting (Negocio › Datos tributarios).
+
+/** Accepted-tender configuration (`config.rs::PaymentMethodsResponse`).
+ *  `methods` is the active selection; `available` the full catalog to offer. */
+export interface PaymentMethods {
+  methods: string[];
+  available: string[];
+}
+
+/** GET /api/v1/config/payment-methods (Bearer) — current + available tender. */
+export function getPaymentMethods(serverUrl: string): Promise<PaymentMethods> {
+  return invoke<PaymentMethods>("config_get_payment_methods", { serverUrl });
+}
+
+/** PUT /api/v1/config/payment-methods (Bearer, admin+) — set accepted tender. */
+export function setPaymentMethods(serverUrl: string, methods: string[]): Promise<PaymentMethods> {
+  return invoke<PaymentMethods>("config_set_payment_methods", { serverUrl, methods });
+}
+
+/** General business profile for the UI/receipts (`config.rs::BusinessProfile`).
+ *  `razon_social` is required on save; the rest are optional. */
+export interface BusinessProfile {
+  razon_social: string | null;
+  giro: string | null;
+  direccion: string | null;
+  telefono: string | null;
+  email: string | null;
+}
+
+/** GET /api/v1/config/business (Bearer) — the business card. */
+export function getBusinessProfile(serverUrl: string): Promise<BusinessProfile> {
+  return invoke<BusinessProfile>("config_get_business", { serverUrl });
+}
+
+/** PUT /api/v1/config/business (Bearer, admin+) — save the business card.
+ *  `razonSocial` required; empty optionals are stored null. */
+export function setBusinessProfile(
+  serverUrl: string,
+  profile: {
+    razonSocial: string;
+    giro?: string;
+    direccion?: string;
+    telefono?: string;
+    email?: string;
+  },
+): Promise<BusinessProfile> {
+  return invoke<BusinessProfile>("config_set_business", {
+    serverUrl,
+    razonSocial: profile.razonSocial,
+    giro: profile.giro,
+    direccion: profile.direccion,
+    telefono: profile.telefono,
+    email: profile.email,
+  });
+}
+
+// --- config center: SII certificado + CAF (carga desde la UI, #268) ---------
+//
+// `crates/api/src/v1/dte.rs`. The .pfx travels base64-encoded; the passphrase is
+// validated against the key material then used to encrypt-at-rest and is NEVER
+// persisted (ADR-0011 §cert). Admin/owner only.
+
+/** Result of a cert (.pfx) upload (`dte.rs::upload_cert` 201 body). */
+export interface CertUploadResult {
+  id: string;
+  rut: string;
+  vigencia_desde: string;
+  vigencia_hasta: string;
+  blob_bytes: number;
+}
+
+/** POST /api/v1/dte/cert (Bearer, admin+) — import the digital certificate. The
+ *  PFX bytes are base64; the passphrase is verified, used to encrypt, discarded.
+ *  Rejects with the server's Spanish message (bad base64/PFX/passphrase, 403…). */
+export function uploadCert(
+  serverUrl: string,
+  args: {
+    pfxBase64: string;
+    certPassphrase: string;
+    rut: string;
+    vigenciaDesde: string;
+    vigenciaHasta: string;
+  },
+): Promise<CertUploadResult> {
+  return invoke<CertUploadResult>("dte_upload_cert", {
+    serverUrl,
+    pfxBase64: args.pfxBase64,
+    certPassphrase: args.certPassphrase,
+    rut: args.rut,
+    vigenciaDesde: args.vigenciaDesde,
+    vigenciaHasta: args.vigenciaHasta,
+  });
+}
+
+/** Result of a CAF (folios) upload (`dte.rs::upload_caf` 201 body). */
+export interface CafUploadResult {
+  id: string;
+  tipo: number;
+  folio_desde: number;
+  folio_hasta: number;
+  next_folio: number;
+  rut_emisor: string;
+}
+
+/** POST /api/v1/dte/caf (Bearer, admin+) — import a CAF (folios) XML from the
+ *  SII. The whole XML is kept (the TED embeds it). Rejects with a Spanish
+ *  message on an invalid CAF XML / 403. */
+export function uploadCaf(serverUrl: string, xml: string): Promise<CafUploadResult> {
+  return invoke<CafUploadResult>("dte_upload_caf", { serverUrl, xml });
+}

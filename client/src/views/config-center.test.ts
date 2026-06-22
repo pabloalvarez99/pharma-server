@@ -21,6 +21,9 @@ import {
   formatBytes,
   backupSourceLabel,
   backupStatusLabel,
+  paymentLabel,
+  validatePaymentSelection,
+  validateCertForm,
 } from "./config-center";
 
 describe("section catalog", () => {
@@ -268,5 +271,66 @@ describe("backup formatters", () => {
   it("labels the backup status in Spanish", () => {
     expect(backupStatusLabel("ok")).toBe("Correcto");
     expect(backupStatusLabel("failed")).toBe("Falló");
+  });
+});
+
+describe("payment methods", () => {
+  it("maps each method key to its Spanish label", () => {
+    expect(paymentLabel("efectivo")).toBe("Efectivo");
+    expect(paymentLabel("debito")).toBe("Débito");
+    expect(paymentLabel("credito")).toBe("Crédito");
+    expect(paymentLabel("convenio")).toBe("Convenio");
+  });
+
+  it("echoes an unknown method key (forward-compatible)", () => {
+    expect(paymentLabel("cripto")).toBe("cripto");
+  });
+
+  it("selection requires at least one method, deduped in order", () => {
+    expect(validatePaymentSelection([]).ok).toBe(false);
+    const r = validatePaymentSelection(["efectivo", "efectivo", "debito"]);
+    expect(r.ok).toBe(true);
+    expect(r.value).toEqual(["efectivo", "debito"]);
+  });
+});
+
+describe("validateCertForm", () => {
+  const ok = {
+    passphrase: "clave-pfx",
+    rut: "76123456-0",
+    vigenciaDesde: "2026-01-01",
+    vigenciaHasta: "2027-01-01",
+  };
+
+  it("accepts a complete form and canonicalises the RUT", () => {
+    const r = validateCertForm({ ...ok, rut: "76.123.456-0" });
+    expect(r.ok).toBe(true);
+    expect(r.value).toEqual({
+      passphrase: "clave-pfx",
+      rut: "76123456-0",
+      vigenciaDesde: "2026-01-01",
+      vigenciaHasta: "2027-01-01",
+    });
+  });
+
+  it("requires a non-empty passphrase", () => {
+    expect(validateCertForm({ ...ok, passphrase: "  " }).ok).toBe(false);
+  });
+
+  it("rejects an invalid RUT (mód-11)", () => {
+    const r = validateCertForm({ ...ok, rut: "76123456-5" });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/dígito verificador|RUT/);
+  });
+
+  it("requires both validity dates", () => {
+    expect(validateCertForm({ ...ok, vigenciaDesde: "" }).ok).toBe(false);
+    expect(validateCertForm({ ...ok, vigenciaHasta: "" }).ok).toBe(false);
+  });
+
+  it("rejects an inverted validity range", () => {
+    const r = validateCertForm({ ...ok, vigenciaDesde: "2027-06-01", vigenciaHasta: "2026-06-01" });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/vigencia|fecha/i);
   });
 });
