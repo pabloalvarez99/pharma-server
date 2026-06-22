@@ -639,6 +639,72 @@ pub struct AssistAnswer {
     pub proposal: Option<AgentProposal>,
 }
 
+// --- config center: usuarios, sucursales, cajas, respaldo ------------------
+
+/// Mirrors `crates/api/src/v1/config.rs::UserDto`. `password`/`tenant` are never
+/// serialized server-side. `roles` are the canonical English keys.
+#[derive(Serialize, Deserialize)]
+pub struct ConfigUser {
+    pub id: String,
+    pub email: String,
+    pub roles: Vec<String>,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `crates/domain/src/branches/model.rs::BranchDto` (sucursal).
+#[derive(Serialize, Deserialize)]
+pub struct Branch {
+    pub id: String,
+    pub name: String,
+    pub code: Option<String>,
+    pub address: Option<String>,
+    pub comuna: Option<String>,
+    pub phone: Option<String>,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `crates/domain/src/branches/model.rs::RegisterDto` (caja). `branch`
+/// is the owning sucursal record id or absent when unassigned.
+#[derive(Serialize, Deserialize)]
+pub struct Register {
+    pub id: String,
+    pub branch: Option<String>,
+    pub name: String,
+    pub code: Option<String>,
+    pub active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Mirrors `crates/api/src/v1/backup.rs::BackupReport` — an on-demand snapshot.
+/// `duration_ms` is a server `u128` but always a small value; read as i64.
+#[derive(Serialize, Deserialize)]
+pub struct BackupReport {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+    pub started_at: String,
+    pub duration_ms: i64,
+}
+
+/// Mirrors `crates/db/src/backup_log.rs::BackupLogEntry` — one audited backup
+/// attempt. Artifact fields are null on a failed attempt (`error` carries why).
+#[derive(Serialize, Deserialize)]
+pub struct BackupLogEntry {
+    pub status: String,
+    pub source: String,
+    pub path: Option<String>,
+    pub bytes: Option<i64>,
+    pub sha256: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub error: Option<String>,
+    pub started_at: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -3150,6 +3216,425 @@ fn logout(state: State<'_, SessionState>) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Config center commands — usuarios, sucursales, cajas, respaldo
+// ---------------------------------------------------------------------------
+
+/// GET `/api/v1/config/users` (Bearer, admin+) — every user of the tenant.
+#[tauri::command]
+async fn config_list_users(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<Vec<ConfigUser>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/config/users"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuarios inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/config/users` (Bearer, admin+). Body `{ email, password, roles }`.
+/// 409 on a duplicate email, 403 when a non-owner assigns `owner` — both surface
+/// as the server's Spanish message.
+#[tauri::command]
+async fn config_create_user(
+    state: State<'_, SessionState>,
+    server_url: String,
+    email: String,
+    password: String,
+    roles: Vec<String>,
+) -> Result<ConfigUser, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/config/users"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "email": email, "password": password, "roles": roles }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuario inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/config/users/{id}` (Bearer, admin+). Body `{ roles }`. Guards
+/// last-owner (409) and owner-grant (403) server-side.
+#[tauri::command]
+async fn config_update_user_roles(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    roles: Vec<String>,
+) -> Result<ConfigUser, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .patch(format!("{base}/api/v1/config/users/{id}"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "roles": roles }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuario inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/config/users/{id}/{enable|disable}` (Bearer, admin+) — toggle
+/// `active`. The server refuses to disable the sole active owner (409).
+#[tauri::command]
+async fn config_set_user_active(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    active: bool,
+) -> Result<ConfigUser, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let action = if active { "enable" } else { "disable" };
+    let resp = http
+        .post(format!("{base}/api/v1/config/users/{id}/{action}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuario inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/sucursales` (Bearer). `active = Some(false)` includes inactive.
+#[tauri::command]
+async fn list_branches(
+    state: State<'_, SessionState>,
+    server_url: String,
+    active: Option<bool>,
+) -> Result<Vec<Branch>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/sucursales"))
+        .bearer_auth(token);
+    if let Some(a) = active {
+        req = req.query(&[("active", a)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de sucursales inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/sucursales` (Bearer, admin+). `name` required; empty optionals
+/// are omitted so the server stores null instead of an empty string.
+#[tauri::command]
+async fn create_branch(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    code: Option<String>,
+    address: Option<String>,
+    comuna: Option<String>,
+    phone: Option<String>,
+) -> Result<Branch, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    for (k, v) in [
+        ("code", code),
+        ("address", address),
+        ("comuna", comuna),
+        ("phone", phone),
+    ] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/sucursales"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de sucursal inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/sucursales/{id}` (Bearer, admin+). Only the supplied fields are
+/// forwarded; the server skips `None`/empty (no change). `active` toggles it.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn update_branch(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    name: Option<String>,
+    code: Option<String>,
+    address: Option<String>,
+    comuna: Option<String>,
+    phone: Option<String>,
+    active: Option<bool>,
+) -> Result<Branch, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    for (k, v) in [
+        ("name", name),
+        ("code", code),
+        ("address", address),
+        ("comuna", comuna),
+        ("phone", phone),
+    ] {
+        if let Some(s) = v {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/sucursales/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de sucursal inválida del servidor: {e}"))
+}
+
+/// DELETE `/api/v1/sucursales/{id}` (Bearer, admin+) — soft-delete (deactivate).
+#[tauri::command]
+async fn delete_branch(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<(), String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .delete(format!("{base}/api/v1/sucursales/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    Ok(())
+}
+
+/// GET `/api/v1/cajas` (Bearer). `active` / `branch` (sucursal id) optional.
+#[tauri::command]
+async fn list_registers(
+    state: State<'_, SessionState>,
+    server_url: String,
+    active: Option<bool>,
+    branch: Option<String>,
+) -> Result<Vec<Register>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http.get(format!("{base}/api/v1/cajas")).bearer_auth(token);
+    if let Some(a) = active {
+        req = req.query(&[("active", a.to_string())]);
+    }
+    if let Some(b) = branch.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("branch", b)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cajas inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/cajas` (Bearer, admin+). `name` required; `branch` (sucursal id)
+/// optional and must belong to the tenant (404 otherwise).
+#[tauri::command]
+async fn create_register(
+    state: State<'_, SessionState>,
+    server_url: String,
+    name: String,
+    branch: Option<String>,
+    code: Option<String>,
+) -> Result<Register, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "name": name });
+    if let Some(b) = branch.filter(|s| !s.is_empty()) {
+        body["branch"] = serde_json::Value::String(b);
+    }
+    if let Some(c) = code.filter(|s| !s.is_empty()) {
+        body["code"] = serde_json::Value::String(c);
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/cajas"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de caja inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/cajas/{id}` (Bearer, admin+). Supplied fields only; `branch`
+/// reassigns (must be the tenant's); `active` toggles it.
+#[tauri::command]
+async fn update_register(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    name: Option<String>,
+    branch: Option<String>,
+    code: Option<String>,
+    active: Option<bool>,
+) -> Result<Register, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    for (k, v) in [("name", name), ("branch", branch), ("code", code)] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/cajas/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de caja inválida del servidor: {e}"))
+}
+
+/// DELETE `/api/v1/cajas/{id}` (Bearer, admin+) — soft-delete (deactivate).
+#[tauri::command]
+async fn delete_register(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+) -> Result<(), String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .delete(format!("{base}/api/v1/cajas/{id}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    Ok(())
+}
+
+/// POST `/api/v1/admin/backup` (Bearer, admin+) — tar+gzip the data dir now.
+/// Returns the artifact path + size + sha256.
+#[tauri::command]
+async fn run_backup(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<BackupReport, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/admin/backup"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de respaldo inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/admin/backup?limit=N` (Bearer, admin+) — the snapshot audit log,
+/// newest first.
+#[tauri::command]
+async fn list_backups(
+    state: State<'_, SessionState>,
+    server_url: String,
+    limit: Option<u32>,
+) -> Result<Vec<BackupLogEntry>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut req = http
+        .get(format!("{base}/api/v1/admin/backup"))
+        .bearer_auth(token);
+    if let Some(n) = limit {
+        req = req.query(&[("limit", n)]);
+    }
+    let resp = req.send().await.map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de respaldos inválida del servidor: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3228,7 +3713,21 @@ pub fn run() {
             cancel_dte,
             seed_demo,
             assist_ask,
-            assist_act
+            assist_act,
+            config_list_users,
+            config_create_user,
+            config_update_user_roles,
+            config_set_user_active,
+            list_branches,
+            create_branch,
+            update_branch,
+            delete_branch,
+            list_registers,
+            create_register,
+            update_register,
+            delete_register,
+            run_backup,
+            list_backups
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

@@ -15,8 +15,24 @@ import {
   licenseStatus,
   dteCafStatus,
   SEED_ALREADY_EXISTS,
+  listConfigUsers,
+  createConfigUser,
+  updateUserRoles,
+  setUserActive,
+  listBranches,
+  createBranch,
+  updateBranch,
+  listRegisters,
+  createRegister,
+  updateRegister,
+  runBackup,
+  listBackups,
   type LicenseSummary,
   type CafStatus,
+  type ConfigUser,
+  type Branch,
+  type Register,
+  type BackupLogEntry,
 } from "../api";
 import { isValidRut, formatRut } from "../format";
 import {
@@ -42,9 +58,17 @@ import {
   validateRequiredText,
   validateNonNegativeInt,
   validateActeco,
+  ALL_ROLES,
+  roleLabel,
+  validateNewUser,
+  validateRoleSelection,
+  formatBytes,
+  backupSourceLabel,
+  backupStatusLabel,
   type SectionId,
   type SaveState,
 } from "./config-center";
+import { emptyState, errorState, loadingState } from "./ui";
 
 // --- setting keys (technical — never surfaced to the operator) --------------
 const EMISOR_KEY = "dte.emisor";
@@ -112,6 +136,13 @@ function applyStatus(el: HTMLElement, state: SaveState): void {
 function readBool(setting: { value: string } | null, fallback = false): boolean {
   if (!setting) return fallback;
   return setting.value === "true";
+}
+
+/** Format an RFC3339 timestamp for es-CL display; echoes the raw string when it
+ *  is not a parseable date (defensive — the server controls this field). */
+function fmtDateTime(s: string): string {
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleString("es-CL");
 }
 
 export function renderConfiguracion(host: HTMLElement, serverUrl: string): void {
@@ -244,8 +275,14 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       case "preferencias":
         renderPreferencias();
         break;
-      default:
-        renderPlaceholder(id);
+      case "usuarios":
+        renderUsuarios();
+        break;
+      case "sucursales":
+        renderSucursales();
+        break;
+      case "respaldo":
+        renderRespaldo();
         break;
     }
   }
@@ -376,32 +413,547 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     void loadTelemetry();
   }
 
-  // --- Placeholder sections (honest "próximamente", never a dead-end) --------
-  const PLACEHOLDER_COPY: Record<string, { what: string; today: string }> = {
-    usuarios: {
-      what: "Crear cajeros, químicos y administradores, con sus roles y permisos por módulo, desde esta pantalla.",
-      today: "Hoy las cuentas se crean por terminal: <code>pharma user-create</code>. La gestión visual llega en esta misma tanda de mejoras.",
-    },
-    sucursales: {
-      what: "Administrar varias sucursales y puntos de caja desde una sola instalación.",
-      today: "Tu instalación ya opera una sucursal. El alta de sucursales y cajas adicionales desde la UI llega pronto.",
-    },
-    respaldo: {
-      what: "Programar respaldos automáticos, ejecutarlos ahora y restaurar con una guía paso a paso.",
-      today: "Hoy el respaldo se ejecuta por terminal: <code>pharma backup</code>. El respaldo programado y la restauración guiada llegan pronto.",
-    },
-  };
-
-  function renderPlaceholder(id: SectionId): void {
-    const copy = PLACEHOLDER_COPY[id];
+  // ===========================================================================
+  // Usuarios y roles (config/users) — admin+ CRUD, no terminal needed.
+  // ===========================================================================
+  function renderUsuarios(): void {
     panelEl.innerHTML = `
-      ${sectionHead(id)}
-      <div class="cfg-card cfg-card-soon">
-        <span class="cfg-soon-chip">próximamente</span>
-        <p>${copy?.what ?? "Esta sección estará disponible pronto."}</p>
-        <p class="muted cfg-help">${copy?.today ?? ""}</p>
+      ${sectionHead("usuarios")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Tu equipo</h4>
+        <p class="muted cfg-help">Cajeros, químicos y administradores con sus permisos. Sólo administradores y dueños pueden crear o editar usuarios. El negocio nunca queda sin un dueño activo.</p>
+        <div id="cfg-users-list">${loadingState({ label: "Cargando usuarios…" })}</div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Nuevo usuario</h4>
+        <div class="cfg-emisor-form">
+          <div class="field">
+            <label for="cfg-nu-email">Correo</label>
+            <input id="cfg-nu-email" type="email" placeholder="cajero@minegocio.cl" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="cfg-nu-pass">Contraseña</label>
+            <input id="cfg-nu-pass" type="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" />
+          </div>
+          <div class="field">
+            <span class="cfg-field-label">Roles</span>
+            <div class="cfg-role-pick" id="cfg-nu-roles">
+              ${ALL_ROLES.map(
+                (r) => `
+                <label class="cfg-check">
+                  <input type="checkbox" value="${r}" ${r === "cashier" ? "checked" : ""} />
+                  <span>${escapeHtml(roleLabel(r))}</span>
+                </label>`,
+              ).join("")}
+            </div>
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-nu-save">Crear usuario</button>
+            <span class="cfg-status" id="cfg-nu-status" hidden></span>
+          </div>
+        </div>
       </div>
     `;
+    void loadUsers();
+    wireNewUser();
+  }
+
+  async function loadUsers(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-users-list");
+    if (!box) return;
+    box.innerHTML = loadingState({ label: "Cargando usuarios…" });
+    try {
+      const users = await listConfigUsers(serverUrl);
+      if (!users.length) {
+        box.innerHTML = emptyState({ title: "Sin usuarios", hint: "Crea el primer usuario abajo." });
+        return;
+      }
+      box.innerHTML = `<ul class="cfg-list">${users.map(userRow).join("")}</ul>`;
+      const rows = Array.from(box.querySelectorAll<HTMLElement>("li.cfg-row"));
+      rows.forEach((li, i) => wireUserRow(li, users[i]));
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-users-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-users-retry")?.addEventListener("click", () => void loadUsers());
+    }
+  }
+
+  function userRow(u: ConfigUser): string {
+    const roles = u.roles
+      .map((r) => `<span class="cfg-chip">${escapeHtml(roleLabel(r))}</span>`)
+      .join("");
+    const badge = u.active
+      ? `<span class="cfg-badge ok">Activo</span>`
+      : `<span class="cfg-badge off">Deshabilitado</span>`;
+    return `
+      <li class="cfg-row">
+        <div class="cfg-row-main">
+          <span class="cfg-row-title">${escapeHtml(u.email)} ${badge}</span>
+          <span class="cfg-row-tags">${roles}</span>
+        </div>
+        <div class="cfg-row-actions">
+          <button class="btn-ghost cfg-sm" data-act="edit">Editar roles</button>
+          <button class="btn-ghost cfg-sm" data-act="toggle">${u.active ? "Deshabilitar" : "Habilitar"}</button>
+        </div>
+        <div class="cfg-row-editor" hidden>
+          <div class="cfg-role-pick">
+            ${ALL_ROLES.map(
+              (r) => `
+              <label class="cfg-check">
+                <input type="checkbox" value="${r}" ${u.roles.includes(r) ? "checked" : ""} />
+                <span>${escapeHtml(roleLabel(r))}</span>
+              </label>`,
+            ).join("")}
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary cfg-sm" data-act="save-roles">Guardar roles</button>
+            <span class="cfg-status" data-status hidden></span>
+          </div>
+        </div>
+      </li>`;
+  }
+
+  function wireUserRow(li: HTMLElement, u: ConfigUser): void {
+    const editor = li.querySelector<HTMLElement>(".cfg-row-editor")!;
+    li.querySelector<HTMLButtonElement>('[data-act="edit"]')!.addEventListener("click", () => {
+      editor.hidden = !editor.hidden;
+    });
+    li.querySelector<HTMLButtonElement>('[data-act="toggle"]')!.addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget as HTMLButtonElement;
+      btn.disabled = true;
+      try {
+        await setUserActive(serverUrl, u.id, !u.active);
+        toast(u.active ? "Usuario deshabilitado" : "Usuario habilitado");
+        await loadUsers();
+      } catch (err) {
+        toast(asMessage(err));
+        btn.disabled = false;
+      }
+    });
+    const status = editor.querySelector<HTMLElement>("[data-status]")!;
+    editor.querySelector<HTMLButtonElement>('[data-act="save-roles"]')!.addEventListener("click", async () => {
+      const picked = Array.from(
+        editor.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'),
+      ).map((c) => c.value);
+      const v = validateRoleSelection(picked);
+      if (!v.ok) {
+        applyStatus(status, toFailed(v.message!));
+        return;
+      }
+      applyStatus(status, toSaving());
+      try {
+        await updateUserRoles(serverUrl, u.id, v.value!);
+        toast("Roles actualizados");
+        await loadUsers();
+      } catch (err) {
+        applyStatus(status, toFailed(asMessage(err)));
+      }
+    });
+  }
+
+  function wireNewUser(): void {
+    const emailEl = panelEl.querySelector<HTMLInputElement>("#cfg-nu-email")!;
+    const passEl = panelEl.querySelector<HTMLInputElement>("#cfg-nu-pass")!;
+    const rolesBox = panelEl.querySelector<HTMLElement>("#cfg-nu-roles")!;
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-nu-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-nu-status")!;
+    saveBtn.addEventListener("click", async () => {
+      const roles = Array.from(
+        rolesBox.querySelectorAll<HTMLInputElement>("input:checked"),
+      ).map((c) => c.value);
+      const v = validateNewUser({ email: emailEl.value, password: passEl.value, roles });
+      if (!v.ok) {
+        applyStatus(statusEl, toFailed(v.message!));
+        return;
+      }
+      saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      try {
+        await createConfigUser(serverUrl, v.value!.email, v.value!.password, v.value!.roles);
+        applyStatus(statusEl, toSaved("Usuario creado"));
+        toast("Usuario creado");
+        emailEl.value = "";
+        passEl.value = "";
+        await loadUsers();
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  // ===========================================================================
+  // Sucursales y cajas (branches.rs) — multi-local topology from the UI.
+  // ===========================================================================
+  let branchCache: Branch[] = [];
+
+  function renderSucursales(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("sucursales")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Sucursales</h4>
+        <p class="muted cfg-help">Locales y bodegas de tu negocio. Una sola instalación puede operar varias sucursales.</p>
+        <div id="cfg-branches-list">${loadingState({ label: "Cargando sucursales…" })}</div>
+        <div class="cfg-subform">
+          <h5 class="cfg-subform-title">Nueva sucursal</h5>
+          <div class="cfg-emisor-form">
+            <div class="field"><label for="cfg-nb-name">Nombre</label><input id="cfg-nb-name" type="text" placeholder="Sucursal Centro" autocomplete="off" /></div>
+            <div class="field"><label for="cfg-nb-code">Código (opcional)</label><input id="cfg-nb-code" type="text" placeholder="SUC-01" autocomplete="off" /></div>
+            <div class="field"><label for="cfg-nb-comuna">Comuna (opcional)</label><input id="cfg-nb-comuna" type="text" placeholder="Coquimbo" autocomplete="off" /></div>
+            <div class="field"><label for="cfg-nb-address">Dirección (opcional)</label><input id="cfg-nb-address" type="text" placeholder="Av. Principal 123" autocomplete="off" /></div>
+            <div class="field"><label for="cfg-nb-phone">Teléfono (opcional)</label><input id="cfg-nb-phone" type="text" placeholder="+56 9 1234 5678" autocomplete="off" /></div>
+            <div class="cfg-edit">
+              <button class="btn-primary" id="cfg-nb-save">Agregar sucursal</button>
+              <span class="cfg-status" id="cfg-nb-status" hidden></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Cajas</h4>
+        <p class="muted cfg-help">Puntos de venta. Cada caja puede pertenecer a una sucursal.</p>
+        <div id="cfg-registers-list">${loadingState({ label: "Cargando cajas…" })}</div>
+        <div class="cfg-subform">
+          <h5 class="cfg-subform-title">Nueva caja</h5>
+          <div class="cfg-emisor-form">
+            <div class="field"><label for="cfg-nr-name">Nombre</label><input id="cfg-nr-name" type="text" placeholder="Caja 1" autocomplete="off" /></div>
+            <div class="field"><label for="cfg-nr-branch">Sucursal (opcional)</label><select id="cfg-nr-branch" class="rb-input"><option value="">— Sin asignar —</option></select></div>
+            <div class="field"><label for="cfg-nr-code">Código (opcional)</label><input id="cfg-nr-code" type="text" placeholder="POS-01" autocomplete="off" /></div>
+            <div class="cfg-edit">
+              <button class="btn-primary" id="cfg-nr-save">Agregar caja</button>
+              <span class="cfg-status" id="cfg-nr-status" hidden></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    void loadBranchesThenRegisters();
+    wireNewBranch();
+    wireNewRegister();
+  }
+
+  async function loadBranchesThenRegisters(): Promise<void> {
+    await loadBranches();
+    await loadRegisters();
+  }
+
+  async function loadBranches(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-branches-list");
+    if (!box) return;
+    box.innerHTML = loadingState({ label: "Cargando sucursales…" });
+    try {
+      branchCache = await listBranches(serverUrl);
+      if (!branchCache.length) {
+        box.innerHTML = emptyState({ title: "Sin sucursales", hint: "Agrega tu primera sucursal abajo." });
+      } else {
+        box.innerHTML = `<ul class="cfg-list">${branchCache.map(branchRow).join("")}</ul>`;
+        const rows = Array.from(box.querySelectorAll<HTMLElement>("li.cfg-row"));
+        rows.forEach((li, i) => wireBranchRow(li, branchCache[i]));
+      }
+      populateBranchSelect();
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-branches-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-branches-retry")?.addEventListener("click", () => void loadBranches());
+    }
+  }
+
+  function branchRow(b: Branch): string {
+    const sub = [b.code, b.comuna, b.address, b.phone]
+      .filter((x): x is string => Boolean(x))
+      .map((x) => escapeHtml(x))
+      .join(" · ");
+    const badge = b.active
+      ? `<span class="cfg-badge ok">Activa</span>`
+      : `<span class="cfg-badge off">Inactiva</span>`;
+    return `
+      <li class="cfg-row">
+        <div class="cfg-row-main">
+          <span class="cfg-row-title">${escapeHtml(b.name)} ${badge}</span>
+          ${sub ? `<span class="cfg-row-sub muted">${sub}</span>` : ""}
+        </div>
+        <div class="cfg-row-actions">
+          <button class="btn-ghost cfg-sm" data-act="edit">Editar</button>
+          <button class="btn-ghost cfg-sm" data-act="toggle">${b.active ? "Deshabilitar" : "Habilitar"}</button>
+        </div>
+        <div class="cfg-row-editor" hidden>
+          <div class="cfg-emisor-form">
+            <div class="field"><label>Nombre</label><input data-f="name" type="text" value="${escapeHtml(b.name)}" /></div>
+            <div class="field"><label>Código</label><input data-f="code" type="text" value="${escapeHtml(b.code ?? "")}" /></div>
+            <div class="field"><label>Comuna</label><input data-f="comuna" type="text" value="${escapeHtml(b.comuna ?? "")}" /></div>
+            <div class="field"><label>Dirección</label><input data-f="address" type="text" value="${escapeHtml(b.address ?? "")}" /></div>
+            <div class="field"><label>Teléfono</label><input data-f="phone" type="text" value="${escapeHtml(b.phone ?? "")}" /></div>
+            <div class="cfg-edit">
+              <button class="btn-primary cfg-sm" data-act="save">Guardar</button>
+              <span class="cfg-status" data-status hidden></span>
+            </div>
+          </div>
+        </div>
+      </li>`;
+  }
+
+  function wireBranchRow(li: HTMLElement, b: Branch): void {
+    const editor = li.querySelector<HTMLElement>(".cfg-row-editor")!;
+    li.querySelector<HTMLButtonElement>('[data-act="edit"]')!.addEventListener("click", () => {
+      editor.hidden = !editor.hidden;
+    });
+    li.querySelector<HTMLButtonElement>('[data-act="toggle"]')!.addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget as HTMLButtonElement;
+      btn.disabled = true;
+      try {
+        await updateBranch(serverUrl, b.id, { active: !b.active });
+        toast("Sucursal actualizada");
+        await loadBranches();
+      } catch (err) {
+        toast(asMessage(err));
+        btn.disabled = false;
+      }
+    });
+    const status = editor.querySelector<HTMLElement>("[data-status]")!;
+    editor.querySelector<HTMLButtonElement>('[data-act="save"]')!.addEventListener("click", async () => {
+      const get = (f: string) => editor.querySelector<HTMLInputElement>(`input[data-f="${f}"]`)!.value.trim();
+      const r = validateRequiredText(get("name"), "Nombre");
+      if (!r.ok) {
+        applyStatus(status, toFailed(r.message!));
+        return;
+      }
+      applyStatus(status, toSaving());
+      try {
+        await updateBranch(serverUrl, b.id, {
+          name: get("name"),
+          code: get("code"),
+          comuna: get("comuna"),
+          address: get("address"),
+          phone: get("phone"),
+        });
+        toast("Sucursal actualizada");
+        await loadBranches();
+      } catch (err) {
+        applyStatus(status, toFailed(asMessage(err)));
+      }
+    });
+  }
+
+  function populateBranchSelect(): void {
+    const sel = panelEl.querySelector<HTMLSelectElement>("#cfg-nr-branch");
+    if (!sel) return;
+    const opts = ['<option value="">— Sin asignar —</option>'];
+    for (const b of branchCache.filter((x) => x.active)) {
+      opts.push(`<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`);
+    }
+    sel.innerHTML = opts.join("");
+  }
+
+  function branchName(id: string | null): string {
+    if (!id) return "Sin sucursal";
+    return branchCache.find((b) => b.id === id)?.name ?? "Otra sucursal";
+  }
+
+  async function loadRegisters(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-registers-list");
+    if (!box) return;
+    box.innerHTML = loadingState({ label: "Cargando cajas…" });
+    try {
+      const regs = await listRegisters(serverUrl);
+      if (!regs.length) {
+        box.innerHTML = emptyState({ title: "Sin cajas", hint: "Agrega tu primera caja abajo." });
+        return;
+      }
+      box.innerHTML = `<ul class="cfg-list">${regs.map(registerRow).join("")}</ul>`;
+      const rows = Array.from(box.querySelectorAll<HTMLElement>("li.cfg-row"));
+      rows.forEach((li, i) => wireRegisterRow(li, regs[i]));
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-registers-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-registers-retry")?.addEventListener("click", () => void loadRegisters());
+    }
+  }
+
+  function registerRow(r: Register): string {
+    const badge = r.active
+      ? `<span class="cfg-badge ok">Activa</span>`
+      : `<span class="cfg-badge off">Inactiva</span>`;
+    const sub = [branchName(r.branch), r.code]
+      .filter((x): x is string => Boolean(x))
+      .map((x) => escapeHtml(x))
+      .join(" · ");
+    return `
+      <li class="cfg-row">
+        <div class="cfg-row-main">
+          <span class="cfg-row-title">${escapeHtml(r.name)} ${badge}</span>
+          <span class="cfg-row-sub muted">${sub}</span>
+        </div>
+        <div class="cfg-row-actions">
+          <button class="btn-ghost cfg-sm" data-act="toggle">${r.active ? "Deshabilitar" : "Habilitar"}</button>
+        </div>
+      </li>`;
+  }
+
+  function wireRegisterRow(li: HTMLElement, r: Register): void {
+    li.querySelector<HTMLButtonElement>('[data-act="toggle"]')!.addEventListener("click", async (ev) => {
+      const btn = ev.currentTarget as HTMLButtonElement;
+      btn.disabled = true;
+      try {
+        await updateRegister(serverUrl, r.id, { active: !r.active });
+        toast("Caja actualizada");
+        await loadRegisters();
+      } catch (err) {
+        toast(asMessage(err));
+        btn.disabled = false;
+      }
+    });
+  }
+
+  function wireNewBranch(): void {
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-nb-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-nb-status")!;
+    const val = (id: string) => panelEl.querySelector<HTMLInputElement>(id)!.value.trim();
+    saveBtn.addEventListener("click", async () => {
+      const r = validateRequiredText(val("#cfg-nb-name"), "Nombre");
+      if (!r.ok) {
+        applyStatus(statusEl, toFailed(r.message!));
+        return;
+      }
+      saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      try {
+        await createBranch(serverUrl, {
+          name: val("#cfg-nb-name"),
+          code: val("#cfg-nb-code"),
+          comuna: val("#cfg-nb-comuna"),
+          address: val("#cfg-nb-address"),
+          phone: val("#cfg-nb-phone"),
+        });
+        applyStatus(statusEl, toSaved("Sucursal agregada"));
+        toast("Sucursal agregada");
+        for (const id of ["#cfg-nb-name", "#cfg-nb-code", "#cfg-nb-comuna", "#cfg-nb-address", "#cfg-nb-phone"]) {
+          const el = panelEl.querySelector<HTMLInputElement>(id);
+          if (el) el.value = "";
+        }
+        await loadBranches();
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  function wireNewRegister(): void {
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-nr-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-nr-status")!;
+    saveBtn.addEventListener("click", async () => {
+      const name = panelEl.querySelector<HTMLInputElement>("#cfg-nr-name")!.value.trim();
+      const branch = panelEl.querySelector<HTMLSelectElement>("#cfg-nr-branch")!.value;
+      const code = panelEl.querySelector<HTMLInputElement>("#cfg-nr-code")!.value.trim();
+      const r = validateRequiredText(name, "Nombre");
+      if (!r.ok) {
+        applyStatus(statusEl, toFailed(r.message!));
+        return;
+      }
+      saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      try {
+        await createRegister(serverUrl, { name, branch: branch || undefined, code });
+        applyStatus(statusEl, toSaved("Caja agregada"));
+        toast("Caja agregada");
+        panelEl.querySelector<HTMLInputElement>("#cfg-nr-name")!.value = "";
+        panelEl.querySelector<HTMLInputElement>("#cfg-nr-code")!.value = "";
+        await loadRegisters();
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  // ===========================================================================
+  // Respaldo (backup.rs) — on-demand snapshot + audit log.
+  // ===========================================================================
+  function renderRespaldo(): void {
+    panelEl.innerHTML = `
+      ${sectionHead("respaldo")}
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Respaldar ahora</h4>
+        <p class="muted cfg-help">Genera una copia comprimida (.tar.gz) de toda la base de datos y la identidad del nodo, guardada en el servidor. Cópiala luego a un disco externo. Para una copia 100% consistente, hazla con el negocio cerrado.</p>
+        <div class="cfg-edit">
+          <button class="btn-primary" id="cfg-bk-run">Respaldar ahora</button>
+          <span class="cfg-status" id="cfg-bk-status" hidden></span>
+        </div>
+        <div id="cfg-bk-last" class="cfg-bk-last" hidden></div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Historial de respaldos</h4>
+        <p class="muted cfg-help">Últimos respaldos (programados, manuales y por terminal). Un respaldo listado puede ya no existir en disco si fue purgado.</p>
+        <div id="cfg-bk-list">${loadingState({ label: "Cargando historial…" })}</div>
+      </div>
+    `;
+    wireBackupRun();
+    void loadBackups();
+  }
+
+  function wireBackupRun(): void {
+    const btn = panelEl.querySelector<HTMLButtonElement>("#cfg-bk-run")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-bk-status")!;
+    const last = panelEl.querySelector<HTMLElement>("#cfg-bk-last")!;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      statusEl.textContent = "Respaldando…";
+      try {
+        const rep = await runBackup(serverUrl);
+        applyStatus(statusEl, toSaved("Respaldo creado"));
+        last.hidden = false;
+        last.innerHTML = `<strong>Último respaldo:</strong> ${formatBytes(rep.bytes)} · <code>${escapeHtml(rep.path)}</code>`;
+        toast("Respaldo creado");
+        await loadBackups();
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function loadBackups(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-bk-list");
+    if (!box) return;
+    box.innerHTML = loadingState({ label: "Cargando historial…" });
+    try {
+      const rows = await listBackups(serverUrl, 50);
+      if (!rows.length) {
+        box.innerHTML = emptyState({
+          title: "Sin respaldos aún",
+          hint: "Crea el primero con “Respaldar ahora”.",
+        });
+        return;
+      }
+      box.innerHTML = `<ul class="cfg-list">${rows.map(backupRow).join("")}</ul>`;
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-bk-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-bk-retry")?.addEventListener("click", () => void loadBackups());
+    }
+  }
+
+  function backupRow(b: BackupLogEntry): string {
+    const ok = b.status === "ok";
+    const badge = ok
+      ? `<span class="cfg-badge ok">${escapeHtml(backupStatusLabel(b.status))}</span>`
+      : `<span class="cfg-badge off">${escapeHtml(backupStatusLabel(b.status))}</span>`;
+    const size = ok && b.bytes != null ? ` · ${formatBytes(b.bytes)}` : "";
+    const detail = ok
+      ? b.path
+        ? `<span class="cfg-row-sub muted"><code>${escapeHtml(b.path)}</code></span>`
+        : ""
+      : b.error
+        ? `<span class="cfg-row-sub muted">${escapeHtml(b.error)}</span>`
+        : "";
+    return `
+      <li class="cfg-row">
+        <div class="cfg-row-main">
+          <span class="cfg-row-title">${escapeHtml(fmtDateTime(b.started_at))} · ${escapeHtml(backupSourceLabel(b.source))} ${badge}${size}</span>
+          ${detail}
+        </div>
+      </li>`;
   }
 
   // ===========================================================================

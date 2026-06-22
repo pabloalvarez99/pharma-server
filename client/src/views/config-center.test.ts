@@ -14,6 +14,13 @@ import {
   validateBusinessRut,
   validateNonNegativeInt,
   validateActeco,
+  ALL_ROLES,
+  roleLabel,
+  validateNewUser,
+  validateRoleSelection,
+  formatBytes,
+  backupSourceLabel,
+  backupStatusLabel,
 } from "./config-center";
 
 describe("section catalog", () => {
@@ -177,5 +184,89 @@ describe("field validators", () => {
     expect(validateActeco("477301").value).toBe(477301);
     expect(validateActeco("12.5").ok).toBe(false);
     expect(validateActeco("-3").ok).toBe(false);
+  });
+});
+
+describe("user roles", () => {
+  it("the canonical role set matches the server (cashier/pharmacist/admin/owner)", () => {
+    expect([...ALL_ROLES]).toEqual(["cashier", "pharmacist", "admin", "owner"]);
+  });
+
+  it("maps each role to its Spanish label", () => {
+    expect(roleLabel("cashier")).toBe("Cajero");
+    expect(roleLabel("pharmacist")).toBe("Químico");
+    expect(roleLabel("admin")).toBe("Administrador");
+    expect(roleLabel("owner")).toBe("Dueño");
+  });
+
+  it("falls back to the raw id for an unknown role (forward-compatible)", () => {
+    expect(roleLabel("supervisor")).toBe("supervisor");
+  });
+
+  it("role selection requires at least one role", () => {
+    expect(validateRoleSelection([]).ok).toBe(false);
+    const ok = validateRoleSelection(["cashier", "cashier", "admin"]);
+    expect(ok.ok).toBe(true);
+    // dedupes while preserving order
+    expect(ok.value).toEqual(["cashier", "admin"]);
+  });
+
+  it("rejects an unknown role in a selection", () => {
+    const r = validateRoleSelection(["cashier", "wizard"]);
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/wizard/);
+  });
+});
+
+describe("validateNewUser", () => {
+  const base = { email: "cajero@minegocio.cl", password: "secret12", roles: ["cashier"] };
+
+  it("accepts a well-formed new user and normalizes the email", () => {
+    const r = validateNewUser({ ...base, email: "  Cajero@MiNegocio.CL " });
+    expect(r.ok).toBe(true);
+    expect(r.value).toEqual({
+      email: "cajero@minegocio.cl",
+      password: "secret12",
+      roles: ["cashier"],
+    });
+  });
+
+  it("rejects a blank or malformed email", () => {
+    expect(validateNewUser({ ...base, email: "   " }).ok).toBe(false);
+    expect(validateNewUser({ ...base, email: "cajero-sin-arroba" }).ok).toBe(false);
+    expect(validateNewUser({ ...base, email: "espacio @x.cl" }).ok).toBe(false);
+  });
+
+  it("rejects a password shorter than 8 characters", () => {
+    const r = validateNewUser({ ...base, password: "corta" });
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/8/);
+  });
+
+  it("rejects an empty role set", () => {
+    expect(validateNewUser({ ...base, roles: [] }).ok).toBe(false);
+  });
+});
+
+describe("backup formatters", () => {
+  it("formats byte sizes with es-CL decimals", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(500)).toBe("500 B");
+    expect(formatBytes(1024)).toBe("1 KB");
+    expect(formatBytes(1536)).toBe("1,5 KB");
+    expect(formatBytes(1048576)).toBe("1 MB");
+    expect(formatBytes(1572864)).toBe("1,5 MB");
+  });
+
+  it("labels the backup source in Spanish", () => {
+    expect(backupSourceLabel("scheduled")).toBe("Programado");
+    expect(backupSourceLabel("manual")).toBe("Manual");
+    expect(backupSourceLabel("cli")).toBe("Terminal");
+    expect(backupSourceLabel("otro")).toBe("otro");
+  });
+
+  it("labels the backup status in Spanish", () => {
+    expect(backupStatusLabel("ok")).toBe("Correcto");
+    expect(backupStatusLabel("failed")).toBe("Falló");
   });
 });

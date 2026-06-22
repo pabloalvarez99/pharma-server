@@ -4531,3 +4531,34 @@ cashier→403, sin token→401); validación CAF (XML basura/vacío→400, cashi
 `cargo fmt` + `clippy --workspace -D warnings` + `cargo test --workspace`. Branch
 `feat/config-sii-backup-upload` vs erp-parity. Sin migraciones (reusa tablas
 `cert_digital`/`caf`/`backup_log` existentes).
+
+## 2026-06-22 — W6 ye: cablear Config Center (usuarios, sucursales/cajas, respaldo)
+
+Reemplaza tres secciones `placeholder:true` ("hoy por CLI") del hub `config-center`
+por CRUD real desde la UI (cero terminal). Backend ya en base (#268 + branches.rs +
+config.rs); este lane es **cliente puro** (Tauri + vistas), scope disjunto.
+
+- **Usuarios y roles** (`config.rs`): lista + crear (correo/contraseña/roles) +
+  editar roles inline + habilitar/deshabilitar. Roles con etiqueta es-CL (cajero,
+  químico, administrador, dueño). El servidor protege último-dueño y owner-grant; el
+  cliente valida antes (formato correo, ≥8 chars, ≥1 rol conocido).
+- **Sucursales y cajas** (`/api/v1/sucursales` + `/api/v1/cajas`): lista + crear +
+  editar + habilitar/deshabilitar. La caja elige sucursal desde un select poblado con
+  las sucursales activas; los nombres de sucursal se resuelven en el listado de cajas.
+- **Respaldo** (`/api/v1/admin/backup`): "Respaldar ahora" (POST) + historial del
+  `backup_log` (GET) con fuente/estado en es-CL y tamaño legible.
+- Estados de lista (cargando/vacío/error+reintentar) vía el design system de bob
+  (`ui.ts` `.ui-*`), para que se vea producido, no "de dev".
+
+Capas tocadas (todas en mi scope): `config-center.ts` (helpers puros: `ALL_ROLES`/
+`roleLabel`/`validateNewUser`/`validateRoleSelection`/`formatBytes`/`backupSourceLabel`/
+`backupStatusLabel` + quita los 3 flags `placeholder`), `api.ts` (wrappers tipados),
+`src-tauri/lib.rs` (14 comandos Tauri nuevos + structs + registro), `configuracion.ts`
+(renderers reales para las 3 secciones), `brand.css` (`.cfg-*` filas/badges/role-picker,
+append). Sin migraciones (reusa tablas existentes).
+
+Tests: `config-center.test.ts` (+12, TDD): role labels + `validateNewUser` (correo/
+password/roles) + `validateRoleSelection` (dedupe, rol desconocido) + `formatBytes`
+(es-CL coma) + labels de respaldo. GATE: `npm run build` + `npm test` (653 ok, 7 todo)
++ `cargo fmt --check` + `clippy --manifest-path client/src-tauri/Cargo.toml -D warnings`
+(0 warnings). Branch `feat/config-wire-sections` vs `feature/erp-parity`.

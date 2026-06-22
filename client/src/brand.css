@@ -683,3 +683,54 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .ui-spinner{animation:none}
   .ui-sk-line{animation:none}
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Config center — wired CRUD sections (ye, W6 · lane feat/config-wire-sections).
+ * Usuarios/roles, sucursales/cajas, respaldo. Builds on the legacy .cfg-list/
+ * .cfg-row (styles.css) which give each row its bordered shell; these rules add
+ * the row internals (title/sub/tags), role pickers, badges and the inline
+ * editor. Own ".cfg-" namespace (ye), tokens from styles.css. Append-only.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+/* row internals — title line, secondary text, tag/role strips */
+.cfg-row-main{flex:1 1 280px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.cfg-row-title{font-size:14.5px;font-weight:600;color:var(--text);
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.cfg-row-sub{font-size:12.5px;line-height:1.45;word-break:break-word}
+.cfg-row-sub code{font-size:11.5px}
+.cfg-row-tags{display:flex;flex-wrap:wrap;gap:6px}
+.cfg-row-actions{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+
+/* role chip (read-only) + status badges */
+.cfg-chip{font-size:11.5px;font-weight:600;color:var(--accent);
+  padding:2px 9px;border-radius:var(--radius-pill,999px);
+  background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line))}
+.cfg-badge{font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  padding:2px 8px;border-radius:var(--radius-pill,999px);border:1px solid var(--line)}
+.cfg-badge.ok{color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border-color:color-mix(in srgb,var(--accent) 34%,var(--line))}
+.cfg-badge.off{color:var(--muted);background:transparent;border-style:dashed}
+
+/* inline editor (roles / branch fields) revealed under a row */
+.cfg-row-editor{flex-basis:100%;margin-top:6px;padding-top:14px;
+  border-top:1px solid var(--line)}
+
+/* compact button variant for in-row actions */
+.btn-primary.cfg-sm,.btn-ghost.cfg-sm{padding:6px 12px;font-size:12.5px;min-height:0}
+
+/* role picker — a wrap of checkbox+label chips */
+.cfg-field-label{display:block;font-size:13px;color:var(--muted-strong,var(--muted));margin-bottom:6px}
+.cfg-role-pick{display:flex;flex-wrap:wrap;gap:8px 16px}
+.cfg-check{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;color:var(--text);cursor:pointer}
+.cfg-check input{accent-color:var(--accent)}
+
+/* "nuevo …" sub-form separated from the list above it */
+.cfg-subform{margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}
+.cfg-subform-title{margin:0 0 10px;font-size:12.5px;font-weight:650;
+  text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+
+/* last-backup confirmation line */
+.cfg-bk-last{margin-top:12px;font-size:13px;color:var(--text);word-break:break-word}
+.cfg-bk-last code{font-size:11.5px;color:var(--muted)}

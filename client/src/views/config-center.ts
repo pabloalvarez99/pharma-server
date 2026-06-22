@@ -105,7 +105,6 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
     label: "Usuarios y roles",
     blurb: "Cajeros, químicos y administradores con sus permisos.",
     icon: "users",
-    placeholder: true,
     fields: [
       { label: "Usuarios", keywords: ["cuentas", "personas"] },
       { label: "Roles", keywords: ["permisos", "cajero", "químico", "admin", "dueño"] },
@@ -116,7 +115,6 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
     label: "Sucursales y cajas",
     blurb: "Locales, bodegas y puntos de caja de tu negocio.",
     icon: "building",
-    placeholder: true,
     fields: [
       { label: "Sucursales", keywords: ["locales", "tiendas", "multi-tenant"] },
       { label: "Cajas", keywords: ["puntos de venta", "terminales"] },
@@ -127,7 +125,6 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
     label: "Respaldo",
     blurb: "Copias de seguridad programadas y restauración guiada.",
     icon: "shield",
-    placeholder: true,
     fields: [
       { label: "Respaldo automático", keywords: ["backup", "copia de seguridad", "programado"] },
       { label: "Restaurar", keywords: ["restore", "recuperar datos"] },
@@ -295,4 +292,134 @@ export function validateActeco(raw: string): FieldResult<number | undefined> {
     return { ok: false, message: "El código acteco debe ser un número entero." };
   }
   return { ok: true, value: n, message: null };
+}
+
+// --- Users & roles ----------------------------------------------------------
+// The role strings are the server's canonical English keys (mirrors
+// `crates/api/src/v1/config.rs::VALID_ROLES`); the UI only ever shows the
+// Spanish label. Validators mirror the server gate so the operator gets the
+// rejection inline instead of a round-trip 400.
+
+/** Canonical role keys, in escalation order. Mirrors the server `VALID_ROLES`. */
+export type Role = "cashier" | "pharmacist" | "admin" | "owner";
+
+/** The role keys the server accepts, in the order the UI lists them. */
+export const ALL_ROLES: readonly Role[] = ["cashier", "pharmacist", "admin", "owner"] as const;
+
+const ROLE_LABELS: Record<string, string> = {
+  cashier: "Cajero",
+  pharmacist: "Químico",
+  admin: "Administrador",
+  owner: "Dueño",
+};
+
+/** Spanish label for a role key; unknown keys echo back (forward-compatible
+ *  with a server that grows a new role before the client knows its label). */
+export function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+/** Minimum password length — mirrors the server's `MIN_PASSWORD_LEN`. */
+export const MIN_PASSWORD_LEN = 8;
+
+/** Validate + normalize an email the same way the server does (trim, lowercase,
+ *  must contain `@` and `.`, no spaces). */
+export function validateUserEmail(raw: string): FieldResult<string> {
+  const email = raw.trim().toLowerCase();
+  if (!email) return { ok: false, message: "Indica el correo del usuario." };
+  if (!email.includes("@") || !email.includes(".") || email.includes(" ")) {
+    return {
+      ok: false,
+      message: "El correo no tiene un formato válido (ej: usuario@minegocio.cl).",
+    };
+  }
+  return { ok: true, value: email, message: null };
+}
+
+/** Validate a role selection: non-empty, known-only, deduped (order preserved).
+ *  Mirrors `validate_roles` server-side so the editor blocks before the PATCH. */
+export function validateRoleSelection(roles: readonly string[]): FieldResult<Role[]> {
+  const out: Role[] = [];
+  for (const r of roles) {
+    if (!ALL_ROLES.includes(r as Role)) {
+      return {
+        ok: false,
+        message: `Rol desconocido: '${r}'. Válidos: cajero, químico, admin, dueño.`,
+      };
+    }
+    if (!out.includes(r as Role)) out.push(r as Role);
+  }
+  if (out.length === 0) {
+    return { ok: false, message: "Asigna al menos un rol al usuario." };
+  }
+  return { ok: true, value: out, message: null };
+}
+
+/** A validated new-user payload ready for `POST /config/users`. */
+export interface NewUserDraft {
+  email: string;
+  password: string;
+  roles: Role[];
+}
+
+/** Gate the "crear usuario" form: email format, password length, ≥1 known role.
+ *  Returns the normalized payload (lowercased email, deduped roles) on success. */
+export function validateNewUser(input: {
+  email: string;
+  password: string;
+  roles: readonly string[];
+}): FieldResult<NewUserDraft> {
+  const email = validateUserEmail(input.email);
+  if (!email.ok) return { ok: false, message: email.message };
+  if (input.password.length < MIN_PASSWORD_LEN) {
+    return { ok: false, message: "La contraseña debe tener al menos 8 caracteres." };
+  }
+  const roles = validateRoleSelection(input.roles);
+  if (!roles.ok) return { ok: false, message: roles.message };
+  return {
+    ok: true,
+    value: { email: email.value!, password: input.password, roles: roles.value! },
+    message: null,
+  };
+}
+
+// --- Backup formatters ------------------------------------------------------
+// Pure presenters for the Respaldo section's snapshot log (es-CL).
+
+/** Human byte size with an es-CL decimal comma (`1536 → "1,5 KB"`). Hand-rolled
+ *  (no `Intl`) so the output is identical across Node/CI ICU builds. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1024) {
+    return `${Math.max(0, Math.trunc(bytes || 0))} B`;
+  }
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const rounded = v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
+  return `${String(rounded).replace(".", ",")} ${units[i]}`;
+}
+
+const BACKUP_SOURCE_LABELS: Record<string, string> = {
+  scheduled: "Programado",
+  manual: "Manual",
+  cli: "Terminal",
+};
+
+/** Spanish label for a `backup_log.source` (`scheduled|manual|cli`). */
+export function backupSourceLabel(source: string): string {
+  return BACKUP_SOURCE_LABELS[source] ?? source;
+}
+
+const BACKUP_STATUS_LABELS: Record<string, string> = {
+  ok: "Correcto",
+  failed: "Falló",
+};
+
+/** Spanish label for a `backup_log.status` (`ok|failed`). */
+export function backupStatusLabel(status: string): string {
+  return BACKUP_STATUS_LABELS[status] ?? status;
 }
