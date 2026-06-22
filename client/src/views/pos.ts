@@ -48,6 +48,7 @@ import {
   type HeldSale,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
+import { emptyState, errorState } from "./ui";
 
 interface PickedCustomer {
   id: string;
@@ -272,7 +273,12 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       const rows: Product[] = await listProducts(serverUrl, search || undefined, SEARCH_LIMIT);
       currentResults = rows;
       if (rows.length === 0) {
-        resultsEl.innerHTML = `<p class="empty">Sin resultados${search ? ` para «${escapeHtml(search)}»` : ""}.</p>`;
+        resultsEl.innerHTML = emptyState({
+          title: search ? `Sin resultados para «${search}»` : "Sin productos",
+          hint: search
+            ? "Revisa el término o el código de barras."
+            : "Agrega productos en Inventario para venderlos.",
+        });
         return;
       }
       resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock)).join("");
@@ -283,7 +289,12 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       });
     } catch (err) {
       currentResults = [];
-      resultsEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+      resultsEl.innerHTML = errorState(asMessage(err), {
+        retry: { id: "pos-results-retry", label: "Reintentar" },
+      });
+      resultsEl
+        .querySelector<HTMLButtonElement>("#pos-results-retry")
+        ?.addEventListener("click", () => void loadResults(search));
     }
   }
 
@@ -447,7 +458,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       if (!customerModuleOk) return;
       if (rows.length === 0) {
         custResultsEl.hidden = false;
-        custResultsEl.innerHTML = `<p class="empty">Sin clientes para «${escapeHtml(q)}».</p>`;
+        custResultsEl.innerHTML = emptyState({ title: `Sin clientes para «${q}»` });
         return;
       }
       custResultsEl.hidden = false;
@@ -483,7 +494,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         return;
       }
       custResultsEl.hidden = false;
-      custResultsEl.innerHTML = `<p class="empty">${escapeHtml(asMessage(err))}</p>`;
+      custResultsEl.innerHTML = errorState(asMessage(err));
     }
   }
 
@@ -540,7 +551,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   function renderCart(): void {
     if (cart.length === 0) {
-      linesEl.innerHTML = `<p class="empty">El carrito está vacío. Busca un producto para agregarlo.</p>`;
+      linesEl.innerHTML = emptyState({
+        title: "El carrito está vacío",
+        hint: "Busca un producto para agregarlo.",
+      });
     } else {
       linesEl.innerHTML = cart
         .map(

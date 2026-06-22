@@ -4531,3 +4531,37 @@ cashier→403, sin token→401); validación CAF (XML basura/vacío→400, cashi
 `cargo fmt` + `clippy --workspace -D warnings` + `cargo test --workspace`. Branch
 `feat/config-sii-backup-upload` vs erp-parity. Sin migraciones (reusa tablas
 `cert_digital`/`caf`/`backup_log` existentes).
+
+## 2026-06-22 — W6 paul: adoptar design system (vistas del cajero)
+
+Aplica el design system de bob (`client/src/views/ui.ts` → `emptyState`/`errorState`,
+clases `.ui-*` en `brand.css`) a las 4 vistas del cajero. Cierra las "pantallas de
+dev": cada estado vacío/error ad-hoc (`<p class="empty">`, `<div class="view-error">`,
+los bloques bespoke `.caja-empty`/`.cli-missing` con su marca `●`) pasa por el helper
+producido → marca + título + copy que enseña el siguiente paso, consistente en todo.
+
+- **pos.ts**: resultados de búsqueda vacíos, error de búsqueda (con **Reintentar** →
+  reejecuta `loadResults`), dropdown de clientes (vacío + error) y carrito vacío.
+- **caja.ts**: error de `refresh` (con **Reintentar** → `refresh`), "Sin caja abierta"
+  → `emptyState` con CTA "Abrir caja" (`action`, mismo `#caja-open-btn`), error del
+  arqueo en el modal de cierre.
+- **devoluciones.ts**: lista vacía, placeholder "Carga una boleta" del modal, boleta
+  sin ítems, error al cargar boleta, y `renderError` (403 → `emptyState` "Sin acceso";
+  resto → `errorState`).
+- **clientes.ts**: prompts de búsqueda/detalle (dedup en `searchPrompt`/`detailPrompt`),
+  sin resultados, sin compras, y `renderError` (módulo ausente → `emptyState`; resto →
+  `errorState`).
+
+Alcance disciplinado = **estados producidos** (empty/error), igual que la adopción de
+bob en sus propias vistas (boletas/facturas/recetas/auditoría sólo `emptyState`/
+`errorState`). Los botones `.btn-*` y las cards ya tienen estilo en `brand.css` y traen
+affordances propias (loading/pulse) → se dejan; los CTA se vuelven `.ui-btn` vía el
+`action` de `emptyState`. `ui.ts` no se toca (es de bob); las tablas conservan
+`tableSkeleton`/`kpiSkeleton` (guía de `ui.ts`). Sin cambios en `rutbrand.css` (las
+`.ui-*` viven en `brand.css`). Las clases bespoke quedan sin emisor pero su CSS no se
+remueve (puede ser compartido; inocuo).
+
+Tests: ningún test asertaba sobre el markup/copy cambiado → cero roturas. GATE:
+`npm run build` (tsc `--noEmit` limpio + vite) + `npm test` (29 archivos, 641 passed /
+7 todo, `ui.test.ts` verde). Branch `feat/ui-adopt-cashier` vs `feature/erp-parity`.
+Sin backend, sin migraciones, sin `src-tauri`.

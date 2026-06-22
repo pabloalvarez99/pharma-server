@@ -25,10 +25,19 @@ import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
 import { bindModalKeys } from "./modal-keys";
 import "./rutbrand.css";
+import { emptyState, errorState } from "./ui";
 
 const HISTORY_LIMIT = 20;
 
 export function renderClientes(host: HTMLElement, serverUrl: string): void {
+  const searchPrompt = emptyState({
+    title: "Busca un cliente",
+    hint: "Escribe nombre, RUT o teléfono para empezar.",
+  });
+  const detailPrompt = emptyState({
+    title: "Sin cliente seleccionado",
+    hint: "Selecciona un cliente para ver su detalle.",
+  });
   host.innerHTML = `
     <section class="view view-clientes">
       <div class="view-head">
@@ -49,11 +58,11 @@ export function renderClientes(host: HTMLElement, serverUrl: string): void {
       <div class="clientes-grid">
         <div class="table-card">
           <h3 class="section-title">Resultados</h3>
-          <div id="cli-results"><p class="empty">Escribe para buscar un cliente.</p></div>
+          <div id="cli-results">${searchPrompt}</div>
         </div>
         <div class="table-card">
           <h3 class="section-title">Detalle</h3>
-          <div id="cli-detail"><p class="empty">Selecciona un cliente para ver su detalle.</p></div>
+          <div id="cli-detail">${detailPrompt}</div>
         </div>
       </div>
     </section>
@@ -69,7 +78,7 @@ export function renderClientes(host: HTMLElement, serverUrl: string): void {
   const search = () => {
     const q = searchEl.value.trim();
     if (q === "") {
-      resultsEl.innerHTML = `<p class="empty">Escribe para buscar un cliente.</p>`;
+      resultsEl.innerHTML = searchPrompt;
       return;
     }
     resultsEl.innerHTML = tableSkeleton(5);
@@ -78,7 +87,7 @@ export function renderClientes(host: HTMLElement, serverUrl: string): void {
   searchEl.addEventListener("input", () => {
     window.clearTimeout(timer);
     if (searchEl.value.trim() === "") {
-      resultsEl.innerHTML = `<p class="empty">Escribe para buscar un cliente.</p>`;
+      resultsEl.innerHTML = searchPrompt;
       return;
     }
     timer = window.setTimeout(search, 240);
@@ -225,7 +234,10 @@ async function runSearch(
   try {
     const rows: Customer[] = await customerSearch(serverUrl, q);
     if (rows.length === 0) {
-      resultsEl.innerHTML = `<p class="empty">Sin clientes para «${escapeHtml(q)}».</p>`;
+      resultsEl.innerHTML = emptyState({
+        title: `Sin clientes para «${q}»`,
+        hint: "Prueba otro nombre, RUT o teléfono.",
+      });
       return;
     }
     resultsEl.innerHTML = rows.map(resultRow).join("");
@@ -314,7 +326,7 @@ function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
 
   const hist =
     history.length === 0
-      ? `<p class="empty">Sin compras registradas.</p>`
+      ? emptyState({ title: "Sin compras registradas", hint: "Este cliente todavía no tiene compras." })
       : `
         <table class="data-table">
           <thead>
@@ -346,15 +358,12 @@ function historyRow(o: CustomerOrder): string {
 
 function renderError(err: unknown): string {
   if (err === CUSTOMERS_MODULE_MISSING) {
-    return `
-      <div class="cli-missing">
-        <div class="caja-empty-mark">●</div>
-        <h3>Módulo de clientes no disponible</h3>
-        <p class="muted">Este servidor aún no expone la búsqueda de clientes. Requiere el merge de <code>customers-loyalty</code> en el servidor.</p>
-      </div>
-    `;
+    return emptyState({
+      title: "Módulo de clientes no disponible",
+      hint: "Este servidor aún no expone la búsqueda de clientes. Requiere el merge de customers-loyalty en el servidor.",
+    });
   }
-  return `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+  return errorState(asMessage(err));
 }
 
 // --- label helpers ---------------------------------------------------------
