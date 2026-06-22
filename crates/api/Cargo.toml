@@ -46,6 +46,8 @@ hmac.workspace = true
 bitflags = "2"
 hex.workspace = true
 subtle.workspace = true
+# Decode base64-encoded cert (.pfx) uploads in `POST /api/v1/dte/cert`.
+base64.workspace = true
 reqwest.workspace = true
 tar.workspace = true
 flate2.workspace = true

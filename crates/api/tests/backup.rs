@@ -155,3 +155,77 @@ async fn backup_endpoint_rejects_without_bearer() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn backup_list_returns_manual_row_after_create() {
+    let (app, token, _tmp, _db) = spawn().await;
+
+    // Empty before any backup.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/admin/backup")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let rows: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 0, "no backups yet");
+
+    // Create one (records a manual backup_log row).
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/backup")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // List now shows exactly one 'ok'/'manual' row with artifact metadata.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/admin/backup")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let rows: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = rows.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "one audit row after a manual backup");
+    assert_eq!(arr[0]["status"], "ok");
+    assert_eq!(arr[0]["source"], "manual");
+    assert!(arr[0]["path"].as_str().unwrap().ends_with(".tar.gz"));
+    assert!(arr[0]["bytes"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn backup_list_rejects_without_bearer() {
+    let (app, _token, _tmp, _db) = spawn().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/admin/backup")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
