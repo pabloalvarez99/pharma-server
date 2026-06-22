@@ -4562,3 +4562,33 @@ password/roles) + `validateRoleSelection` (dedupe, rol desconocido) + `formatByt
 (es-CL coma) + labels de respaldo. GATE: `npm run build` + `npm test` (653 ok, 7 todo)
 + `cargo fmt --check` + `clippy --manifest-path client/src-tauri/Cargo.toml -D warnings`
 (0 warnings). Branch `feat/config-wire-sections` vs `feature/erp-parity`.
+
+## 2026-06-22 — W6 ye (2/2): SII cert+CAF upload + medios de pago + ficha de negocio
+
+Segundo PR del lane W6 (cascada sobre `feat/config-wire-sections`). Completa el Config
+Center: convierte la card "próximamente" de Facturación SII en carga real de
+certificado + folios, y enriquece Negocio con ficha de contacto y medios de pago.
+Cliente puro sobre backend ya en base (#268 + `config.rs`).
+
+- **Certificado digital (.pfx)** (`POST /api/v1/dte/cert`): selector de archivo +
+  contraseña + RUT + vigencia. El .pfx se lee en base64 en el webview y viaja al
+  endpoint; el server valida el material, lo cifra (AES-256-GCM + Argon2id) y descarta
+  la passphrase (nunca se persiste). Mismo flujo que `pharma cert import`.
+- **Folios CAF (.xml)** (`POST /api/v1/dte/caf`): selector de archivo XML del SII;
+  refresca el contador de folios restantes al cargar. Espejo de `pharma caf import`.
+- **Ficha del negocio** (`GET/PUT /api/v1/config/business`): razón social (requerida) +
+  giro/dirección/teléfono/correo. Es la tarjeta de contacto para UI/comprobantes,
+  distinta de los datos tributarios del SII (`dte.emisor`).
+- **Medios de pago** (`GET/PUT /api/v1/config/payment-methods`): checkboxes del catálogo
+  del servidor (efectivo/débito/crédito/convenio); exige ≥1.
+
+Capas (scope ye): `config-center.ts` (+`paymentLabel`/`validatePaymentSelection`/
+`validateCertForm` puros), `api.ts` (wrappers), `src-tauri/lib.rs` (6 comandos + structs
++ registro), `configuracion.ts` (cards reales en renderNegocio + renderSii, lectores de
+archivo base64/texto), `brand.css` (inputs file/date). Sin migraciones.
+
+Tests: `config-center.test.ts` (+8, TDD): payment labels + `validatePaymentSelection`
+(dedupe, vacío→error) + `validateCertForm` (passphrase/RUT mód-11/vigencia invertida).
+GATE: `npm run build` + `npm test` (661 ok, 7 todo) + `cargo fmt --check` + `clippy
+--manifest-path client/src-tauri/Cargo.toml -D warnings` (0 warnings). Branch
+`feat/config-wire-sii-pay` cascada sobre `feat/config-wire-sections` (PR #270).

@@ -734,3 +734,12 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
 /* last-backup confirmation line */
 .cfg-bk-last{margin-top:12px;font-size:13px;color:var(--text);word-break:break-word}
 .cfg-bk-last code{font-size:11.5px;color:var(--muted)}
+
+/* file/date inputs (SII cert + CAF upload) — keep them legible + theme-aware */
+.cfg-emisor-form input[type="file"]{font-size:13px;color:var(--muted);padding:8px 0}
+.cfg-emisor-form input[type="file"]::file-selector-button{margin-right:10px;cursor:pointer;
+  font-family:inherit;font-size:12.5px;font-weight:600;color:var(--text);
+  padding:7px 12px;border-radius:var(--radius-field,10px);
+  border:1px solid var(--line);background:var(--bg-2)}
+.cfg-emisor-form input[type="file"]::file-selector-button:hover{border-color:var(--accent);color:var(--accent)}
+.cfg-emisor-form input[type="date"]{color-scheme:dark light}

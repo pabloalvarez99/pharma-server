@@ -705,6 +705,45 @@ pub struct BackupLogEntry {
     pub started_at: String,
 }
 
+/// Mirrors `config.rs::PaymentMethodsResponse` — active + catalog tender keys.
+#[derive(Serialize, Deserialize)]
+pub struct PaymentMethods {
+    pub methods: Vec<String>,
+    pub available: Vec<String>,
+}
+
+/// Mirrors `config.rs::BusinessProfile` — the general business card (UI/receipt).
+/// SII emisor identity lives separately under the `dte.emisor` setting.
+#[derive(Serialize, Deserialize)]
+pub struct BusinessProfile {
+    pub razon_social: Option<String>,
+    pub giro: Option<String>,
+    pub direccion: Option<String>,
+    pub telefono: Option<String>,
+    pub email: Option<String>,
+}
+
+/// Mirrors the `dte.rs::upload_cert` 201 body. Dates are `YYYY-MM-DD`.
+#[derive(Serialize, Deserialize)]
+pub struct CertUploadResult {
+    pub id: String,
+    pub rut: String,
+    pub vigencia_desde: String,
+    pub vigencia_hasta: String,
+    pub blob_bytes: u64,
+}
+
+/// Mirrors the `dte.rs::upload_caf` 201 body — the imported folio range.
+#[derive(Serialize, Deserialize)]
+pub struct CafUploadResult {
+    pub id: String,
+    pub tipo: i32,
+    pub folio_desde: i64,
+    pub folio_hasta: i64,
+    pub next_folio: i64,
+    pub rut_emisor: String,
+}
+
 /// Server error envelope (`crates/api/src/error.rs`):
 /// `{ "error": { "code", "message", "details"? } }`.
 #[derive(Deserialize)]
@@ -3635,6 +3674,185 @@ async fn list_backups(
         .map_err(|e| format!("Respuesta de respaldos inválida del servidor: {e}"))
 }
 
+// ---------------------------------------------------------------------------
+// Config center commands — medios de pago, ficha de negocio, SII cert + CAF
+// ---------------------------------------------------------------------------
+
+/// GET `/api/v1/config/payment-methods` (Bearer) — active + available tender.
+#[tauri::command]
+async fn config_get_payment_methods(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<PaymentMethods, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/config/payment-methods"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de medios de pago inválida del servidor: {e}"))
+}
+
+/// PUT `/api/v1/config/payment-methods` (Bearer, admin+). Body `{ methods }`.
+#[tauri::command]
+async fn config_set_payment_methods(
+    state: State<'_, SessionState>,
+    server_url: String,
+    methods: Vec<String>,
+) -> Result<PaymentMethods, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .put(format!("{base}/api/v1/config/payment-methods"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "methods": methods }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de medios de pago inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/config/business` (Bearer) — the business card.
+#[tauri::command]
+async fn config_get_business(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<BusinessProfile, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/config/business"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de negocio inválida del servidor: {e}"))
+}
+
+/// PUT `/api/v1/config/business` (Bearer, admin+). `razonSocial` required; empty
+/// optionals are omitted so the server stores null.
+#[tauri::command]
+async fn config_set_business(
+    state: State<'_, SessionState>,
+    server_url: String,
+    razon_social: String,
+    giro: Option<String>,
+    direccion: Option<String>,
+    telefono: Option<String>,
+    email: Option<String>,
+) -> Result<BusinessProfile, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({ "razon_social": razon_social });
+    for (k, v) in [
+        ("giro", giro),
+        ("direccion", direccion),
+        ("telefono", telefono),
+        ("email", email),
+    ] {
+        if let Some(s) = v.filter(|s| !s.is_empty()) {
+            body[k] = serde_json::Value::String(s);
+        }
+    }
+    let resp = http
+        .put(format!("{base}/api/v1/config/business"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de negocio inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/cert` (Bearer, admin+) — import the digital certificate.
+/// The PFX bytes are base64; the passphrase is verified server-side, used to
+/// encrypt-at-rest and never persisted.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn dte_upload_cert(
+    state: State<'_, SessionState>,
+    server_url: String,
+    pfx_base64: String,
+    cert_passphrase: String,
+    rut: String,
+    vigencia_desde: String,
+    vigencia_hasta: String,
+) -> Result<CertUploadResult, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/cert"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "pfx_base64": pfx_base64,
+            "cert_passphrase": cert_passphrase,
+            "rut": rut,
+            "vigencia_desde": vigencia_desde,
+            "vigencia_hasta": vigencia_hasta,
+        }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de certificado inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/dte/caf` (Bearer, admin+) — import a CAF (folios) XML.
+#[tauri::command]
+async fn dte_upload_caf(
+    state: State<'_, SessionState>,
+    server_url: String,
+    xml: String,
+) -> Result<CafUploadResult, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/dte/caf"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "xml": xml }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de CAF inválida del servidor: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3727,7 +3945,13 @@ pub fn run() {
             update_register,
             delete_register,
             run_backup,
-            list_backups
+            list_backups,
+            config_get_payment_methods,
+            config_set_payment_methods,
+            config_get_business,
+            config_set_business,
+            dte_upload_cert,
+            dte_upload_caf
         ])
         .run(tauri::generate_context!())
         .expect("error while running pharma-client");

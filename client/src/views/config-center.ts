@@ -423,3 +423,77 @@ const BACKUP_STATUS_LABELS: Record<string, string> = {
 export function backupStatusLabel(status: string): string {
   return BACKUP_STATUS_LABELS[status] ?? status;
 }
+
+// --- Payment methods --------------------------------------------------------
+// Method keys are the server's canonical catalog (`config.rs::PAYMENT_METHODS`);
+// the UI offers `available` (from the server) as checkboxes and shows labels.
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  efectivo: "Efectivo",
+  debito: "Débito",
+  credito: "Crédito",
+  convenio: "Convenio",
+};
+
+/** Spanish label for a payment-method key; unknown keys echo back. */
+export function paymentLabel(method: string): string {
+  return PAYMENT_METHOD_LABELS[method] ?? method;
+}
+
+/** Validate the accepted-tender selection: non-empty, deduped (order kept).
+ *  The server re-validates the catalog, so the client only blocks the empty set. */
+export function validatePaymentSelection(methods: readonly string[]): FieldResult<string[]> {
+  const out: string[] = [];
+  for (const m of methods) {
+    if (!out.includes(m)) out.push(m);
+  }
+  if (out.length === 0) {
+    return { ok: false, message: "Selecciona al menos un medio de pago." };
+  }
+  return { ok: true, value: out, message: null };
+}
+
+// --- SII certificate upload form -------------------------------------------
+// Gates the text fields of the cert (.pfx) upload before it is read + base64'd
+// in the view. Mirrors the server checks in `dte.rs::upload_cert` (passphrase
+// present, RUT valid, validity range not inverted) so the operator gets the
+// rejection inline. The file itself is validated in the DOM layer.
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A validated cert-upload form (text fields only — the PFX bytes ride
+ *  separately). `rut` is canonicalised; dates are `YYYY-MM-DD`. */
+export interface CertFormDraft {
+  passphrase: string;
+  rut: string;
+  vigenciaDesde: string;
+  vigenciaHasta: string;
+}
+
+/** Validate the cert-upload form fields: passphrase present, RUT mód-11 valid,
+ *  both dates present + well-formed, and the validity range not inverted. */
+export function validateCertForm(input: {
+  passphrase: string;
+  rut: string;
+  vigenciaDesde: string;
+  vigenciaHasta: string;
+}): FieldResult<CertFormDraft> {
+  if (!input.passphrase.trim()) {
+    return { ok: false, message: "Ingresa la contraseña del certificado (.pfx)." };
+  }
+  const rut = validateBusinessRut(input.rut);
+  if (!rut.ok) return { ok: false, message: rut.message };
+  const desde = input.vigenciaDesde.trim();
+  const hasta = input.vigenciaHasta.trim();
+  if (!ISO_DATE.test(desde) || !ISO_DATE.test(hasta)) {
+    return { ok: false, message: "Indica la vigencia del certificado (desde y hasta)." };
+  }
+  if (hasta < desde) {
+    return { ok: false, message: "La vigencia está invertida: «hasta» es anterior a «desde»." };
+  }
+  return {
+    ok: true,
+    value: { passphrase: input.passphrase, rut: rut.value!, vigenciaDesde: desde, vigenciaHasta: hasta },
+    message: null,
+  };
+}

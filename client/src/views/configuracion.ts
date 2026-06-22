@@ -27,12 +27,20 @@ import {
   updateRegister,
   runBackup,
   listBackups,
+  getPaymentMethods,
+  setPaymentMethods,
+  getBusinessProfile,
+  setBusinessProfile,
+  uploadCert,
+  uploadCaf,
   type LicenseSummary,
   type CafStatus,
   type ConfigUser,
   type Branch,
   type Register,
   type BackupLogEntry,
+  type PaymentMethods,
+  type BusinessProfile,
 } from "../api";
 import { isValidRut, formatRut } from "../format";
 import {
@@ -65,6 +73,9 @@ import {
   formatBytes,
   backupSourceLabel,
   backupStatusLabel,
+  paymentLabel,
+  validatePaymentSelection,
+  validateCertForm,
   type SectionId,
   type SaveState,
 } from "./config-center";
@@ -143,6 +154,31 @@ function readBool(setting: { value: string } | null, fallback = false): boolean 
 function fmtDateTime(s: string): string {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? s : d.toLocaleString("es-CL");
+}
+
+/** Read a File as base64 (no data-URL prefix) — for the .pfx cert upload, which
+ *  ships the bytes base64-encoded to the server. */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma === -1 ? result : result.slice(comma + 1));
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Read a File as UTF-8 text — for the CAF (.xml) upload. */
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsText(file);
+  });
 }
 
 export function renderConfiguracion(host: HTMLElement, serverUrl: string): void {
@@ -309,13 +345,143 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         <div id="cfg-vertical">${tableSkeleton(2)}</div>
       </div>
       <div class="cfg-card">
+        <h4 class="cfg-card-title">Ficha del negocio</h4>
+        <p class="muted cfg-help">Datos de contacto que aparecen en la app y en los comprobantes. Es distinto de los datos tributarios del SII (abajo).</p>
+        <div id="cfg-business">${tableSkeleton(3)}</div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Medios de pago aceptados</h4>
+        <p class="muted cfg-help">Las formas de pago que ofrece tu negocio en el POS. Debes aceptar al menos una.</p>
+        <div id="cfg-payments">${tableSkeleton(2)}</div>
+      </div>
+      <div class="cfg-card">
         <h4 class="cfg-card-title">Datos tributarios</h4>
         <p class="muted cfg-help">Identidad con la que se firman tus documentos ante el SII. Requerido antes de emitir el primer DTE.</p>
         <div id="cfg-emisor">${tableSkeleton(3)}</div>
       </div>
     `;
     void loadVerticalForm();
+    void loadBusinessProfile();
+    void loadPaymentMethods();
     void loadEmisor();
+  }
+
+  // --- Ficha del negocio (business profile, sección Negocio) -----------------
+  async function loadBusinessProfile(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-business");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(3);
+    try {
+      const p: BusinessProfile = await getBusinessProfile(serverUrl);
+      const fields: { name: keyof BusinessProfile; label: string; placeholder: string }[] = [
+        { name: "razon_social", label: "Razón social", placeholder: "Mi Negocio SpA" },
+        { name: "giro", label: "Giro (opcional)", placeholder: "Venta al por menor" },
+        { name: "direccion", label: "Dirección (opcional)", placeholder: "Av. Principal 123" },
+        { name: "telefono", label: "Teléfono (opcional)", placeholder: "+56 9 1234 5678" },
+        { name: "email", label: "Correo (opcional)", placeholder: "contacto@minegocio.cl" },
+      ];
+      box.innerHTML = `
+        <div class="cfg-emisor-form">
+          ${fields
+            .map(
+              (f) => `
+            <div class="field">
+              <label for="cfg-bp-${f.name}">${escapeHtml(f.label)}</label>
+              <input id="cfg-bp-${f.name}" type="text" placeholder="${escapeHtml(f.placeholder)}"
+                     value="${escapeHtml(p[f.name] ?? "")}" autocomplete="off" />
+            </div>`,
+            )
+            .join("")}
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-bp-save">Guardar ficha</button>
+            <span class="cfg-status" id="cfg-bp-status" hidden></span>
+          </div>
+        </div>
+      `;
+      const saveBtn = box.querySelector<HTMLButtonElement>("#cfg-bp-save")!;
+      const statusEl = box.querySelector<HTMLElement>("#cfg-bp-status")!;
+      saveBtn.addEventListener("click", async () => {
+        const get = (n: string) => box.querySelector<HTMLInputElement>(`#cfg-bp-${n}`)!.value.trim();
+        const razon = validateRequiredText(get("razon_social"), "Razón social");
+        if (!razon.ok) {
+          applyStatus(statusEl, toFailed(razon.message!));
+          return;
+        }
+        saveBtn.disabled = true;
+        applyStatus(statusEl, toSaving());
+        try {
+          await setBusinessProfile(serverUrl, {
+            razonSocial: razon.value!,
+            giro: get("giro"),
+            direccion: get("direccion"),
+            telefono: get("telefono"),
+            email: get("email"),
+          });
+          applyStatus(statusEl, toSaved("Ficha guardada"));
+          toast("Ficha del negocio guardada");
+        } catch (err) {
+          applyStatus(statusEl, toFailed(asMessage(err)));
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-bp-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-bp-retry")?.addEventListener("click", () => void loadBusinessProfile());
+    }
+  }
+
+  // --- Medios de pago (payment methods, sección Negocio) ---------------------
+  async function loadPaymentMethods(): Promise<void> {
+    const box = panelEl.querySelector<HTMLElement>("#cfg-payments");
+    if (!box) return;
+    box.innerHTML = tableSkeleton(2);
+    try {
+      const pm: PaymentMethods = await getPaymentMethods(serverUrl);
+      box.innerHTML = `
+        <div class="cfg-role-pick" id="cfg-pm-pick">
+          ${pm.available
+            .map(
+              (m) => `
+            <label class="cfg-check">
+              <input type="checkbox" value="${escapeHtml(m)}" ${pm.methods.includes(m) ? "checked" : ""} />
+              <span>${escapeHtml(paymentLabel(m))}</span>
+            </label>`,
+            )
+            .join("")}
+        </div>
+        <div class="cfg-edit">
+          <button class="btn-primary" id="cfg-pm-save">Guardar medios de pago</button>
+          <span class="cfg-status" id="cfg-pm-status" hidden></span>
+        </div>
+      `;
+      const saveBtn = box.querySelector<HTMLButtonElement>("#cfg-pm-save")!;
+      const statusEl = box.querySelector<HTMLElement>("#cfg-pm-status")!;
+      saveBtn.addEventListener("click", async () => {
+        const picked = Array.from(
+          box.querySelectorAll<HTMLInputElement>("#cfg-pm-pick input:checked"),
+        ).map((c) => c.value);
+        const v = validatePaymentSelection(picked);
+        if (!v.ok) {
+          applyStatus(statusEl, toFailed(v.message!));
+          return;
+        }
+        saveBtn.disabled = true;
+        applyStatus(statusEl, toSaving());
+        try {
+          await setPaymentMethods(serverUrl, v.value!);
+          applyStatus(statusEl, toSaved("Medios de pago guardados"));
+          toast("Medios de pago guardados");
+        } catch (err) {
+          applyStatus(statusEl, toFailed(asMessage(err)));
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+    } catch (err) {
+      box.innerHTML = errorState(asMessage(err), { retry: { id: "cfg-pm-retry", label: "Reintentar" } });
+      box.querySelector("#cfg-pm-retry")?.addEventListener("click", () => void loadPaymentMethods());
+    }
   }
 
   // --- Facturación SII: ambiente + folios + certificado ----------------------
@@ -332,13 +498,129 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         <p class="muted cfg-help">Folios autorizados restantes para boleta electrónica (tipo 39).</p>
         <div id="cfg-caf">${tableSkeleton(2)}</div>
       </div>
-      <div class="cfg-card cfg-card-soon">
-        <h4 class="cfg-card-title">Certificado y archivos CAF <span class="cfg-soon-chip">próximamente</span></h4>
-        <p class="muted cfg-help">La carga del certificado digital (.pfx) y de los archivos CAF desde esta pantalla llegará pronto. Por ahora se cargan en el servidor durante la puesta en marcha.</p>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Certificado digital (.pfx)</h4>
+        <p class="muted cfg-help">Sube tu certificado digital del SII (.pfx/.p12) para firmar boletas y facturas. La contraseña se usa sólo para validarlo y cifrarlo en el servidor; nunca se guarda ni se registra.</p>
+        <div class="cfg-emisor-form">
+          <div class="field">
+            <label for="cfg-cert-file">Archivo del certificado</label>
+            <input id="cfg-cert-file" type="file" accept=".pfx,.p12" />
+          </div>
+          <div class="field">
+            <label for="cfg-cert-pass">Contraseña del certificado</label>
+            <input id="cfg-cert-pass" type="password" autocomplete="off" placeholder="Contraseña del .pfx" />
+          </div>
+          <div class="field">
+            <label for="cfg-cert-rut">RUT del titular</label>
+            <input id="cfg-cert-rut" type="text" placeholder="76123456-7" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="cfg-cert-desde">Vigente desde</label>
+            <input id="cfg-cert-desde" type="date" />
+          </div>
+          <div class="field">
+            <label for="cfg-cert-hasta">Vigente hasta</label>
+            <input id="cfg-cert-hasta" type="date" />
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-cert-save">Subir certificado</button>
+            <span class="cfg-status" id="cfg-cert-status" hidden></span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-card">
+        <h4 class="cfg-card-title">Cargar folios (CAF)</h4>
+        <p class="muted cfg-help">Sube el archivo CAF (.xml) que te entrega el SII con el rango de folios autorizados para boleta electrónica (tipo 39).</p>
+        <div class="cfg-emisor-form">
+          <div class="field">
+            <label for="cfg-caf-file">Archivo CAF (.xml)</label>
+            <input id="cfg-caf-file" type="file" accept=".xml,text/xml" />
+          </div>
+          <div class="cfg-edit">
+            <button class="btn-primary" id="cfg-caf-save">Cargar folios</button>
+            <span class="cfg-status" id="cfg-caf-status" hidden></span>
+          </div>
+        </div>
       </div>
     `;
     void loadSiiEnv();
     void loadCaf();
+    wireCertUpload();
+    wireCafUpload();
+  }
+
+  function wireCertUpload(): void {
+    const fileEl = panelEl.querySelector<HTMLInputElement>("#cfg-cert-file")!;
+    const passEl = panelEl.querySelector<HTMLInputElement>("#cfg-cert-pass")!;
+    const rutEl = panelEl.querySelector<HTMLInputElement>("#cfg-cert-rut")!;
+    const desdeEl = panelEl.querySelector<HTMLInputElement>("#cfg-cert-desde")!;
+    const hastaEl = panelEl.querySelector<HTMLInputElement>("#cfg-cert-hasta")!;
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-cert-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-cert-status")!;
+    saveBtn.addEventListener("click", async () => {
+      const v = validateCertForm({
+        passphrase: passEl.value,
+        rut: rutEl.value,
+        vigenciaDesde: desdeEl.value,
+        vigenciaHasta: hastaEl.value,
+      });
+      if (!v.ok) {
+        applyStatus(statusEl, toFailed(v.message!));
+        return;
+      }
+      const file = fileEl.files?.[0];
+      if (!file) {
+        applyStatus(statusEl, toFailed("Selecciona el archivo .pfx del certificado."));
+        return;
+      }
+      saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      try {
+        const pfxBase64 = await readFileAsBase64(file);
+        const res = await uploadCert(serverUrl, {
+          pfxBase64,
+          certPassphrase: v.value!.passphrase,
+          rut: v.value!.rut,
+          vigenciaDesde: v.value!.vigenciaDesde,
+          vigenciaHasta: v.value!.vigenciaHasta,
+        });
+        applyStatus(statusEl, toSaved(`Certificado cargado (vigente hasta ${res.vigencia_hasta})`));
+        toast("Certificado digital cargado");
+        passEl.value = "";
+        fileEl.value = "";
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
+  function wireCafUpload(): void {
+    const fileEl = panelEl.querySelector<HTMLInputElement>("#cfg-caf-file")!;
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-caf-save")!;
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-caf-status")!;
+    saveBtn.addEventListener("click", async () => {
+      const file = fileEl.files?.[0];
+      if (!file) {
+        applyStatus(statusEl, toFailed("Selecciona el archivo CAF (.xml)."));
+        return;
+      }
+      saveBtn.disabled = true;
+      applyStatus(statusEl, toSaving());
+      try {
+        const xml = await readFileAsText(file);
+        const res = await uploadCaf(serverUrl, xml);
+        applyStatus(statusEl, toSaved(`Folios ${res.folio_desde}–${res.folio_hasta} cargados`));
+        toast("Folios CAF cargados");
+        fileEl.value = "";
+        await loadCaf();
+      } catch (err) {
+        applyStatus(statusEl, toFailed(asMessage(err)));
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
   }
 
   // --- Licencia y plan -------------------------------------------------------
