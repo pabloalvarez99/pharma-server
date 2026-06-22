@@ -1505,3 +1505,111 @@ export function assistAct(
 ): Promise<AssistActResult> {
   return invoke<AssistActResult>("assist_act", { serverUrl, confirmToken });
 }
+
+// --- cuenta corriente / fiado (V1 business-depth) ---------------------------
+// Customer store-credit ("fiar al cliente"): a running ledger of cargos (sales
+// rung up on account) and abonos (payments). The retail-chico essential #1 — the
+// almacén/farmacia fía al cliente habitual y le lleva la cuenta. FROZEN contract
+// (docs/strategy/business-depth-master-plan.md §V1):
+//   GET  /api/v1/clientes/{id}/cuenta        -> CuentaCorriente
+//   POST /api/v1/clientes/{id}/cuenta/abono  -> CuentaMovimiento (the abono)
+//   POS sale with paymentMethod = PAYMENT_CUENTA opens the cargo (no tender).
+// DEGRADES GRACEFULLY: the backend ships par-coordinado (a later worker), so a
+// client built ahead of it must not break — the Tauri command rejects (a 404 →
+// CUENTA_MODULE_MISSING, or "command … not found" when it isn't registered yet)
+// and callers use {@link cuentaUnavailable} to show "disponible próximamente".
+
+/** Sentinel a cuenta-corriente command rejects with when the server lacks the
+ *  `/clientes/{id}/cuenta` surface (404) — mirrors {@link CUSTOMERS_MODULE_MISSING}. */
+export const CUENTA_MODULE_MISSING = "CUENTA_MODULE_MISSING";
+
+/** Wire payment method for a fiado sale. POS posts the existing `pos_sale` with
+ *  this method and the server opens a cargo on the customer's cuenta instead of
+ *  taking a tender. */
+export const PAYMENT_CUENTA = "pos_cuenta";
+
+/** A cargo (sale on account) or abono (payment) — sign is implied by `tipo`,
+ *  never carried in `monto` (always a non-negative integer CLP). */
+export type CuentaMovTipo = "cargo" | "abono";
+
+/** One ledger movimiento (`CuentaMovimientoDto`). `monto` is integer CLP > 0;
+ *  `ref` links the originating order / abono when present. */
+export interface CuentaMovimiento {
+  id: string;
+  fecha: string; // RFC3339
+  tipo: CuentaMovTipo;
+  monto: number;
+  glosa: string;
+  ref: string | null;
+}
+
+/** A customer's cuenta corriente (`CuentaCorrienteDto`). `saldo` is integer CLP
+ *  owed (positive = the customer owes the store); `limite` is the credit cap, or
+ *  null when no cap is set. */
+export interface CuentaCorriente {
+  saldo: number;
+  limite: number | null;
+  movimientos: CuentaMovimiento[];
+}
+
+/** GET /api/v1/clientes/{id}/cuenta (Bearer). Rejects with
+ *  {@link CUENTA_MODULE_MISSING} when the backend lacks the surface — branch on
+ *  {@link cuentaUnavailable} to the "próximamente" state, never a hard error. */
+export function cuentaCorriente(serverUrl: string, id: string): Promise<CuentaCorriente> {
+  return invoke<CuentaCorriente>("cuenta_corriente", { serverUrl, id });
+}
+
+/** POST /api/v1/clientes/{id}/cuenta/abono (Bearer) — record a payment against
+ *  the account. `monto` is an integer CLP > 0; `medio` is the cash/card method
+ *  (the abono lands in caja). Returns the created movimiento. */
+export function registrarAbono(
+  serverUrl: string,
+  id: string,
+  monto: number,
+  medio: string,
+): Promise<CuentaMovimiento> {
+  return invoke<CuentaMovimiento>("registrar_abono", { serverUrl, id, monto, medio });
+}
+
+/** A POS sale charged to the customer's cuenta corriente (fiado): the existing
+ *  `pos_sale` command with `paymentMethod = PAYMENT_CUENTA` and no tender — the
+ *  server opens the cargo. Requires a `customer`. Rejects like {@link posSale};
+ *  a backend without fiado rejects and the POS shows the Spanish message. */
+export async function posSaleCuenta(
+  serverUrl: string,
+  items: PosItem[],
+  customer: string,
+  discount?: string,
+): Promise<PosSaleResult> {
+  const res = await invoke<RawSaleResponse>("pos_sale", {
+    serverUrl,
+    items,
+    paymentMethod: PAYMENT_CUENTA,
+    customer,
+    discount,
+  });
+  return {
+    orderId: res?.order?.id ?? "",
+    loyaltyPointsAwarded: res?.loyalty_points_awarded ?? 0,
+    lowStockAlerts: Array.isArray(res?.low_stock_alerts) ? res.low_stock_alerts : [],
+  };
+}
+
+/** True when an error from a fiado / cuenta-corriente call means the backend
+ *  doesn't expose the surface yet — so the UI degrades to "disponible
+ *  próximamente" instead of a hard error. Matches the module-missing sentinel,
+ *  the Tauri "command … not found" shape (client shipped ahead of the server
+ *  command, par coordinado), and a 404 / not-implemented body. Deliberately
+ *  narrow: a real permission/business error (e.g. "No tienes permiso…") returns
+ *  false so it surfaces to the operator, never silently hidden. */
+export function cuentaUnavailable(err: unknown): boolean {
+  if (err === CUENTA_MODULE_MISSING) return true;
+  const s = typeof err === "string" ? err : err instanceof Error ? err.message : "";
+  return (
+    /CUENTA_MODULE_MISSING/.test(s) ||
+    /\b404\b/.test(s) ||
+    /command\s+\S+\s+not found/i.test(s) ||
+    /no\s+implementad/i.test(s) ||
+    /not\s+implemented/i.test(s)
+  );
+}

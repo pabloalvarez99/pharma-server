@@ -4565,3 +4565,46 @@ Tests: ningún test asertaba sobre el markup/copy cambiado → cero roturas. GAT
 `npm run build` (tsc `--noEmit` limpio + vite) + `npm test` (29 archivos, 641 passed /
 7 todo, `ui.test.ts` verde). Branch `feat/ui-adopt-cashier` vs `feature/erp-parity`.
 Sin backend, sin migraciones, sin `src-tauri`.
+
+## 2026-06-22 — V1 fiado / cuenta corriente (cliente) — paul · feat/pos-fiado
+
+Esencial #1 del retail chico CL: **fiar al cliente habitual y llevarle la cuenta**
+(business-depth-master-plan §V1). Lado **cliente** (Tauri); el backend lo despacha
+paxoloop al próximo worker libre (par coordinado). Contrato FROZEN consumido tal cual:
+
+- `GET  /api/v1/clientes/:id/cuenta` → `{ saldo, limite, movimientos[] }` (CLP int).
+- POS venta a cuenta = `pos_sale` con `paymentMethod = pos_cuenta` (sin tender; el
+  server abre el cargo). Gated a cliente seleccionado.
+- `POST /api/v1/clientes/:id/cuenta/abono { monto, medio }` → registra abono (a caja).
+
+**api.ts** (append-only): tipos `CuentaCorriente`/`CuentaMovimiento`, wrappers
+`cuentaCorriente`/`registrarAbono`/`posSaleCuenta`, const `PAYMENT_CUENTA`/
+`CUENTA_MODULE_MISSING`, y `cuentaUnavailable(err)` — detector de "backend aún no
+implementa el fiado" (sentinel + `command … not found` Tauri + 404 / no-implementada),
+deliberadamente angosto: un error real (permiso/negocio) NO se oculta. La unión
+exportada `PaymentMethod` queda intacta.
+
+**pos.ts**: medio "Cuenta corriente (fiar)" como `PosMethod` local (`PaymentMethod |
+pos_cuenta`, sin tocar la unión exportada). Gated vía `fiarEnabled(hasCustomer)`:
+disabled + hint hasta elegir cliente; si se quita el cliente con fiado activo, cae a
+Efectivo (jamás una venta a cuenta de nadie). Sin panel de tender en fiado; botón
+"Cobrar"→"Fiar"; checkout vía `posSaleCuenta`; degradación: `cuentaUnavailable` →
+"venta a cuenta todavía no disponible" sin romper el carro.
+
+**clientes.ts**: sección "Cuenta corriente" en el panel de detalle (carga aparte,
+lazy). `renderCuentaCard` (pure): pill saldo (Debe/Al día), cupo+disponible si hay
+límite, tabla de movimientos firmada por tipo (cargo `+` / abono `−`), empty state.
+Modal "registrar abono" (monto vía `validateAbono` + `parseCash`, medio) → reload.
+Estado de cuenta imprimible `#cuenta-print` (`window.print`, revelado por `@media
+print` en rutbrand.css, mismo truco que `#receipt-print`). Degradación graceful →
+"disponible próximamente".
+
+**rutbrand.css** (append): panel cuenta, rail fiado `:disabled`, `@media print` del
+estado. **ui.ts/format.ts** sólo lectura.
+
+Tests TDD (RED→GREEN): `cuenta-fiado.test.ts` (17, pure: gate, validateAbono,
+render, print, escaping, `cuentaUnavailable`) + `cuenta-fiado.dom.test.ts` (6,
+happy-dom, api mockeada: render saldo/movs, graceful-404, abono POST+reload, abono
+cero rechazado, fiar gating ambos sentidos). GATE: `npm run build` + `npm test`.
+Scope: `views/{pos,clientes}.ts` + `api.ts` (append) + `rutbrand.css` (append). Sin
+backend, sin `src-tauri`, sin migraciones.

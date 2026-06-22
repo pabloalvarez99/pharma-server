@@ -16,16 +16,21 @@ import {
   customerHistory,
   createCustomer,
   updateCustomer,
+  cuentaCorriente,
+  registrarAbono,
+  cuentaUnavailable,
   CUSTOMERS_MODULE_MISSING,
   type Customer,
   type CustomerDetail,
   type CustomerOrder,
+  type CuentaCorriente,
+  type CuentaMovimiento,
 } from "../api";
-import { clp, num } from "../format";
+import { clp, num, fecha, parseCash } from "../format";
 import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./inventory";
 import { bindModalKeys } from "./modal-keys";
 import "./rutbrand.css";
-import { emptyState, errorState } from "./ui";
+import { emptyState, errorState, loadingState } from "./ui";
 
 const HISTORY_LIMIT = 20;
 
@@ -285,6 +290,7 @@ async function loadDetail(
       }),
     ]);
     detailEl.innerHTML = renderDetail(detail, history);
+    void loadCuenta(detailEl, serverUrl, id, detail.name);
   } catch (err) {
     detailEl.innerHTML = renderError(err);
   }
@@ -336,7 +342,14 @@ function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
         </table>
       `;
 
-  return `${head}<h3 class="section-title cli-hist-title">Historial de compras</h3>${hist}`;
+  // The cuenta-corriente (fiado) section loads on its own — a separate endpoint
+  // that DEGRADES GRACEFULLY (a server without the surface shows "próximamente",
+  // never an error). `loadCuenta` swaps the placeholder once it resolves.
+  const cuenta = `
+    <h3 class="section-title cli-cuenta-title">Cuenta corriente</h3>
+    <div id="cli-cuenta">${loadingState({ label: "Cargando cuenta…" })}</div>`;
+
+  return `${head}${cuenta}<h3 class="section-title cli-hist-title">Historial de compras</h3>${hist}`;
 }
 
 function historyRow(o: CustomerOrder): string {
@@ -403,4 +416,230 @@ function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Cuenta corriente / fiado (V1 business-depth) — the retail-chico essential #1:
+// fiar al cliente habitual y llevarle la cuenta. Saldo + movimientos panel,
+// "registrar abono" modal, and a printable estado de cuenta. The pure producers
+// (renderCuentaCard / estadoCuentaPrintHtml / validateAbono) are unit-tested in
+// cuenta-fiado.test.ts; the wiring + graceful-404 in cuenta-fiado.dom.test.ts.
+// Money is integer CLP; the FROZEN api contract lives in ../api.
+// ════════════════════════════════════════════════════════════════════════════
+
+const ABONO_MEDIOS = [
+  { id: "efectivo", label: "Efectivo" },
+  { id: "debito", label: "Débito" },
+  { id: "credito", label: "Crédito" },
+  { id: "transferencia", label: "Transferencia" },
+] as const;
+
+/** Parse + validate a cashier-typed abono amount ("$10.000" / "10000"). Reuses
+ *  the POS `parseCash` discipline (strips non-digits, never negative); a
+ *  non-positive amount is rejected with a Spanish message. */
+export function validateAbono(raw: string): { ok: boolean; monto: number; error?: string } {
+  const monto = parseCash(raw);
+  if (monto <= 0) return { ok: false, monto: 0, error: "Ingresa un monto válido (mayor a $0)." };
+  return { ok: true, monto };
+}
+
+/** One movimiento row: cargo (sale on account, `+`) vs abono (payment, `−`), the
+ *  sign carried in the glyph + the row class, never in the (always-positive)
+ *  monto. Glosa is escaped; date through the canonical `fecha`. */
+function movRow(m: CuentaMovimiento): string {
+  const cargo = m.tipo === "cargo";
+  const cls = cargo ? "cuenta-mov-cargo" : "cuenta-mov-abono";
+  const sign = cargo ? "+" : "−"; // U+2212 minus, matching format.ts
+  return `<tr class="${cls}">
+    <td>${fecha(m.fecha)}</td>
+    <td>${escapeHtml(m.glosa)}</td>
+    <td class="num rb-num">${sign} ${clp(m.monto)}</td>
+  </tr>`;
+}
+
+/** The on-screen cuenta panel: a saldo pill (debe vs al día), the cupo/disponible
+ *  line when a limite is set, the movimientos table (or an empty state), the
+ *  abono + print actions, and the hidden printable doc (`#cuenta-print`, shown by
+ *  the `@media print` rule in rutbrand.css). Pure — the view wires the buttons. */
+export function renderCuentaCard(cuenta: CuentaCorriente, customerName: string): string {
+  const debe = cuenta.saldo > 0;
+  const saldoPill = debe
+    ? `<span class="pill pill-danger">Debe ${clp(cuenta.saldo)}</span>`
+    : `<span class="pill pill-ok">Al día</span>`;
+  const cupo =
+    cuenta.limite != null
+      ? `<div class="cuenta-cupo cell-sub muted">Cupo <span class="rb-num">${clp(cuenta.limite)}</span> · Disponible <span class="rb-num">${clp(Math.max(0, cuenta.limite - cuenta.saldo))}</span></div>`
+      : "";
+  const movs =
+    cuenta.movimientos.length === 0
+      ? emptyState({ title: "Sin movimientos", hint: "Aún no hay cargos ni abonos en esta cuenta." })
+      : `<table class="data-table cuenta-mov-table">
+          <thead><tr><th>Fecha</th><th>Detalle</th><th class="num">Monto</th></tr></thead>
+          <tbody>${cuenta.movimientos.map(movRow).join("")}</tbody>
+        </table>`;
+  return `
+    <div class="cli-cuenta-card">
+      <div class="cli-cuenta-head">
+        <div class="cli-cuenta-saldo">${saldoPill}</div>
+        <div class="cuenta-actions">
+          <button type="button" class="btn-primary" id="cli-abono-btn">Registrar abono</button>
+          <button type="button" class="btn-ghost" id="cli-cuenta-print">Imprimir estado</button>
+        </div>
+      </div>
+      ${cupo}
+      <div class="cuenta-mov">${movs}</div>
+      <div class="cuenta-print-doc">${estadoCuentaPrintHtml(customerName, cuenta)}</div>
+    </div>`;
+}
+
+/** A self-contained, paper-friendly estado de cuenta (`#cuenta-print`). On print
+ *  the `@media print` rule hides everything else and shows only this block — the
+ *  same trick the POS boleta uses (`#receipt-print`). Name is escaped. */
+export function estadoCuentaPrintHtml(customerName: string, cuenta: CuentaCorriente): string {
+  const rows =
+    cuenta.movimientos.length === 0
+      ? `<tr><td colspan="4" class="muted">Sin movimientos registrados.</td></tr>`
+      : cuenta.movimientos
+          .map(
+            (m) => `<tr>
+            <td>${fecha(m.fecha)}</td>
+            <td>${escapeHtml(m.glosa)}</td>
+            <td>${m.tipo === "cargo" ? "Cargo" : "Abono"}</td>
+            <td class="num">${m.tipo === "cargo" ? "+" : "−"} ${clp(m.monto)}</td>
+          </tr>`,
+          )
+          .join("");
+  const cupo = cuenta.limite != null ? `<div class="cuenta-estado-cupo">Cupo: ${clp(cuenta.limite)}</div>` : "";
+  return `<div id="cuenta-print" class="cuenta-estado-doc">
+    <h2 class="cuenta-estado-title">Estado de cuenta</h2>
+    <div class="cuenta-estado-cliente">${escapeHtml(customerName)}</div>
+    <div class="cuenta-estado-meta muted">Generado ${fecha(new Date().toISOString())}</div>
+    <div class="cuenta-estado-saldo">Saldo: <strong class="rb-num">${clp(cuenta.saldo)}</strong></div>
+    ${cupo}
+    <table class="data-table">
+      <thead><tr><th>Fecha</th><th>Detalle</th><th>Tipo</th><th class="num">Monto</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+/** Fetch + render the cuenta into its placeholder, degrading to "próximamente"
+ *  when the backend lacks the surface (par coordinado). */
+async function loadCuenta(
+  detailEl: HTMLElement,
+  serverUrl: string,
+  id: string,
+  customerName: string,
+): Promise<void> {
+  const el = detailEl.querySelector<HTMLElement>("#cli-cuenta");
+  if (!el) return;
+  try {
+    const cuenta = await cuentaCorriente(serverUrl, id);
+    renderCuentaInto(el, detailEl, serverUrl, id, customerName, cuenta);
+  } catch (err) {
+    el.innerHTML = cuentaUnavailable(err)
+      ? emptyState({
+          title: "Cuenta corriente disponible próximamente",
+          hint: "Este servidor aún no habilita el fiado de clientes; la función aparecerá al actualizarlo.",
+        })
+      : errorState(asMessage(err));
+  }
+}
+
+/** Paint the cuenta panel and wire its actions: print (the embedded
+ *  `#cuenta-print` doc) and "registrar abono" (modal → reload). */
+function renderCuentaInto(
+  el: HTMLElement,
+  detailEl: HTMLElement,
+  serverUrl: string,
+  id: string,
+  customerName: string,
+  cuenta: CuentaCorriente,
+): void {
+  el.innerHTML = renderCuentaCard(cuenta, customerName);
+  el.querySelector<HTMLButtonElement>("#cli-cuenta-print")?.addEventListener("click", () => {
+    window.print();
+  });
+  el.querySelector<HTMLButtonElement>("#cli-abono-btn")?.addEventListener("click", () => {
+    const modalHost = detailEl.closest(".view-clientes")?.querySelector<HTMLElement>("#cli-modal-host");
+    if (!modalHost) return;
+    openAbonoModal(modalHost, serverUrl, id, () => {
+      el.innerHTML = tableSkeleton(4);
+      void loadCuenta(detailEl, serverUrl, id, customerName);
+    });
+  });
+}
+
+/** Register-an-abono modal: monto + medio → POST. On success, `onSaved` reloads
+ *  the cuenta so the new saldo + movimiento show immediately. */
+function openAbonoModal(
+  modalHost: HTMLElement,
+  serverUrl: string,
+  id: string,
+  onSaved: () => void,
+): void {
+  modalHost.innerHTML = `
+    <div class="modal-backdrop" id="abono-modal-backdrop">
+      <div class="modal">
+        <div class="modal-title">Registrar abono</div>
+        <div class="modal-field">
+          <label class="modal-label" for="abono-monto">Monto</label>
+          <input id="abono-monto" type="text" inputmode="numeric" placeholder="$ 0" autocomplete="off" />
+        </div>
+        <div class="modal-field">
+          <label class="modal-label" for="abono-medio">Medio de pago</label>
+          <select id="abono-medio">
+            ${ABONO_MEDIOS.map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+          </select>
+        </div>
+        <div id="abono-error" class="form-error" hidden></div>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" id="abono-cancel">Cancelar</button>
+          <button type="button" class="btn-primary modal-confirm" id="abono-save">
+            <span class="btn-label">Registrar</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const detachKeys = bindModalKeys(() => close());
+  const close = () => {
+    detachKeys();
+    modalHost.innerHTML = "";
+  };
+  const montoEl = modalHost.querySelector<HTMLInputElement>("#abono-monto")!;
+  const medioEl = modalHost.querySelector<HTMLSelectElement>("#abono-medio")!;
+  const errEl = modalHost.querySelector<HTMLElement>("#abono-error")!;
+  const saveBtn = modalHost.querySelector<HTMLButtonElement>("#abono-save")!;
+
+  modalHost.querySelector<HTMLButtonElement>("#abono-cancel")!.addEventListener("click", close);
+  modalHost.querySelector<HTMLElement>("#abono-modal-backdrop")!.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) close();
+  });
+  montoEl.focus();
+
+  saveBtn.addEventListener("click", async () => {
+    const v = validateAbono(montoEl.value);
+    if (!v.ok) {
+      errEl.hidden = false;
+      errEl.textContent = v.error ?? "Monto inválido.";
+      return;
+    }
+    errEl.hidden = true;
+    saveBtn.classList.add("loading");
+    saveBtn.disabled = true;
+    try {
+      await registrarAbono(serverUrl, id, v.monto, medioEl.value);
+      close();
+      onSaved();
+    } catch (err) {
+      saveBtn.classList.remove("loading");
+      saveBtn.disabled = false;
+      errEl.hidden = false;
+      errEl.textContent = cuentaUnavailable(err)
+        ? "El registro de abonos aún no está disponible en este servidor."
+        : asMessage(err);
+    }
+  });
 }

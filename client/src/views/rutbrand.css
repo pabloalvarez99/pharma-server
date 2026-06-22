@@ -810,3 +810,83 @@
 @media (prefers-reduced-motion: reduce) {
   .view-pos #pos-search.pos-scan-miss { animation: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Cuenta corriente / fiado (V1 business-depth) — saldo + movimientos panel in
+   the Clientes detail, the gated POS fiar rail, and the printable estado.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* The fiado payment rail is inert until a customer is picked (POS gate). */
+.view-pos .pos-method:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.view-pos .pos-method:disabled:hover {
+  color: var(--rb-txt-2);
+  border-color: var(--rb-line);
+}
+
+.cli-cuenta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.cli-cuenta-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cuenta-actions {
+  display: flex;
+  gap: 8px;
+}
+.cuenta-cupo {
+  margin-top: -4px;
+}
+.cuenta-mov-table .cuenta-mov-cargo td {
+  color: var(--rb-txt);
+}
+.cuenta-mov-table .cuenta-mov-abono td {
+  color: var(--rb-ok, #2e9e6b);
+}
+/* The printable estado lives in the DOM but is hidden on screen; the print
+   media query below reveals only it (same trick as #receipt-print). */
+.cuenta-print-doc {
+  display: none;
+}
+.cuenta-estado-doc {
+  font-size: 13px;
+}
+.cuenta-estado-title {
+  margin: 0 0 4px;
+}
+.cuenta-estado-cliente {
+  font-weight: 600;
+}
+.cuenta-estado-saldo {
+  margin: 8px 0;
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .cuenta-print-doc {
+    display: block !important;
+  }
+  #cuenta-print,
+  #cuenta-print * {
+    visibility: visible !important;
+    color: #000 !important;
+  }
+  #cuenta-print {
+    position: absolute !important;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    background: #fff !important;
+  }
+}

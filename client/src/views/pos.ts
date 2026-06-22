@@ -13,7 +13,10 @@
 import {
   listProducts,
   posSale,
+  posSaleCuenta,
   parseSaleError,
+  cuentaUnavailable,
+  PAYMENT_CUENTA,
   customerSearch,
   getReceipt,
   emitBoleta,
@@ -22,6 +25,7 @@ import {
   CUSTOMERS_MODULE_MISSING,
   type Product,
   type PosItem,
+  type PosSaleResult,
   type PaymentMethod,
   type Customer,
   type Receipt,
@@ -59,11 +63,18 @@ interface PickedCustomer {
 const SEARCH_LIMIT = 40;
 const CUST_LIMIT = 8;
 
-const METHODS: { id: PaymentMethod; label: string }[] = [
+// POS payment selection = the api `PaymentMethod` rails plus the POS-local fiado
+// option (`PAYMENT_CUENTA`). Fiado isn't a tender — it charges the sale to the
+// selected customer's cuenta corriente. Kept POS-local so the exported
+// `PaymentMethod` union (consumed by other lanes) stays untouched (append-only).
+type PosMethod = PaymentMethod | typeof PAYMENT_CUENTA;
+
+const METHODS: { id: PosMethod; label: string }[] = [
   { id: "pos_cash", label: "Efectivo" },
   { id: "pos_debit", label: "Débito" },
   { id: "pos_credit", label: "Crédito" },
   { id: "pos_mixed", label: "Mixto" },
+  { id: PAYMENT_CUENTA, label: "Cuenta corriente (fiar)" },
 ];
 
 const METHOD_LABEL: Record<string, string> = {
@@ -71,11 +82,19 @@ const METHOD_LABEL: Record<string, string> = {
   pos_debit: "Débito",
   pos_credit: "Crédito",
   pos_mixed: "Mixto",
+  [PAYMENT_CUENTA]: "Cuenta corriente (fiar)",
 };
+
+/** The fiado option is gated to a selected customer — a sale can't be charged to
+ *  the account of nobody. Exported (pure) so the gate is unit-tested without
+ *  standing up the POS DOM. */
+export function fiarEnabled(hasCustomer: boolean): boolean {
+  return hasCustomer;
+}
 
 export function renderPos(host: HTMLElement, serverUrl: string): void {
   const cart: CartLine[] = [];
-  let method: PaymentMethod = "pos_cash";
+  let method: PosMethod = "pos_cash";
   let globalDiscount = 0; // flat order-level discount in pesos (cashier-typed)
   let selectedCustomer: PickedCustomer | null = null;
   let customerModuleOk = true;
@@ -299,24 +318,45 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   // ---- payment method selector ----
+  function selectMethod(id: PosMethod): void {
+    method = id;
+    methodsEl.querySelectorAll<HTMLButtonElement>(".pos-method").forEach((x) => {
+      x.classList.toggle("active", x.dataset.method === id);
+    });
+    syncPayment();
+  }
   methodsEl.querySelectorAll<HTMLButtonElement>(".pos-method").forEach((b) => {
     b.addEventListener("click", () => {
-      methodsEl.querySelectorAll(".pos-method").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      method = b.dataset.method as PaymentMethod;
-      syncPayment();
+      if (b.disabled) return; // fiado stays inert until a customer is picked
+      selectMethod(b.dataset.method as PosMethod);
     });
   });
+  // The fiado rail is gated to a selected customer (fiarEnabled): disabled with a
+  // hint until one is picked, and if the customer is cleared while fiado is the
+  // active method the rail falls back to Efectivo — a sale is never charged to
+  // nobody's account.
+  function syncMethodsAvailability(): void {
+    const fiarBtn = methodsEl.querySelector<HTMLButtonElement>(`[data-method="${PAYMENT_CUENTA}"]`);
+    if (!fiarBtn) return;
+    const ok = fiarEnabled(!!selectedCustomer);
+    fiarBtn.disabled = !ok;
+    fiarBtn.title = ok ? "" : "Selecciona un cliente para fiar la venta";
+    if (!ok && method === PAYMENT_CUENTA) selectMethod("pos_cash");
+  }
 
   // ---- tender panels: Efectivo (single) vs Mixto (split) vs card (none) ----
   function syncPayment(): void {
     const isCash = method === "pos_cash";
     const isMixed = method === "pos_mixed";
+    // Fiado shows no tender panel (cash/split both hidden) — it's a charge to the
+    // account, not a payment taken now.
     cashWrap.style.display = isCash ? "" : "none";
     splitWrap.hidden = !isMixed;
     if (isCash) renderQuickChips();
     if (isMixed) renderSplit();
     renderVuelto();
+    const chargeLabel = chargeBtn.querySelector<HTMLElement>(".btn-label");
+    if (chargeLabel) chargeLabel.textContent = method === PAYMENT_CUENTA ? "Fiar" : "Cobrar";
     syncChargeBtn();
   }
 
@@ -420,6 +460,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   function chargeEnabled(): boolean {
     if (cart.length === 0) return false;
     if (method === "pos_mixed") return currentSplit().ok;
+    if (method === PAYMENT_CUENTA) return fiarEnabled(!!selectedCustomer);
     return true;
   }
   function syncChargeBtn(): void {
@@ -514,6 +555,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       custRow.hidden = false;
       custChipEl.hidden = true;
     }
+    // The fiado rail depends on whether a customer is now selected.
+    syncMethodsAvailability();
   }
 
   // ---- cart ops ----
@@ -802,35 +845,53 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     //  · pos_cash  → the tendered cash (or the exact total) so the server
     //    computes the vuelto; · card → the exact total; · pos_mixed → the
     //    cashier's split (cash + card), validated to cover the total here.
-    let cash: string | undefined;
-    let card: string | undefined;
-    if (method === "pos_cash") {
-      cash = String(effectiveTender(parseCash(cashIn.value), total));
-    } else if (method === "pos_mixed") {
-      const s = currentSplit();
-      if (!s.ok) {
-        showError(`El pago dividido no cubre el total. Faltan ${clp(s.short)}.`);
-        chargeBtn.classList.remove("loading");
-        syncChargeBtn();
-        return;
-      }
-      cash = String(parseCash(splitCashIn.value));
-      card = String(parseCash(splitCardIn.value));
-    } else {
-      card = String(total);
-    }
     const discountArg = discount > 0 ? String(discount) : undefined;
+    const wasCuenta = method === PAYMENT_CUENTA;
 
     try {
-      const result = await posSale(
-        serverUrl,
-        items,
-        method,
-        cash,
-        card,
-        selectedCustomer?.id,
-        discountArg,
-      );
+      let result: PosSaleResult;
+      if (wasCuenta) {
+        // Fiado: no tender — the server opens a cargo on the selected customer's
+        // cuenta. The gate guarantees a customer; guard anyway so a race can never
+        // post a fiado sale to nobody.
+        if (!selectedCustomer) {
+          showError("Selecciona un cliente para fiar la venta.");
+          chargeBtn.classList.remove("loading");
+          syncChargeBtn();
+          return;
+        }
+        result = await posSaleCuenta(serverUrl, items, selectedCustomer.id, discountArg);
+      } else {
+        // Hand each rail the amount that makes the server-side balance check pass:
+        //  · pos_cash → tendered cash (or exact total) so the server computes the
+        //    vuelto; · card → exact total; · pos_mixed → the validated split.
+        let cash: string | undefined;
+        let card: string | undefined;
+        if (method === "pos_cash") {
+          cash = String(effectiveTender(parseCash(cashIn.value), total));
+        } else if (method === "pos_mixed") {
+          const s = currentSplit();
+          if (!s.ok) {
+            showError(`El pago dividido no cubre el total. Faltan ${clp(s.short)}.`);
+            chargeBtn.classList.remove("loading");
+            syncChargeBtn();
+            return;
+          }
+          cash = String(parseCash(splitCashIn.value));
+          card = String(parseCash(splitCardIn.value));
+        } else {
+          card = String(total);
+        }
+        result = await posSale(
+          serverUrl,
+          items,
+          method as PaymentMethod,
+          cash,
+          card,
+          selectedCustomer?.id,
+          discountArg,
+        );
+      }
       const count = cart.reduce((n, l) => n + l.qty, 0);
       cart.length = 0;
       globalDiscount = 0;
@@ -842,7 +903,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       renderVuelto();
 
       const pts = result.loyaltyPointsAwarded;
-      toast(`Venta registrada · ${num(count)} ítem(es) · ${clp(total)}${pts > 0 ? ` · +${num(pts)} pts` : ""}`);
+      const head = wasCuenta ? "Venta a cuenta (fiado)" : "Venta registrada";
+      toast(`${head} · ${num(count)} ítem(es) · ${clp(total)}${pts > 0 ? ` · +${num(pts)} pts` : ""}`);
       flashLowStock(result.lowStockAlerts);
 
       // Reset the customer for the next sale, then fetch + show the boleta.
@@ -861,6 +923,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       runSearch(searchEl.value.trim());
       searchEl.focus();
     } catch (err) {
+      if (cuentaUnavailable(err)) {
+        showError("La venta a cuenta (fiado) todavía no está disponible en este servidor.");
+        return; // `finally` re-enables the charge button; the cart is preserved
+      }
       const { code, message } = parseSaleError(err);
       showError(
         code === "INSUFFICIENT_STOCK"
