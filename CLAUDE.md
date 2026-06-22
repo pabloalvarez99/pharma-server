@@ -29,6 +29,22 @@
 > instantáneo (<100ms; POS <50ms p99), keyboard-first, estados empty/error claros en
 > español, formato consistente (CLP/RUT/fechas), idéntico en ambos verticales. Manejar
 > el binario/stack REAL (tauri dev, `scripts/qa/*.sh`, `npm run e2e`), no solo vitest.
+>
+> ## 🤝 OBJETIVO FUNDAMENTAL — UX INTUITIVA Y AMIGABLE (founder, 2026-06-21)
+> El programa debe ser **MUY intuitivo y amigable** para el usuario real (dueño/cajero
+> no-técnico, a veces mayor, a veces en tablet táctil): cualquiera lo entiende **sin
+> manual**. NO es una ola — es **vara PERMANENTE** que TODA lane de UI cumple en su DoD
+> (igual que la vara de la vitrina, ahora para toda vista). 8 principios no-negociables:
+> (1) **tarea diaria de cero fricción** (cobrar/fiar/"¿cuánto vendí?"/reponer = obvias,
+> rápidas, a prueba de error); (2) **habla como el dueño** (es-CL humano, cero jerga ni
+> keys técnicas como `admin_setting`; errores que dicen QUÉ hacer); (3) **guía, no manual**
+> (primer-uso guiado, empty-states que enseñan, tooltips, el agente como ayuda); (4)
+> **perdona errores** (confirm/undo en destructivo, validación inline amable); (5)
+> **rápido** (keyboard-first + Ctrl+K, <100ms, defaults inteligentes, cero clicks de más);
+> (6) **consistente** (un solo lenguaje visual: design system `client/src/views/ui.ts`);
+> (7) **accesible + táctil** (contraste AA, teclado total, tipografía legible, modo touch
+> POS); (8) **confianza** (toasts de cada acción, estados loading/empty/error producidos,
+> NUNCA pantalla en blanco). Ultra-plan: [`docs/strategy/intuitive-ux-master-plan.md`](./docs/strategy/intuitive-ux-master-plan.md).
 
 Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
