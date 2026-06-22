@@ -22,6 +22,7 @@ import { kpiSkeleton, asMessage, escapeHtml } from "./inventory";
 import "./rutbrand.css";
 import { expectedCash, discrepancy, nextDrawerName } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
+import { emptyState, errorState } from "./ui";
 
 export function renderCaja(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -72,7 +73,12 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
       }
     } catch (err) {
       bodyEl.className = "";
-      bodyEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+      bodyEl.innerHTML = errorState(asMessage(err), {
+        retry: { id: "caja-retry", label: "Reintentar" },
+      });
+      bodyEl
+        .querySelector<HTMLButtonElement>("#caja-retry")
+        ?.addEventListener("click", () => void refresh());
     }
   }
 
@@ -87,17 +93,11 @@ export function renderCaja(host: HTMLElement, serverUrl: string): void {
 
   function renderClosed(): void {
     bodyEl.className = "";
-    bodyEl.innerHTML = `
-      <div class="caja-empty">
-        <div class="caja-empty-mark">●</div>
-        <h3>Sin caja abierta</h3>
-        <p class="muted">Abre una caja para comenzar a registrar ventas en efectivo del turno.</p>
-        <button id="caja-open-btn" class="btn-primary caja-open">
-          <span class="btn-label">Abrir caja</span>
-          <span class="btn-pulse"></span>
-        </button>
-      </div>
-    `;
+    bodyEl.innerHTML = emptyState({
+      title: "Sin caja abierta",
+      hint: "Abre una caja para comenzar a registrar ventas en efectivo del turno.",
+      action: { id: "caja-open-btn", label: "Abrir caja" },
+    });
     bodyEl.querySelector<HTMLButtonElement>("#caja-open-btn")!
       .addEventListener("click", () => openModal(modalHost, serverUrl, "caja-1", async () => {
         toast("Caja abierta");
@@ -305,7 +305,7 @@ async function closeFlow(
       <div class="arqueo-row arqueo-total"><span>Esperado en caja</span><strong class="rb-num">${clp(expected)}</strong></div>
     `;
   } catch (err) {
-    arqueoEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
+    arqueoEl.innerHTML = errorState(asMessage(err));
   }
 
   const recomputeDiff = () => {
