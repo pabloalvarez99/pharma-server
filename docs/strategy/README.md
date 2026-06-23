@@ -23,6 +23,7 @@ objetivo y decisiones estructurales. Audiencia: fundador, board, design partners
 | [`ecosystem-roadmap.md`](./ecosystem-roadmap.md) | Visión federada ERP multi-nodo. Fases 1-14. | Lockeado v1 — 2026-05-16 |
 | [`b2b-marketplace.md`](./b2b-marketplace.md) | Capa de confianza B2B Fase 13 (ex marketplace-master-plan). | Lockeado v1 — 2026-05-16 |
 | [`web-interop.md`](./web-interop.md) | Guía operador para conectar storefront web ↔ pharma-server (3 patrones HTTP). Anchored en ADR-0012. | Draft — 2026-05-24 |
+| [`rutagent-web-platform-master-plan.md`](./rutagent-web-platform-master-plan.md) | RutAgent: pivote agéntico + web companion (Vercel) + BYO-AI-provider + fusión `tu-farmacia.cl` + pasos manuales del fundador. Anchored en ADR-0016/0017. | Draft — 2026-06-23 |
 
 ## Cambios a estrategia
 
