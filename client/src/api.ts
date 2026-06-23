@@ -690,6 +690,50 @@ export function createSupplier(
   });
 }
 
+// --- users (credenciales del negocio) --------------------------------------
+
+/** A business user/credential (server `UserDto`) — never carries the password
+ *  hash. `created_at` is an RFC3339 string. */
+export interface UserAccount {
+  id: string;
+  email: string;
+  roles: string[];
+  active: boolean;
+  created_at: string;
+}
+
+/** GET /api/v1/users (Bearer, admin/owner) — list the business's credentials. */
+export function listUsers(serverUrl: string): Promise<UserAccount[]> {
+  return invoke<UserAccount[]>("list_users", { serverUrl });
+}
+
+/** POST /api/v1/users (Bearer, admin/owner) — create a credential. `roles` is a
+ *  subset of cashier|pharmacist|admin|owner. Rejects (Spanish) on 400/409. */
+export function createUser(
+  serverUrl: string,
+  email: string,
+  password: string,
+  roles: string[],
+): Promise<UserAccount> {
+  return invoke<UserAccount>("create_user", { serverUrl, email, password, roles });
+}
+
+/** PATCH /api/v1/users/{id} (Bearer, admin/owner) — edit a credential. Pass only
+ *  what changes: `active` (de/reactivate), `password` (reset), `roles`. */
+export function updateUser(
+  serverUrl: string,
+  id: string,
+  patch: { active?: boolean; password?: string; roles?: string[] },
+): Promise<UserAccount> {
+  return invoke<UserAccount>("update_user", {
+    serverUrl,
+    id,
+    active: patch.active ?? null,
+    password: patch.password ?? null,
+    roles: patch.roles ?? null,
+  });
+}
+
 // --- expenses (gastos / caja chica) ----------------------------------------
 
 /** An expense / egreso (`ExpenseDto`). `amount` is a STRING (Decimal).

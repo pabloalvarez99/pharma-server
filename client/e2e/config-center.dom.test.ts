@@ -33,6 +33,13 @@ const h = vi.hoisted(() => ({
   vertical: "farmacia",
   failVertical: false,
   setCalls: [] as Array<{ key: string; value: string }>,
+  users: [] as Array<{
+    id: string;
+    email: string;
+    roles: string[];
+    active: boolean;
+    created_at: string;
+  }>,
 }));
 vi.mock("../src/api", () => ({
   getSetting: async (_url: string, key: string) => {
@@ -61,6 +68,29 @@ vi.mock("../src/api", () => ({
     seat_count: 1,
   }),
   dteCafStatus: async () => ({ cafs: [] }),
+  listUsers: async () => h.users.slice(),
+  createUser: async (_url: string, email: string, _password: string, roles: string[]) => {
+    const u = {
+      id: `user:${h.users.length + 1}`,
+      email: email.trim().toLowerCase(),
+      roles,
+      active: true,
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    h.users.push(u);
+    return u;
+  },
+  updateUser: async (
+    _url: string,
+    id: string,
+    patch: { active?: boolean; password?: string; roles?: string[] },
+  ) => {
+    const u = h.users.find((x) => x.id === id);
+    if (!u) throw "Usuario no encontrado.";
+    if (typeof patch.active === "boolean") u.active = patch.active;
+    if (patch.roles) u.roles = patch.roles;
+    return u;
+  },
   SEED_ALREADY_EXISTS: "SEED_ALREADY_EXISTS",
 }));
 
@@ -101,6 +131,7 @@ beforeEach(() => {
   h.vertical = "farmacia";
   h.failVertical = false;
   h.setCalls = [];
+  h.users = [];
   document.body.innerHTML = "";
 });
 
@@ -271,7 +302,7 @@ describe("config hub — honest 'próximamente' mounts (cero dead-end, ADR-0005)
   it("placeholder sections render an honest roadmap + CLI path, never blank or fake", () => {
     const host = mountHub();
     const panel = host.querySelector<HTMLElement>("#cfg-panel")!;
-    for (const id of ["usuarios", "sucursales", "respaldo"]) {
+    for (const id of ["sucursales", "respaldo"]) {
       goSection(host, id);
       expect(panel.querySelector(".cfg-soon-chip")?.textContent ?? "").toMatch(/próximamente/i);
       expect((panel.textContent ?? "").trim().length).toBeGreaterThan(0);
@@ -294,7 +325,23 @@ describe("config hub — honest 'próximamente' mounts (cero dead-end, ADR-0005)
   // --- becomes real when ye's CRUD lanes land in feature/erp-parity -----------
   // (feat/config-users-api, feat/config-branches-sii). Kept as todos — never
   // asserting against the soon-to-be-replaced placeholder, never going red.
-  it.todo("Usuarios: create/edit/delete a cashier with a role, surfaced in a produced table");
+  it("Usuarios: create a cashier with a role, surfaced in a produced table (no hash leak)", async () => {
+    const host = mountHub();
+    goSection(host, "usuarios");
+    const emailEl = await waitForEl<HTMLInputElement>(host, "#cfg-user-email");
+    const passEl = host.querySelector<HTMLInputElement>("#cfg-user-pass")!;
+    type(emailEl, "Cajero@Demo.CL");
+    type(passEl, "Cajero123");
+    // cashier role is checked by default
+    host.querySelector<HTMLButtonElement>("#cfg-user-create")!.click();
+    // the new credential appears in the produced list, normalized + role badge
+    const row = await waitForEl<HTMLElement>(host, ".cfg-user-row[data-id]");
+    expect(row.querySelector(".cfg-user-email")?.textContent).toBe("cajero@demo.cl");
+    expect(row.textContent ?? "").toMatch(/Cajero/);
+    expect(row.textContent ?? "").toMatch(/Activo/);
+    // never surfaces a password/hash
+    expect(row.textContent ?? "").not.toMatch(/\$argon2|password|Cajero123/);
+  });
   it.todo("Sucursales y cajas: add a branch + caja, list them, switch the active one");
   it.todo("SII: upload a .pfx certificate and CAF files from the hub with progress + validation");
   it.todo("Respaldo: run a backup now, schedule one, and restore via a guided step flow");

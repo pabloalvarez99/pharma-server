@@ -911,6 +911,114 @@ async fn setup_account(
     })
 }
 
+// --- user management (credenciales) ----------------------------------------
+
+/// Server `UserDto` (`crates/api/src/v1/users.rs`) — una credencial del negocio,
+/// SIN el hash de contraseña. `created_at` es un string RFC3339.
+#[derive(Serialize, Deserialize)]
+pub struct UserSummary {
+    pub id: String,
+    pub email: String,
+    pub roles: Vec<String>,
+    pub active: bool,
+    pub created_at: String,
+}
+
+/// GET `/api/v1/users` (Bearer, admin/owner) — lista las credenciales del
+/// negocio. 403 (cajero) o 401 se traducen al español vía `error_message`.
+#[tauri::command]
+async fn list_users(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<Vec<UserSummary>, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/users"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuarios inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/users` (Bearer, admin/owner) — crea una credencial nueva.
+#[tauri::command]
+async fn create_user(
+    state: State<'_, SessionState>,
+    server_url: String,
+    email: String,
+    password: String,
+    roles: Vec<String>,
+) -> Result<UserSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let resp = http
+        .post(format!("{base}/api/v1/users"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "email": email,
+            "password": password,
+            "roles": roles,
+        }))
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuario inválida del servidor: {e}"))
+}
+
+/// PATCH `/api/v1/users/{id}` (Bearer, admin/owner) — edita una credencial.
+/// Sólo se envían los campos provistos (los omitidos quedan intactos): `active`
+/// (de/reactivar), `password` (resetear), `roles` (cambiar permisos).
+#[tauri::command]
+async fn update_user(
+    state: State<'_, SessionState>,
+    server_url: String,
+    id: String,
+    active: Option<bool>,
+    password: Option<String>,
+    roles: Option<Vec<String>>,
+) -> Result<UserSummary, String> {
+    let token = token_of(&state)?;
+    let http = client()?;
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    if let Some(a) = active {
+        body["active"] = serde_json::Value::Bool(a);
+    }
+    if let Some(p) = password {
+        body["password"] = serde_json::Value::String(p);
+    }
+    if let Some(r) = roles {
+        body["roles"] = serde_json::json!(r);
+    }
+    let resp = http
+        .patch(format!("{base}/api/v1/users/{id}"))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de usuario inválida del servidor: {e}"))
+}
+
 /// GET `/api/v1/admin/license/status` (Bearer). Requires a prior `login`.
 /// Admin/owner only on the server side — a 403 surfaces as Spanish copy.
 #[tauri::command]
@@ -3187,6 +3295,9 @@ pub fn run() {
             customer_history,
             create_customer,
             update_customer,
+            list_users,
+            create_user,
+            update_user,
             list_purchase_orders,
             get_purchase_order,
             list_suppliers,
