@@ -683,3 +683,29 @@ body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
   .ui-spinner{animation:none}
   .ui-sk-line{animation:none}
 }
+
+/* --- Usuarios y roles (gestión de credenciales, sección Configuración) ------ */
+.cfg-roles{display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:4px}
+.cfg-role-opt{display:inline-flex;align-items:center;gap:7px;font-size:14px;color:var(--rb-txt);
+  padding:8px 12px;border:1px solid var(--rb-line);border-radius:var(--rb-radius-sm);
+  background:var(--rb-surface);cursor:pointer;transition:.15s;user-select:none}
+.cfg-role-opt:hover{border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.cfg-role-opt input{accent-color:var(--rb-brand);width:15px;height:15px;cursor:pointer;margin:0}
+.cfg-users-list{display:flex;flex-direction:column;gap:9px}
+.cfg-user-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:12px 14px;border:1px solid var(--rb-line);border-radius:var(--rb-radius-sm);background:var(--rb-surface)}
+.cfg-user-row.off{opacity:.62}
+.cfg-user-id{display:flex;flex-direction:column;gap:6px;min-width:0}
+.cfg-user-email{font-weight:600;color:var(--rb-txt);word-break:break-all}
+.cfg-user-roles{display:flex;flex-wrap:wrap;gap:6px}
+.cfg-role-badge{font-size:11px;font-weight:600;letter-spacing:.02em;padding:3px 9px;border-radius:999px;
+  background:var(--rb-brand-soft);color:var(--rb-brand)}
+.cfg-user-side{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.cfg-user-state{font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid var(--rb-line);color:var(--rb-txt-2)}
+.cfg-user-state.on{color:var(--rb-brand);background:var(--rb-brand-soft);border-color:transparent}
+.cfg-user-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cfg-reset-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;width:100%}
+.cfg-reset-inline .rb-input{width:auto;flex:1 1 200px}
+.rb-btn.sm{padding:8px 12px;font-size:13px}
+.rb-btn.danger{background:linear-gradient(180deg,var(--rb-danger),#d83b4a);color:#fff;box-shadow:0 10px 24px -12px var(--rb-danger)}
+.rb-btn.danger:hover{filter:brightness(1.05)}

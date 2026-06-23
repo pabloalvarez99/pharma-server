@@ -105,7 +105,6 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
     label: "Usuarios y roles",
     blurb: "Cajeros, químicos y administradores con sus permisos.",
     icon: "users",
-    placeholder: true,
     fields: [
       { label: "Usuarios", keywords: ["cuentas", "personas"] },
       { label: "Roles", keywords: ["permisos", "cajero", "químico", "admin", "dueño"] },
