@@ -144,10 +144,35 @@ async fn ask(
         tenant: &tenant,
     };
     // Offline-first: `select_provider` returns the deterministic provider unless
-    // the owner opted into an LLM (default OFF, ADR-0016). No network in this
-    // build regardless of config.
-    let answer = assist::select_provider(&AssistConfig::default())
-        .answer(&query)
-        .await?;
+    // the owner opted into an LLM (default OFF, ADR-0016/ADR-0017). The opt-in +
+    // BYO key live in per-tenant settings (telemetry-style consent, ADR-0005
+    // inv. 3); absent/empty → fully offline, zero network. Even when enabled,
+    // the LLM provider degrades to the deterministic answer on any failure.
+    let cfg = load_assist_config(db.as_ref(), &tenant).await;
+    let answer = assist::select_provider(&cfg).answer(&query).await?;
     Ok(Json(answer))
+}
+
+const ASSIST_LLM_ENABLED_KEY: &str = "assist.llm_enabled";
+const ASSIST_LLM_API_KEY: &str = "assist.llm_api_key";
+
+/// Build [`AssistConfig`] from per-tenant settings. Both reads are best-effort:
+/// a missing/failed read yields the offline default (the agent must never error
+/// because a setting is absent). The key is never logged.
+async fn load_assist_config(db: &db::Db, tenant: &Thing) -> AssistConfig {
+    let enabled = matches!(
+        domain::sales::service::get_setting(db, tenant, ASSIST_LLM_ENABLED_KEY).await,
+        Ok(Some(s)) if s.value == "true"
+    );
+    if !enabled {
+        return AssistConfig::default();
+    }
+    let key = match domain::sales::service::get_setting(db, tenant, ASSIST_LLM_API_KEY).await {
+        Ok(Some(s)) if !s.value.trim().is_empty() => Some(s.value),
+        _ => None,
+    };
+    AssistConfig {
+        llm_enabled: true,
+        llm_api_key: key,
+    }
 }
