@@ -35,6 +35,23 @@ pub struct AppConfig {
     /// red se loguean y se ignoran (la revocación nunca bloquea el core).
     #[serde(default)]
     pub crl: CrlConfig,
+    /// Global CORS allow-list for cross-origin browser clients (the web front on
+    /// Vercel / `rutagent.cl`). Default `[]` ⇒ CORS off: only same-origin calls
+    /// (the server serving its own `/app`) work — zero exposure. Add the front
+    /// origins to let a cross-origin web app call `/api/v1` (ADR-0018).
+    #[serde(default)]
+    pub cors: CorsConfig,
+}
+
+/// Global CORS settings for cross-origin browser clients (the web front).
+/// Empty `allowed_origins` ⇒ disabled (same-origin only). ADR-0018.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CorsConfig {
+    /// Exact browser origins allowed to call `/api/v1` cross-origin (scheme +
+    /// host [+ port], no trailing slash, e.g. `https://rutagent.cl`). Empty ⇒
+    /// CORS disabled. Set via `config/local.toml` `[cors] allowed_origins`.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 /// Public web-push orders endpoint (ADR-0012 pattern 2).

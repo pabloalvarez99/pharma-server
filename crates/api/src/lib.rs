@@ -309,7 +309,14 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         }
     });
 
-    let app = build_router(state).merge(metrics_router).layer(prom_layer);
+    let mut app = build_router(state).merge(metrics_router).layer(prom_layer);
+    // Global CORS for cross-origin browser fronts (web companion on Vercel /
+    // rutagent.cl). Off unless `cors.allowed_origins` is set — the server
+    // serving its own `/app` is same-origin and never needs it (ADR-0018).
+    if !cfg.cors.allowed_origins.is_empty() {
+        tracing::info!(origins = ?cfg.cors.allowed_origins, "CORS enabled for web front");
+        app = app.layer(build_cors_layer(&cfg.cors.allowed_origins));
+    }
 
     let addr: SocketAddr = cfg.bind.parse()?;
     tracing::info!(%addr, "pharma-api listening");
@@ -762,7 +769,29 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: pharma_core::config::StockWebhookConfig::default(),
         crl: pharma_core::config::CrlConfig::default(),
+        cors: pharma_core::config::CorsConfig::default(),
     }
+}
+
+/// Build the global CORS layer for the configured browser origins. Covers the
+/// full API surface a web front needs: GET/POST/PATCH/DELETE/OPTIONS +
+/// Authorization + Content-Type. Explicit origin list (never `*`) so the JWT
+/// `Authorization` header is allowed safely (ADR-0018).
+fn build_cors_layer(origins: &[String]) -> tower_http::cors::CorsLayer {
+    use axum::http::{header, Method};
+    use tower_http::cors::{AllowOrigin, CorsLayer};
+    let parsed: Vec<axum::http::HeaderValue> =
+        origins.iter().filter_map(|o| o.parse().ok()).collect();
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(parsed))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
 fn authorize_metrics(

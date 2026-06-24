@@ -141,6 +141,16 @@ let token=sessionStorage.getItem("rb_token")||null;
 let me=null;
 let lastSlug=sessionStorage.getItem("rb_slug")||"principal";
 
+// ---- API base (Vercel-ready) -------------------------------------------
+// Same-origin by default (server serving its own /app → ""). When the front is
+// hosted apart (Vercel / rutagent.cl) point it at the API once with ?api=<url>;
+// it persists to localStorage. The server must allow this origin via CORS
+// (config [cors] allowed_origins). ADR-0018.
+const _q=new URLSearchParams(location.search);
+const API=((_q.get("api")||localStorage.getItem("rb_api")||"").replace(/\/+$/,""));
+if(_q.get("api"))localStorage.setItem("rb_api",API);
+const U=(p)=>API+p;
+
 const RUBROS=[["farmacia","💊"],["minimarket","🛒"],["restaurant","🍽️"],["cafe","☕"],["tienda","🏷️"],["belleza","💅"],["servicios","🔧"],["otro","✨"]];
 let pickedRubro="minimarket";
 
@@ -150,7 +160,7 @@ async function api(path,opts={}){
   const h=Object.assign({},opts.headers||{});
   if(opts.body)h["content-type"]="application/json";
   if(token)h["authorization"]="Bearer "+token;
-  const r=await fetch(path,{...opts,headers:h});
+  const r=await fetch(U(path),{...opts,headers:h});
   let body=null;const ct=r.headers.get("content-type")||"";
   try{body=ct.includes("json")?await r.json():await r.text();}catch{}
   return{ok:r.ok,status:r.status,body};
@@ -160,7 +170,7 @@ function apiErr(r){return (r.body&&r.body.error&&r.body.error.message)||(r.body&
 // ---- server status dot ----
 async function pingStatus(){
   try{
-    const r=await fetch("/health/ready");const j=await r.json();
+    const r=await fetch(U("/health/ready"));const j=await r.json();
     const ok=r.ok&&j&&j.checks&&j.checks.db==="ok";
     $("#dot").className="dot "+(ok?"ok":"bad");
     $("#dot-label").textContent=ok?"en línea":"degradado";
