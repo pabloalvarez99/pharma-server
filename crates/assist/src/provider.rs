@@ -125,17 +125,20 @@ impl AssistConfig {
 
 /// Pick the provider for a request given the owner's [`AssistConfig`].
 ///
-/// Today this **always** returns the offline [`crate::Deterministic`] provider.
-/// When `llm_active()` is set we log a one-line notice and still fall back to
-/// deterministic — wiring an `LlmProvider` here is the single, isolated change
-/// the founder makes to flip the opt-in path on (ADR-0016), without touching
-/// the endpoint, the parser, or any executor.
+/// * Owner opted in AND supplied a key → the OPT-IN [`crate::llm::LlmProvider`]
+///   over an [`crate::llm::AnthropicBackend`] (BYO-key, ADR-0017). It grounds on
+///   the owner's real data first and degrades to the deterministic answer on any
+///   LLM failure, so offline-first is preserved (ADR-0005 inv. 1/2/6).
+/// * Otherwise → the fully-offline [`crate::Deterministic`] provider, zero
+///   network. This is the default.
+///
+/// This is the single, isolated switch ADR-0016 reserved for flipping the LLM
+/// path on — the endpoint, parser, and executors are untouched.
 pub fn select_provider(cfg: &AssistConfig) -> Box<dyn AssistProvider> {
-    if cfg.llm_active() {
-        tracing::warn!(
-            "assist: llm opt-in is set but no LlmProvider is compiled in; \
-             answering offline with the deterministic provider"
-        );
+    if let (true, Some(key)) = (cfg.llm_enabled, cfg.llm_api_key.as_ref()) {
+        let backend = crate::llm::AnthropicBackend::new(key.clone());
+        Box::new(crate::llm::LlmProvider::new(backend))
+    } else {
+        Box::new(crate::Deterministic)
     }
-    Box::new(crate::Deterministic)
 }

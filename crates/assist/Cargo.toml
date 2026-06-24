@@ -16,6 +16,7 @@ async-trait.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 surrealdb.workspace = true
+reqwest.workspace = true
 rust_decimal = { version = "1.37", features = ["serde-with-str"] }
 uuid = { workspace = true }
 

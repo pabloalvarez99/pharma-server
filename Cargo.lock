@@ -440,6 +440,7 @@ dependencies = [
  "chrono",
  "db",
  "domain",
+ "reqwest",
  "rust_decimal",
  "serde",
  "serde_json",
