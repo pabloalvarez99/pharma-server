@@ -57,6 +57,10 @@ pub enum Intent {
     /// reorder needs, lots expiring this week, and (pharmacy) controlled-drug
     /// ledger count. The RutAgent money-shot — one ask, many domains.
     ResumenDia,
+    /// Health (pharmacy) — controlled-drug ledger this month (Ley 20.000).
+    Controlados,
+    /// Health (pharmacy) — prescriptions dispensed this month.
+    RecetasMes,
     /// The owner asked what they can ask.
     Ayuda,
     /// Could not be classified.
@@ -89,6 +93,8 @@ impl Intent {
             Intent::StockBajo => "stock_bajo",
             Intent::ResumenInventario => "resumen_inventario",
             Intent::ResumenDia => "resumen_dia",
+            Intent::Controlados => "controlados",
+            Intent::RecetasMes => "recetas_mes",
             Intent::Ayuda => "ayuda",
             Intent::Unknown => "desconocido",
         }
@@ -176,6 +182,26 @@ pub fn parse(question: &str) -> Intent {
         ],
     ) {
         return Intent::ResumenDia;
+    }
+
+    // Health (pharmacy) — prescriptions & controlled-drug ledger (Ley 20.000).
+    // Distinct vocab; data-driven so a non-pharmacy tenant just gets an empty
+    // list. Controlados first: "receta controlada" is a controlled-ledger ask.
+    if contains_any(
+        &q,
+        &[
+            "controlad",
+            "ley 20000",
+            "ley 20.000",
+            "libro de recetas",
+            "estupefaciente",
+            "psicotropico",
+        ],
+    ) {
+        return Intent::Controlados;
+    }
+    if contains_any(&q, &["receta", "recetas"]) {
+        return Intent::RecetasMes;
     }
 
     // Payment-method breakdown. MUST precede both the comparative branch
@@ -662,6 +688,27 @@ mod tests {
     }
 
     #[test]
+    fn health_intents() {
+        for q in [
+            "recetas controladas",
+            "libro de controlados",
+            "controlados del mes",
+            "ley 20.000",
+        ] {
+            assert_eq!(parse(q), Intent::Controlados, "q={q}");
+        }
+        for q in [
+            "recetas del mes",
+            "cuántas recetas dispensé",
+            "recetas dispensadas",
+        ] {
+            assert_eq!(parse(q), Intent::RecetasMes, "q={q}");
+        }
+        // A controlled question wins over the generic prescriptions one.
+        assert_eq!(parse("receta controlada"), Intent::Controlados);
+    }
+
+    #[test]
     fn unknown_is_graceful() {
         for q in ["", "   ", "cuéntame un chiste", "asdf qwer"] {
             assert_eq!(parse(q), Intent::Unknown, "q={q}");
@@ -832,6 +879,8 @@ mod tests {
         );
         assert_eq!(Intent::StockProducto("x".into()).label(), "stock_producto");
         assert_eq!(Intent::ResumenDia.label(), "resumen_dia");
+        assert_eq!(Intent::Controlados.label(), "controlados");
+        assert_eq!(Intent::RecetasMes.label(), "recetas_mes");
         assert_eq!(Intent::Unknown.label(), "desconocido");
     }
 }

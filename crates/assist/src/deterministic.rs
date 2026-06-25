@@ -58,6 +58,8 @@ impl AssistProvider for Deterministic {
             Intent::StockBajo => stock_bajo(q.db, q.tenant, &q.intent).await,
             Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &q.intent).await,
             Intent::ResumenDia => resumen_dia(q.db, q.tenant, &q.intent).await,
+            Intent::Controlados => controlados(q.db, q.tenant, &q.intent).await,
+            Intent::RecetasMes => recetas_mes(q.db, q.tenant, &q.intent).await,
             Intent::Ayuda => Ok(ayuda(&q.intent)),
             Intent::Unknown => Ok(unknown(&q.intent)),
         }
@@ -510,6 +512,76 @@ async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     Ok(Answer::new(intent, text).with_data(data))
 }
 
+/// Health (Ley 20.000) — controlled-drug ledger for the current month. Reuses
+/// `prescriptions::list_controlled`. Data-driven: a non-pharmacy tenant has no
+/// controlled entries, so this answers gracefully without hard-coding a vertical.
+async fn controlados(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let mr = month_range();
+    let rows = prescriptions::list_controlled(
+        db,
+        tenant,
+        PrescriptionFilters {
+            from: mr.from,
+            to: mr.to,
+            limit: Some(500),
+            ..Default::default()
+        },
+    )
+    .await?;
+    if rows.is_empty() {
+        return Ok(Answer::new(
+            intent,
+            "No registras recetas controladas este mes (libro Ley 20.000).",
+        )
+        .with_data(serde_json::json!({ "count": 0 })));
+    }
+    let recientes: Vec<String> = rows
+        .iter()
+        .take(3)
+        .map(|r| r.patient_name.clone())
+        .collect();
+    let text = format!(
+        "Tienes {} {} controladas este mes en el libro (Ley 20.000). Últimos pacientes: {}.",
+        rows.len(),
+        plural(rows.len() as i64, "receta", "recetas"),
+        recientes.join(", "),
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({ "count": rows.len() })))
+}
+
+/// Health — prescriptions dispensed this month (count + how many controlled).
+async fn recetas_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let mr = month_range();
+    let rows = prescriptions::list_prescriptions(
+        db,
+        tenant,
+        PrescriptionFilters {
+            from: mr.from,
+            to: mr.to,
+            limit: Some(1000),
+            ..Default::default()
+        },
+    )
+    .await?;
+    if rows.is_empty() {
+        return Ok(
+            Answer::new(intent, "No registras recetas dispensadas este mes.")
+                .with_data(serde_json::json!({ "count": 0 })),
+        );
+    }
+    let controladas = rows.iter().filter(|r| r.controlled).count();
+    let text = format!(
+        "Este mes dispensaste {} {} ({} controladas).",
+        rows.len(),
+        plural(rows.len() as i64, "receta", "recetas"),
+        controladas,
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": rows.len(),
+        "controlled": controladas,
+    })))
+}
+
 /// Sum the daily-sales rollup over `range` into `(orders, revenue, cash, card)`.
 async fn sum_sales(
     db: &Db,
@@ -866,7 +938,8 @@ fn ayuda(intent: &Intent) -> Answer {
          «gastos del mes», «mejores clientes», «¿cuántos clientes tengo?», «busca el \
          cliente Juan», «precio de ibuprofeno», «margen de paracetamol», «¿qué se vence \
          esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
-         «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». También \
+         «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». Si llevas \
+         recetas: «recetas del mes» o «libro de controlados». También \
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea un producto Aspirina a $1000», «cambia el precio de \
          paracetamol a $1500», «repón 40 de paracetamol», «cierra la caja con $50.000», \
