@@ -131,6 +131,10 @@ pub enum Action {
         items: i64,
         total: Decimal,
     },
+    /// Open the cash drawer with a starting float — reuses
+    /// `domain::cash_register::open_session` (per-cashier; rejects if the user
+    /// already has an open drawer). Pairs with [`Action::CerrarCaja`].
+    AbrirCaja { opening_cash: Decimal },
 }
 
 impl Action {
@@ -145,6 +149,7 @@ impl Action {
             Action::CerrarCaja { .. } => "cerrar_caja",
             Action::AjustarStock { .. } => "ajustar_stock",
             Action::RecibirOrdenCompra { .. } => "recibir_orden_compra",
+            Action::AbrirCaja { .. } => "abrir_caja",
         }
     }
 
@@ -224,6 +229,10 @@ impl Action {
                 items,
                 if *items == 1 { "producto" } else { "productos" },
                 clp(*total),
+            ),
+            Action::AbrirCaja { opening_cash } => format!(
+                "Abrir la caja con un fondo inicial de {}.",
+                clp(*opening_cash),
             ),
         }
     }
@@ -317,6 +326,9 @@ impl Action {
                 "po_id": po_id,
                 "items": items,
                 "total": total.to_string(),
+            }),
+            Action::AbrirCaja { opening_cash } => serde_json::json!({
+                "opening_cash": opening_cash.to_string(),
             }),
         }
     }
@@ -540,6 +552,8 @@ pub enum ActionParse {
     /// A "recibir orden de compra" request. The concrete draft PO (optionally
     /// scoped to `supplier_name`) is resolved server-side (see [`build`]).
     RecibirOc { supplier_name: Option<String> },
+    /// An "abrir caja" request with the starting float. No DB resolution needed.
+    AperturaCaja { opening_cash: Decimal },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -618,6 +632,16 @@ pub fn parse_action(question: &str) -> ActionParse {
             return ActionParse::NotAnAction;
         }
         return parse_oc(&q);
+    }
+
+    // Cash-drawer OPEN: "abre la caja con $50.000 de fondo". Distinct open verbs
+    // so it never collides with the close branch below or the read CajaActual.
+    if q.contains("caja")
+        && ["abre", "abrir", "apertura", "aperturar"]
+            .iter()
+            .any(|v| q.contains(v))
+    {
+        return parse_apertura(&q);
     }
 
     // Cash-drawer close: "cierra la caja con $50.000 contados". A distinct
@@ -960,6 +984,17 @@ fn parse_recibe(q: &str) -> ActionParse {
         .map(|s| strip_trailing_punct(s.trim()).trim().to_string())
         .filter(|s| !s.is_empty() && !NOISE.contains(&s.as_str()));
     ActionParse::RecibirOc { supplier_name }
+}
+
+fn parse_apertura(q: &str) -> ActionParse {
+    match extract_amount(q) {
+        Some(opening_cash) => ActionParse::AperturaCaja { opening_cash },
+        None => ActionParse::Incomplete(
+            "Para abrir la caja dime con cuánto fondo partes. Por ejemplo: «abre la caja \
+             con $50.000»."
+                .into(),
+        ),
+    }
 }
 
 fn parse_cierre(q: &str) -> ActionParse {
@@ -1474,6 +1509,9 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 total: po.total,
             }))
         }
+        ActionParse::AperturaCaja { opening_cash } => {
+            Ok(BuildOutcome::Ready(Action::AbrirCaja { opening_cash }))
+        }
     }
 }
 
@@ -1794,6 +1832,39 @@ pub async fn execute(
                 }),
             }
         }
+        Action::AbrirCaja { opening_cash } => {
+            use domain::cash_register::model::OpenSessionInput;
+            use domain::cash_register::service as caja;
+            let user = actor.ok_or_else(|| {
+                domain::DomainError::Invalid(
+                    "no pude identificar al usuario para abrir la caja".into(),
+                )
+            })?;
+            let dto = caja::open_session(
+                db,
+                tenant,
+                user,
+                OpenSessionInput {
+                    register_name: "caja-1".into(),
+                    opening_cash,
+                    notes: Some("Apertura registrada por el agente".into()),
+                },
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!(
+                    "Caja «{}» abierta con un fondo de {}.",
+                    dto.register_name,
+                    clp(opening_cash)
+                ),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "register_name": dto.register_name,
+                    "opening_cash": opening_cash.to_string(),
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -1904,6 +1975,44 @@ mod tests {
             parse_action("cierra la caja"),
             ActionParse::Incomplete(_)
         ));
+    }
+
+    #[test]
+    fn parse_apertura_extracts_opening() {
+        for q in [
+            "abre la caja con 50000",
+            "abre la caja con $50.000 de fondo",
+            "apertura de caja 50000",
+        ] {
+            match parse_action(q) {
+                ActionParse::AperturaCaja { opening_cash } => {
+                    assert_eq!(opening_cash, dec("50000"), "q={q}")
+                }
+                other => panic!("expected AperturaCaja for {q:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_apertura_without_amount_is_incomplete() {
+        assert!(matches!(
+            parse_action("abre la caja"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn open_and_close_caja_dont_collide() {
+        assert!(matches!(
+            parse_action("abre la caja con 50000"),
+            ActionParse::AperturaCaja { .. }
+        ));
+        assert!(matches!(
+            parse_action("cierra la caja con 50000"),
+            ActionParse::CierreCaja { .. }
+        ));
+        // The read question is still neither.
+        assert_eq!(parse_action("cuánto hay en caja"), ActionParse::NotAnAction);
     }
 
     #[test]
