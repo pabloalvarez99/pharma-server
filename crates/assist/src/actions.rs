@@ -106,6 +106,17 @@ pub enum Action {
         expected: Decimal,
         counted: Decimal,
     },
+    /// Adjust a product's stock — reuses `domain::inventory::adjust` (which
+    /// emits an audited `stock_movement`). Exactly one of `set`/`delta` is
+    /// `Some`; `product_id` + `old_stock` are resolved server-side at propose
+    /// time (see [`build`]). `old_stock` is for the confirmation prose only.
+    AjustarStock {
+        product_id: String,
+        product_name: String,
+        old_stock: i64,
+        set: Option<i64>,
+        delta: Option<i64>,
+    },
 }
 
 impl Action {
@@ -118,6 +129,7 @@ impl Action {
             Action::CrearProductoRapido { .. } => "crear_producto_rapido",
             Action::AjustarPrecio { .. } => "ajustar_precio",
             Action::CerrarCaja { .. } => "cerrar_caja",
+            Action::AjustarStock { .. } => "ajustar_stock",
         }
     }
 
@@ -179,6 +191,18 @@ impl Action {
                 clp(*counted),
                 clp(*expected),
                 diff_text(*counted - *expected),
+            ),
+            Action::AjustarStock {
+                product_name,
+                old_stock,
+                set,
+                delta,
+                ..
+            } => format!(
+                "Ajustar el stock de {} de {} a {} unidades.",
+                product_name,
+                old_stock,
+                stock_target(*old_stock, *set, *delta),
             ),
         }
     }
@@ -249,7 +273,30 @@ impl Action {
                 "expected": expected.to_string(),
                 "counted": counted.to_string(),
             }),
+            Action::AjustarStock {
+                product_id,
+                product_name,
+                old_stock,
+                set,
+                delta,
+            } => serde_json::json!({
+                "product_id": product_id,
+                "product_name": product_name,
+                "old_stock": old_stock,
+                "set": set,
+                "delta": delta,
+            }),
         }
+    }
+}
+
+/// Resulting stock after applying a `set`/`delta` adjustment to `old`. Exactly
+/// one of `set`/`delta` is expected `Some`; if neither is, stock is unchanged.
+fn stock_target(old: i64, set: Option<i64>, delta: Option<i64>) -> i64 {
+    match (set, delta) {
+        (Some(s), _) => s,
+        (None, Some(d)) => old + d,
+        (None, None) => old,
     }
 }
 
@@ -450,6 +497,14 @@ pub enum ActionParse {
     /// A "cerrar caja" request: the operator counted `counted` pesos. The open
     /// session + expected cash are resolved server-side (see [`build`]).
     CierreCaja { counted: Decimal },
+    /// An "ajustar stock" request; `product_name` still needs DB resolution into
+    /// a record id + current stock (see [`build`]). Exactly one of `set`/`delta`
+    /// is `Some`.
+    AjusteStock {
+        product_name: String,
+        set: Option<i64>,
+        delta: Option<i64>,
+    },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -524,6 +579,16 @@ pub fn parse_action(question: &str) -> ActionParse {
             .any(|v| q.contains(v))
     {
         return parse_cierre(&q);
+    }
+
+    // Stock adjustment: "repón 40 de paracetamol", "ajusta el stock de X a 100".
+    // `parse_stock` returns `Some` only when it confidently sees a stock-adjust
+    // command (verb + product + amount); otherwise `None`, so the read intents
+    // StockProducto ("stock de X") and StockBajo ("qué tengo que reponer") are
+    // left untouched. Before the price branch ("baja el stock" vs "baja el
+    // precio") since it is gated on the word "stock".
+    if let Some(parsed) = parse_stock(&q) {
+        return parsed;
     }
 
     // Price adjustment BEFORE the create branches: a price verb + "precio" is a
@@ -665,6 +730,160 @@ fn parse_producto(q: &str) -> ActionParse {
         return hint;
     }
     ActionParse::Producto { name, price, stock }
+}
+
+/// Try to read a stock-adjust command. Returns `None` (→ read path) unless the
+/// text confidently carries a stock-adjust verb; `Some(Incomplete)` when the
+/// verb is present but the product/amount is missing; `Some(AjusteStock)` when
+/// complete. Forms covered: "repón 40 de <p>", "descuenta 5 de <p>", "ajusta el
+/// stock de <p> a 100", "deja el stock de <p> en 100".
+fn parse_stock(q: &str) -> Option<ActionParse> {
+    // Reposición-family verbs imply a stock add on their own (no "stock" word
+    // needed). Note "repon" is NOT a substring of "reposicion" (s ≠ n), so the
+    // read noun "reposición" never trips this.
+    const REPO: &[&str] = &["repon", "repón", "repone", "reponer", "repongo", "repuse"];
+    // Generic add/sub/set verbs need a stock cue to avoid colliding with the
+    // create ("agrega un cliente") and price ("ajusta el precio") branches.
+    const ADD: &[&str] = &["suma", "sumar", "agrega", "agregar", "ingresa", "ingresar"];
+    const SUB: &[&str] = &[
+        "descuenta",
+        "descontar",
+        "resta",
+        "restar",
+        "quita",
+        "quitar",
+        "merma",
+        "mermar",
+    ];
+    const SET: &[&str] = &[
+        "ajusta",
+        "ajustar",
+        "corrige",
+        "corregir",
+        "deja",
+        "dejar",
+        "fija",
+        "fijar",
+        "establece",
+        "establecer",
+    ];
+    // A create request ("agrega/ingresa un producto/cliente …") overlaps the
+    // generic add verbs — it is a create, never a stock adjust. Bail so the
+    // create branches downstream own it.
+    if CREATE_VERBS.iter().any(|v| q.contains(v))
+        && (q.contains("producto") || q.contains("cliente") || q.contains("gasto"))
+    {
+        return None;
+    }
+    let stock_word = q.contains("stock") || q.contains("inventario");
+    let has_repo = REPO.iter().any(|v| q.contains(v));
+    let has_add = has_repo || (ADD.iter().any(|v| q.contains(v)) && stock_word);
+    let has_sub = SUB.iter().any(|v| q.contains(v)) && (stock_word || q.contains(" de "));
+    let has_set = SET.iter().any(|v| q.contains(v)) && stock_word;
+    if !(has_add || has_sub || has_set) {
+        return None;
+    }
+    // Never steal a read question ("qué tengo que reponer", "cuánto stock…").
+    if q.starts_with("que ")
+        || q.starts_with("cuanto")
+        || q.starts_with("cual")
+        || q.contains("tengo que repon")
+        || q.contains("hay que repon")
+        || q.contains("que repon")
+        || q.contains("stock bajo")
+        || q.contains("bajo stock")
+    {
+        return None;
+    }
+    let hint = ActionParse::Incomplete(
+        "Para ajustar stock dime el producto y la cantidad. Por ejemplo: «repón 40 de \
+         paracetamol» o «ajusta el stock de paracetamol a 100»."
+            .into(),
+    );
+    let Some(n) = extract_count(q) else {
+        return Some(hint);
+    };
+    let product = capture_stock_product(q);
+    if product.is_empty() {
+        return Some(hint);
+    }
+    // A set verb paired with an "a/en N" target sets the absolute level; an
+    // add/sub verb applies a signed delta.
+    if has_set && (q.contains(" a ") || q.contains(" en ")) {
+        Some(ActionParse::AjusteStock {
+            product_name: product,
+            set: Some(n),
+            delta: None,
+        })
+    } else if has_sub {
+        Some(ActionParse::AjusteStock {
+            product_name: product,
+            set: None,
+            delta: Some(-n),
+        })
+    } else {
+        Some(ActionParse::AjusteStock {
+            product_name: product,
+            set: None,
+            delta: Some(n),
+        })
+    }
+}
+
+/// First run of digits (CL thousands `.` allowed) in `q`, as a non-negative
+/// count. Sign is carried by the verb, not the number.
+fn extract_count(q: &str) -> Option<i64> {
+    let bytes = q.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            let s: String = q[start..i].chars().filter(|c| c.is_ascii_digit()).collect();
+            return s.parse::<i64>().ok();
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Capture the product name from a stock-adjust command. Prefers an explicit
+/// "stock de <product>" anchor, else the first "<…> de <product>" tail. Strips a
+/// leading article and cuts at the first digit or stock connector.
+fn capture_stock_product(q: &str) -> String {
+    for a in ["stock de ", "stock del ", "stock a ", "stock para "] {
+        if let Some(p) = q.find(a) {
+            return clean_stock_name(&q[p + a.len()..]);
+        }
+    }
+    if let Some(p) = q.find(" de ") {
+        let name = clean_stock_name(&q[p + 4..]);
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    String::new()
+}
+
+/// Strip a leading article and cut at the first digit or amount connector.
+fn clean_stock_name(s: &str) -> String {
+    let mut t = s.trim();
+    for art in ["el ", "la ", "los ", "las ", "un ", "una ", "producto "] {
+        if let Some(x) = t.strip_prefix(art) {
+            t = x.trim();
+        }
+    }
+    let cut = t.find(|c: char| c.is_ascii_digit()).unwrap_or(t.len());
+    let mut head = t[..cut].trim();
+    for conn in [" a", " en", " a $", " por", " con", " hasta"] {
+        if let Some(x) = head.strip_suffix(conn) {
+            head = x.trim();
+            break;
+        }
+    }
+    strip_trailing_punct(head).trim().to_string()
 }
 
 fn parse_cierre(q: &str) -> ActionParse {
@@ -1056,6 +1275,50 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 counted,
             }))
         }
+        ActionParse::AjusteStock {
+            product_name,
+            set,
+            delta,
+        } => {
+            use domain::catalog::model::ProductFilters;
+            use domain::catalog::service as catalog;
+            let products = catalog::list_products(
+                db,
+                tenant,
+                ProductFilters {
+                    search: Some(product_name.clone()),
+                    limit: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            let Some(p) = pick_product(&products, &product_name) else {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré ningún producto que coincida con «{product_name}». \
+                     Revisa el nombre o créalo primero."
+                )));
+            };
+            let new_stock = stock_target(p.stock, set, delta);
+            if new_stock == p.stock {
+                return Ok(BuildOutcome::Reject(format!(
+                    "El stock de {} ya está en {} unidades; no hay nada que ajustar.",
+                    p.name, p.stock
+                )));
+            }
+            if new_stock < 0 {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No puedo dejar el stock de {} en {}: quedaría negativo (hoy tiene {}).",
+                    p.name, new_stock, p.stock
+                )));
+            }
+            Ok(BuildOutcome::Ready(Action::AjustarStock {
+                product_id: p.id.clone(),
+                product_name: p.name.clone(),
+                old_stock: p.stock,
+                set,
+                delta,
+            }))
+        }
     }
 }
 
@@ -1313,6 +1576,43 @@ pub async fn execute(
                 }),
             }
         }
+        Action::AjustarStock {
+            product_id,
+            product_name: _,
+            old_stock,
+            set,
+            delta,
+        } => {
+            use domain::inventory::model::AdjustMovement;
+            use domain::inventory::service as inventory;
+            let actor_s = actor.map(|t| t.to_string());
+            let (_mv, prod) = inventory::adjust(
+                db,
+                tenant,
+                AdjustMovement {
+                    product: product_id,
+                    set,
+                    delta,
+                    reason: "Ajuste registrado por el agente".into(),
+                    r#ref: None,
+                },
+                actor_s.as_deref(),
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!(
+                    "Stock de {} ajustado: de {} a {} unidades.",
+                    prod.name, old_stock, prod.stock
+                ),
+                data: serde_json::json!({
+                    "id": prod.id,
+                    "name": prod.name,
+                    "old_stock": old_stock,
+                    "new_stock": prod.stock,
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -1431,6 +1731,96 @@ mod tests {
         // write. The write path must never steal it.
         assert_eq!(parse_action("cuánto hay en caja"), ActionParse::NotAnAction);
         assert_eq!(parse_action("efectivo en caja"), ActionParse::NotAnAction);
+    }
+
+    #[test]
+    fn parse_stock_delta_add() {
+        match parse_action("repón 40 de paracetamol") {
+            ActionParse::AjusteStock {
+                product_name,
+                set,
+                delta,
+            } => {
+                assert_eq!(product_name, "paracetamol");
+                assert_eq!(set, None);
+                assert_eq!(delta, Some(40));
+            }
+            other => panic!("expected AjusteStock add, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_stock_delta_sub() {
+        match parse_action("descuenta 5 de paracetamol") {
+            ActionParse::AjusteStock { set, delta, .. } => {
+                assert_eq!(set, None);
+                assert_eq!(delta, Some(-5));
+            }
+            other => panic!("expected AjusteStock sub, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_stock_set_absolute() {
+        match parse_action("ajusta el stock de paracetamol a 100") {
+            ActionParse::AjusteStock {
+                product_name,
+                set,
+                delta,
+            } => {
+                assert_eq!(product_name, "paracetamol");
+                assert_eq!(set, Some(100));
+                assert_eq!(delta, None);
+            }
+            other => panic!("expected AjusteStock set, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_action("deja el stock de ibuprofeno en 50"),
+            ActionParse::AjusteStock { set: Some(50), .. }
+        ));
+    }
+
+    #[test]
+    fn parse_stock_without_amount_is_incomplete() {
+        assert!(matches!(
+            parse_action("repón paracetamol"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn read_stock_questions_are_not_actions() {
+        // These belong to the read agent (StockProducto / StockBajo), never a
+        // write — the adjust path must never steal them.
+        assert_eq!(
+            parse_action("stock de paracetamol"),
+            ActionParse::NotAnAction
+        );
+        assert_eq!(
+            parse_action("qué tengo que reponer"),
+            ActionParse::NotAnAction
+        );
+        assert_eq!(
+            parse_action("productos con stock bajo"),
+            ActionParse::NotAnAction
+        );
+        assert_eq!(
+            parse_action("cuánto stock hay de paracetamol"),
+            ActionParse::NotAnAction
+        );
+    }
+
+    #[test]
+    fn create_and_price_not_stolen_by_stock() {
+        // "agrega un cliente" stays a create; "ajusta el precio" stays a reprice.
+        assert!(matches!(
+            parse_action("agrega un cliente Juan Pérez"),
+            ActionParse::Cliente { .. }
+        ));
+        assert!(matches!(
+            parse_action("ajusta el precio de paracetamol a $1500"),
+            ActionParse::AjustePrecio { .. }
+        ));
     }
 
     #[test]
