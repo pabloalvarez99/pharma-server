@@ -36,6 +36,7 @@ impl AssistProvider for Deterministic {
             Intent::VentasAyer => ventas(q.db, q.tenant, &q.intent, yesterday_range()).await,
             Intent::VentasMes => ventas(q.db, q.tenant, &q.intent, month_range()).await,
             Intent::VentasMesPasado => ventas(q.db, q.tenant, &q.intent, last_month_range()).await,
+            Intent::VentasSemana => ventas(q.db, q.tenant, &q.intent, week_range()).await,
             Intent::ComparativaDia => {
                 comparativa(q.db, q.tenant, &q.intent, today_range(), yesterday_range()).await
             }
@@ -88,6 +89,7 @@ async fn ventas(
     let (periodo, past) = match intent {
         Intent::VentasMes => ("este mes", false),
         Intent::VentasMesPasado => ("el mes pasado", true),
+        Intent::VentasSemana => ("esta semana", false),
         Intent::VentasAyer => ("ayer", true),
         _ => ("hoy", false),
     };
@@ -1055,6 +1057,20 @@ fn yesterday_range() -> SalesReportFilters {
     SalesReportFilters {
         from: Some(from),
         to: Some(to),
+    }
+}
+
+/// `[from, to]` covering the last 7 days (this week) up to now, in UTC.
+fn week_range() -> SalesReportFilters {
+    let now = Utc::now();
+    let d = (now - chrono::Duration::days(6)).date_naive();
+    let from = Utc
+        .with_ymd_and_hms(d.year(), d.month(), d.day(), 0, 0, 0)
+        .single()
+        .unwrap_or(now);
+    SalesReportFilters {
+        from: Some(from),
+        to: Some(now),
     }
 }
 
