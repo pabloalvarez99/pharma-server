@@ -135,6 +135,14 @@ pub enum Action {
     /// `domain::cash_register::open_session` (per-cashier; rejects if the user
     /// already has an open drawer). Pairs with [`Action::CerrarCaja`].
     AbrirCaja { opening_cash: Decimal },
+    /// Register a new supplier — reuses `domain::purchasing::create_supplier`.
+    /// Unblocks the OC flow (`CrearOrdenCompraDraft` rejects unknown suppliers).
+    CrearProveedor {
+        name: String,
+        rut: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+    },
 }
 
 impl Action {
@@ -150,6 +158,7 @@ impl Action {
             Action::AjustarStock { .. } => "ajustar_stock",
             Action::RecibirOrdenCompra { .. } => "recibir_orden_compra",
             Action::AbrirCaja { .. } => "abrir_caja",
+            Action::CrearProveedor { .. } => "crear_proveedor",
         }
     }
 
@@ -234,6 +243,10 @@ impl Action {
                 "Abrir la caja con un fondo inicial de {}.",
                 clp(*opening_cash),
             ),
+            Action::CrearProveedor { name, rut, .. } => match rut {
+                Some(r) => format!("Registrar al proveedor «{name}» (RUT {r})."),
+                None => format!("Registrar al proveedor «{name}»."),
+            },
         }
     }
 
@@ -329,6 +342,17 @@ impl Action {
             }),
             Action::AbrirCaja { opening_cash } => serde_json::json!({
                 "opening_cash": opening_cash.to_string(),
+            }),
+            Action::CrearProveedor {
+                name,
+                rut,
+                phone,
+                email,
+            } => serde_json::json!({
+                "name": name,
+                "rut": rut,
+                "phone": phone,
+                "email": email,
             }),
         }
     }
@@ -554,6 +578,13 @@ pub enum ActionParse {
     RecibirOc { supplier_name: Option<String> },
     /// An "abrir caja" request with the starting float. No DB resolution needed.
     AperturaCaja { opening_cash: Decimal },
+    /// A "crear proveedor" request with the text-derivable fields.
+    Proveedor {
+        name: String,
+        rut: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+    },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -677,6 +708,13 @@ pub fn parse_action(question: &str) -> ActionParse {
         return parse_gasto(&q);
     }
 
+    // New supplier: create verb + "proveedor". Before "cliente" is irrelevant
+    // (distinct word). The OC branch above already claimed "orden de compra …
+    // proveedor X", so this only fires for a bare "crea el proveedor X".
+    if has_create && q.contains("proveedor") {
+        return parse_proveedor(&q);
+    }
+
     // New customer: create verb + "cliente". Read intents ("mejores clientes",
     // "cuántos clientes tengo") carry no create verb → fall through to the
     // read agent.
@@ -720,6 +758,50 @@ const CLIENTE_FIELD_MARKERS: &[&str] = &[
     " mail ",
     " con ",
 ];
+
+/// Mirror of [`parse_cliente`] for suppliers: captures the name after
+/// "proveedor", then optional rut/phone/email by the same field markers.
+fn parse_proveedor(q: &str) -> ActionParse {
+    let hint = ActionParse::Incomplete(
+        "Para crear un proveedor dime su nombre. Por ejemplo: «crea el proveedor Farmaltda \
+         rut 76.123.456-7»."
+            .into(),
+    );
+    let Some((_, after)) = q.split_once("proveedor") else {
+        return hint;
+    };
+    let mut rest = after.trim();
+    for lead in [
+        "llamado ",
+        "llamada ",
+        "de nombre ",
+        "nombre ",
+        "nuevo ",
+        "nueva ",
+        ": ",
+    ] {
+        if let Some(s) = rest.strip_prefix(lead) {
+            rest = s.trim();
+        }
+    }
+    let scan = format!(" {rest}");
+    let mut name_end = scan.len();
+    for m in CLIENTE_FIELD_MARKERS {
+        if let Some(p) = scan.find(m) {
+            name_end = name_end.min(p);
+        }
+    }
+    let name = titlecase(strip_trailing_punct(scan[..name_end].trim()).trim());
+    if name.is_empty() {
+        return hint;
+    }
+    ActionParse::Proveedor {
+        name,
+        rut: token_after(&scan, &[" rut "]).map(|s| s.to_uppercase()),
+        phone: token_after(&scan, &[" telefono ", " fono ", " celular ", " cel "]),
+        email: token_after(&scan, &[" email ", " correo ", " mail ", " e-mail "]),
+    }
+}
 
 fn parse_cliente(q: &str) -> ActionParse {
     let hint = ActionParse::Incomplete(
@@ -1512,6 +1594,17 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
         ActionParse::AperturaCaja { opening_cash } => {
             Ok(BuildOutcome::Ready(Action::AbrirCaja { opening_cash }))
         }
+        ActionParse::Proveedor {
+            name,
+            rut,
+            phone,
+            email,
+        } => Ok(BuildOutcome::Ready(Action::CrearProveedor {
+            name,
+            rut,
+            phone,
+            email,
+        })),
     }
 }
 
@@ -1865,6 +1958,37 @@ pub async fn execute(
                 }),
             }
         }
+        Action::CrearProveedor {
+            name,
+            rut,
+            phone,
+            email,
+        } => {
+            use domain::purchasing::model::NewSupplier;
+            use domain::purchasing::service as purchasing;
+            let dto = purchasing::create_supplier(
+                db,
+                tenant,
+                NewSupplier {
+                    name,
+                    rut,
+                    contact_name: None,
+                    contact_email: email,
+                    contact_phone: phone,
+                    default_invoice_format: None,
+                },
+            )
+            .await?;
+            ActionOutcome {
+                action: label,
+                text: format!("Proveedor «{}» registrado.", dto.name),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "name": dto.name,
+                    "rut": dto.rut,
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -2152,6 +2276,48 @@ mod tests {
             ActionParse::Oc { .. } => {}
             other => panic!("expected Oc create, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_proveedor_name_and_rut() {
+        match parse_action("crea el proveedor Farmaltda rut 76.123.456-7") {
+            ActionParse::Proveedor { name, rut, .. } => {
+                assert_eq!(name, "Farmaltda");
+                assert_eq!(rut.as_deref(), Some("76.123.456-7"));
+            }
+            other => panic!("expected Proveedor, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_action("crea un proveedor Droguería Sur"),
+            ActionParse::Proveedor { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_proveedor_without_name_is_incomplete() {
+        assert!(matches!(
+            parse_action("crea un proveedor"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn proveedor_vs_oc_and_receive() {
+        // Creating an OC to a supplier is an OC, not a CrearProveedor.
+        match parse_action("crea una orden de compra de 5 ibuprofeno a Farmaltda a $300") {
+            ActionParse::Oc { .. } => {}
+            other => panic!("expected Oc, got {other:?}"),
+        }
+        // Receiving from a supplier is a receive, not a CrearProveedor.
+        assert!(matches!(
+            parse_action("recibe la oc del proveedor abcfarma"),
+            ActionParse::RecibirOc { .. }
+        ));
+        // The read "mejores proveedores" carries no create verb → not an action.
+        assert_eq!(
+            parse_action("cuántos proveedores tengo"),
+            ActionParse::NotAnAction
+        );
     }
 
     #[test]
