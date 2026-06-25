@@ -17,6 +17,8 @@ use domain::expenses::model::{
 };
 use domain::expenses::service as reports;
 use domain::inventory::service as inventory;
+use domain::prescriptions::model::PrescriptionFilters;
+use domain::prescriptions::service as prescriptions;
 use domain::DomainResult;
 
 use crate::intent::Intent;
@@ -55,6 +57,7 @@ impl AssistProvider for Deterministic {
             Intent::GastosMes => gastos_mes(q.db, q.tenant, &q.intent).await,
             Intent::StockBajo => stock_bajo(q.db, q.tenant, &q.intent).await,
             Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &q.intent).await,
+            Intent::ResumenDia => resumen_dia(q.db, q.tenant, &q.intent).await,
             Intent::Ayuda => Ok(ayuda(&q.intent)),
             Intent::Unknown => Ok(unknown(&q.intent)),
         }
@@ -370,6 +373,141 @@ async fn resumen_inventario(db: &Db, tenant: &Thing, intent: &Intent) -> DomainR
         "out_of_stock": s.out_of_stock,
         "value": s.inventory_value.to_string(),
     })))
+}
+
+/// The RutAgent daily brief — one ask, many domains. Composes existing
+/// read-only domain services into a single morning summary spanning Business
+/// (sales, cash drawer, reorder, expiry) and Health (controlled-drug ledger,
+/// Ley 20.000). The Health line is data-driven: a non-pharmacy tenant simply
+/// has no controlled entries, so the same brief works for every rubro without
+/// hard-coding the vertical (RutAgent, ADR-0016).
+async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    // Business — yesterday's sales.
+    let (orders, rev, _cash, _card) = sum_sales(db, tenant, yesterday_range()).await?;
+
+    // Business — open cash drawer, if any.
+    let open = caja::list_sessions(
+        db,
+        tenant,
+        SessionFilters {
+            status: Some("open".to_string()),
+            user: None,
+            limit: Some(1),
+            offset: None,
+        },
+    )
+    .await?;
+    let caja_line: Option<(String, Decimal)> = if let Some(session) = open.into_iter().next() {
+        let (s, _, _, _, expected) = caja::compute_summary(db, tenant, &session.id).await?;
+        Some((s.register_name, expected))
+    } else {
+        None
+    };
+
+    // Business — reorder suggestions (low stock).
+    let reorder = inventory::reorder_suggestions(db, tenant).await?;
+
+    // Business — lots expiring within 7 days (for pharmacy, meds about to expire).
+    let expiry = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(7) }).await?;
+    let expired = expiry.iter().filter(|r| r.expired).count();
+
+    // Health (Ley 20.000) — controlled prescriptions dispensed month-to-date.
+    // Best-effort: never let the Health read break the Business brief.
+    let mr = month_range();
+    let controlados = prescriptions::list_controlled(
+        db,
+        tenant,
+        PrescriptionFilters {
+            from: mr.from,
+            to: mr.to,
+            limit: Some(1000),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap_or_default();
+
+    // --- prose: one bullet per domain section ---
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(if orders == 0 {
+        "Ayer no registraste ventas.".to_string()
+    } else {
+        format!(
+            "Ayer vendiste {} {} por {}.",
+            orders,
+            plural(orders, "venta", "ventas"),
+            clp(rev)
+        )
+    });
+    lines.push(match &caja_line {
+        Some((reg, expected)) => format!("Caja «{reg}»: deberían haber {}.", clp(*expected)),
+        None => "No hay caja abierta.".to_string(),
+    });
+    lines.push(if reorder.rows.is_empty() {
+        "Reposición: todo sobre el mínimo. 👍".to_string()
+    } else {
+        let top: Vec<String> = reorder
+            .rows
+            .iter()
+            .take(3)
+            .map(|r| format!("{} (+{})", r.name, r.suggested_qty))
+            .collect();
+        format!(
+            "Reposición: {} {} bajo el mínimo ({}).",
+            reorder.rows.len(),
+            plural(reorder.rows.len() as i64, "producto", "productos"),
+            top.join(", ")
+        )
+    });
+    lines.push(if expiry.is_empty() {
+        "Por vencer (7 días): nada. 👍".to_string()
+    } else if expired > 0 {
+        format!(
+            "Por vencer (7 días): {} {} ({} ya {}).",
+            expiry.len(),
+            plural(expiry.len() as i64, "lote", "lotes"),
+            expired,
+            plural(expired as i64, "vencido", "vencidos")
+        )
+    } else {
+        format!(
+            "Por vencer (7 días): {} {}.",
+            expiry.len(),
+            plural(expiry.len() as i64, "lote", "lotes")
+        )
+    });
+    if !controlados.is_empty() {
+        lines.push(format!(
+            "Controlados (mes): {} {} en el libro (Ley 20.000).",
+            controlados.len(),
+            plural(controlados.len() as i64, "receta", "recetas")
+        ));
+    }
+
+    let text = format!(
+        "Buenos días. Tu resumen para hoy:\n• {}",
+        lines.join("\n• ")
+    );
+
+    let data = serde_json::json!({
+        "ventas_ayer": { "orders": orders, "revenue": rev.to_string() },
+        "caja": match &caja_line {
+            Some((reg, expected)) => serde_json::json!({
+                "open": true, "register": reg, "expected": expected.to_string(),
+            }),
+            None => serde_json::json!({ "open": false }),
+        },
+        "reposicion": {
+            "count": reorder.rows.len(),
+            "items": reorder.rows.iter().take(5).map(|r| serde_json::json!({
+                "name": r.name, "stock": r.stock, "suggested_qty": r.suggested_qty,
+            })).collect::<Vec<_>>(),
+        },
+        "por_vencer": { "count": expiry.len(), "expired": expired, "days": 7 },
+        "controlados_mes": { "count": controlados.len() },
+    });
+
+    Ok(Answer::new(intent, text).with_data(data))
 }
 
 /// Sum the daily-sales rollup over `range` into `(orders, revenue, cash, card)`.
@@ -721,7 +859,9 @@ async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
 fn ayuda(intent: &Intent) -> Answer {
     Answer::new(
         intent,
-        "Puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «ventas de ayer», \
+        "Pídeme «prepárame el día» y te doy el resumen de la mañana de un vistazo \
+         (ventas de ayer, caja, qué reponer, qué se vence y controlados del mes). \
+         También puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «ventas de ayer», \
          «ventas de hoy vs ayer», «ventas del mes pasado», «ventas por método de pago», \
          «gastos del mes», «mejores clientes», «¿cuántos clientes tengo?», «busca el \
          cliente Juan», «precio de ibuprofeno», «margen de paracetamol», «¿qué se vence \
