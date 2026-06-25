@@ -66,6 +66,10 @@ pub enum Action {
     CrearOrdenCompraDraft {
         supplier_id: String,
         supplier_name: String,
+        /// Catalogued product record id when the line name matches a product
+        /// exactly (so a later receipt moves stock); `None` for an off-catalog
+        /// (free-text) line. Resolved server-side at propose time (see [`build`]).
+        product_id: Option<String>,
         product_name: String,
         quantity: i64,
         unit_cost: Decimal,
@@ -242,12 +246,14 @@ impl Action {
             Action::CrearOrdenCompraDraft {
                 supplier_id,
                 supplier_name,
+                product_id,
                 product_name,
                 quantity,
                 unit_cost,
             } => serde_json::json!({
                 "supplier_id": supplier_id,
                 "supplier_name": supplier_name,
+                "product_id": product_id,
                 "product_name": product_name,
                 "quantity": quantity,
                 "unit_cost": unit_cost.to_string(),
@@ -1262,9 +1268,33 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                      vuelve a pedírmelo."
                 )));
             };
+            // Link the line to a catalogued product only on an EXACT (case-
+            // insensitive) name match, so a later receipt bumps the right
+            // product's stock. Anything else stays a free-text line (off-catalog
+            // buy) — never guess a fuzzy product and move the wrong stock.
+            let product_id = {
+                use domain::catalog::model::ProductFilters;
+                use domain::catalog::service as catalog;
+                let products = catalog::list_products(
+                    db,
+                    tenant,
+                    ProductFilters {
+                        search: Some(product_name.clone()),
+                        limit: Some(5),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                let want = product_name.to_lowercase();
+                products
+                    .iter()
+                    .find(|p| p.name.to_lowercase() == want)
+                    .map(|p| p.id.clone())
+            };
             Ok(BuildOutcome::Ready(Action::CrearOrdenCompraDraft {
                 supplier_id: sup.id.clone(),
                 supplier_name: sup.name.clone(),
+                product_id,
                 product_name,
                 quantity,
                 unit_cost,
@@ -1525,6 +1555,7 @@ pub async fn execute(
         Action::CrearOrdenCompraDraft {
             supplier_id,
             supplier_name,
+            product_id,
             product_name,
             quantity,
             unit_cost,
@@ -1540,7 +1571,7 @@ pub async fn execute(
                     notes: Some("Borrador creado por el agente".into()),
                     external_ref: None,
                     items: vec![NewPurchaseOrderItem {
-                        product: None,
+                        product: product_id,
                         product_name: product_name.clone(),
                         quantity,
                         unit_cost,
