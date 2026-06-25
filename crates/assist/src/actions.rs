@@ -117,6 +117,16 @@ pub enum Action {
         set: Option<i64>,
         delta: Option<i64>,
     },
+    /// Receive a `draft` purchase order — reuses
+    /// `domain::purchasing::receive_purchase_order` (one-shot: bumps stock +
+    /// recomputes WAC cost for catalogued lines, flips the PO to `received`).
+    /// The PO is resolved server-side at propose time (see [`build`]);
+    /// `items`/`total` are for the confirmation prose only.
+    RecibirOrdenCompra {
+        po_id: String,
+        items: i64,
+        total: Decimal,
+    },
 }
 
 impl Action {
@@ -130,6 +140,7 @@ impl Action {
             Action::AjustarPrecio { .. } => "ajustar_precio",
             Action::CerrarCaja { .. } => "cerrar_caja",
             Action::AjustarStock { .. } => "ajustar_stock",
+            Action::RecibirOrdenCompra { .. } => "recibir_orden_compra",
         }
     }
 
@@ -203,6 +214,12 @@ impl Action {
                 product_name,
                 old_stock,
                 stock_target(*old_stock, *set, *delta),
+            ),
+            Action::RecibirOrdenCompra { items, total, .. } => format!(
+                "Recibir una orden de compra ({} {}) por {}: sube el stock y la deja como recibida.",
+                items,
+                if *items == 1 { "producto" } else { "productos" },
+                clp(*total),
             ),
         }
     }
@@ -285,6 +302,15 @@ impl Action {
                 "old_stock": old_stock,
                 "set": set,
                 "delta": delta,
+            }),
+            Action::RecibirOrdenCompra {
+                po_id,
+                items,
+                total,
+            } => serde_json::json!({
+                "po_id": po_id,
+                "items": items,
+                "total": total.to_string(),
             }),
         }
     }
@@ -505,6 +531,9 @@ pub enum ActionParse {
         set: Option<i64>,
         delta: Option<i64>,
     },
+    /// A "recibir orden de compra" request. The concrete draft PO (optionally
+    /// scoped to `supplier_name`) is resolved server-side (see [`build`]).
+    RecibirOc { supplier_name: Option<String> },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -561,6 +590,21 @@ pub fn parse_action(question: &str) -> ActionParse {
     let q = normalize(question);
     let has_create = CREATE_VERBS.iter().any(|v| q.contains(v));
     let has_price_verb = PRICE_VERBS.iter().any(|v| q.contains(v));
+
+    // Goods receipt of a draft PO. BEFORE the OC create branch, which also
+    // matches "orden de compra": "recibe la orden de compra" is a receive, not a
+    // create. Gated on a receive verb + a PO noun, never on a question.
+    if ["recib", "recepcion"].iter().any(|v| q.contains(v))
+        && (q.contains("orden")
+            || q.contains(" oc")
+            || q.contains("compra")
+            || q.contains("mercaderia"))
+        && !q.starts_with("que ")
+        && !q.starts_with("cuanto")
+        && !q.starts_with("cual")
+    {
+        return parse_recibe(&q);
+    }
 
     // Purchase order before everything else: "orden de compra" is unambiguous.
     if q.contains("orden de compra") || q.contains(" oc ") || q.starts_with("oc ") {
@@ -884,6 +928,32 @@ fn clean_stock_name(s: &str) -> String {
         }
     }
     strip_trailing_punct(head).trim().to_string()
+}
+
+/// Parse a goods-receipt request. Captures an optional supplier after
+/// "proveedor " or a trailing " de <name>", rejecting PO-noun noise words so
+/// "recibe la orden de compra" resolves to "the latest draft" (no supplier).
+fn parse_recibe(q: &str) -> ActionParse {
+    const NOISE: &[&str] = &[
+        "compra",
+        "compras",
+        "orden",
+        "la orden",
+        "oc",
+        "la oc",
+        "mercaderia",
+        "borrador",
+        "ultima orden",
+    ];
+    let raw = if let Some((_, r)) = q.split_once("proveedor ") {
+        Some(r)
+    } else {
+        q.rfind(" de ").map(|p| &q[p + 4..])
+    };
+    let supplier_name = raw
+        .map(|s| strip_trailing_punct(s.trim()).trim().to_string())
+        .filter(|s| !s.is_empty() && !NOISE.contains(&s.as_str()));
+    ActionParse::RecibirOc { supplier_name }
 }
 
 fn parse_cierre(q: &str) -> ActionParse {
@@ -1319,6 +1389,61 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 delta,
             }))
         }
+        ActionParse::RecibirOc { supplier_name } => {
+            use domain::purchasing::model::{PurchaseOrderFilters, SupplierFilters};
+            use domain::purchasing::service as purchasing;
+            let supplier_id = match &supplier_name {
+                Some(name) => {
+                    let sups = purchasing::list_suppliers(
+                        db,
+                        tenant,
+                        SupplierFilters {
+                            search: Some(name.clone()),
+                            active: Some(true),
+                            limit: Some(5),
+                            offset: None,
+                        },
+                    )
+                    .await?;
+                    match pick_supplier(&sups, name) {
+                        Some(s) => Some(s.id.clone()),
+                        None => {
+                            return Ok(BuildOutcome::Reject(format!(
+                                "No encontré al proveedor «{name}». Revisa el nombre."
+                            )));
+                        }
+                    }
+                }
+                None => None,
+            };
+            let drafts = purchasing::list_purchase_orders(
+                db,
+                tenant,
+                PurchaseOrderFilters {
+                    supplier: supplier_id,
+                    status: Some("draft".into()),
+                    limit: Some(50),
+                    offset: None,
+                },
+            )
+            .await?;
+            let Some(hdr) = drafts.into_iter().max_by_key(|p| p.created_at) else {
+                let scope = supplier_name
+                    .as_deref()
+                    .map(|s| format!(" de «{s}»"))
+                    .unwrap_or_default();
+                return Ok(BuildOutcome::Reject(format!(
+                    "No tienes órdenes de compra en borrador{scope} para recibir."
+                )));
+            };
+            let po = purchasing::get_purchase_order(db, tenant, &hdr.id).await?;
+            let items = po.items.iter().filter(|l| l.product.is_some()).count() as i64;
+            Ok(BuildOutcome::Ready(Action::RecibirOrdenCompra {
+                po_id: po.id,
+                items,
+                total: po.total,
+            }))
+        }
     }
 }
 
@@ -1613,6 +1738,31 @@ pub async fn execute(
                 }),
             }
         }
+        Action::RecibirOrdenCompra {
+            po_id,
+            items,
+            total,
+        } => {
+            use domain::purchasing::service as purchasing;
+            let actor_s = actor.map(|t| t.to_string());
+            let po =
+                purchasing::receive_purchase_order(db, tenant, &po_id, actor_s.as_deref()).await?;
+            let word = if items == 1 { "producto" } else { "productos" };
+            ActionOutcome {
+                action: label,
+                text: format!(
+                    "Orden de compra recibida: actualicé el stock de {items} {word} y la \
+                     dejé como {}.",
+                    po.status
+                ),
+                data: serde_json::json!({
+                    "id": po.id,
+                    "status": po.status,
+                    "items": items,
+                    "total": total.to_string(),
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -1821,6 +1971,47 @@ mod tests {
             parse_action("ajusta el precio de paracetamol a $1500"),
             ActionParse::AjustePrecio { .. }
         ));
+    }
+
+    #[test]
+    fn parse_recibe_latest_draft() {
+        for q in [
+            "recibe la orden de compra",
+            "recibe la última orden de compra",
+            "recepciona la oc",
+        ] {
+            match parse_action(q) {
+                ActionParse::RecibirOc { supplier_name } => {
+                    assert_eq!(supplier_name, None, "q={q}")
+                }
+                other => panic!("expected RecibirOc for {q:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_recibe_with_supplier() {
+        match parse_action("recibe la orden de compra de Farmaltda") {
+            ActionParse::RecibirOc { supplier_name } => {
+                assert_eq!(supplier_name.as_deref(), Some("farmaltda"))
+            }
+            other => panic!("expected RecibirOc supplier, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_action("recibe la oc del proveedor abcfarma"),
+            ActionParse::RecibirOc {
+                supplier_name: Some(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn create_oc_not_stolen_by_receive() {
+        // "crea una orden de compra …" stays a create, not a receive.
+        match parse_action("crea una orden de compra de 10 paracetamol a Farmaltda a $500") {
+            ActionParse::Oc { .. } => {}
+            other => panic!("expected Oc create, got {other:?}"),
+        }
     }
 
     #[test]
