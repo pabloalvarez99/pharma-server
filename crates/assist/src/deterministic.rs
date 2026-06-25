@@ -869,8 +869,8 @@ fn ayuda(intent: &Intent) -> Answer {
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». También \
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea un producto Aspirina a $1000», «cambia el precio de \
-         paracetamol a $1500» o «crea una orden de compra de 10 paracetamol a Farmaltda \
-         a $500».",
+         paracetamol a $1500», «cierra la caja con $50.000» o «crea una orden de compra \
+         de 10 paracetamol a Farmaltda a $500».",
     )
 }
 

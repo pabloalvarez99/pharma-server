@@ -96,6 +96,16 @@ pub enum Action {
         old_price: Decimal,
         new_price: Decimal,
     },
+    /// Close the open cash drawer with the counted cash — reuses
+    /// `domain::cash_register::close_session`. The open session + `expected`
+    /// cash are resolved server-side at propose time (see [`build`]); `expected`
+    /// is for the confirmation prose only.
+    CerrarCaja {
+        session_id: String,
+        register_name: String,
+        expected: Decimal,
+        counted: Decimal,
+    },
 }
 
 impl Action {
@@ -107,6 +117,7 @@ impl Action {
             Action::CrearCliente { .. } => "crear_cliente",
             Action::CrearProductoRapido { .. } => "crear_producto_rapido",
             Action::AjustarPrecio { .. } => "ajustar_precio",
+            Action::CerrarCaja { .. } => "cerrar_caja",
         }
     }
 
@@ -156,6 +167,18 @@ impl Action {
                 product_name,
                 clp(*old_price),
                 clp(*new_price),
+            ),
+            Action::CerrarCaja {
+                register_name,
+                expected,
+                counted,
+                ..
+            } => format!(
+                "Cerrar la caja «{}» con {} contados (esperado {}, {}).",
+                register_name,
+                clp(*counted),
+                clp(*expected),
+                diff_text(*counted - *expected),
             ),
         }
     }
@@ -215,7 +238,30 @@ impl Action {
                 "old_price": old_price.to_string(),
                 "new_price": new_price.to_string(),
             }),
+            Action::CerrarCaja {
+                session_id,
+                register_name,
+                expected,
+                counted,
+            } => serde_json::json!({
+                "session_id": session_id,
+                "register_name": register_name,
+                "expected": expected.to_string(),
+                "counted": counted.to_string(),
+            }),
         }
+    }
+}
+
+/// es-CL phrasing of a drawer difference (`counted − expected`): exact, surplus,
+/// or short. Shared by the proposal summary and the executed outcome.
+fn diff_text(diff: Decimal) -> String {
+    if diff.is_zero() {
+        "calza exacto".to_string()
+    } else if diff.is_sign_positive() {
+        format!("sobran {}", clp(diff))
+    } else {
+        format!("faltan {}", clp(diff.abs()))
     }
 }
 
@@ -401,6 +447,9 @@ pub enum ActionParse {
         product_name: String,
         new_price: Decimal,
     },
+    /// A "cerrar caja" request: the operator counted `counted` pesos. The open
+    /// session + expected cash are resolved server-side (see [`build`]).
+    CierreCaja { counted: Decimal },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -464,6 +513,17 @@ pub fn parse_action(question: &str) -> ActionParse {
             return ActionParse::NotAnAction;
         }
         return parse_oc(&q);
+    }
+
+    // Cash-drawer close: "cierra la caja con $50.000 contados". A distinct
+    // imperative (none of the CREATE/PRICE verbs) so it never collides with the
+    // read intent CajaActual ("cuánto hay en caja"), which carries no close verb.
+    if (q.contains("caja") || q.contains("arqueo"))
+        && ["cierra", "cerrar", "cuadra", "cuadrar", "arquea", "arquear"]
+            .iter()
+            .any(|v| q.contains(v))
+    {
+        return parse_cierre(&q);
     }
 
     // Price adjustment BEFORE the create branches: a price verb + "precio" is a
@@ -605,6 +665,17 @@ fn parse_producto(q: &str) -> ActionParse {
         return hint;
     }
     ActionParse::Producto { name, price, stock }
+}
+
+fn parse_cierre(q: &str) -> ActionParse {
+    match extract_amount(q) {
+        Some(counted) => ActionParse::CierreCaja { counted },
+        None => ActionParse::Incomplete(
+            "Para cerrar la caja dime cuánto contaste. Por ejemplo: «cierra la caja con \
+             $50.000»."
+                .into(),
+        ),
+    }
 }
 
 fn parse_ajuste(q: &str) -> ActionParse {
@@ -957,6 +1028,34 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 new_price,
             }))
         }
+        ActionParse::CierreCaja { counted } => {
+            use domain::cash_register::model::SessionFilters;
+            use domain::cash_register::service as caja;
+            let sessions = caja::list_sessions(
+                db,
+                tenant,
+                SessionFilters {
+                    status: Some("open".into()),
+                    user: None,
+                    limit: Some(1),
+                    offset: None,
+                },
+            )
+            .await?;
+            let Some(session) = sessions.into_iter().next() else {
+                return Ok(BuildOutcome::Reject(
+                    "No hay ninguna caja abierta para cerrar.".into(),
+                ));
+            };
+            let (s, _cash, _in, _out, expected) =
+                caja::compute_summary(db, tenant, &session.id).await?;
+            Ok(BuildOutcome::Ready(Action::CerrarCaja {
+                session_id: s.id,
+                register_name: s.register_name,
+                expected,
+                counted,
+            }))
+        }
     }
 }
 
@@ -1177,6 +1276,43 @@ pub async fn execute(
                 }),
             }
         }
+        Action::CerrarCaja {
+            session_id,
+            register_name,
+            expected,
+            counted,
+        } => {
+            use domain::cash_register::model::CloseSessionInput;
+            use domain::cash_register::service as caja;
+            let summary = caja::close_session(
+                db,
+                tenant,
+                &session_id,
+                CloseSessionInput {
+                    closing_cash_counted: counted,
+                    notes: Some("Cierre registrado por el agente".into()),
+                },
+            )
+            .await?;
+            let diff = counted - expected;
+            ActionOutcome {
+                action: label,
+                text: format!(
+                    "Caja «{}» cerrada: contaste {}, esperado {}; {}.",
+                    register_name,
+                    clp(counted),
+                    clp(expected),
+                    diff_text(diff),
+                ),
+                data: serde_json::json!({
+                    "id": summary.session.id,
+                    "register_name": register_name,
+                    "counted": counted.to_string(),
+                    "expected": expected.to_string(),
+                    "discrepancia": diff.to_string(),
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -1264,6 +1400,37 @@ mod tests {
             parse_action("cuánto gasté este mes"),
             ActionParse::NotAnAction
         );
+    }
+
+    #[test]
+    fn parse_cierre_extracts_counted() {
+        for q in [
+            "cierra la caja con 50000",
+            "cierra la caja con $50.000",
+            "cerrar caja, conté 50000",
+            "cuadra la caja con 50000",
+        ] {
+            match parse_action(q) {
+                ActionParse::CierreCaja { counted } => assert_eq!(counted, dec("50000"), "q={q}"),
+                other => panic!("expected CierreCaja for {q:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_cierre_without_amount_is_incomplete() {
+        assert!(matches!(
+            parse_action("cierra la caja"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn read_cash_question_is_not_an_action() {
+        // "cuánto hay en caja" has no close verb → read intent CajaActual, not a
+        // write. The write path must never steal it.
+        assert_eq!(parse_action("cuánto hay en caja"), ActionParse::NotAnAction);
+        assert_eq!(parse_action("efectivo en caja"), ActionParse::NotAnAction);
     }
 
     #[test]
