@@ -61,6 +61,10 @@ pub enum Intent {
     Controlados,
     /// Health (pharmacy) — prescriptions dispensed this month.
     RecetasMes,
+    /// Purchasing — draft purchase orders pending receipt.
+    ComprasPendientes,
+    /// Purchasing — how many suppliers the business has.
+    Proveedores,
     /// The owner asked what they can ask.
     Ayuda,
     /// Could not be classified.
@@ -95,6 +99,8 @@ impl Intent {
             Intent::ResumenDia => "resumen_dia",
             Intent::Controlados => "controlados",
             Intent::RecetasMes => "recetas_mes",
+            Intent::ComprasPendientes => "compras_pendientes",
+            Intent::Proveedores => "proveedores",
             Intent::Ayuda => "ayuda",
             Intent::Unknown => "desconocido",
         }
@@ -202,6 +208,41 @@ pub fn parse(question: &str) -> Intent {
     }
     if contains_any(&q, &["receta", "recetas"]) {
         return Intent::RecetasMes;
+    }
+
+    // Purchasing — draft POs pending receipt. Distinct from a write request:
+    // creating/receiving an OC carries a verb and is handled before the read
+    // agent. A bare "órdenes de compra pendientes" / "qué tengo que recibir" is
+    // a read. Before the supplier branch (an OC question also says "compra").
+    if (contains_any(&q, &["orden", "ordenes", "compra", "compras"])
+        && contains_any(
+            &q,
+            &[
+                "pendiente",
+                "pendientes",
+                "borrador",
+                "recibir",
+                "por recibir",
+            ],
+        ))
+        || contains_any(
+            &q,
+            &[
+                "ordenes de compra",
+                "compras pendientes",
+                "que tengo que recibir",
+                "que hay que recibir",
+                "que debo recibir",
+            ],
+        )
+    {
+        return Intent::ComprasPendientes;
+    }
+
+    // Purchasing — suppliers. A bare "proveedores" / "cuántos proveedores" read;
+    // "crea el proveedor X" is a write handled earlier (carries a create verb).
+    if contains_any(&q, &["proveedor", "proveedores", "droguería", "drogueria"]) {
+        return Intent::Proveedores;
     }
 
     // Payment-method breakdown. MUST precede both the comparative branch
@@ -709,6 +750,25 @@ mod tests {
     }
 
     #[test]
+    fn compras_pendientes_and_proveedores() {
+        for q in [
+            "órdenes de compra pendientes",
+            "compras pendientes",
+            "qué tengo que recibir",
+            "órdenes en borrador",
+        ] {
+            assert_eq!(parse(q), Intent::ComprasPendientes, "q={q}");
+        }
+        for q in [
+            "cuántos proveedores tengo",
+            "proveedores",
+            "lista de proveedores",
+        ] {
+            assert_eq!(parse(q), Intent::Proveedores, "q={q}");
+        }
+    }
+
+    #[test]
     fn unknown_is_graceful() {
         for q in ["", "   ", "cuéntame un chiste", "asdf qwer"] {
             assert_eq!(parse(q), Intent::Unknown, "q={q}");
@@ -881,6 +941,8 @@ mod tests {
         assert_eq!(Intent::ResumenDia.label(), "resumen_dia");
         assert_eq!(Intent::Controlados.label(), "controlados");
         assert_eq!(Intent::RecetasMes.label(), "recetas_mes");
+        assert_eq!(Intent::ComprasPendientes.label(), "compras_pendientes");
+        assert_eq!(Intent::Proveedores.label(), "proveedores");
         assert_eq!(Intent::Unknown.label(), "desconocido");
     }
 }
