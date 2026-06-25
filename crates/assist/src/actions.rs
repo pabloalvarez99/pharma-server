@@ -131,6 +131,11 @@ pub enum Action {
         items: i64,
         total: Decimal,
     },
+    /// Cancel a `draft` purchase order — reuses
+    /// `domain::purchasing::cancel_purchase_order` (draft → cancelled). The PO is
+    /// resolved server-side at propose time (see [`build`]); `total` is for the
+    /// confirmation prose only.
+    CancelarOrdenCompra { po_id: String, total: Decimal },
     /// Open the cash drawer with a starting float — reuses
     /// `domain::cash_register::open_session` (per-cashier; rejects if the user
     /// already has an open drawer). Pairs with [`Action::CerrarCaja`].
@@ -168,6 +173,7 @@ impl Action {
             Action::CerrarCaja { .. } => "cerrar_caja",
             Action::AjustarStock { .. } => "ajustar_stock",
             Action::RecibirOrdenCompra { .. } => "recibir_orden_compra",
+            Action::CancelarOrdenCompra { .. } => "cancelar_orden_compra",
             Action::AbrirCaja { .. } => "abrir_caja",
             Action::CrearProveedor { .. } => "crear_proveedor",
             Action::DispensarReceta { .. } => "dispensar_receta",
@@ -249,6 +255,10 @@ impl Action {
                 "Recibir una orden de compra ({} {}) por {}: sube el stock y la deja como recibida.",
                 items,
                 if *items == 1 { "producto" } else { "productos" },
+                clp(*total),
+            ),
+            Action::CancelarOrdenCompra { total, .. } => format!(
+                "Cancelar una orden de compra (borrador) por {}.",
                 clp(*total),
             ),
             Action::AbrirCaja { opening_cash } => format!(
@@ -363,6 +373,10 @@ impl Action {
             } => serde_json::json!({
                 "po_id": po_id,
                 "items": items,
+                "total": total.to_string(),
+            }),
+            Action::CancelarOrdenCompra { po_id, total } => serde_json::json!({
+                "po_id": po_id,
                 "total": total.to_string(),
             }),
             Action::AbrirCaja { opening_cash } => serde_json::json!({
@@ -612,6 +626,9 @@ pub enum ActionParse {
     /// A "recibir orden de compra" request. The concrete draft PO (optionally
     /// scoped to `supplier_name`) is resolved server-side (see [`build`]).
     RecibirOc { supplier_name: Option<String> },
+    /// A "cancelar orden de compra" request; the draft PO (optionally scoped to
+    /// `supplier_name`) is resolved server-side (see [`build`]).
+    CancelarOc { supplier_name: Option<String> },
     /// An "abrir caja" request with the starting float. No DB resolution needed.
     AperturaCaja { opening_cash: Decimal },
     /// A "crear proveedor" request with the text-derivable fields.
@@ -698,6 +715,20 @@ pub fn parse_action(question: &str) -> ActionParse {
         && !q.starts_with("cual")
     {
         return parse_recibe(&q);
+    }
+
+    // Cancel a draft PO. BEFORE the OC create branch (also matches "orden de
+    // compra"): "cancela la orden de compra" is a cancel, not a create. Gated on
+    // a cancel verb + a PO noun, never on a question.
+    if ["cancela", "cancelar", "anula", "anular"]
+        .iter()
+        .any(|v| q.contains(v))
+        && (q.contains("orden") || q.contains(" oc") || q.contains("compra"))
+        && !q.starts_with("que ")
+        && !q.starts_with("cuanto")
+        && !q.starts_with("cual")
+    {
+        return parse_cancela(&q);
     }
 
     // Purchase order before everything else: "orden de compra" is unambiguous.
@@ -1189,6 +1220,30 @@ fn parse_recibe(q: &str) -> ActionParse {
         .map(|s| strip_trailing_punct(s.trim()).trim().to_string())
         .filter(|s| !s.is_empty() && !NOISE.contains(&s.as_str()));
     ActionParse::RecibirOc { supplier_name }
+}
+
+/// Parse a PO-cancel request, capturing an optional supplier the same way
+/// [`parse_recibe`] does.
+fn parse_cancela(q: &str) -> ActionParse {
+    const NOISE: &[&str] = &[
+        "compra",
+        "compras",
+        "orden",
+        "la orden",
+        "oc",
+        "la oc",
+        "borrador",
+        "ultima orden",
+    ];
+    let raw = if let Some((_, r)) = q.split_once("proveedor ") {
+        Some(r)
+    } else {
+        q.rfind(" de ").map(|p| &q[p + 4..])
+    };
+    let supplier_name = raw
+        .map(|s| strip_trailing_punct(s.trim()).trim().to_string())
+        .filter(|s| !s.is_empty() && !NOISE.contains(&s.as_str()));
+    ActionParse::CancelarOc { supplier_name }
 }
 
 fn parse_apertura(q: &str) -> ActionParse {
@@ -1714,6 +1769,58 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 total: po.total,
             }))
         }
+        ActionParse::CancelarOc { supplier_name } => {
+            use domain::purchasing::model::{PurchaseOrderFilters, SupplierFilters};
+            use domain::purchasing::service as purchasing;
+            let supplier_id = match &supplier_name {
+                Some(name) => {
+                    let sups = purchasing::list_suppliers(
+                        db,
+                        tenant,
+                        SupplierFilters {
+                            search: Some(name.clone()),
+                            active: Some(true),
+                            limit: Some(5),
+                            offset: None,
+                        },
+                    )
+                    .await?;
+                    match pick_supplier(&sups, name) {
+                        Some(s) => Some(s.id.clone()),
+                        None => {
+                            return Ok(BuildOutcome::Reject(format!(
+                                "No encontré al proveedor «{name}». Revisa el nombre."
+                            )));
+                        }
+                    }
+                }
+                None => None,
+            };
+            let drafts = purchasing::list_purchase_orders(
+                db,
+                tenant,
+                PurchaseOrderFilters {
+                    supplier: supplier_id,
+                    status: Some("draft".into()),
+                    limit: Some(50),
+                    offset: None,
+                },
+            )
+            .await?;
+            let Some(hdr) = drafts.into_iter().max_by_key(|p| p.created_at) else {
+                let scope = supplier_name
+                    .as_deref()
+                    .map(|s| format!(" de «{s}»"))
+                    .unwrap_or_default();
+                return Ok(BuildOutcome::Reject(format!(
+                    "No tienes órdenes de compra en borrador{scope} para cancelar."
+                )));
+            };
+            Ok(BuildOutcome::Ready(Action::CancelarOrdenCompra {
+                po_id: hdr.id,
+                total: hdr.total,
+            }))
+        }
         ActionParse::AperturaCaja { opening_cash } => {
             Ok(BuildOutcome::Ready(Action::AbrirCaja { opening_cash }))
         }
@@ -2081,6 +2188,19 @@ pub async fn execute(
                     "id": po.id,
                     "status": po.status,
                     "items": items,
+                    "total": total.to_string(),
+                }),
+            }
+        }
+        Action::CancelarOrdenCompra { po_id, total } => {
+            use domain::purchasing::service as purchasing;
+            let po = purchasing::cancel_purchase_order(db, tenant, &po_id).await?;
+            ActionOutcome {
+                action: label,
+                text: format!("Orden de compra cancelada (quedó como {}).", po.status),
+                data: serde_json::json!({
+                    "id": po.id,
+                    "status": po.status,
                     "total": total.to_string(),
                 }),
             }
@@ -2474,6 +2594,41 @@ mod tests {
             ActionParse::Oc { .. } => {}
             other => panic!("expected Oc create, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_cancela_latest_draft() {
+        for q in [
+            "cancela la orden de compra",
+            "anula la última orden de compra",
+            "cancela la oc",
+        ] {
+            match parse_action(q) {
+                ActionParse::CancelarOc { supplier_name } => {
+                    assert_eq!(supplier_name, None, "q={q}")
+                }
+                other => panic!("expected CancelarOc for {q:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn cancel_vs_create_and_receive() {
+        // create stays create, receive stays receive — cancel never steals them.
+        match parse_action("crea una orden de compra de 10 paracetamol a Farmaltda a $500") {
+            ActionParse::Oc { .. } => {}
+            other => panic!("expected Oc, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_action("recibe la orden de compra"),
+            ActionParse::RecibirOc { .. }
+        ));
+        assert!(matches!(
+            parse_action("cancela la orden de compra de Farmaltda"),
+            ActionParse::CancelarOc {
+                supplier_name: Some(_)
+            }
+        ));
     }
 
     #[test]
