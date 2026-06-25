@@ -143,6 +143,17 @@ pub enum Action {
         phone: Option<String>,
         email: Option<String>,
     },
+    /// Dispense a (non-controlled) prescription — reuses
+    /// `domain::prescriptions::create_prescription` (Health, Ley 20.000 ledger).
+    /// `product_id` is resolved server-side at propose time (see [`build`]).
+    /// Controlled prescriptions are intentionally NOT created here (they require
+    /// doctor identification by law — routed to the Recetas screen).
+    DispensarReceta {
+        patient_name: String,
+        patient_rut: String,
+        product_id: Option<String>,
+        product_name: Option<String>,
+    },
 }
 
 impl Action {
@@ -159,6 +170,7 @@ impl Action {
             Action::RecibirOrdenCompra { .. } => "recibir_orden_compra",
             Action::AbrirCaja { .. } => "abrir_caja",
             Action::CrearProveedor { .. } => "crear_proveedor",
+            Action::DispensarReceta { .. } => "dispensar_receta",
         }
     }
 
@@ -246,6 +258,19 @@ impl Action {
             Action::CrearProveedor { name, rut, .. } => match rut {
                 Some(r) => format!("Registrar al proveedor «{name}» (RUT {r})."),
                 None => format!("Registrar al proveedor «{name}»."),
+            },
+            Action::DispensarReceta {
+                patient_name,
+                patient_rut,
+                product_name,
+                ..
+            } => match product_name {
+                Some(p) => format!(
+                    "Registrar la dispensación de {p} a {patient_name} (RUT {patient_rut})."
+                ),
+                None => format!(
+                    "Registrar una receta a {patient_name} (RUT {patient_rut})."
+                ),
             },
         }
     }
@@ -353,6 +378,17 @@ impl Action {
                 "rut": rut,
                 "phone": phone,
                 "email": email,
+            }),
+            Action::DispensarReceta {
+                patient_name,
+                patient_rut,
+                product_id,
+                product_name,
+            } => serde_json::json!({
+                "patient_name": patient_name,
+                "patient_rut": patient_rut,
+                "product_id": product_id,
+                "product_name": product_name,
             }),
         }
     }
@@ -585,6 +621,13 @@ pub enum ActionParse {
         phone: Option<String>,
         email: Option<String>,
     },
+    /// A "dispensar receta" request (non-controlled). `product_name` still needs
+    /// DB resolution into a record id (see [`build`]).
+    Receta {
+        patient_name: String,
+        patient_rut: String,
+        product_name: Option<String>,
+    },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -708,6 +751,13 @@ pub fn parse_action(question: &str) -> ActionParse {
         return parse_gasto(&q);
     }
 
+    // Dispense a prescription (Health): a create/dispense verb + "receta". The
+    // read intents RecetasMes/Controlados carry no such verb → they fall through
+    // to the read agent. "controlada" is rejected here (needs doctor by law).
+    if q.contains("receta") && (has_create || q.contains("dispensa")) {
+        return parse_receta(&q);
+    }
+
     // New supplier: create verb + "proveedor". Before "cliente" is irrelevant
     // (distinct word). The OC branch above already claimed "orden de compra …
     // proveedor X", so this only fires for a bare "crea el proveedor X".
@@ -758,6 +808,79 @@ const CLIENTE_FIELD_MARKERS: &[&str] = &[
     " mail ",
     " con ",
 ];
+
+/// Parse a (non-controlled) prescription dispensing: patient name + RUT
+/// (required) and an optional product. Form: "registra una receta a <patient>
+/// rut <prut> [de <product>]". Controlled prescriptions are refused here — they
+/// require doctor identification (Ley 20.000), routed to the Recetas screen.
+fn parse_receta(q: &str) -> ActionParse {
+    if q.contains("controlad") {
+        return ActionParse::Incomplete(
+            "Las recetas controladas requieren registrar al médico (Ley 20.000); hazlo en \
+             la pantalla de Recetas."
+                .into(),
+        );
+    }
+    let hint = ActionParse::Incomplete(
+        "Para registrar una receta dime el paciente y su RUT. Por ejemplo: «registra una \
+         receta a Juan Pérez rut 12.345.678-9 de paracetamol»."
+            .into(),
+    );
+    let Some((_, after)) = q.split_once("receta") else {
+        return hint;
+    };
+    let mut rest = after.trim();
+    for lead in [
+        "a ",
+        "para ",
+        "al paciente ",
+        "del paciente ",
+        "de la paciente ",
+        "paciente ",
+        "de nombre ",
+        ": ",
+    ] {
+        if let Some(s) = rest.strip_prefix(lead) {
+            rest = s.trim();
+            break;
+        }
+    }
+    let scan = format!(" {rest}");
+    // The patient RUT is the anchor: the name runs up to " rut ".
+    let Some(rut_pos) = scan.find(" rut ") else {
+        return ActionParse::Incomplete(
+            "¿Cuál es el RUT del paciente? Por ejemplo: «… rut 12.345.678-9».".into(),
+        );
+    };
+    let patient_name = titlecase(strip_trailing_punct(scan[..rut_pos].trim()).trim());
+    if patient_name.is_empty() {
+        return hint;
+    }
+    let after_rut = scan[rut_pos + 5..].trim();
+    // First token after "rut" is the RUT itself.
+    let patient_rut = after_rut
+        .split_whitespace()
+        .next()
+        .map(|t| strip_trailing_punct(t).to_uppercase())
+        .unwrap_or_default();
+    if patient_rut.is_empty() {
+        return ActionParse::Incomplete(
+            "¿Cuál es el RUT del paciente? Por ejemplo: «… rut 12.345.678-9».".into(),
+        );
+    }
+    // Optional product after a " de " that follows the RUT.
+    let product_name = after_rut.find(" de ").map(|p| {
+        strip_trailing_punct(after_rut[p + 4..].trim())
+            .trim()
+            .to_string()
+    });
+    let product_name = product_name.filter(|s| !s.is_empty());
+    ActionParse::Receta {
+        patient_name,
+        patient_rut,
+        product_name,
+    }
+}
 
 /// Mirror of [`parse_cliente`] for suppliers: captures the name after
 /// "proveedor", then optional rut/phone/email by the same field markers.
@@ -1605,6 +1728,43 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
             phone,
             email,
         })),
+        ActionParse::Receta {
+            patient_name,
+            patient_rut,
+            product_name,
+        } => {
+            // Resolve the product by EXACT (case-insensitive) name only, so a
+            // dispensing links the right product; otherwise leave it product-less
+            // (a prescription without a catalogued product is valid).
+            let product_id = match &product_name {
+                Some(name) => {
+                    use domain::catalog::model::ProductFilters;
+                    use domain::catalog::service as catalog;
+                    let products = catalog::list_products(
+                        db,
+                        tenant,
+                        ProductFilters {
+                            search: Some(name.clone()),
+                            limit: Some(5),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                    let want = name.to_lowercase();
+                    products
+                        .iter()
+                        .find(|p| p.name.to_lowercase() == want)
+                        .map(|p| p.id.clone())
+                }
+                None => None,
+            };
+            Ok(BuildOutcome::Ready(Action::DispensarReceta {
+                patient_name,
+                patient_rut,
+                product_id,
+                product_name,
+            }))
+        }
     }
 }
 
@@ -1989,6 +2149,44 @@ pub async fn execute(
                 }),
             }
         }
+        Action::DispensarReceta {
+            patient_name,
+            patient_rut,
+            product_id,
+            product_name,
+        } => {
+            use domain::prescriptions::model::NewPrescription;
+            use domain::prescriptions::service as prescriptions;
+            let dto = prescriptions::create_prescription(
+                db,
+                tenant,
+                NewPrescription {
+                    product: product_id,
+                    customer: None,
+                    patient_name: patient_name.clone(),
+                    patient_rut: patient_rut.clone(),
+                    doctor_name: None,
+                    doctor_rut: None,
+                    controlled: false,
+                    folio: None,
+                    dispensed_at: None,
+                },
+            )
+            .await?;
+            let what = product_name
+                .as_deref()
+                .map(|p| format!("la dispensación de {p}"))
+                .unwrap_or_else(|| "la receta".to_string());
+            ActionOutcome {
+                action: label,
+                text: format!("Registré {what} a {patient_name} (RUT {patient_rut})."),
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "patient_name": dto.patient_name,
+                    "patient_rut": dto.patient_rut,
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -2299,6 +2497,58 @@ mod tests {
             parse_action("crea un proveedor"),
             ActionParse::Incomplete(_)
         ));
+    }
+
+    #[test]
+    fn parse_receta_patient_rut_product() {
+        match parse_action("registra una receta a Juan Pérez rut 12.345.678-9 de paracetamol") {
+            ActionParse::Receta {
+                patient_name,
+                patient_rut,
+                product_name,
+            } => {
+                // normalize() folds accents before parsing (as every action does).
+                assert_eq!(patient_name, "Juan Perez");
+                assert_eq!(patient_rut, "12.345.678-9");
+                assert_eq!(product_name.as_deref(), Some("paracetamol"));
+            }
+            other => panic!("expected Receta, got {other:?}"),
+        }
+        // Product is optional.
+        assert!(matches!(
+            parse_action("dispensa una receta a María Soto rut 9.876.543-2"),
+            ActionParse::Receta {
+                product_name: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_receta_controlled_is_refused() {
+        assert!(matches!(
+            parse_action("registra una receta controlada a Juan rut 1-9 de morfina"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn parse_receta_without_rut_is_incomplete() {
+        assert!(matches!(
+            parse_action("registra una receta a Juan Pérez"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn read_recetas_question_is_not_an_action() {
+        // "recetas del mes" / "libro de controlados" carry no create/dispense
+        // verb → they belong to the read agent (RecetasMes / Controlados).
+        assert_eq!(parse_action("recetas del mes"), ActionParse::NotAnAction);
+        assert_eq!(
+            parse_action("libro de controlados"),
+            ActionParse::NotAnAction
+        );
     }
 
     #[test]
