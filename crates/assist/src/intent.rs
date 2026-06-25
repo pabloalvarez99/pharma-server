@@ -19,6 +19,8 @@ pub enum Intent {
     VentasMes,
     /// Last calendar month's sales (full month).
     VentasMesPasado,
+    /// This week's sales (last 7 days).
+    VentasSemana,
     /// Today vs yesterday comparison.
     ComparativaDia,
     /// Month-to-date vs last full month comparison.
@@ -79,6 +81,7 @@ impl Intent {
             Intent::VentasAyer => "ventas_ayer",
             Intent::VentasMes => "ventas_mes",
             Intent::VentasMesPasado => "ventas_mes_pasado",
+            Intent::VentasSemana => "ventas_semana",
             Intent::ComparativaDia => "ventas_vs_ayer",
             Intent::ComparativaMes => "ventas_vs_mes_pasado",
             Intent::VentasPorMetodo => "ventas_metodo_pago",
@@ -440,6 +443,9 @@ pub fn parse(question: &str) -> Intent {
         if mentions_month(&q) {
             return Intent::VentasMes;
         }
+        if mentions_week(&q) {
+            return Intent::VentasSemana;
+        }
         if mentions_yesterday(&q) {
             return Intent::VentasAyer;
         }
@@ -794,6 +800,20 @@ mod tests {
     }
 
     #[test]
+    fn ventas_semana_synonyms() {
+        for q in [
+            "ventas de la semana",
+            "cuánto vendí esta semana",
+            "ventas 7 días",
+        ] {
+            assert_eq!(parse(q), Intent::VentasSemana, "q={q}");
+        }
+        // "del mes" still wins over week when both could match; week beats today.
+        assert_eq!(parse("ventas del mes"), Intent::VentasMes);
+        assert_eq!(parse("ventas de hoy"), Intent::VentasHoy);
+    }
+
+    #[test]
     fn comparativa_dia_vs_ayer() {
         for q in [
             "ventas de hoy vs ayer",
@@ -921,6 +941,7 @@ mod tests {
         assert_eq!(Intent::VentasHoy.label(), "ventas_hoy");
         assert_eq!(Intent::VentasAyer.label(), "ventas_ayer");
         assert_eq!(Intent::VentasMesPasado.label(), "ventas_mes_pasado");
+        assert_eq!(Intent::VentasSemana.label(), "ventas_semana");
         assert_eq!(Intent::ComparativaDia.label(), "ventas_vs_ayer");
         assert_eq!(Intent::ComparativaMes.label(), "ventas_vs_mes_pasado");
         assert_eq!(Intent::VentasPorMetodo.label(), "ventas_metodo_pago");
