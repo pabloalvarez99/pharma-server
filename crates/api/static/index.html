@@ -266,7 +266,7 @@ function renderApp(){
       <div class="agent-head" style="margin-bottom:12px"><div><h2 style="font-size:15px">Resumen rápido</h2></div></div>
       <div class="kpis" id="kpis"><div class="muted">Cargando…</div></div>
     </section>`;
-  const chips=["¿cuánto vendí hoy?","ventas del mes","¿qué se vence?","mejores productos","¿cuánto hay en caja?","stock bajo"];
+  const chips=["prepárame el día","¿cuánto vendí hoy?","ventas de la semana","¿qué tengo que reponer?","¿qué se vence?","órdenes pendientes","¿cuánto hay en caja?"];
   $("#chips").innerHTML=chips.map(c=>`<button class="chip">${esc(c)}</button>`).join("");
   $("#chips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{$("#q").value=b.textContent;ask();});
   $("#ask").onclick=ask;
