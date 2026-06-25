@@ -60,6 +60,8 @@ impl AssistProvider for Deterministic {
             Intent::ResumenDia => resumen_dia(q.db, q.tenant, &q.intent).await,
             Intent::Controlados => controlados(q.db, q.tenant, &q.intent).await,
             Intent::RecetasMes => recetas_mes(q.db, q.tenant, &q.intent).await,
+            Intent::ComprasPendientes => compras_pendientes(q.db, q.tenant, &q.intent).await,
+            Intent::Proveedores => proveedores(q.db, q.tenant, &q.intent).await,
             Intent::Ayuda => Ok(ayuda(&q.intent)),
             Intent::Unknown => Ok(unknown(&q.intent)),
         }
@@ -582,6 +584,72 @@ async fn recetas_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     })))
 }
 
+/// Purchasing — draft purchase orders pending receipt (count + total). Pairs
+/// with the "recibe la orden de compra" action: shows what is receivable.
+async fn compras_pendientes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    use domain::purchasing::model::PurchaseOrderFilters;
+    use domain::purchasing::service as purchasing;
+    let rows = purchasing::list_purchase_orders(
+        db,
+        tenant,
+        PurchaseOrderFilters {
+            supplier: None,
+            status: Some("draft".into()),
+            limit: Some(500),
+            offset: None,
+        },
+    )
+    .await?;
+    if rows.is_empty() {
+        return Ok(
+            Answer::new(intent, "No tienes órdenes de compra en borrador. 👍")
+                .with_data(serde_json::json!({ "count": 0 })),
+        );
+    }
+    let total: Decimal = rows.iter().map(|p| p.total).sum();
+    let text = format!(
+        "Tienes {} {} de compra en borrador por {} en total. Pídeme «recibe la orden de \
+         compra» para ingresarlas al stock.",
+        rows.len(),
+        plural(rows.len() as i64, "orden", "órdenes"),
+        clp(total),
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": rows.len(),
+        "total": total.to_string(),
+    })))
+}
+
+/// Purchasing — how many active suppliers the business has.
+async fn proveedores(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    use domain::purchasing::model::SupplierFilters;
+    use domain::purchasing::service as purchasing;
+    let rows = purchasing::list_suppliers(
+        db,
+        tenant,
+        SupplierFilters {
+            search: None,
+            active: Some(true),
+            limit: Some(500),
+            offset: None,
+        },
+    )
+    .await?;
+    let text = if rows.is_empty() {
+        "Todavía no tienes proveedores registrados. Pídeme «crea el proveedor <nombre>»."
+            .to_string()
+    } else {
+        let nombres: Vec<String> = rows.iter().take(5).map(|s| s.name.clone()).collect();
+        format!(
+            "Tienes {} {} activos: {}.",
+            rows.len(),
+            plural(rows.len() as i64, "proveedor", "proveedores"),
+            nombres.join(", "),
+        )
+    };
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({ "count": rows.len() })))
+}
+
 /// Sum the daily-sales rollup over `range` into `(orders, revenue, cash, card)`.
 async fn sum_sales(
     db: &Db,
@@ -939,7 +1007,8 @@ fn ayuda(intent: &Intent) -> Answer {
          cliente Juan», «precio de ibuprofeno», «margen de paracetamol», «¿qué se vence \
          esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». Si llevas \
-         recetas: «recetas del mes» o «libro de controlados». También \
+         recetas: «recetas del mes» o «libro de controlados». De compras: «órdenes de \
+         compra pendientes» o «cuántos proveedores tengo». También \
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea el proveedor Farmaltda», «crea un producto Aspirina a \
          $1000», «cambia el precio de paracetamol a $1500», «repón 40 de paracetamol», \
