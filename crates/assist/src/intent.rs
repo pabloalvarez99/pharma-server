@@ -53,6 +53,10 @@ pub enum Intent {
     StockBajo,
     /// Inventory headline figures (SKUs, value, low/out of stock).
     ResumenInventario,
+    /// A composed multi-domain morning brief: yesterday's sales, open drawer,
+    /// reorder needs, lots expiring this week, and (pharmacy) controlled-drug
+    /// ledger count. The RutAgent money-shot — one ask, many domains.
+    ResumenDia,
     /// The owner asked what they can ask.
     Ayuda,
     /// Could not be classified.
@@ -84,6 +88,7 @@ impl Intent {
             Intent::GastosMes => "gastos_mes",
             Intent::StockBajo => "stock_bajo",
             Intent::ResumenInventario => "resumen_inventario",
+            Intent::ResumenDia => "resumen_dia",
             Intent::Ayuda => "ayuda",
             Intent::Unknown => "desconocido",
         }
@@ -141,6 +146,36 @@ pub fn parse(question: &str) -> Intent {
         ],
     ) {
         return Intent::Ayuda;
+    }
+
+    // Daily brief — the composed multi-domain morning summary (RutAgent
+    // money-shot). Distinctive multi-word cues so it never steals "ventas del
+    // día" or "resumen de inventario". Checked early, right after help.
+    if contains_any(
+        &q,
+        &[
+            "preparame el dia",
+            "prepara mi dia",
+            "preparame mi dia",
+            "prepara el dia",
+            "resumen del dia",
+            "resumen diario",
+            "resumen de la jornada",
+            "resumen de mi dia",
+            "como viene el dia",
+            "como viene mi dia",
+            "como arranca el dia",
+            "como pinta el dia",
+            "que tengo que hacer hoy",
+            "que hay que hacer hoy",
+            "ponme al dia",
+            "pasame el resumen",
+            "dame el resumen del dia",
+            "briefing",
+            "buenos dias",
+        ],
+    ) {
+        return Intent::ResumenDia;
     }
 
     // Payment-method breakdown. MUST precede both the comparative branch
@@ -609,6 +644,24 @@ mod tests {
     }
 
     #[test]
+    fn resumen_dia_synonyms() {
+        for q in [
+            "prepárame el día",
+            "resumen del día",
+            "¿cómo viene el día?",
+            "qué tengo que hacer hoy",
+            "buenos días",
+            "ponme al día",
+        ] {
+            assert_eq!(parse(q), Intent::ResumenDia, "q={q}");
+        }
+        // Must NOT steal plain sales or inventory questions.
+        assert_eq!(parse("ventas del día"), Intent::VentasHoy);
+        assert_eq!(parse("cuánto vendí hoy"), Intent::VentasHoy);
+        assert_eq!(parse("resumen de inventario"), Intent::ResumenInventario);
+    }
+
+    #[test]
     fn unknown_is_graceful() {
         for q in ["", "   ", "cuéntame un chiste", "asdf qwer"] {
             assert_eq!(parse(q), Intent::Unknown, "q={q}");
@@ -778,6 +831,7 @@ mod tests {
             "margen_producto"
         );
         assert_eq!(Intent::StockProducto("x".into()).label(), "stock_producto");
+        assert_eq!(Intent::ResumenDia.label(), "resumen_dia");
         assert_eq!(Intent::Unknown.label(), "desconocido");
     }
 }
