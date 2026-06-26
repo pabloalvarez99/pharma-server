@@ -584,17 +584,23 @@ async function vInventario(v){
   const prods=Array.isArray(p.body)?p.body:[], s=st.body||{};
   let html=vhead("Inventario",prods.length+" productos",actbtn("prod","+ Nuevo producto"));
   html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
-  html+=`<div class="card"><div class="search" style="margin-bottom:13px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div><div id="inv-tbl"></div></div>`;
+  html+=`<div class="card">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
+      <div class="search" style="flex:1;min-width:160px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div>
+      <div class="chips" id="inv-f" style="margin:0">${[["all","Todos"],["low","Stock bajo"],["out","Agotados"]].map(([v2,l],i)=>`<button class="chip${i===0?" on":""}" data-f="${v2}">${l}</button>`).join("")}</div>
+    </div><div id="inv-tbl"></div></div>`;
   v.innerHTML=html;
   const byId={};prods.forEach(p=>byId[p.id]=p);
+  let ff="all";
   const draw=(q)=>{
-    const f=prods.filter(x=>!q||(x.name||"").toLowerCase().includes(q.toLowerCase()));
+    const f=prods.filter(x=>(!q||(x.name||"").toLowerCase().includes(q.toLowerCase()))&&(ff==="all"||(ff==="out"?num(x.stock)<=0:num(x.stock)>0&&num(x.stock)<5)));
     $("#inv-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Laboratorio</th><th class="num">Precio</th><th class="num">Stock</th><th></th></tr></thead><tbody>${f.slice(0,120).map(x=>{
       const low=num(x.stock)<=0?'bad':(num(x.stock)<5?'warn':'');
       return `<tr data-pid="${esc(x.id)}" style="cursor:pointer"><td class="name">${esc(x.name)}</td><td class="muted2">${esc(x.laboratory||"—")}</td><td class="num">${money(x.price)}</td><td class="num"><span class="bdg ${low}">${clp(x.stock)}</span></td><td class="num muted2">editar ›</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="muted" style="padding:14px">Sin resultados para «${esc(q)}».</div>`;
     $$("#inv-tbl tr[data-pid]").forEach(tr=>tr.onclick=()=>editProduct(byId[tr.dataset.pid]));
   };
   draw("");$("#inv-q").oninput=e=>draw(e.target.value);
+  $$("#inv-f .chip").forEach(c=>c.onclick=()=>{ff=c.dataset.f;$$("#inv-f .chip").forEach(x=>x.classList.toggle("on",x===c));draw($("#inv-q").value);});
 }
 
 /* ---------------- view: Caja ---------------- */
