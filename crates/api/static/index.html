@@ -5,6 +5,14 @@
 <title>RutAgent — tu negocio, con su agente</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#0b0f17" />
+<meta name="description" content="RutAgent — tu negocio, administrado conversando con su propio agente. POS, inventario, caja y reportes, offline-first." />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="RutAgent" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2319d39a'/%3E%3Cpath d='M62 116c0-16 12-28 28-28s28 12 28 28M90 74a13 13 0 100-26 13 13 0 000 26z' stroke='%2304140e' stroke-width='11' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='126' cy='56' r='12' fill='%2304140e'/%3E%3C/svg%3E" />
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22RutAgent%22%2C%22short_name%22%3A%22RutAgent%22%2C%22start_url%22%3A%22%2Fapp%22%2C%22scope%22%3A%22%2Fapp%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23070a10%22%2C%22theme_color%22%3A%22%230b0f17%22%2C%22description%22%3A%22Tu%20negocio%2C%20con%20su%20agente%22%7D" />
 <style>
   :root{
     --bg:#070a10; --bg-2:#0b0f17; --surface:#111726; --surface-2:#151c2d; --raise:#1a2235;
@@ -73,6 +81,16 @@
   .sub{margin:0 0 16px;font-size:13px;color:var(--txt-2);line-height:1.5}
   .sect-t{font-size:12.5px;font-weight:600;color:var(--txt-2);margin:2px 0 11px;display:flex;align-items:center;gap:8px}
   .sect-t .ln{height:1px;background:var(--line);flex:1}
+  /* ---------- auth hero ---------- */
+  .auth-wrap{max-width:430px;margin:5vh auto 0;padding:0 4px}
+  .auth-brand{text-align:center;margin-bottom:18px}
+  .auth-brand .mk{width:60px;height:60px;margin:0 auto 12px;display:block}
+  .auth-brand h1{margin:0;font-size:25px;font-weight:720;letter-spacing:-.03em}
+  .auth-brand h1 b{color:var(--brand)}
+  .auth-brand p{margin:7px auto 0;font-size:14px;color:var(--txt-2);max-width:330px;line-height:1.5}
+  .auth-feats{display:flex;justify-content:center;gap:16px;margin:16px 0 4px;flex-wrap:wrap}
+  .auth-feats span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--txt-2)}
+  .auth-feats svg{width:14px;height:14px;color:var(--brand)}
   /* ---------- hero ---------- */
   .hero{background:linear-gradient(135deg,rgba(25,211,154,.16),rgba(19,185,214,.10) 55%,transparent);
     border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
@@ -82,6 +100,15 @@
   .hero .pill b{color:var(--txt);font-family:var(--ff-num)}
   .delta{display:inline-flex;align-items:center;gap:3px;font-weight:650;font-family:var(--ff-num)}
   .delta.up{color:var(--brand)}.delta.down{color:var(--danger)}.delta.flat{color:var(--txt-3)}
+  /* ---------- quick actions ---------- */
+  .qa{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .qa-b{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:15px 8px;
+    background:linear-gradient(150deg,var(--raise),var(--surface));border:1px solid var(--line);border-radius:var(--r-sm);
+    color:var(--txt);font-family:var(--ff);font-size:13px;font-weight:550;cursor:pointer;transition:.14s}
+  .qa-b svg{width:21px;height:21px;color:var(--brand)}
+  .qa-b:hover{border-color:var(--brand);background:var(--brand-soft);transform:translateY(-1px)}
+  .qa-b:active{transform:translateY(0)}
+  @media(max-width:560px){.qa{grid-template-columns:repeat(2,1fr)}}
   /* ---------- kpi grid ---------- */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
   .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 15px;position:relative;overflow:hidden}
@@ -232,6 +259,7 @@
   </div>
   <div class="hright">
     <span class="hstatus"><span class="dot" id="dot"></span><span id="dot-label">conectando…</span></span>
+    <button class="hstatus hidden" id="kbtn" title="Buscar (Ctrl/⌘ K)" style="cursor:pointer;font-family:var(--ff-num)">⌘K</button>
     <span class="htenant hidden" id="htenant"></span>
     <button class="btn ghost hidden" id="logout">Salir</button>
   </div>
@@ -309,7 +337,15 @@ async function boot(){
   pingStatus();setInterval(pingStatus,8000);
   if(token){const m=await api("/api/v1/me");if(m.ok){me=m.body;return renderApp();}token=null;sessionStorage.removeItem("rb_token");}
   const s=await api("/api/v1/setup/status");
-  $("#root").innerHTML=`<main style="max-width:1240px;margin:0 auto;width:100%"><section class="card center" id="auth"><div id="auth-body"></div></section></main>`;
+  const ck='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  $("#root").innerHTML=`<main style="max-width:1240px;margin:0 auto;width:100%"><div class="auth-wrap">
+    <div class="auth-brand">
+      <svg class="mk" viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="9" fill="url(#g2)"/><path d="M11 20.5c0-3 2.2-5 5-5s5 2 5 5M16 13.2a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8z" stroke="#04140e" stroke-width="2.1" stroke-linecap="round"/><circle cx="22.4" cy="10" r="2.1" fill="#04140e"/><defs><linearGradient id="g2" x1="2" y1="2" x2="30" y2="30"><stop stop-color="#19d39a"/><stop offset="1" stop-color="#13b9d6"/></linearGradient></defs></svg>
+      <h1>Rut<b>Agent</b></h1>
+      <p>Tu negocio, administrado conversando con su propio agente. POS, inventario, caja y reportes — todo en un solo lugar.</p>
+      <div class="auth-feats"><span>${ck} Offline-first</span><span>${ck} Sin mensualidad</span><span>${ck} Tus datos, tuyos</span></div>
+    </div>
+    <section class="card" id="auth"><div id="auth-body"></div></section></div></main>`;
   if(s.ok&&s.body&&s.body.needs_setup)renderSetup();else renderLogin();
 }
 
@@ -386,6 +422,7 @@ function renderApp(){
   loadBiz();
   $("#htenant").innerHTML=`<span class="avatar">${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug).slice(0,1).toUpperCase())}</span><b>${esc(bizName)}</b>`;
   $("#htenant").classList.remove("hidden");$("#logout").classList.remove("hidden");
+  const kb=$("#kbtn");if(kb){kb.classList.remove("hidden");kb.onclick=openPalette;}
   $("#root").innerHTML=`<div class="shell">
     <nav class="side" id="nav"><div class="navlbl">Mi negocio</div>${VIEWS.map(v=>`<div class="nav-i" data-v="${v.id}">${svg(v.icon)}<span>${v.label}</span></div>`).join("")}</nav>
     <main id="view"></main></div>`;
@@ -430,6 +467,8 @@ async function vResumen(v){
   const hr=new Date().getHours(), saludo=hr<12?"Buenos días":hr<20?"Buenas tardes":"Buenas noches";
   let html=`<div class="hero"><div><h1>${esc(saludo)}, ${esc(bizName)} 👋</h1><div class="when">${esc(fechaLarga())}</div></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap"><span class="pill">Hoy <b>${money(hoyRev)}</b> ${dHTML}</span><span class="pill">${open?"Caja abierta":"Caja cerrada"}</span></div></div>`;
+  const qa=[["venta","Nueva venta",I.ventas],["gasto","Registrar gasto",I.gastos],open?["cerrar:"+open.id,"Cerrar caja",I.caja]:["abrir","Abrir caja",I.caja],["prod","Nuevo producto",I.inventario]];
+  html+=`<div class="qa">${qa.map(([a,l,ic])=>`<button class="qa-b" data-act="${esc(a)}">${svg(ic)}<span>${esc(l)}</span></button>`).join("")}</div>`;
   html+=`<div class="kpis">
     ${kpi("Ventas hoy",money(vh.revenue),"accent ok",`${num(vh.orders)} ventas · efvo ${money(vh.cash)} · tarj ${money(vh.card)}`,I.ventas)}
     ${kpi("En caja",enCaja,"accent",open?`caja «${esc(open.register_name)}» abierta`:"sin caja abierta",I.caja)}
@@ -489,6 +528,25 @@ async function ask(){
   const r=await api("/api/v1/assist/ask",{method:"POST",body:JSON.stringify({question:q})});th.remove();
   if(!r.ok)return botSay(apiErr(r),true);
   botSay((r.body&&r.body.text)||"…");
+  agentActions(r.body||{});
+}
+// botones contextuales según lo que respondió el agente → atan agente ↔ operación
+function agentActions(body){
+  const intent=body.intent||"", data=body.data||{};
+  const acts=[];
+  const repoN=(data.reposicion&&data.reposicion.count)||(intent==="stock_bajo"?(data.count||0):0);
+  if(intent==="resumen_dia"||intent==="stock_bajo"){
+    if(repoN>0)acts.push(["Crear orden de compra",()=>go("compras")]);
+    acts.push(["Ver inventario",()=>go("inventario")]);
+  }
+  if(intent.startsWith("ventas")||intent==="metodo_pago"||intent==="top_productos"){acts.push(["Nueva venta",()=>{go("ventas");setTimeout(posOpen,120);}]);acts.push(["Ver ventas",()=>go("ventas")]);}
+  if(intent==="caja_actual"){acts.push(["Ir a caja",()=>go("caja")]);}
+  if(intent==="por_vencer"){acts.push(["Ver vencimientos",()=>go("reportes")]);}
+  if(intent==="compras_pendientes"||intent==="proveedores"){acts.push(["Ir a compras",()=>go("compras")]);}
+  if(!acts.length)return;
+  const c=$("#chat");const wrap=document.createElement("div");wrap.className="chips";wrap.style.marginTop="-4px";
+  acts.slice(0,3).forEach(([label,fn])=>{const b=document.createElement("button");b.className="chip";b.textContent="→ "+label;b.onclick=fn;wrap.appendChild(b);});
+  c.appendChild(wrap);c.scrollTop=c.scrollHeight;
 }
 
 /* ---------------- view: Ventas ---------------- */
@@ -629,7 +687,18 @@ async function vClientes(v){
   const r=await api("/api/v1/clientes");
   const cl=(r.ok&&Array.isArray(r.body))?r.body:[];
   if(!cl.length)return v.innerHTML=vhead("Clientes","",actbtn("cliente","+ Nuevo cliente"))+empty(I.clientes,"Aún no tienes clientes","Registra clientes para llevar su historial de compras, fiado y fidelización. El agente también puede crearlos por ti.");
-  v.innerHTML=vhead("Clientes",cl.length+" clientes",actbtn("cliente","+ Nuevo cliente"))+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th></tr></thead><tbody>${cl.map(c=>`<tr><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  v.innerHTML=vhead("Clientes",cl.length+" clientes",actbtn("cliente","+ Nuevo cliente"))+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th><th class="num">Gastado</th><th></th></tr></thead><tbody>${cl.map(c=>`<tr data-cid="${esc(c.id)}" style="cursor:pointer"><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td><td class="num">${money(c.total_spent||0)}</td><td class="num muted2">ver ›</td></tr>`).join("")}</tbody></table></div></div>`;
+  $$("#view tr[data-cid]").forEach(tr=>tr.onclick=()=>clientDetail(tr.dataset.cid));
+}
+async function clientDetail(id){
+  showModal("Cliente",`<div id="cd-body"><div class="skel" style="width:55%"></div><div class="skel" style="width:75%;margin-top:10px"></div></div>`);
+  const [d,h]=await Promise.all([api("/api/v1/customers/"+id),api("/api/v1/customers/"+id+"/history")]);
+  if(!d.ok||!d.body)return $("#cd-body").innerHTML=`<div class="muted">No se pudo cargar.</div>`;
+  const c=d.body, hist=(h.ok&&Array.isArray(h.body))?h.body:[];
+  $("#cd-body").innerHTML=`<h2 style="margin:0 0 2px">${esc(c.name)}</h2><p class="sub">${esc(c.rut||"sin RUT")}${c.phone?" · "+esc(c.phone):""}${c.email?" · "+esc(c.email):""}</p>
+    <div class="kpis" style="margin-bottom:13px">${kpi("Total gastado",money(c.total_spent),"accent ok",null,I.ventas)}${kpi("Visitas",clp(c.visit_count),"",null,I.clientes)}${kpi("Puntos",clp(c.loyalty_points),"",null,I.spark)}</div>
+    <div class="sect-t">Historial de compras<span class="ln"></span></div>
+    ${hist.length?`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Método</th><th class="num">Total</th></tr></thead><tbody>${hist.slice(0,30).map(o=>`<tr><td class="muted2">${fday(o.created_at)} ${hhmm(o.created_at)}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin compras registradas aún.</div>`}`;
 }
 
 /* ---------------- view: Gastos ---------------- */
@@ -833,13 +902,57 @@ const bdgTxt=(map,k)=>(map[k]||[k])[0];
 
 /* logout + action delegation */
 function doLogout(){token=null;me=null;sessionStorage.removeItem("rb_token");
-  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");location.hash="";boot();}
+  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");const kb=$("#kbtn");if(kb)kb.classList.add("hidden");location.hash="";boot();}
 document.addEventListener("click",e=>{
   if(e.target.closest("#logout"))return doLogout();
   const a=e.target.closest("[data-act]");if(!a)return;
   const raw=a.dataset.act,ci=raw.indexOf(":"),k=ci<0?raw:raw.slice(0,ci),arg=ci<0?"":raw.slice(ci+1);
   const map={venta:posOpen,prod:newProduct,gasto:newExpense,cliente:newCustomer,abrir:abrirCaja,cerrar:()=>cerrarCaja(arg),mov:()=>movCaja(arg),proveedor:newSupplier,oc:newPO,recibir:()=>receivePO(arg)};
   if(map[k])map[k]();
+});
+
+/* ---------------- paleta de comandos (Ctrl/⌘+K) ---------------- */
+function paletteItems(){
+  const nav=VIEWS.map(v=>({label:v.label,hint:"Ir a",icon:v.icon,run:()=>go(v.id)}));
+  const acts=[
+    {label:"Nueva venta",hint:"Acción",icon:I.ventas,run:()=>{go("ventas");setTimeout(posOpen,120);}},
+    {label:"Registrar gasto",hint:"Acción",icon:I.gastos,run:newExpense},
+    {label:"Nuevo cliente",hint:"Acción",icon:I.clientes,run:newCustomer},
+    {label:"Nuevo producto",hint:"Acción",icon:I.inventario,run:newProduct},
+    {label:"Nuevo proveedor",hint:"Acción",icon:I.compras,run:newSupplier},
+    {label:"Preguntar al agente",hint:"Acción",icon:I.agente,run:()=>go("agente")},
+  ];
+  return nav.concat(acts);
+}
+function openPalette(){
+  if($("#ov"))return;
+  const all=paletteItems();
+  const o=document.createElement("div");o.className="ov";o.id="ov";
+  o.innerHTML=`<div class="modal" style="max-width:540px"><div class="modal-b" style="padding:14px">
+    <div class="search" style="margin-bottom:10px">${svg(I.search)}<input id="pal-q" placeholder="Buscar sección o acción…" autocomplete="off"/></div>
+    <div id="pal-list" style="max-height:50vh;overflow:auto"></div></div></div>`;
+  document.body.appendChild(o);
+  o.onclick=e=>{if(e.target===o)closeModal();};
+  let cursor=0,shown=all;
+  const draw=(q)=>{
+    shown=all.filter(it=>!q||it.label.toLowerCase().includes(q.toLowerCase()));
+    cursor=0;
+    $("#pal-list").innerHTML=shown.map((it,i)=>`<div class="pos-row" data-i="${i}" style="border:none;border-radius:8px${i===cursor?";background:var(--brand-soft)":""}"><span style="display:flex;align-items:center;gap:10px"><span style="width:17px;height:17px;color:var(--txt-2)">${svg(it.icon)}</span>${esc(it.label)}</span><span class="p" style="font-size:11px">${esc(it.hint)}</span></div>`).join("")||`<div class="muted" style="padding:12px">Sin resultados.</div>`;
+    $$("#pal-list .pos-row").forEach(el=>el.onclick=()=>{const it=shown[+el.dataset.i];closeModal();it.run();});
+  };
+  const hi=()=>{$$("#pal-list .pos-row").forEach((el,i)=>el.style.background=i===cursor?"var(--brand-soft)":"");const cur=$$("#pal-list .pos-row")[cursor];if(cur)cur.scrollIntoView({block:"nearest"});};
+  draw("");
+  const inp=$("#pal-q");inp.focus();
+  inp.oninput=e=>draw(e.target.value);
+  inp.onkeydown=e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();cursor=Math.min(cursor+1,shown.length-1);hi();}
+    else if(e.key==="ArrowUp"){e.preventDefault();cursor=Math.max(cursor-1,0);hi();}
+    else if(e.key==="Enter"){e.preventDefault();const it=shown[cursor];if(it){closeModal();it.run();}}
+    else if(e.key==="Escape")closeModal();
+  };
+}
+document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();if(token)openPalette();}
 });
 
 boot();
