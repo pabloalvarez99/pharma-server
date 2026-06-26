@@ -164,6 +164,32 @@
   .skel{height:13px;border-radius:6px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:sh 1.3s infinite}
   @keyframes sh{to{background-position:-200% 0}}
   .muted{color:var(--txt-2);font-size:13px}
+  /* ---------- actions + modal ---------- */
+  .actbar{display:inline-flex;gap:8px;flex-wrap:wrap}
+  .btn.sm{width:auto;padding:9px 14px;font-size:13.5px}
+  .btn.alt{background:var(--surface);color:var(--txt);border:1px solid var(--line);box-shadow:none}
+  .btn.alt:hover{border-color:var(--brand)}
+  .ov{position:fixed;inset:0;background:rgba(4,7,12,.66);backdrop-filter:blur(3px);z-index:70;display:flex;align-items:flex-end;justify-content:center}
+  @media(min-width:640px){.ov{align-items:center;padding:20px}}
+  .modal{background:linear-gradient(155deg,var(--raise),var(--surface));border:1px solid var(--line);border-radius:18px 18px 0 0;width:100%;max-width:520px;max-height:92dvh;overflow:auto;box-shadow:var(--shadow)}
+  @media(min-width:640px){.modal{border-radius:18px}}
+  .modal-h{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--raise);z-index:2}
+  .modal-h h3{margin:0;font-size:16px;font-weight:640}
+  .modal-x{background:none;border:none;color:var(--txt-2);cursor:pointer;font-size:23px;line-height:1;padding:0 4px}
+  .modal-b{padding:18px}
+  .modal-f{padding:13px 18px;border-top:1px solid var(--line);display:flex;gap:8px;position:sticky;bottom:0;background:var(--raise)}
+  .modal-f .btn{flex:1}
+  .pos-res{max-height:190px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:12px}
+  .pos-row{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line-soft);cursor:pointer;font-size:14px}
+  .pos-row:last-child{border:none}.pos-row:hover{background:var(--brand-soft)}
+  .pos-row .p{color:var(--txt-3);font-family:var(--ff-num)}
+  .cart{display:flex;flex-direction:column;gap:7px;margin:4px 0 10px}
+  .cart-i{display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px}
+  .cart-i .nm{flex:1;font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qty{display:flex;align-items:center;gap:7px}
+  .qty button{width:27px;height:27px;border-radius:7px;border:1px solid var(--line);background:var(--bg-2);color:var(--txt);font-size:16px;cursor:pointer;line-height:1}
+  .qty b{min-width:18px;text-align:center;font-family:var(--ff-num)}
+  .cart-tot{display:flex;justify-content:space-between;align-items:center;font-size:19px;font-weight:680;padding:8px 2px;font-family:var(--ff-num)}
   /* ---------- toast / misc ---------- */
   #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(20px);
     background:var(--raise);border:1px solid var(--line);color:var(--txt);padding:11px 17px;border-radius:999px;
@@ -439,9 +465,9 @@ async function vVentas(v){
   const r=await api("/api/v1/orders");
   if(!r.ok)return v.innerHTML=vhead("Ventas")+errCard(apiErr(r));
   const all=(Array.isArray(r.body)?r.body:[]).slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-  if(!all.length)return v.innerHTML=vhead("Ventas")+empty(I.ventas,"Aún no hay ventas","Cuando vendas en el POS, cada boleta aparece aquí al instante.");
+  if(!all.length)return v.innerHTML=vhead("Ventas","",actbtn("venta","+ Nueva venta"))+empty(I.ventas,"Aún no hay ventas","Vende tu primera boleta — toca «Nueva venta».");
   const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
-  let html=vhead("Ventas",all.length+" ventas registradas");
+  let html=vhead("Ventas",all.length+" ventas registradas",actbtn("venta","+ Nueva venta"));
   html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
   html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
   v.innerHTML=html;
@@ -452,7 +478,7 @@ async function vInventario(v){
   const [p,st]=await Promise.all([api("/api/v1/products"),api("/api/v1/products/stats")]);
   if(!p.ok)return v.innerHTML=vhead("Inventario")+errCard(apiErr(p));
   const prods=Array.isArray(p.body)?p.body:[], s=st.body||{};
-  let html=vhead("Inventario",prods.length+" productos");
+  let html=vhead("Inventario",prods.length+" productos",actbtn("prod","+ Nuevo producto"));
   html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
   html+=`<div class="card"><div class="search" style="margin-bottom:13px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div><div id="inv-tbl"></div></div>`;
   v.innerHTML=html;
@@ -470,11 +496,11 @@ async function vCaja(v){
   const cs=await api("/api/v1/cash-sessions");
   if(!cs.ok)return v.innerHTML=vhead("Caja")+errCard(apiErr(cs));
   const list=Array.isArray(cs.body)?cs.body:[], open=list.find(x=>x.status==="open");
-  if(!open)return v.innerHTML=vhead("Caja")+empty(I.caja,"No hay caja abierta","Abre la caja al empezar el turno para registrar ventas en efectivo y cuadrar el cierre.");
+  if(!open)return v.innerHTML=vhead("Caja","",actbtn("abrir","+ Abrir caja"))+empty(I.caja,"No hay caja abierta","Abre la caja al empezar el turno para registrar ventas en efectivo y cuadrar el cierre.");
   const id=String(open.id).replace(/^cash_register_session:/,"");
   const aq=await api("/api/v1/cash-sessions/"+id+"/arqueo");
   const a=aq.ok?aq.body:{};const sess=a.session||open;
-  let html=vhead("Caja","Sesión «"+(open.register_name||"caja")+"» · abierta "+hhmm(open.opened_at));
+  let html=vhead("Caja","Sesión «"+(open.register_name||"caja")+"» · abierta "+hhmm(open.opened_at),'<div class="actbar">'+actbtn("mov:"+open.id,"+ Ingreso/Retiro")+actbtn("cerrar:"+open.id,"Cerrar caja")+'</div>');
   html+=`<div class="kpis">
     ${kpi("Efectivo esperado",money(sess.closing_cash_expected||sess.opening_cash),"accent ok","en la caja ahora",I.caja)}
     ${kpi("Apertura",money(sess.opening_cash),"",null,I.box)}
@@ -504,17 +530,17 @@ async function vCompras(v){
 async function vClientes(v){
   const r=await api("/api/v1/clientes");
   const cl=(r.ok&&Array.isArray(r.body))?r.body:[];
-  if(!cl.length)return v.innerHTML=vhead("Clientes")+empty(I.clientes,"Aún no tienes clientes","Registra clientes para llevar su historial de compras, fiado y fidelización. El agente también puede crearlos por ti.");
-  v.innerHTML=vhead("Clientes",cl.length+" clientes")+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th></tr></thead><tbody>${cl.map(c=>`<tr><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  if(!cl.length)return v.innerHTML=vhead("Clientes","",actbtn("cliente","+ Nuevo cliente"))+empty(I.clientes,"Aún no tienes clientes","Registra clientes para llevar su historial de compras, fiado y fidelización. El agente también puede crearlos por ti.");
+  v.innerHTML=vhead("Clientes",cl.length+" clientes",actbtn("cliente","+ Nuevo cliente"))+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th></tr></thead><tbody>${cl.map(c=>`<tr><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 /* ---------------- view: Gastos ---------------- */
 async function vGastos(v){
   const r=await api("/api/v1/expenses");
   const ex=(r.ok&&Array.isArray(r.body))?r.body:[];
-  if(!ex.length)return v.innerHTML=vhead("Gastos")+empty(I.gastos,"Sin gastos registrados","Anota arriendo, sueldos, servicios y compras menores para ver tu margen real. Dile al agente «registra un gasto de…».");
+  if(!ex.length)return v.innerHTML=vhead("Gastos","",actbtn("gasto","+ Registrar gasto"))+empty(I.gastos,"Sin gastos registrados","Anota arriendo, sueldos, servicios y compras menores para ver tu margen real. Dile al agente «registra un gasto de…».");
   const tot=ex.reduce((s,e)=>s+num(e.amount),0);
-  v.innerHTML=vhead("Gastos",ex.length+" gastos")+`<div class="kpis">${kpi("Total gastos",money(tot),"warn",null,I.gastos)}</div><div class="card"><div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>Detalle</th><th class="num">Monto</th></tr></thead><tbody>${ex.map(e=>`<tr><td class="muted2">${fday(e.created_at||e.date)}</td><td>${esc(e.category||"—")}</td><td class="name">${esc(e.description||e.notes||"—")}</td><td class="num">${money(e.amount)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  v.innerHTML=vhead("Gastos",ex.length+" gastos",actbtn("gasto","+ Registrar gasto"))+`<div class="kpis">${kpi("Total gastos",money(tot),"warn",null,I.gastos)}</div><div class="card"><div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>Detalle</th><th class="num">Monto</th></tr></thead><tbody>${ex.map(e=>`<tr><td class="muted2">${fday(e.created_at||e.date)}</td><td>${esc(e.category||"—")}</td><td class="name">${esc(e.description||e.notes||"—")}</td><td class="num">${money(e.amount)}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 /* ---------------- view: Reportes ---------------- */
@@ -533,10 +559,113 @@ async function vReportes(v){
 }
 const empty2=(t,p)=>`<div class="empty" style="padding:26px 16px"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`;
 
-/* logout */
+/* ---------------- actions (write) ---------------- */
+const btn=(id,label)=>`<button class="btn ghost" id="${id}">${esc(label)}</button>`;
+function closeModal(){const o=$("#ov");if(o)o.remove();}
+function showModal(title,bodyHTML,footHTML){
+  closeModal();
+  const o=document.createElement("div");o.className="ov";o.id="ov";
+  o.innerHTML=`<div class="modal"><div class="modal-h"><h3>${esc(title)}</h3><button class="modal-x" id="mx">×</button></div><div class="modal-b">${bodyHTML}</div>${footHTML?`<div class="modal-f">${footHTML}</div>`:""}</div>`;
+  document.body.appendChild(o);
+  o.onclick=e=>{if(e.target===o)closeModal();};
+  document.addEventListener("keydown",function esc2(e){if(e.key==="Escape"){closeModal();document.removeEventListener("keydown",esc2);}});
+  $("#mx").onclick=closeModal;
+  return o;
+}
+function ffield(f){
+  if(f.type==="select")return `<div class="field"><label>${esc(f.label)}</label><select id="f-${f.name}">${f.options.map(o=>`<option value="${esc(o[0])}">${esc(o[1])}</option>`).join("")}</select></div>`;
+  return `<div class="field"><label>${esc(f.label)}</label><input id="f-${f.name}" type="${f.type||"text"}" placeholder="${esc(f.ph||"")}" inputmode="${f.type==="number"?"numeric":"text"}"/></div>`;
+}
+function formModal(title,fields,submitLabel,onSubmit){
+  showModal(title,fields.map(ffield).join("")+`<div class="formmsg" id="f-msg"></div>`,
+    `<button class="btn alt sm" id="f-cancel">Cancelar</button><button class="btn" id="f-go">${esc(submitLabel)}</button>`);
+  setTimeout(()=>{const i=$(".modal-b input,.modal-b select");if(i)i.focus();},30);
+  $("#f-cancel").onclick=closeModal;
+  const submit=async()=>{
+    const vals={};fields.forEach(f=>vals[f.name]=$("#f-"+f.name).value.trim());
+    const msg=$("#f-msg");msg.className="formmsg";
+    const b=$("#f-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Guardando…';
+    const res=await onSubmit(vals);
+    b.disabled=false;b.textContent=submitLabel;
+    if(res&&res.err){msg.className="formmsg err";msg.textContent=res.err;return;}
+    closeModal();toast((res&&res.msg)||"Listo ✓");go(cur);
+  };
+  $("#f-go").onclick=submit;
+  $$(".modal-b input").forEach(i=>i.onkeydown=e=>{if(e.key==="Enter")submit();});
+}
+function newCustomer(){formModal("Nuevo cliente",[{name:"name",label:"Nombre",ph:"Juan Pérez"},{name:"rut",label:"RUT (opcional)",ph:"12.345.678-9"},{name:"phone",label:"Teléfono (opcional)",ph:"+56 9 …"}],"Crear cliente",async v=>{
+  if(!v.name)return{err:"Indica el nombre."};
+  const r=await api("/api/v1/clientes",{method:"POST",body:JSON.stringify({name:v.name,rut:v.rut||null,phone:v.phone||null})});
+  return r.ok?{msg:"Cliente creado ✓"}:{err:apiErr(r)};});}
+function newProduct(){formModal("Nuevo producto",[{name:"name",label:"Nombre",ph:"Paracetamol 500mg"},{name:"price",label:"Precio (CLP)",type:"number",ph:"1990"},{name:"stock",label:"Stock inicial",type:"number",ph:"0"},{name:"laboratory",label:"Laboratorio (opcional)",ph:""}],"Crear producto",async v=>{
+  if(!v.name)return{err:"Indica el nombre."};
+  if(!v.price||num(v.price)<=0)return{err:"Indica un precio válido."};
+  const r=await api("/api/v1/products",{method:"POST",body:JSON.stringify({name:v.name,price:String(num(v.price)),stock:parseInt(v.stock||"0",10)||0,laboratory:v.laboratory||null})});
+  return r.ok?{msg:"Producto creado ✓"}:{err:apiErr(r)};});}
+function newExpense(){formModal("Registrar gasto",[{name:"category",label:"Categoría",ph:"Arriendo, sueldos, servicios…"},{name:"description",label:"Detalle",ph:"Pago luz junio"},{name:"amount",label:"Monto (CLP)",type:"number",ph:"50000"}],"Registrar gasto",async v=>{
+  if(!v.category)return{err:"Indica la categoría."};
+  if(!v.amount||num(v.amount)<=0)return{err:"Indica un monto válido."};
+  const r=await api("/api/v1/expenses",{method:"POST",body:JSON.stringify({category:v.category,description:v.description||v.category,amount:String(num(v.amount))})});
+  return r.ok?{msg:"Gasto registrado ✓"}:{err:apiErr(r)};});}
+function abrirCaja(){formModal("Abrir caja",[{name:"opening_cash",label:"Fondo inicial (CLP)",type:"number",ph:"50000"}],"Abrir caja",async v=>{
+  const r=await api("/api/v1/cash-sessions",{method:"POST",body:JSON.stringify({register_name:"caja-1",opening_cash:String(num(v.opening_cash||0))})});
+  return r.ok?{msg:"Caja abierta ✓"}:{err:apiErr(r)};});}
+function cerrarCaja(id){formModal("Cerrar caja",[{name:"counted",label:"Efectivo contado (CLP)",type:"number",ph:"0"}],"Cerrar caja",async v=>{
+  const r=await api("/api/v1/cash-sessions/"+id+"/close",{method:"POST",body:JSON.stringify({closing_cash_counted:String(num(v.counted||0))})});
+  return r.ok?{msg:"Caja cerrada ✓"}:{err:apiErr(r)};});}
+function movCaja(id){formModal("Ingreso / Retiro de caja",[{name:"tipo",label:"Tipo",type:"select",options:[["ingreso","Ingreso"],["retiro","Retiro"]]},{name:"amount",label:"Monto (CLP)",type:"number",ph:"10000"},{name:"reason",label:"Motivo",ph:"Vuelto, compra menor…"}],"Registrar",async v=>{
+  if(!v.amount||num(v.amount)<=0)return{err:"Indica un monto válido."};
+  if(!v.reason)return{err:"Indica el motivo."};
+  const r=await api("/api/v1/cash-sessions/"+id+"/movements",{method:"POST",body:JSON.stringify({tipo:v.tipo,amount:String(num(v.amount)),reason:v.reason})});
+  return r.ok?{msg:"Movimiento registrado ✓"}:{err:apiErr(r)};});}
+/* POS — nueva venta */
+let posCart=[],posProds=[];
+async function posOpen(){
+  posCart=[];
+  if(!posProds.length){const r=await api("/api/v1/products");posProds=(r.ok&&Array.isArray(r.body))?r.body.filter(p=>p.active!==false):[];}
+  showModal("Nueva venta",
+    `<div class="search" style="margin-bottom:10px">${svg(I.search)}<input id="pos-q" placeholder="Buscar producto…" autocomplete="off"/></div>
+     <div class="pos-res" id="pos-res"></div><div class="cart" id="pos-cart"></div>
+     <div class="cart-tot"><span>Total</span><span id="pos-tot">$0</span></div>
+     <div class="field"><label>Forma de pago</label><select id="pos-pm"><option value="pos_cash">Efectivo</option><option value="pos_debit">Débito</option><option value="pos_credit">Crédito</option></select></div>
+     <div class="formmsg" id="pos-msg"></div>`,
+    `<button class="btn alt sm" id="pos-cancel">Cancelar</button><button class="btn" id="pos-go">Cobrar</button>`);
+  const total=()=>posCart.reduce((s,c)=>s+c.price*c.qty,0);
+  const drawCart=()=>{
+    $("#pos-cart").innerHTML=posCart.map(c=>`<div class="cart-i"><span class="nm">${esc(c.name)}</span><div class="qty"><button data-m="${esc(c.id)}">−</button><b>${c.qty}</b><button data-pl="${esc(c.id)}">+</button></div><span class="p" style="font-family:var(--ff-num);min-width:62px;text-align:right">${money(c.price*c.qty)}</span></div>`).join("");
+    $("#pos-tot").textContent=money(total());
+    $$("#pos-cart [data-pl]").forEach(b=>b.onclick=()=>{const c=posCart.find(x=>x.id===b.dataset.pl);c.qty++;drawCart();});
+    $$("#pos-cart [data-m]").forEach(b=>b.onclick=()=>{let c=posCart.find(x=>x.id===b.dataset.m);c.qty--;if(c.qty<=0)posCart=posCart.filter(x=>x.id!==c.id);drawCart();});
+  };
+  const drawRes=(q)=>{const f=posProds.filter(p=>!q||(p.name||"").toLowerCase().includes(q.toLowerCase())).slice(0,30);
+    $("#pos-res").innerHTML=f.length?f.map(p=>`<div class="pos-row" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span class="p">${money(p.price)}</span></div>`).join(""):`<div class="pos-row muted2">Sin resultados</div>`;
+    $$("#pos-res .pos-row[data-id]").forEach(el=>el.onclick=()=>{const p=posProds.find(x=>x.id===el.dataset.id);const ex=posCart.find(c=>c.id===p.id);if(ex)ex.qty++;else posCart.push({id:p.id,name:p.name,price:num(p.price),qty:1});drawCart();});};
+  drawRes("");drawCart();
+  $("#pos-q").oninput=e=>drawRes(e.target.value);$("#pos-cancel").onclick=closeModal;
+  $("#pos-go").onclick=async()=>{
+    if(!posCart.length){const m=$("#pos-msg");m.className="formmsg err";m.textContent="Agrega al menos un producto.";return;}
+    const pm=$("#pos-pm").value,tot=total(),body={items:posCart.map(c=>({product:c.id,product_name:c.name,quantity:c.qty,unit_price:String(c.price)})),payment_method:pm};
+    if(pm==="pos_cash")body.cash_amount=String(tot);else body.card_amount=String(tot);
+    const b=$("#pos-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Cobrando…';
+    const r=await api("/api/v1/pos/sale",{method:"POST",headers:{"Idempotency-Key":"pos-"+Date.now()},body:JSON.stringify(body)});
+    b.disabled=false;b.textContent="Cobrar";
+    if(!r.ok){const m=$("#pos-msg");m.className="formmsg err";m.textContent=apiErr(r);return;}
+    closeModal();toast("Venta cobrada · "+money(tot)+" ✓");go(cur);
+  };
+}
+
+const actbtn=(act,label)=>`<button class="btn ghost" data-act="${esc(act)}">${esc(label)}</button>`;
+
+/* logout + action delegation */
 function doLogout(){token=null;me=null;sessionStorage.removeItem("rb_token");
   $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");location.hash="";boot();}
-document.addEventListener("click",e=>{if(e.target.closest("#logout"))doLogout();});
+document.addEventListener("click",e=>{
+  if(e.target.closest("#logout"))return doLogout();
+  const a=e.target.closest("[data-act]");if(!a)return;
+  const raw=a.dataset.act,ci=raw.indexOf(":"),k=ci<0?raw:raw.slice(0,ci),arg=ci<0?"":raw.slice(ci+1);
+  const map={venta:posOpen,prod:newProduct,gasto:newExpense,cliente:newCustomer,abrir:abrirCaja,cerrar:()=>cerrarCaja(arg),mov:()=>movCaja(arg)};
+  if(map[k])map[k]();
+});
 
 boot();
 </script>
