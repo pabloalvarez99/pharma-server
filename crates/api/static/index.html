@@ -457,6 +457,18 @@ function kpi(k,v,cls,sub,icon){return `<div class="kpi ${cls||""}"><div class="k
 const PM={pos_cash:["Efectivo","ok"],pos_debit:["Débito","info"],pos_credit:["Crédito","info"],pos_mixed:["Mixto","warn"]};
 const ST={paid:["Pagada","ok"],draft:["Borrador","warn"],received:["Recibida","ok"],cancelled:["Anulada","bad"],open:["Abierta","ok"],closed:["Cerrada",""]};
 const bdg=(map,k)=>{const m=(map[k]||[k,""]);return `<span class="bdg ${m[1]}">${esc(m[0])}</span>`;};
+// export CSV (no lock-in: tus datos son tuyos)
+function downloadCSV(name,rows){
+  if(!rows||!rows.length)return toast("Nada para exportar.");
+  const cols=Object.keys(rows[0]);
+  const cell=(v)=>{const s=v==null?"":String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const csv=[cols.join(",")].concat(rows.map(r=>cols.map(c=>cell(r[c])).join(","))).join("\r\n");
+  const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=name+"-"+new Date().toISOString().slice(0,10)+".csv";document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);toast("Exportado ✓");
+}
+const expbtn=(id)=>`<button class="btn ghost" id="${id}">⤓ Exportar</button>`;
 
 /* ---------------- view: Resumen ---------------- */
 async function vResumen(v){
@@ -565,7 +577,7 @@ async function vVentas(v){
   const all=(Array.isArray(r.body)?r.body:[]).slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   if(!all.length)return v.innerHTML=vhead("Ventas","",actbtn("venta","+ Nueva venta"))+empty(I.ventas,"Aún no hay ventas","Vende tu primera boleta — toca «Nueva venta».");
   const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
-  let html=vhead("Ventas",all.length+" ventas registradas",actbtn("venta","+ Nueva venta"));
+  let html=vhead("Ventas",all.length+" ventas registradas",'<div class="actbar">'+expbtn("vt-exp")+actbtn("venta","+ Nueva venta")+'</div>');
   html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
   html+=`<div class="card">
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
@@ -574,6 +586,7 @@ async function vVentas(v){
     </div>
     <div id="vt-tbl"></div></div>`;
   v.innerHTML=html;
+  $("#vt-exp").onclick=()=>downloadCSV("ventas",all.map(o=>({hora:o.created_at,cliente:o.customer_name||"",metodo:(PM[o.payment_method]||[o.payment_method])[0],total:num(o.total),efectivo:num(o.cash_amount),tarjeta:num(o.card_amount),estado:(ST[o.status]||[o.status])[0]})));
   let fpm="",fq="";
   const draw=()=>{
     const f=all.filter(o=>(!fpm||o.payment_method===fpm)&&(!fq||(o.customer_name||"").toLowerCase().includes(fq.toLowerCase())));
@@ -590,7 +603,7 @@ async function vInventario(v){
   const [p,st]=await Promise.all([api("/api/v1/products"),api("/api/v1/products/stats")]);
   if(!p.ok)return v.innerHTML=vhead("Inventario")+errCard(apiErr(p));
   const prods=Array.isArray(p.body)?p.body:[], s=st.body||{};
-  let html=vhead("Inventario",prods.length+" productos",actbtn("prod","+ Nuevo producto"));
+  let html=vhead("Inventario",prods.length+" productos",'<div class="actbar">'+expbtn("inv-exp")+actbtn("prod","+ Nuevo producto")+'</div>');
   html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
   html+=`<div class="card">
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
@@ -598,6 +611,7 @@ async function vInventario(v){
       <div class="chips" id="inv-f" style="margin:0">${[["all","Todos"],["low","Stock bajo"],["out","Agotados"]].map(([v2,l],i)=>`<button class="chip${i===0?" on":""}" data-f="${v2}">${l}</button>`).join("")}</div>
     </div><div id="inv-tbl"></div></div>`;
   v.innerHTML=html;
+  $("#inv-exp").onclick=()=>downloadCSV("inventario",prods.map(p=>({producto:p.name,laboratorio:p.laboratory||"",precio:num(p.price),costo:num(p.cost_price),stock:num(p.stock),activo:p.active!==false})));
   const byId={};prods.forEach(p=>byId[p.id]=p);
   let ff="all";
   const draw=(q)=>{
