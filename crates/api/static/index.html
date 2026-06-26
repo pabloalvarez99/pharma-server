@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>RutAgent — tu negocio, con su agente</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
+<meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#0b0f17" />
 <meta name="description" content="RutAgent — tu negocio, administrado conversando con su propio agente. POS, inventario, caja y reportes, offline-first." />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="RutAgent" />
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%2319d39a'/%3E%3Cpath d='M62 116c0-16 12-28 28-28s28 12 28 28M90 74a13 13 0 100-26 13 13 0 000 26z' stroke='%2304140e' stroke-width='11' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='126' cy='56' r='12' fill='%2304140e'/%3E%3C/svg%3E" />
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22RutAgent%22%2C%22short_name%22%3A%22RutAgent%22%2C%22start_url%22%3A%22%2Fapp%22%2C%22scope%22%3A%22%2Fapp%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23070a10%22%2C%22theme_color%22%3A%22%230b0f17%22%2C%22description%22%3A%22Tu%20negocio%2C%20con%20su%20agente%22%7D" />
+<script>try{if(localStorage.getItem("rb_theme")==="light")document.documentElement.dataset.theme="light";}catch(e){}</script>
 <style>
   :root{
     --bg:#070a10; --bg-2:#0b0f17; --surface:#111726; --surface-2:#151c2d; --raise:#1a2235;
@@ -26,6 +27,21 @@
     --ff:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
     --ff-num:"SF Mono",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
     --nav-w:220px;
+    --hover:rgba(255,255,255,.022);
+    --header-bg:rgba(11,15,23,.72);
+    color-scheme:dark;
+  }
+  html[data-theme="light"]{
+    color-scheme:light;
+    --bg:#f5f7fb; --bg-2:#eef2f8; --surface:#ffffff; --surface-2:#f6f9fc; --raise:#ffffff;
+    --line:#e4e9f1; --line-soft:#eef2f7;
+    --txt:#101826; --txt-2:#5b6a80; --txt-3:#98a4b6;
+    --brand:#0fa57a; --brand-2:#0e96c4; --brand-deep:#0c8a66; --brand-soft:rgba(15,165,122,.10);
+    --amber:#c5870e; --amber-soft:rgba(197,135,14,.12); --danger:#e0455a; --danger-soft:rgba(224,69,90,.10);
+    --info:#2f7fe0; --info-soft:rgba(47,127,224,.10);
+    --shadow:0 1px 2px rgba(16,24,38,.05),0 12px 30px -20px rgba(16,24,38,.18);
+    --hover:rgba(16,24,38,.028);
+    --header-bg:rgba(255,255,255,.78);
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
@@ -43,7 +59,7 @@
   .wordmark{font-weight:650;font-size:17px;letter-spacing:-.03em}
   .wordmark b{color:var(--brand);font-weight:750}
   header{display:flex;align-items:center;justify-content:space-between;gap:12px;
-    padding:11px 18px;border-bottom:1px solid var(--line);background:rgba(11,15,23,.72);
+    padding:11px 18px;border-bottom:1px solid var(--line);background:var(--header-bg);
     backdrop-filter:saturate(1.4) blur(12px);position:sticky;top:0;z-index:30}
   .hstatus{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--txt-2);
     background:var(--surface);border:1px solid var(--line);padding:5px 10px;border-radius:999px}
@@ -126,7 +142,7 @@
     text-transform:uppercase;letter-spacing:.06em;color:var(--txt-3);font-weight:600;padding:12px 16px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
   tbody td{padding:13px 16px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
   tbody tr:last-child td{border-bottom:none}
-  tbody tr:hover td{background:rgba(255,255,255,.018)}
+  tbody tr:hover td{background:var(--hover)}
   td.num,th.num{text-align:right;font-family:var(--ff-num);letter-spacing:-.02em}
   td.name{white-space:normal;font-weight:500;min-width:150px}
   .muted2{color:var(--txt-3)}
@@ -260,6 +276,7 @@
   </div>
   <div class="hright">
     <span class="hstatus"><span class="dot" id="dot"></span><span id="dot-label">conectando…</span></span>
+    <button class="hstatus" id="theme" title="Cambiar tema" style="cursor:pointer;padding:5px 9px">◐</button>
     <button class="hstatus hidden" id="kbtn" title="Buscar (Ctrl/⌘ K)" style="cursor:pointer;font-family:var(--ff-num)">⌘K</button>
     <span class="htenant hidden" id="htenant"></span>
     <button class="btn ghost hidden" id="logout">Salir</button>
@@ -1054,6 +1071,12 @@ function openPalette(){
 document.addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();if(token)openPalette();}
 });
+
+// tema claro/oscuro
+$("#theme").onclick=()=>{
+  if(document.documentElement.dataset.theme!=="light"){document.documentElement.dataset.theme="light";localStorage.setItem("rb_theme","light");}
+  else{document.documentElement.removeAttribute("data-theme");localStorage.setItem("rb_theme","dark");}
+};
 
 boot();
 </script>
