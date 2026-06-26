@@ -73,6 +73,16 @@
   .sub{margin:0 0 16px;font-size:13px;color:var(--txt-2);line-height:1.5}
   .sect-t{font-size:12.5px;font-weight:600;color:var(--txt-2);margin:2px 0 11px;display:flex;align-items:center;gap:8px}
   .sect-t .ln{height:1px;background:var(--line);flex:1}
+  /* ---------- auth hero ---------- */
+  .auth-wrap{max-width:430px;margin:5vh auto 0;padding:0 4px}
+  .auth-brand{text-align:center;margin-bottom:18px}
+  .auth-brand .mk{width:60px;height:60px;margin:0 auto 12px;display:block}
+  .auth-brand h1{margin:0;font-size:25px;font-weight:720;letter-spacing:-.03em}
+  .auth-brand h1 b{color:var(--brand)}
+  .auth-brand p{margin:7px auto 0;font-size:14px;color:var(--txt-2);max-width:330px;line-height:1.5}
+  .auth-feats{display:flex;justify-content:center;gap:16px;margin:16px 0 4px;flex-wrap:wrap}
+  .auth-feats span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--txt-2)}
+  .auth-feats svg{width:14px;height:14px;color:var(--brand)}
   /* ---------- hero ---------- */
   .hero{background:linear-gradient(135deg,rgba(25,211,154,.16),rgba(19,185,214,.10) 55%,transparent);
     border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
@@ -310,7 +320,15 @@ async function boot(){
   pingStatus();setInterval(pingStatus,8000);
   if(token){const m=await api("/api/v1/me");if(m.ok){me=m.body;return renderApp();}token=null;sessionStorage.removeItem("rb_token");}
   const s=await api("/api/v1/setup/status");
-  $("#root").innerHTML=`<main style="max-width:1240px;margin:0 auto;width:100%"><section class="card center" id="auth"><div id="auth-body"></div></section></main>`;
+  const ck='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  $("#root").innerHTML=`<main style="max-width:1240px;margin:0 auto;width:100%"><div class="auth-wrap">
+    <div class="auth-brand">
+      <svg class="mk" viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="9" fill="url(#g2)"/><path d="M11 20.5c0-3 2.2-5 5-5s5 2 5 5M16 13.2a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8z" stroke="#04140e" stroke-width="2.1" stroke-linecap="round"/><circle cx="22.4" cy="10" r="2.1" fill="#04140e"/><defs><linearGradient id="g2" x1="2" y1="2" x2="30" y2="30"><stop stop-color="#19d39a"/><stop offset="1" stop-color="#13b9d6"/></linearGradient></defs></svg>
+      <h1>Rut<b>Agent</b></h1>
+      <p>Tu negocio, administrado conversando con su propio agente. POS, inventario, caja y reportes — todo en un solo lugar.</p>
+      <div class="auth-feats"><span>${ck} Offline-first</span><span>${ck} Sin mensualidad</span><span>${ck} Tus datos, tuyos</span></div>
+    </div>
+    <section class="card" id="auth"><div id="auth-body"></div></section></div></main>`;
   if(s.ok&&s.body&&s.body.needs_setup)renderSetup();else renderLogin();
 }
 
