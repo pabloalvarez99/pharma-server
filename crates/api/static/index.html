@@ -656,10 +656,21 @@ async function vCompras(v){
   const right='<div class="actbar">'+actbtn("proveedor","+ Proveedor")+(sups.length?actbtn("oc","+ Orden de compra"):"")+'</div>';
   let html=vhead("Compras",orders.length+" órdenes · "+sups.length+" proveedores",right);
   html+=`<div class="grid2">
-    <div class="card"><div class="sect-t">Órdenes de compra<span class="ln"></span></div>${orders.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>Estado</th><th class="num">Total</th><th></th></tr></thead><tbody>${orders.map(o=>`<tr><td class="name">${esc(supName(o.supplier))}</td><td>${bdg(ST,o.status)}</td><td class="num">${money(o.total)}</td><td class="num">${o.status==="draft"?`<button class="btn ghost sm" data-act="recibir:${esc(o.id)}">Recibir</button>`:""}</td></tr>`).join("")}</tbody></table></div>`:empty2("Sin órdenes de compra","Crea una orden para reponer stock con tus proveedores.")}</div>
+    <div class="card"><div class="sect-t">Órdenes de compra<span class="ln"></span></div>${orders.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>Estado</th><th class="num">Total</th><th></th></tr></thead><tbody>${orders.map(o=>`<tr data-poid="${esc(o.id)}" style="cursor:pointer"><td class="name">${esc(supName(o.supplier))}</td><td>${bdg(ST,o.status)}</td><td class="num">${money(o.total)}</td><td class="num">${o.status==="draft"?`<button class="btn ghost sm" data-act="recibir:${esc(o.id)}">Recibir</button>`:"ver ›"}</td></tr>`).join("")}</tbody></table></div>`:empty2("Sin órdenes de compra","Crea una orden para reponer stock con tus proveedores.")}</div>
     <div class="card"><div class="sect-t">Proveedores<span class="ln"></span></div>${sups.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>RUT</th><th>Contacto</th></tr></thead><tbody>${sups.map(s=>`<tr><td class="name">${esc(s.name)}</td><td class="muted2">${esc(s.rut||"—")}</td><td class="muted2">${esc(s.contact_phone||s.contact_name||"—")}</td></tr>`).join("")}</tbody></table></div>`:empty2("Sin proveedores","Agrega un proveedor para empezar a comprar.")}</div>
   </div>`;
   v.innerHTML=html;
+  $$("#view tr[data-poid]").forEach(tr=>tr.onclick=e=>{if(e.target.closest("[data-act]"))return;poDetail(tr.dataset.poid,supName);});
+}
+async function poDetail(id,supName){
+  showModal("Orden de compra",`<div id="po-d"><div class="skel" style="width:55%"></div><div class="skel" style="width:75%;margin-top:10px"></div></div>`);
+  const r=await api("/api/v1/purchase-orders/"+id);
+  if(!r.ok||!r.body)return $("#po-d").innerHTML=`<div class="muted">No se pudo cargar.</div>`;
+  const o=r.body.order||r.body,items=o.items||r.body.items||[];
+  $("#po-d").innerHTML=`<div class="kpis" style="margin-bottom:13px">${kpi("Total",money(o.total),"accent",supName?supName(o.supplier):"",I.compras)}${kpi("Estado",bdgTxt(ST,o.status),"",fday(o.created_at),I.box)}</div>
+    <div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Recibido</th><th class="num">Costo</th></tr></thead><tbody>${items.map(it=>`<tr><td class="name">${esc(it.product_name)}</td><td class="num">${num(it.quantity)}</td><td class="num muted2">${num(it.qty_received||0)}</td><td class="num">${money(it.unit_cost)}</td></tr>`).join("")||`<tr><td colspan="4" class="muted">Sin líneas.</td></tr>`}</tbody></table></div>
+    ${o.status==="draft"?`<button class="btn" id="po-recv" style="margin-top:14px">Recibir esta orden</button>`:""}`;
+  if(o.status==="draft")$("#po-recv").onclick=()=>{closeModal();receivePO(id);};
 }
 function newSupplier(){formModal("Nuevo proveedor",[{name:"name",label:"Nombre",ph:"Difarma Ltda."},{name:"rut",label:"RUT (opcional)",ph:"78.913.450-K"},{name:"contact_phone",label:"Teléfono (opcional)",ph:"+56 2 …"}],"Crear proveedor",async v=>{
   if(!v.name)return{err:"Indica el nombre."};
