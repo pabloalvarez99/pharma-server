@@ -232,6 +232,7 @@
   </div>
   <div class="hright">
     <span class="hstatus"><span class="dot" id="dot"></span><span id="dot-label">conectando…</span></span>
+    <button class="hstatus hidden" id="kbtn" title="Buscar (Ctrl/⌘ K)" style="cursor:pointer;font-family:var(--ff-num)">⌘K</button>
     <span class="htenant hidden" id="htenant"></span>
     <button class="btn ghost hidden" id="logout">Salir</button>
   </div>
@@ -386,6 +387,7 @@ function renderApp(){
   loadBiz();
   $("#htenant").innerHTML=`<span class="avatar">${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug).slice(0,1).toUpperCase())}</span><b>${esc(bizName)}</b>`;
   $("#htenant").classList.remove("hidden");$("#logout").classList.remove("hidden");
+  const kb=$("#kbtn");if(kb){kb.classList.remove("hidden");kb.onclick=openPalette;}
   $("#root").innerHTML=`<div class="shell">
     <nav class="side" id="nav"><div class="navlbl">Mi negocio</div>${VIEWS.map(v=>`<div class="nav-i" data-v="${v.id}">${svg(v.icon)}<span>${v.label}</span></div>`).join("")}</nav>
     <main id="view"></main></div>`;
@@ -852,13 +854,57 @@ const bdgTxt=(map,k)=>(map[k]||[k])[0];
 
 /* logout + action delegation */
 function doLogout(){token=null;me=null;sessionStorage.removeItem("rb_token");
-  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");location.hash="";boot();}
+  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");const kb=$("#kbtn");if(kb)kb.classList.add("hidden");location.hash="";boot();}
 document.addEventListener("click",e=>{
   if(e.target.closest("#logout"))return doLogout();
   const a=e.target.closest("[data-act]");if(!a)return;
   const raw=a.dataset.act,ci=raw.indexOf(":"),k=ci<0?raw:raw.slice(0,ci),arg=ci<0?"":raw.slice(ci+1);
   const map={venta:posOpen,prod:newProduct,gasto:newExpense,cliente:newCustomer,abrir:abrirCaja,cerrar:()=>cerrarCaja(arg),mov:()=>movCaja(arg),proveedor:newSupplier,oc:newPO,recibir:()=>receivePO(arg)};
   if(map[k])map[k]();
+});
+
+/* ---------------- paleta de comandos (Ctrl/⌘+K) ---------------- */
+function paletteItems(){
+  const nav=VIEWS.map(v=>({label:v.label,hint:"Ir a",icon:v.icon,run:()=>go(v.id)}));
+  const acts=[
+    {label:"Nueva venta",hint:"Acción",icon:I.ventas,run:()=>{go("ventas");setTimeout(posOpen,120);}},
+    {label:"Registrar gasto",hint:"Acción",icon:I.gastos,run:newExpense},
+    {label:"Nuevo cliente",hint:"Acción",icon:I.clientes,run:newCustomer},
+    {label:"Nuevo producto",hint:"Acción",icon:I.inventario,run:newProduct},
+    {label:"Nuevo proveedor",hint:"Acción",icon:I.compras,run:newSupplier},
+    {label:"Preguntar al agente",hint:"Acción",icon:I.agente,run:()=>go("agente")},
+  ];
+  return nav.concat(acts);
+}
+function openPalette(){
+  if($("#ov"))return;
+  const all=paletteItems();
+  const o=document.createElement("div");o.className="ov";o.id="ov";
+  o.innerHTML=`<div class="modal" style="max-width:540px"><div class="modal-b" style="padding:14px">
+    <div class="search" style="margin-bottom:10px">${svg(I.search)}<input id="pal-q" placeholder="Buscar sección o acción…" autocomplete="off"/></div>
+    <div id="pal-list" style="max-height:50vh;overflow:auto"></div></div></div>`;
+  document.body.appendChild(o);
+  o.onclick=e=>{if(e.target===o)closeModal();};
+  let cursor=0,shown=all;
+  const draw=(q)=>{
+    shown=all.filter(it=>!q||it.label.toLowerCase().includes(q.toLowerCase()));
+    cursor=0;
+    $("#pal-list").innerHTML=shown.map((it,i)=>`<div class="pos-row" data-i="${i}" style="border:none;border-radius:8px${i===cursor?";background:var(--brand-soft)":""}"><span style="display:flex;align-items:center;gap:10px"><span style="width:17px;height:17px;color:var(--txt-2)">${svg(it.icon)}</span>${esc(it.label)}</span><span class="p" style="font-size:11px">${esc(it.hint)}</span></div>`).join("")||`<div class="muted" style="padding:12px">Sin resultados.</div>`;
+    $$("#pal-list .pos-row").forEach(el=>el.onclick=()=>{const it=shown[+el.dataset.i];closeModal();it.run();});
+  };
+  const hi=()=>{$$("#pal-list .pos-row").forEach((el,i)=>el.style.background=i===cursor?"var(--brand-soft)":"");const cur=$$("#pal-list .pos-row")[cursor];if(cur)cur.scrollIntoView({block:"nearest"});};
+  draw("");
+  const inp=$("#pal-q");inp.focus();
+  inp.oninput=e=>draw(e.target.value);
+  inp.onkeydown=e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();cursor=Math.min(cursor+1,shown.length-1);hi();}
+    else if(e.key==="ArrowUp"){e.preventDefault();cursor=Math.max(cursor-1,0);hi();}
+    else if(e.key==="Enter"){e.preventDefault();const it=shown[cursor];if(it){closeModal();it.run();}}
+    else if(e.key==="Escape")closeModal();
+  };
+}
+document.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();if(token)openPalette();}
 });
 
 boot();
