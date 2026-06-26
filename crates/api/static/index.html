@@ -643,8 +643,9 @@ async function vGastos(v){
 
 /* ---------------- view: Reportes ---------------- */
 async function vReportes(v){
-  const [tp,ne,sd]=await Promise.all([api("/api/v1/reports/top-products"),api("/api/v1/reports/near-expiry"),api("/api/v1/reports/sales-daily")]);
+  const [tp,ne,sd,rot,abc,mg]=await Promise.all([api("/api/v1/reports/top-products"),api("/api/v1/reports/near-expiry"),api("/api/v1/reports/sales-daily"),api("/api/v1/reports/stock-rotation"),api("/api/v1/inventory/abc"),api("/api/v1/reports/margins-daily")]);
   const top=(tp.ok&&Array.isArray(tp.body))?tp.body:[], exp=(ne.ok&&Array.isArray(ne.body))?ne.body:[], days=(sd.ok&&Array.isArray(sd.body))?sd.body:[];
+  const rota=(rot.ok&&Array.isArray(rot.body))?rot.body:[], abcRows=(abc.ok&&abc.body&&Array.isArray(abc.body.rows))?abc.body.rows:[];
   let html=vhead("Reportes","Lo que importa de tu negocio, claro.");
   // sales chart
   if(days.length){const rows=days.slice(-14),mx=Math.max(...rows.map(r=>num(r.revenue)),1),today=new Date().toISOString().slice(0,10);
@@ -653,6 +654,16 @@ async function vReportes(v){
     <div class="card"><div class="sect-t">Productos más vendidos (ABC)<span class="ln"></span></div>${top.length?`<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Producto</th><th class="num">Vendidos</th><th class="num">Ingresos</th><th>Clase</th></tr></thead><tbody>${top.slice(0,10).map(p=>`<tr><td class="num muted2">${p.rank}</td><td class="name">${esc(p.product_name)}</td><td class="num muted2">${num(p.qty_sold)}</td><td class="num">${money(p.revenue)}</td><td><span class="bdg abc-${esc(p.abc_class||"C")}">${esc(p.abc_class||"—")}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Aún sin datos.</div>`}</div>
     <div class="card"><div class="sect-t">Próximos a vencer<span class="ln"></span></div>${exp.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Lote</th><th class="num">Días</th><th class="num">Stock</th></tr></thead><tbody>${exp.map(e=>`<tr><td class="name">${esc(e.product_name)}</td><td class="muted2">${esc(e.batch_code||"—")}</td><td class="num"><span class="bdg ${num(e.days_to_expiry)<=15?'bad':'warn'}">${num(e.days_to_expiry)}d</span></td><td class="num">${clp(e.stock)}</td></tr>`).join("")}</tbody></table></div>`:empty2("Nada por vencer","Ningún lote vence en los próximos 30 días. 👍")}</div>
   </div>`;
+  // rotación + ABC
+  html+=`<div class="grid2">
+    <div class="card"><div class="sect-t">Rotación de inventario<span class="ln"></span></div>${rota.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Vendido</th><th class="num">Stock</th><th class="num">Rotación</th></tr></thead><tbody>${rota.slice(0,10).map(r=>`<tr><td class="name">${esc(r.product_name)}</td><td class="num muted2">${num(r.qty_sold)}</td><td class="num muted2">${clp(r.current_stock)}</td><td class="num"><b>${Number(num(r.turnover)).toFixed(1)}×</b></td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Aún sin datos de rotación.</div>`}</div>
+    <div class="card"><div class="sect-t">Análisis ABC (valor)<span class="ln"></span></div>${abcRows.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Valor</th><th class="num">% acum.</th><th>Clase</th></tr></thead><tbody>${abcRows.slice(0,10).map(r=>`<tr><td class="name">${esc(r.name)}</td><td class="num">${money(r.value)}</td><td class="num muted2">${Number(num(r.cumulative_pct)).toFixed(0)}%</td><td><span class="bdg abc-${esc(r.class||"C")}">${esc(r.class||"—")}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Aún sin datos.</div>`}</div>
+  </div>`;
+  // márgenes (feature Pro — 402)
+  if(mg.status===402){
+    html+=`<div class="card" style="border-style:dashed"><div class="sect-t">Márgenes diarios<span class="bdg info" style="margin-left:8px">Pro</span><span class="ln"></span></div>
+      <p class="muted" style="margin:0">El reporte de márgenes (utilidad por día y por producto) está disponible en el plan <b>Pro</b>. El núcleo de RutAgent es gratis para siempre — esta función se desbloquea con una licencia.</p></div>`;
+  }
   v.innerHTML=html;
 }
 const empty2=(t,p)=>`<div class="empty" style="padding:26px 16px"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`;
