@@ -73,6 +73,15 @@
   .sub{margin:0 0 16px;font-size:13px;color:var(--txt-2);line-height:1.5}
   .sect-t{font-size:12.5px;font-weight:600;color:var(--txt-2);margin:2px 0 11px;display:flex;align-items:center;gap:8px}
   .sect-t .ln{height:1px;background:var(--line);flex:1}
+  /* ---------- hero ---------- */
+  .hero{background:linear-gradient(135deg,rgba(25,211,154,.16),rgba(19,185,214,.10) 55%,transparent);
+    border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .hero h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.03em}
+  .hero .when{font-size:12.5px;color:var(--txt-2);margin-top:3px}
+  .hero .pill{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-size:13px;color:var(--txt-2)}
+  .hero .pill b{color:var(--txt);font-family:var(--ff-num)}
+  .delta{display:inline-flex;align-items:center;gap:3px;font-weight:650;font-family:var(--ff-num)}
+  .delta.up{color:var(--brand)}.delta.down{color:var(--danger)}.delta.flat{color:var(--txt-3)}
   /* ---------- kpi grid ---------- */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
   .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 15px;position:relative;overflow:hidden}
@@ -246,6 +255,9 @@ const money=(n)=>"$"+clp(n);
 const hhmm=(iso)=>{try{return new Date(iso).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});}catch{return"—";}};
 const fday=(iso)=>{try{return new Date(iso).toLocaleDateString("es-CL",{day:"2-digit",month:"short"});}catch{return"—";}};
 let token=sessionStorage.getItem("rb_token")||null, me=null, lastSlug=sessionStorage.getItem("rb_slug")||"principal";
+let bizName=sessionStorage.getItem("rb_biz")||"tu negocio";
+const fechaLarga=()=>{try{return new Date().toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"});}catch{return"";}};
+const titleCase=(s)=>String(s||"").replace(/[-_]/g," ").replace(/\b\w/g,c=>c.toUpperCase());
 
 const _q=new URLSearchParams(location.search);
 const API=((_q.get("api")||localStorage.getItem("rb_api")||"").replace(/\/+$/,""));
@@ -361,8 +373,16 @@ const VIEWS=[
   {id:"reportes",label:"Reportes",icon:I.reportes,fn:vReportes},
 ];
 let cur="resumen";
+async function loadBiz(){
+  bizName=titleCase(lastSlug);
+  const r=await api("/api/v1/config/business");
+  if(r.ok&&r.body&&r.body.razon_social)bizName=r.body.razon_social;
+  sessionStorage.setItem("rb_biz",bizName);
+  const h=$("#htenant");if(h)h.innerHTML=`<span class="avatar">${esc(bizName.slice(0,1).toUpperCase())}</span><b>${esc(bizName)}</b>`;
+}
 function renderApp(){
-  $("#htenant").innerHTML=`<span class="avatar">${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug).slice(0,1).toUpperCase())}</span><b>${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug))}</b>`;
+  loadBiz();
+  $("#htenant").innerHTML=`<span class="avatar">${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug).slice(0,1).toUpperCase())}</span><b>${esc(bizName)}</b>`;
   $("#htenant").classList.remove("hidden");$("#logout").classList.remove("hidden");
   $("#root").innerHTML=`<div class="shell">
     <nav class="side" id="nav"><div class="navlbl">Mi negocio</div>${VIEWS.map(v=>`<div class="nav-i" data-v="${v.id}">${svg(v.icon)}<span>${v.label}</span></div>`).join("")}</nav>
@@ -398,7 +418,16 @@ async function vResumen(v){
   const open=(cs.ok&&Array.isArray(cs.body))?cs.body.find(x=>x.status==="open"):null;
   const enCaja=open?money(open.closing_cash_expected||open.opening_cash):"—";
   const vencer=(ne.ok&&Array.isArray(ne.body))?ne.body.length:0;
-  let html=vhead("Resumen","Una mirada a tu día, en vivo.");
+  // ayer vs hoy desde sales-daily (fechas UTC, igual que el backend)
+  const ds=(sd.ok&&Array.isArray(sd.body))?sd.body:[];
+  const todayK=new Date().toISOString().slice(0,10), yK=new Date(Date.now()-864e5).toISOString().slice(0,10);
+  const rev=(k)=>{const r=ds.find(x=>x.date===k);return r?num(r.revenue):0;};
+  const hoyRev=num(vh.revenue)||rev(todayK), ayerRev=rev(yK);
+  const dpct=ayerRev>0?Math.round((hoyRev-ayerRev)/ayerRev*100):(hoyRev>0?100:0);
+  const dHTML=ayerRev>0?`<span class="delta ${dpct>0?"up":dpct<0?"down":"flat"}">${dpct>0?"▲":dpct<0?"▼":"="} ${Math.abs(dpct)}% vs ayer</span>`:`<span class="delta flat">primer día con datos</span>`;
+  const hr=new Date().getHours(), saludo=hr<12?"Buenos días":hr<20?"Buenas tardes":"Buenas noches";
+  let html=`<div class="hero"><div><h1>${esc(saludo)}, ${esc(bizName)} 👋</h1><div class="when">${esc(fechaLarga())}</div></div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap"><span class="pill">Hoy <b>${money(hoyRev)}</b> ${dHTML}</span><span class="pill">${open?"Caja abierta":"Caja cerrada"}</span></div></div>`;
   html+=`<div class="kpis">
     ${kpi("Ventas hoy",money(vh.revenue),"accent ok",`${num(vh.orders)} ventas · efvo ${money(vh.cash)} · tarj ${money(vh.card)}`,I.ventas)}
     ${kpi("En caja",enCaja,"accent",open?`caja «${esc(open.register_name)}» abierta`:"sin caja abierta",I.caja)}
