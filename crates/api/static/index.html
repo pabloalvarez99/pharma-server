@@ -164,6 +164,7 @@
   .chip{font-size:12.5px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);
     background:var(--surface);color:var(--txt-2);cursor:pointer;transition:.14s;white-space:nowrap}
   .chip:hover{border-color:var(--brand);color:var(--txt);background:var(--brand-soft)}
+  .chip.on{border-color:var(--brand);color:var(--txt);background:var(--brand-soft);font-weight:600}
   .askbar{display:flex;gap:8px}
   .askbar input{font-size:16px}
   .askbar .btn{width:auto;flex:none;padding:12px 18px}
@@ -558,9 +559,22 @@ async function vVentas(v){
   const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
   let html=vhead("Ventas",all.length+" ventas registradas",actbtn("venta","+ Nueva venta"));
   html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
-  html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr data-oid="${esc(o.id)}" style="cursor:pointer"><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  html+=`<div class="card">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
+      <div class="search" style="flex:1;min-width:160px">${svg(I.search)}<input id="vt-q" placeholder="Buscar por cliente…"/></div>
+      <div class="chips" id="vt-f" style="margin:0">${[["","Todas"],["pos_cash","Efectivo"],["pos_debit","Débito"],["pos_credit","Crédito"]].map(([v2,l],i)=>`<button class="chip${i===0?" on":""}" data-pm="${v2}">${l}</button>`).join("")}</div>
+    </div>
+    <div id="vt-tbl"></div></div>`;
   v.innerHTML=html;
-  $$("#view tr[data-oid]").forEach(tr=>tr.onclick=()=>saleDetail(tr.dataset.oid));
+  let fpm="",fq="";
+  const draw=()=>{
+    const f=all.filter(o=>(!fpm||o.payment_method===fpm)&&(!fq||(o.customer_name||"").toLowerCase().includes(fq.toLowerCase())));
+    $("#vt-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${f.slice(0,100).map(o=>`<tr data-oid="${esc(o.id)}" style="cursor:pointer"><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div><div class="muted2" style="padding:9px 2px 0;font-size:12px">${f.length} de ${all.length} ventas · ${money(f.reduce((s,o)=>s+num(o.total),0))}</div>`:`<div class="muted" style="padding:14px">Sin ventas que coincidan.</div>`;
+    $$("#vt-tbl tr[data-oid]").forEach(tr=>tr.onclick=()=>saleDetail(tr.dataset.oid));
+  };
+  draw();
+  $("#vt-q").oninput=e=>{fq=e.target.value;draw();};
+  $$("#vt-f .chip").forEach(c=>c.onclick=()=>{fpm=c.dataset.pm;$$("#vt-f .chip").forEach(x=>x.classList.toggle("on",x===c));draw();});
 }
 
 /* ---------------- view: Inventario ---------------- */
