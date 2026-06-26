@@ -321,6 +321,8 @@ agrega al validar el rubro (disciplina anti-framework). Valor interno EN, UI ES
 
 ### Integración DSS (storefront) + cliente universal cross-platform
 
+**Mapa paraguas de superficies (canónico, 2026-06-26)** → [`docs/strategy/product-surfaces-master-plan.md`](./docs/strategy/product-surfaces-master-plan.md) + [ADR‑0019](./docs/adr/0019-product-surface-taxonomy.md). Da sentido coherente, **para todo cliente futuro**, a las 4 superficies: **RutAgent Windows/MSI** (= el *núcleo*: datos+agente+API on-prem) · **RutAgent Business** (operador nativo Tauri) · **RutAgent Web** (operador web/PWA `/app`) · **`tu-negocio.cl`** (storefront del cliente final; `tu-farmacia.cl` = instancia piloto). Regla: **1 RUT = 1 núcleo = 1 agente = N superficies**; 2 seams (operador↔núcleo `/api/v1`; núcleo↔storefront 3 verbos pull-cat/push-stock/push-pedidos); genérico por `business.vertical`, no por fork; operar gratis/offline, se cobra alcance + storefront.
+
 - **DSS** (https://dss-spa.vercel.app, Vercel/CF, fundador) = **capa storefront** de
   RutAgentIA (front-office del cliente final), acoplada por el seam HTTP existente
   ([ADR-0012](./docs/adr/0012-web-onprem-interop.md)/[ADR-0013](./docs/adr/0013-sync-bidireccional-stock.md)):
