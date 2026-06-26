@@ -617,7 +617,7 @@ async function vCaja(v){
   if(!cs.ok)return v.innerHTML=vhead("Caja")+errCard(apiErr(cs));
   const list=Array.isArray(cs.body)?cs.body:[], open=list.find(x=>x.status==="open");
   if(!open)return v.innerHTML=vhead("Caja","",actbtn("abrir","+ Abrir caja"))+empty(I.caja,"No hay caja abierta","Abre la caja al empezar el turno para registrar ventas en efectivo y cuadrar el cierre.");
-  const id=String(open.id).replace(/^cash_register_session:/,"");
+  const id=open.id;  // subendpoints de caja requieren el record id COMPLETO
   const aq=await api("/api/v1/cash-sessions/"+id+"/arqueo");
   const a=aq.ok?aq.body:{};const sess=a.session||open;
   let html=vhead("Caja","Sesión «"+(open.register_name||"caja")+"» · abierta "+hhmm(open.opened_at),'<div class="actbar">'+actbtn("mov:"+open.id,"+ Ingreso/Retiro")+actbtn("cerrar:"+open.id,"Cerrar caja")+'</div>');
@@ -851,9 +851,33 @@ function newExpense(){formModal("Registrar gasto",[{name:"category",label:"Categ
 function abrirCaja(){formModal("Abrir caja",[{name:"opening_cash",label:"Fondo inicial (CLP)",type:"number",ph:"50000"}],"Abrir caja",async v=>{
   const r=await api("/api/v1/cash-sessions",{method:"POST",body:JSON.stringify({register_name:"caja-1",opening_cash:String(num(v.opening_cash||0))})});
   return r.ok?{msg:"Caja abierta ✓"}:{err:apiErr(r)};});}
-function cerrarCaja(id){formModal("Cerrar caja",[{name:"counted",label:"Efectivo contado (CLP)",type:"number",ph:"0"}],"Cerrar caja",async v=>{
-  const r=await api("/api/v1/cash-sessions/"+id+"/close",{method:"POST",body:JSON.stringify({closing_cash_counted:String(num(v.counted||0))})});
-  return r.ok?{msg:"Caja cerrada ✓"}:{err:apiErr(r)};});}
+async function cerrarCaja(id){
+  const sid=id;  // los subendpoints de caja requieren el record id COMPLETO
+  const aq=await api("/api/v1/cash-sessions/"+sid+"/arqueo");
+  const a=aq.ok?aq.body:{}, sess=a.session||{}, expected=num(sess.closing_cash_expected||sess.opening_cash);
+  showModal("Cerrar caja",
+    `<p class="sub">Cuenta el efectivo en la caja y anótalo para cuadrar el cierre.</p>
+     <div class="kpis" style="margin-bottom:13px">${kpi("Efectivo esperado",money(expected),"accent","apertura + ventas en efectivo",I.caja)}</div>
+     <div class="field"><label>Efectivo contado (CLP)</label><input id="cc-cnt" type="number" inputmode="numeric" placeholder="0"/></div>
+     <div id="cc-diff" class="formmsg"></div>`,
+    `<button class="btn alt sm" id="cc-cancel">Cancelar</button><button class="btn" id="cc-go">Cerrar caja</button>`);
+  setTimeout(()=>$("#cc-cnt")?.focus(),30);
+  $("#cc-cancel").onclick=closeModal;
+  const upd=()=>{const c=num($("#cc-cnt").value),d=c-expected,el=$("#cc-diff");
+    if($("#cc-cnt").value===""){el.className="formmsg";el.textContent="";return;}
+    if(d===0){el.className="formmsg ok";el.textContent="✓ Cuadra exacto.";}
+    else if(d>0){el.className="formmsg";el.style.color="var(--amber)";el.textContent="Sobran "+money(d)+" en la caja.";}
+    else{el.className="formmsg err";el.textContent="Faltan "+money(-d)+" en la caja.";}};
+  $("#cc-cnt").oninput=upd;
+  $("#cc-go").onclick=async()=>{
+    const b=$("#cc-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Cerrando…';
+    const r=await api("/api/v1/cash-sessions/"+sid+"/close",{method:"POST",body:JSON.stringify({closing_cash_counted:String(num($("#cc-cnt").value||0))})});
+    b.disabled=false;b.textContent="Cerrar caja";
+    if(!r.ok)return($("#cc-diff").className="formmsg err",$("#cc-diff").textContent=apiErr(r));
+    const dif=r.body&&r.body.discrepancia!=null?num(r.body.discrepancia):null;
+    closeModal();toast(dif===0||dif===null?"Caja cerrada · cuadró ✓":"Caja cerrada · diferencia "+money(dif));go(cur);
+  };
+}
 function movCaja(id){formModal("Ingreso / Retiro de caja",[{name:"tipo",label:"Tipo",type:"select",options:[["ingreso","Ingreso"],["retiro","Retiro"]]},{name:"amount",label:"Monto (CLP)",type:"number",ph:"10000"},{name:"reason",label:"Motivo",ph:"Vuelto, compra menor…"}],"Registrar",async v=>{
   if(!v.amount||num(v.amount)<=0)return{err:"Indica un monto válido."};
   if(!v.reason)return{err:"Indica el motivo."};
