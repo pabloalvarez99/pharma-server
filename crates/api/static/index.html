@@ -489,6 +489,25 @@ async function ask(){
   const r=await api("/api/v1/assist/ask",{method:"POST",body:JSON.stringify({question:q})});th.remove();
   if(!r.ok)return botSay(apiErr(r),true);
   botSay((r.body&&r.body.text)||"…");
+  agentActions(r.body||{});
+}
+// botones contextuales según lo que respondió el agente → atan agente ↔ operación
+function agentActions(body){
+  const intent=body.intent||"", data=body.data||{};
+  const acts=[];
+  const repoN=(data.reposicion&&data.reposicion.count)||(intent==="stock_bajo"?(data.count||0):0);
+  if(intent==="resumen_dia"||intent==="stock_bajo"){
+    if(repoN>0)acts.push(["Crear orden de compra",()=>go("compras")]);
+    acts.push(["Ver inventario",()=>go("inventario")]);
+  }
+  if(intent.startsWith("ventas")||intent==="metodo_pago"||intent==="top_productos"){acts.push(["Nueva venta",()=>{go("ventas");setTimeout(posOpen,120);}]);acts.push(["Ver ventas",()=>go("ventas")]);}
+  if(intent==="caja_actual"){acts.push(["Ir a caja",()=>go("caja")]);}
+  if(intent==="por_vencer"){acts.push(["Ver vencimientos",()=>go("reportes")]);}
+  if(intent==="compras_pendientes"||intent==="proveedores"){acts.push(["Ir a compras",()=>go("compras")]);}
+  if(!acts.length)return;
+  const c=$("#chat");const wrap=document.createElement("div");wrap.className="chips";wrap.style.marginTop="-4px";
+  acts.slice(0,3).forEach(([label,fn])=>{const b=document.createElement("button");b.className="chip";b.textContent="→ "+label;b.onclick=fn;wrap.appendChild(b);});
+  c.appendChild(wrap);c.scrollTop=c.scrollHeight;
 }
 
 /* ---------------- view: Ventas ---------------- */
