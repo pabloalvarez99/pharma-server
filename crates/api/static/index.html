@@ -429,6 +429,14 @@ function renderApp(){
     <main id="view"></main></div>`;
   $$("#nav .nav-i").forEach(el=>el.onclick=()=>go(el.dataset.v));
   go(location.hash.replace("#","")||"resumen");
+  loadNavAlerts();
+}
+async function loadNavAlerts(){
+  const setBadge=(vid,n)=>{const el=$(`#nav .nav-i[data-v="${vid}"]`);if(!el)return;el.querySelector(".badge")?.remove();if(n>0){const b=document.createElement("span");b.className="badge";b.textContent=n;el.appendChild(b);}};
+  const [d,ne,po]=await Promise.all([api("/api/v1/reports/dashboard"),api("/api/v1/reports/near-expiry"),api("/api/v1/purchase-orders")]);
+  if(d.ok&&d.body&&d.body.inventario)setBadge("inventario",num(d.body.inventario.low_stock)+num(d.body.inventario.out_of_stock));
+  if(ne.ok&&Array.isArray(ne.body))setBadge("reportes",ne.body.length);
+  if(po.ok&&Array.isArray(po.body))setBadge("compras",po.body.filter(o=>o.status==="draft").length);
 }
 function go(id){
   if(!VIEWS.find(v=>v.id===id))id="resumen";
