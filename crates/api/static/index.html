@@ -92,6 +92,15 @@
   .hero .pill b{color:var(--txt);font-family:var(--ff-num)}
   .delta{display:inline-flex;align-items:center;gap:3px;font-weight:650;font-family:var(--ff-num)}
   .delta.up{color:var(--brand)}.delta.down{color:var(--danger)}.delta.flat{color:var(--txt-3)}
+  /* ---------- quick actions ---------- */
+  .qa{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .qa-b{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:15px 8px;
+    background:linear-gradient(150deg,var(--raise),var(--surface));border:1px solid var(--line);border-radius:var(--r-sm);
+    color:var(--txt);font-family:var(--ff);font-size:13px;font-weight:550;cursor:pointer;transition:.14s}
+  .qa-b svg{width:21px;height:21px;color:var(--brand)}
+  .qa-b:hover{border-color:var(--brand);background:var(--brand-soft);transform:translateY(-1px)}
+  .qa-b:active{transform:translateY(0)}
+  @media(max-width:560px){.qa{grid-template-columns:repeat(2,1fr)}}
   /* ---------- kpi grid ---------- */
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
   .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 15px;position:relative;overflow:hidden}
@@ -450,6 +459,8 @@ async function vResumen(v){
   const hr=new Date().getHours(), saludo=hr<12?"Buenos días":hr<20?"Buenas tardes":"Buenas noches";
   let html=`<div class="hero"><div><h1>${esc(saludo)}, ${esc(bizName)} 👋</h1><div class="when">${esc(fechaLarga())}</div></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap"><span class="pill">Hoy <b>${money(hoyRev)}</b> ${dHTML}</span><span class="pill">${open?"Caja abierta":"Caja cerrada"}</span></div></div>`;
+  const qa=[["venta","Nueva venta",I.ventas],["gasto","Registrar gasto",I.gastos],open?["cerrar:"+open.id,"Cerrar caja",I.caja]:["abrir","Abrir caja",I.caja],["prod","Nuevo producto",I.inventario]];
+  html+=`<div class="qa">${qa.map(([a,l,ic])=>`<button class="qa-b" data-act="${esc(a)}">${svg(ic)}<span>${esc(l)}</span></button>`).join("")}</div>`;
   html+=`<div class="kpis">
     ${kpi("Ventas hoy",money(vh.revenue),"accent ok",`${num(vh.orders)} ventas · efvo ${money(vh.cash)} · tarj ${money(vh.card)}`,I.ventas)}
     ${kpi("En caja",enCaja,"accent",open?`caja «${esc(open.register_name)}» abierta`:"sin caja abierta",I.caja)}
