@@ -280,7 +280,8 @@ const I={
   reportes:'<path d="M21 21H3V3M7 15l4-4 3 3 5-6"/>',
   search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',
   box:'<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5"/>',
-  spark:'<path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/>'
+  spark:'<path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/>',
+  config:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9z"/>'
 };
 const svg=(d,w)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w||1.8}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 
@@ -371,6 +372,7 @@ const VIEWS=[
   {id:"clientes",label:"Clientes",icon:I.clientes,fn:vClientes},
   {id:"gastos",label:"Gastos",icon:I.gastos,fn:vGastos},
   {id:"reportes",label:"Reportes",icon:I.reportes,fn:vReportes},
+  {id:"config",label:"Configuración",icon:I.config,fn:vConfig},
 ];
 let cur="resumen";
 async function loadBiz(){
@@ -654,6 +656,40 @@ async function vReportes(v){
   v.innerHTML=html;
 }
 const empty2=(t,p)=>`<div class="empty" style="padding:26px 16px"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`;
+
+/* ---------------- view: Configuración ---------------- */
+async function vConfig(v){
+  const [bz,pm,us]=await Promise.all([api("/api/v1/config/business"),api("/api/v1/config/payment-methods"),api("/api/v1/config/users")]);
+  const b=bz.ok&&bz.body?bz.body:{}, methods=(pm.ok&&pm.body&&pm.body.methods)?pm.body.methods:[], users=(us.ok&&Array.isArray(us.body))?us.body:[];
+  const ROL={owner:["Dueño","ok"],admin:["Administrador","info"],cashier:["Cajero",""],pharmacist:["Químico","warn"]};
+  let html=vhead("Configuración","Los datos de tu negocio y tu equipo.");
+  html+=`<div class="grid2">
+    <div class="card"><div class="sect-t">Ficha del negocio<span class="ln"></span></div>
+      <div class="field"><label>Razón social / Nombre</label><input id="cf-razon" value="${esc(b.razon_social||"")}" placeholder="${esc(titleCase(lastSlug))}"/></div>
+      <div class="field"><label>Giro</label><input id="cf-giro" value="${esc(b.giro||"")}" placeholder="Farmacia, minimarket…"/></div>
+      <div class="field"><label>Dirección</label><input id="cf-dir" value="${esc(b.direccion||"")}" placeholder="Calle 123, Comuna"/></div>
+      <div class="grid2"><div class="field"><label>Teléfono</label><input id="cf-tel" value="${esc(b.telefono||"")}" placeholder="+56 9 …"/></div>
+      <div class="field"><label>Correo</label><input id="cf-email" type="email" value="${esc(b.email||"")}" placeholder="contacto@negocio.cl"/></div></div>
+      <button class="btn" id="cf-save">Guardar ficha</button><div class="formmsg" id="cf-msg"></div></div>
+    <div>
+      <div class="card" style="margin-bottom:16px"><div class="sect-t">Medios de pago<span class="ln"></span></div>
+        <div class="chips" style="margin:0">${methods.length?methods.map(m=>`<span class="bdg ok">${esc(titleCase(m))}</span>`).join(""):'<span class="muted">Sin medios configurados.</span>'}</div></div>
+      <div class="card"><div class="sect-t">Equipo<span class="ln"></span></div>
+        ${users.length?`<div class="tbl-wrap"><table><thead><tr><th>Correo</th><th>Rol</th><th>Estado</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name">${esc(u.email)}</td><td>${(u.roles||[]).map(r=>bdg(ROL,r)).join(" ")}</td><td>${u.active!==false?'<span class="bdg ok">Activo</span>':'<span class="bdg bad">Inactivo</span>'}</td></tr>`).join("")}</tbody></table></div>`:'<div class="muted">Sin usuarios.</div>'}
+      </div></div>
+  </div>`;
+  v.innerHTML=html;
+  $("#cf-save").onclick=async()=>{
+    const body={razon_social:$("#cf-razon").value.trim()||null,giro:$("#cf-giro").value.trim()||null,direccion:$("#cf-dir").value.trim()||null,telefono:$("#cf-tel").value.trim()||null,email:$("#cf-email").value.trim()||null};
+    const bt=$("#cf-save");bt.disabled=true;bt.innerHTML='<span class="spin"></span>Guardando…';
+    const r=await api("/api/v1/config/business",{method:"PUT",body:JSON.stringify(body)});
+    bt.disabled=false;bt.textContent="Guardar ficha";
+    const msg=$("#cf-msg");
+    if(!r.ok)return(msg.className="formmsg err",msg.textContent=apiErr(r));
+    if(body.razon_social){bizName=body.razon_social;sessionStorage.setItem("rb_biz",bizName);const h=$("#htenant");if(h)h.innerHTML=`<span class="avatar">${esc(bizName.slice(0,1).toUpperCase())}</span><b>${esc(bizName)}</b>`;}
+    msg.className="formmsg ok";msg.textContent="Ficha guardada ✓";toast("Datos del negocio actualizados ✓");
+  };
+}
 
 /* ---------------- actions (write) ---------------- */
 const btn=(id,label)=>`<button class="btn ghost" id="${id}">${esc(label)}</button>`;
