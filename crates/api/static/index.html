@@ -2,120 +2,199 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>RutBusiness — tu negocio</title>
+<title>RutAgent — tu negocio, con su agente</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <style>
   :root{
-    --bg:#0a0d13; --surface:#121826; --surface-2:#161d2d; --raise:#1b2335;
-    --line:#232c40; --line-soft:#1a2233;
-    --txt:#eef2f9; --txt-2:#9aa6bd; --txt-3:#5c6880;
-    --brand:#19d39a; --brand-deep:#0f9d75; --brand-soft:rgba(25,211,154,.12);
-    --amber:#f5b53d; --danger:#ff5d6c; --info:#5aa9ff;
-    --r:14px; --r-sm:9px;
-    --shadow:0 1px 0 rgba(255,255,255,.03) inset,0 18px 40px -22px rgba(0,0,0,.8);
-    --ff:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --ff-num:ui-monospace,"IBM Plex Mono",monospace;
+    --bg:#070a10; --bg-2:#0b0f17; --surface:#111726; --surface-2:#151c2d; --raise:#1a2235;
+    --line:#222c42; --line-soft:#19212f;
+    --txt:#eef2f9; --txt-2:#97a3ba; --txt-3:#5b6783;
+    --brand:#19d39a; --brand-2:#13b9d6; --brand-deep:#0f9d75; --brand-soft:rgba(25,211,154,.12);
+    --amber:#f5b53d; --amber-soft:rgba(245,181,61,.13); --danger:#ff5d6c; --danger-soft:rgba(255,93,108,.13);
+    --info:#5aa9ff; --info-soft:rgba(90,169,255,.13); --violet:#a78bfa;
+    --r:16px; --r-sm:10px; --r-xs:7px;
+    --shadow:0 1px 0 rgba(255,255,255,.03) inset,0 24px 50px -28px rgba(0,0,0,.85);
+    --ff:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --ff-num:"SF Mono",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
+    --nav-w:220px;
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
   body{background:var(--bg);color:var(--txt);font-family:var(--ff);
-    letter-spacing:-.01em;-webkit-font-smoothing:antialiased;
+    letter-spacing:-.011em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
     display:flex;flex-direction:column;min-height:100dvh}
-  a{color:var(--brand)}
-  .wordmark{font-weight:600;font-size:17px;letter-spacing:-.02em}
-  .wordmark b{color:var(--brand);font-weight:700}
-  /* header */
+  body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(1100px 540px at 78% -8%,rgba(25,211,154,.10),transparent 60%),
+               radial-gradient(900px 480px at 0% 0%,rgba(19,185,214,.07),transparent 55%)}
+  a{color:var(--brand);text-decoration:none}
+  ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
+  /* ---------- brand / header ---------- */
+  .logo{display:flex;align-items:center;gap:9px}
+  .logo svg{width:28px;height:28px;flex:none}
+  .wordmark{font-weight:650;font-size:17px;letter-spacing:-.03em}
+  .wordmark b{color:var(--brand);font-weight:750}
   header{display:flex;align-items:center;justify-content:space-between;gap:12px;
-    padding:13px 18px;border-bottom:1px solid var(--line);background:rgba(18,24,38,.7);
-    backdrop-filter:blur(8px);position:sticky;top:0;z-index:10}
-  .hstatus{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--txt-2)}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--txt-3)}
+    padding:11px 18px;border-bottom:1px solid var(--line);background:rgba(11,15,23,.72);
+    backdrop-filter:saturate(1.4) blur(12px);position:sticky;top:0;z-index:30}
+  .hstatus{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--txt-2);
+    background:var(--surface);border:1px solid var(--line);padding:5px 10px;border-radius:999px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--txt-3);transition:.3s}
   .dot.ok{background:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
-  .dot.bad{background:var(--danger);box-shadow:0 0 0 3px rgba(255,93,108,.15)}
-  .hright{display:flex;align-items:center;gap:12px}
-  .htenant{font-size:12px;color:var(--txt-2);max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  /* layout */
-  main{flex:1;width:100%;max-width:760px;margin:0 auto;padding:20px 16px 28px;display:flex;flex-direction:column;gap:16px}
-  .center{max-width:440px;margin:6vh auto 0}
-  .card{background:linear-gradient(150deg,var(--raise),var(--surface));
-    border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:20px}
-  .card h2{margin:0 0 4px;font-size:18px;font-weight:600;letter-spacing:-.02em}
+  .dot.bad{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
+  .hright{display:flex;align-items:center;gap:10px}
+  .htenant{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--txt-2);
+    max-width:36vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .htenant b{color:var(--txt);font-weight:600}
+  .avatar{width:24px;height:24px;border-radius:7px;background:linear-gradient(145deg,var(--brand),var(--brand-2));
+    color:#04140e;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+  /* ---------- shell ---------- */
+  .shell{flex:1;display:grid;grid-template-columns:var(--nav-w) 1fr;width:100%;max-width:1240px;margin:0 auto}
+  nav.side{border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:2px;position:sticky;top:53px;align-self:start;height:calc(100dvh - 53px);overflow:auto}
+  .navlbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--txt-3);padding:12px 12px 5px;font-weight:600}
+  .nav-i{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:var(--r-sm);
+    color:var(--txt-2);font-size:14px;font-weight:500;cursor:pointer;transition:.13s;border:1px solid transparent;white-space:nowrap}
+  .nav-i svg{width:18px;height:18px;flex:none;opacity:.8}
+  .nav-i:hover{background:var(--surface);color:var(--txt)}
+  .nav-i.on{background:var(--brand-soft);color:var(--txt);border-color:rgba(25,211,154,.25)}
+  .nav-i.on svg{opacity:1;color:var(--brand)}
+  .nav-i .badge{margin-left:auto;font-size:10.5px;background:var(--amber-soft);color:var(--amber);
+    border-radius:999px;padding:1px 7px;font-weight:700;font-family:var(--ff-num)}
+  main{min-width:0;padding:22px 22px 96px;display:flex;flex-direction:column;gap:16px}
+  /* ---------- view header ---------- */
+  .vh{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:2px}
+  .vh h1{margin:0;font-size:21px;font-weight:680;letter-spacing:-.03em}
+  .vh p{margin:3px 0 0;font-size:13px;color:var(--txt-2)}
+  /* ---------- cards ---------- */
+  .card{background:linear-gradient(155deg,var(--raise),var(--surface));
+    border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+  .card.center{max-width:430px;margin:7vh auto 0;padding:24px}
+  .card h2{margin:0 0 3px;font-size:17px;font-weight:640;letter-spacing:-.02em}
   .sub{margin:0 0 16px;font-size:13px;color:var(--txt-2);line-height:1.5}
-  .field{margin-bottom:12px}
-  label{display:block;font-size:12px;color:var(--txt-2);margin-bottom:6px;font-weight:500}
-  input,select{width:100%;background:var(--surface);border:1px solid var(--line);
-    border-radius:var(--r-sm);color:var(--txt);font-family:var(--ff);font-size:15px;
-    padding:11px 12px;outline:none;transition:.16s}
-  input::placeholder{color:var(--txt-3)}
-  input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-soft);background:var(--surface-2)}
-  select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%239aa6bd' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;
-    border:none;border-radius:var(--r-sm);padding:12px 16px;cursor:pointer;
-    font-family:var(--ff);font-weight:600;font-size:15px;transition:.16s;
-    background:linear-gradient(180deg,var(--brand),var(--brand-deep));color:#04140e;
-    box-shadow:0 10px 24px -12px var(--brand)}
-  .btn:hover{filter:brightness(1.06)} .btn:active{transform:translateY(1px)}
-  .btn:disabled{opacity:.55;cursor:progress;filter:none}
-  .btn.ghost{background:var(--surface);color:var(--txt-2);border:1px solid var(--line);box-shadow:none;width:auto;padding:8px 14px;font-size:13px}
-  .btn.ghost:hover{color:var(--txt);border-color:var(--brand)}
-  .formmsg{font-size:13px;margin-top:10px;min-height:18px;line-height:1.4}
-  .formmsg.err{color:var(--danger)} .formmsg.ok{color:var(--brand)}
-  .switch{margin-top:16px;text-align:center;font-size:13px;color:var(--txt-2)}
-  .switch a{cursor:pointer;text-decoration:none;font-weight:600}
-  .rolepick{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
-  /* rubro grid */
-  .rubros{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:2px}
-  .rubro{display:flex;flex-direction:column;align-items:center;gap:5px;padding:11px 4px;
-    border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);
-    cursor:pointer;transition:.15s;font-size:11px;color:var(--txt-2);text-align:center}
-  .rubro:hover{border-color:var(--brand);color:var(--txt)}
-  .rubro.sel{border-color:var(--brand);background:var(--brand-soft);color:var(--txt)}
-  .rubro span{font-size:20px;line-height:1}
-  @media(max-width:440px){.rubros{grid-template-columns:repeat(3,1fr)}}
-  /* agent chat */
-  .agent-head{display:flex;align-items:center;gap:11px;margin-bottom:14px}
-  .agent-mark{width:38px;height:38px;border-radius:11px;flex:none;display:grid;place-items:center;
-    background:linear-gradient(145deg,var(--brand-soft),transparent);border:1px solid var(--line);font-size:20px}
-  .agent-head h2{margin:0;font-size:16px}
-  .agent-head p{margin:1px 0 0;font-size:12px;color:var(--txt-2)}
-  .chat{display:flex;flex-direction:column;gap:11px;min-height:120px;margin-bottom:14px}
-  .bubble{max-width:88%;padding:11px 14px;border-radius:13px;font-size:14.5px;line-height:1.55;white-space:pre-wrap;word-wrap:break-word}
-  .bubble.me{align-self:flex-end;background:var(--brand);color:#04140e;border-bottom-right-radius:4px;font-weight:500}
-  .bubble.bot{align-self:flex-start;background:var(--surface-2);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .sect-t{font-size:12.5px;font-weight:600;color:var(--txt-2);margin:2px 0 11px;display:flex;align-items:center;gap:8px}
+  .sect-t .ln{height:1px;background:var(--line);flex:1}
+  /* ---------- kpi grid ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 15px;position:relative;overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--brand);opacity:.0;transition:.2s}
+  .kpi.accent::after{opacity:.9}.kpi.warn::after{background:var(--amber);opacity:.9}.kpi.bad::after{background:var(--danger);opacity:.9}
+  .kpi .k{font-size:11px;color:var(--txt-2);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:flex;align-items:center;gap:6px}
+  .kpi .k svg{width:13px;height:13px;opacity:.7}
+  .kpi .v{font-size:25px;font-weight:680;margin-top:7px;font-family:var(--ff-num);letter-spacing:-.03em;line-height:1}
+  .kpi .v.warn{color:var(--amber)}.kpi .v.bad{color:var(--danger)}.kpi .v.ok{color:var(--brand)}
+  .kpi .s{font-size:11.5px;color:var(--txt-3);margin-top:6px;font-weight:500}
+  /* ---------- table ---------- */
+  .tbl-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--r-sm)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  thead th{position:sticky;top:0;background:var(--surface-2);text-align:left;font-size:11px;
+    text-transform:uppercase;letter-spacing:.04em;color:var(--txt-3);font-weight:600;padding:10px 13px;border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:11px 13px;border-bottom:1px solid var(--line-soft);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover td{background:rgba(255,255,255,.018)}
+  td.num,th.num{text-align:right;font-family:var(--ff-num);letter-spacing:-.02em}
+  td.name{white-space:normal;font-weight:500;min-width:150px}
+  .muted2{color:var(--txt-3)}
+  /* ---------- badges ---------- */
+  .bdg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--txt-2);background:var(--surface)}
+  .bdg.ok{color:var(--brand);background:var(--brand-soft);border-color:rgba(25,211,154,.25)}
+  .bdg.warn{color:var(--amber);background:var(--amber-soft);border-color:rgba(245,181,61,.25)}
+  .bdg.bad{color:var(--danger);background:var(--danger-soft);border-color:rgba(255,93,108,.25)}
+  .bdg.info{color:var(--info);background:var(--info-soft);border-color:rgba(90,169,255,.25)}
+  .bdg.abc-A{color:var(--brand);background:var(--brand-soft)}.bdg.abc-B{color:var(--amber);background:var(--amber-soft)}.bdg.abc-C{color:var(--txt-2)}
+  /* ---------- chart ---------- */
+  .chart{display:flex;align-items:flex-end;gap:5px;height:140px;padding-top:8px}
+  .bar{flex:1;min-width:5px;background:linear-gradient(180deg,var(--brand),var(--brand-deep));
+    border-radius:4px 4px 2px 2px;position:relative;transition:.2s;min-height:3px;opacity:.85}
+  .bar:hover{opacity:1;filter:brightness(1.12)}
+  .bar.today{background:linear-gradient(180deg,var(--amber),#cf941f)}
+  .chart-x{display:flex;gap:5px;margin-top:6px}.chart-x span{flex:1;text-align:center;font-size:9.5px;color:var(--txt-3);overflow:hidden}
+  /* ---------- agent chat ---------- */
+  .agent-head{display:flex;align-items:center;gap:12px;margin-bottom:15px}
+  .agent-mark{width:42px;height:42px;border-radius:13px;flex:none;display:grid;place-items:center;
+    background:linear-gradient(145deg,var(--brand),var(--brand-2));box-shadow:0 8px 22px -10px var(--brand)}
+  .agent-mark svg{width:23px;height:23px;color:#04140e}
+  .agent-head h2{margin:0;font-size:17px}.agent-head p{margin:2px 0 0;font-size:12.5px;color:var(--txt-2)}
+  .chat{display:flex;flex-direction:column;gap:11px;min-height:140px;margin-bottom:14px}
+  .bubble{max-width:90%;padding:12px 15px;border-radius:15px;font-size:14.5px;line-height:1.6;white-space:pre-wrap;word-wrap:break-word}
+  .bubble.me{align-self:flex-end;background:linear-gradient(180deg,var(--brand),var(--brand-deep));color:#04140e;border-bottom-right-radius:5px;font-weight:550}
+  .bubble.bot{align-self:flex-start;background:var(--surface-2);border:1px solid var(--line);border-bottom-left-radius:5px}
   .bubble.bot.think{color:var(--txt-3)}
   .bubble.bot.err{border-color:rgba(255,93,108,.4);color:#ffb3bb}
+  .bubble b.li{display:block;font-weight:400}
   .typing span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--txt-3);margin:0 1px;animation:b 1s infinite}
   .typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
   @keyframes b{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
   .chips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}
-  .chip{font-size:12.5px;padding:7px 12px;border-radius:999px;border:1px solid var(--line);
-    background:var(--surface);color:var(--txt-2);cursor:pointer;transition:.15s;white-space:nowrap}
-  .chip:hover{border-color:var(--brand);color:var(--txt)}
+  .chip{font-size:12.5px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);
+    background:var(--surface);color:var(--txt-2);cursor:pointer;transition:.14s;white-space:nowrap}
+  .chip:hover{border-color:var(--brand);color:var(--txt);background:var(--brand-soft)}
   .askbar{display:flex;gap:8px}
-  .askbar input{font-size:15px}
-  .askbar .btn{width:auto;flex:none;padding:11px 18px}
-  /* kpis */
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px 14px}
-  .kpi .k{font-size:11px;color:var(--txt-2);text-transform:uppercase;letter-spacing:.04em}
-  .kpi .v{font-size:22px;font-weight:600;margin-top:5px;font-family:var(--ff-num);letter-spacing:-.02em}
-  .kpi .v.warn{color:var(--amber)} .kpi .v.bad{color:var(--danger)} .kpi .v.ok{color:var(--brand)}
+  .askbar input{font-size:16px}
+  .askbar .btn{width:auto;flex:none;padding:12px 18px}
+  /* ---------- forms ---------- */
+  .field{margin-bottom:13px}
+  label{display:block;font-size:12px;color:var(--txt-2);margin-bottom:6px;font-weight:550}
+  input,select{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-sm);
+    color:var(--txt);font-family:var(--ff);font-size:16px;padding:11px 13px;outline:none;transition:.16s}
+  input::placeholder{color:var(--txt-3)}
+  input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-soft);background:var(--surface)}
+  .search{position:relative}.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--txt-3)}
+  .search input{padding-left:36px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    border:none;border-radius:var(--r-sm);padding:12px 16px;cursor:pointer;font-family:var(--ff);font-weight:620;font-size:15px;transition:.15s;
+    background:linear-gradient(180deg,var(--brand),var(--brand-deep));color:#04140e;box-shadow:0 12px 26px -14px var(--brand)}
+  .btn:hover{filter:brightness(1.06)}.btn:active{transform:translateY(1px)}
+  .btn:disabled{opacity:.55;cursor:progress;filter:none}
+  .btn.ghost{background:var(--surface);color:var(--txt-2);border:1px solid var(--line);box-shadow:none;width:auto;padding:8px 13px;font-size:13px;font-weight:600}
+  .btn.ghost:hover{color:var(--txt);border-color:var(--brand)}
+  .formmsg{font-size:13px;margin-top:10px;min-height:18px;line-height:1.4}
+  .formmsg.err{color:var(--danger)}.formmsg.ok{color:var(--brand)}
+  .rubros{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:2px}
+  .rubro{display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 4px;border:1px solid var(--line);
+    border-radius:var(--r-sm);background:var(--bg-2);cursor:pointer;transition:.15s;font-size:11px;color:var(--txt-2);text-align:center}
+  .rubro:hover{border-color:var(--brand);color:var(--txt)}
+  .rubro.sel{border-color:var(--brand);background:var(--brand-soft);color:var(--txt)}
+  .rubro span{font-size:21px;line-height:1}
+  /* ---------- states ---------- */
+  .empty{text-align:center;padding:42px 20px;color:var(--txt-2)}
+  .empty .ico{width:46px;height:46px;margin:0 auto 12px;border-radius:13px;display:grid;place-items:center;background:var(--surface);border:1px solid var(--line)}
+  .empty .ico svg{width:23px;height:23px;color:var(--txt-3)}
+  .empty h3{margin:0 0 5px;font-size:15px;color:var(--txt);font-weight:600}
+  .empty p{margin:0 auto;font-size:13px;max-width:340px;line-height:1.5}
+  .skel{height:13px;border-radius:6px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));background-size:200% 100%;animation:sh 1.3s infinite}
+  @keyframes sh{to{background-position:-200% 0}}
   .muted{color:var(--txt-2);font-size:13px}
-  footer{padding:12px 18px;border-top:1px solid var(--line);color:var(--txt-3);font-size:11px;text-align:center}
-  /* toast */
-  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);
-    background:var(--raise);border:1px solid var(--line);color:var(--txt);padding:10px 16px;
-    border-radius:999px;font-size:13px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.25s;z-index:50;max-width:90vw}
+  /* ---------- toast / misc ---------- */
+  #toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%) translateY(20px);
+    background:var(--raise);border:1px solid var(--line);color:var(--txt);padding:11px 17px;border-radius:999px;
+    font-size:13px;box-shadow:var(--shadow);opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:90vw}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .hidden{display:none!important}
   .spin{width:15px;height:15px;border:2px solid rgba(4,20,14,.35);border-top-color:#04140e;border-radius:50%;animation:s .7s linear infinite}
   @keyframes s{to{transform:rotate(360deg)}}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  /* ---------- mobile ---------- */
+  @media(max-width:760px){
+    .shell{grid-template-columns:1fr}
+    nav.side{position:fixed;left:0;right:0;bottom:0;top:auto;height:auto;flex-direction:row;border-right:none;
+      border-top:1px solid var(--line);background:rgba(11,15,23,.94);backdrop-filter:blur(12px);padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:40;overflow-x:auto;gap:3px}
+    .navlbl{display:none}
+    .nav-i{flex-direction:column;gap:3px;font-size:10px;padding:7px 9px;min-width:60px;justify-content:center}
+    .nav-i svg{width:20px;height:20px}.nav-i .badge{position:absolute;margin:0;top:3px;right:8px}
+    .nav-i{position:relative}
+    main{padding:16px 14px 90px}
+    .rubros{grid-template-columns:repeat(3,1fr)}
+    .htenant{max-width:28vw}
+  }
 </style>
 </head>
 <body>
 <header>
-  <div class="wordmark">Rut<b>Business</b></div>
+  <div class="logo">
+    <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="9" fill="url(#g)"/><path d="M11 20.5c0-3 2.2-5 5-5s5 2 5 5M16 13.2a2.4 2.4 0 100-4.8 2.4 2.4 0 000 4.8z" stroke="#04140e" stroke-width="2.1" stroke-linecap="round"/><circle cx="22.4" cy="10" r="2.1" fill="#04140e"/><defs><linearGradient id="g" x1="2" y1="2" x2="30" y2="30"><stop stop-color="#19d39a"/><stop offset="1" stop-color="#13b9d6"/></linearGradient></defs></svg>
+    <span class="wordmark">Rut<b>Agent</b></span>
+  </div>
   <div class="hright">
     <span class="hstatus"><span class="dot" id="dot"></span><span id="dot-label">conectando…</span></span>
     <span class="htenant hidden" id="htenant"></span>
@@ -123,36 +202,49 @@
   </div>
 </header>
 
-<main id="main">
-  <!-- AUTH: setup / login (filled by JS) -->
-  <section class="card center" id="auth">
-    <div id="auth-body"><p class="muted">Cargando…</p></div>
-  </section>
-</main>
+<div id="root">
+  <main style="max-width:1240px;margin:0 auto;width:100%">
+    <section class="card center" id="auth"><div id="auth-body"><p class="muted">Cargando…</p></div></section>
+  </main>
+</div>
 
-<footer>RutBusiness · tu negocio, con su propio agente · offline-first</footer>
 <div id="toast"></div>
 
 <script>
 const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
 const esc=(s)=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const clp=(n)=>{const x=Number(n);return isNaN(x)?"—":x.toLocaleString("es-CL");};
-let token=sessionStorage.getItem("rb_token")||null;
-let me=null;
-let lastSlug=sessionStorage.getItem("rb_slug")||"principal";
+const num=(n)=>{const x=Number(n);return isNaN(x)?0:x;};
+const clp=(n)=>num(n).toLocaleString("es-CL");
+const money=(n)=>"$"+clp(n);
+const hhmm=(iso)=>{try{return new Date(iso).toLocaleTimeString("es-CL",{hour:"2-digit",minute:"2-digit"});}catch{return"—";}};
+const fday=(iso)=>{try{return new Date(iso).toLocaleDateString("es-CL",{day:"2-digit",month:"short"});}catch{return"—";}};
+let token=sessionStorage.getItem("rb_token")||null, me=null, lastSlug=sessionStorage.getItem("rb_slug")||"principal";
 
-// ---- API base (Vercel-ready) -------------------------------------------
-// Same-origin by default (server serving its own /app → ""). When the front is
-// hosted apart (Vercel / rutagent.cl) point it at the API once with ?api=<url>;
-// it persists to localStorage. The server must allow this origin via CORS
-// (config [cors] allowed_origins). ADR-0018.
 const _q=new URLSearchParams(location.search);
 const API=((_q.get("api")||localStorage.getItem("rb_api")||"").replace(/\/+$/,""));
 if(_q.get("api"))localStorage.setItem("rb_api",API);
 const U=(p)=>API+p;
 
 const RUBROS=[["farmacia","💊"],["minimarket","🛒"],["restaurant","🍽️"],["cafe","☕"],["tienda","🏷️"],["belleza","💅"],["servicios","🔧"],["otro","✨"]];
-let pickedRubro="minimarket";
+let pickedRubro="farmacia";
+
+// icon set (stroke, currentColor)
+const I={
+  resumen:'<path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 7h6V4h-6zM4 20h6v-3H4z"/>',
+  agente:'<path d="M12 3a7 7 0 017 7v4a7 7 0 01-14 0v-4a7 7 0 017-7zM9 11h.01M15 11h.01M9.5 15a3.5 3.5 0 005 0"/>',
+  ventas:'<path d="M3 6h18M3 12h18M3 18h18"/><circle cx="7" cy="6" r="0"/>',
+  caja:'<path d="M3 7h18v12H3zM3 7l3-4h12l3 4M9 12h6"/>',
+  inventario:'<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/>',
+  compras:'<path d="M5 7h14l-1.2 10.5a2 2 0 01-2 1.8H8.2a2 2 0 01-2-1.8zM9 7V5a3 3 0 016 0v2"/>',
+  clientes:'<path d="M16 18v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 9a3 3 0 100-6 3 3 0 000 6zM21 18v-1a4 4 0 00-3-3.8M16 3.1a3 3 0 010 5.8"/>',
+  gastos:'<path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>',
+  reportes:'<path d="M21 21H3V3M7 15l4-4 3 3 5-6"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',
+  box:'<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5"/>',
+  spark:'<path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/>'
+};
+const svg=(d,w)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w||1.8}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),2600);}
 
@@ -160,150 +252,291 @@ async function api(path,opts={}){
   const h=Object.assign({},opts.headers||{});
   if(opts.body)h["content-type"]="application/json";
   if(token)h["authorization"]="Bearer "+token;
-  const r=await fetch(U(path),{...opts,headers:h});
+  let r;try{r=await fetch(U(path),{...opts,headers:h});}catch(e){return{ok:false,status:0,body:null};}
   let body=null;const ct=r.headers.get("content-type")||"";
   try{body=ct.includes("json")?await r.json():await r.text();}catch{}
   return{ok:r.ok,status:r.status,body};
 }
-function apiErr(r){return (r.body&&r.body.error&&r.body.error.message)||(r.body&&r.body.error)||("Error "+r.status);}
+const apiErr=(r)=>(r.body&&r.body.error&&r.body.error.message)||(r.body&&r.body.error)||(r.status===0?"Sin conexión":"Error "+r.status);
 
-// ---- server status dot ----
 async function pingStatus(){
-  try{
-    const r=await fetch(U("/health/ready"));const j=await r.json();
+  try{const r=await fetch(U("/health/ready"));const j=await r.json();
     const ok=r.ok&&j&&j.checks&&j.checks.db==="ok";
-    $("#dot").className="dot "+(ok?"ok":"bad");
-    $("#dot-label").textContent=ok?"en línea":"degradado";
+    $("#dot").className="dot "+(ok?"ok":"bad");$("#dot-label").textContent=ok?"en línea":"degradado";
   }catch{$("#dot").className="dot bad";$("#dot-label").textContent="sin conexión";}
 }
 
-// ---- boot ----
 async function boot(){
   pingStatus();setInterval(pingStatus,8000);
   if(token){const m=await api("/api/v1/me");if(m.ok){me=m.body;return renderApp();}token=null;sessionStorage.removeItem("rb_token");}
   const s=await api("/api/v1/setup/status");
+  $("#root").innerHTML=`<main style="max-width:1240px;margin:0 auto;width:100%"><section class="card center" id="auth"><div id="auth-body"></div></section></main>`;
   if(s.ok&&s.body&&s.body.needs_setup)renderSetup();else renderLogin();
 }
 
-// ---- setup (first run) ----
+/* ---------------- auth ---------------- */
 function renderSetup(){
   $("#auth-body").innerHTML=`
-    <h2>Crea tu negocio</h2>
-    <p class="sub">Primer inicio. Esto crea tu cuenta de dueño — no se necesita nada más.</p>
+    <div class="agent-head"><div class="agent-mark">${svg(I.spark,1.6)}</div><div><h2>Crea tu negocio</h2><p>Primer inicio — esto crea tu cuenta de dueño.</p></div></div>
     <div class="field"><label>Nombre del negocio</label><input id="s-name" placeholder="Mi Negocio" autocomplete="organization"/></div>
     <div class="field"><label>Rubro</label><div class="rubros" id="s-rubros"></div></div>
     <div class="field"><label>Tu correo</label><input id="s-email" type="email" placeholder="dueno@minegocio.cl" autocomplete="email"/></div>
     <div class="field"><label>Contraseña</label><input id="s-pass" type="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password"/></div>
-    <button class="btn" id="s-go">Crear mi negocio</button>
-    <div class="formmsg" id="s-msg"></div>`;
-  const grid=$("#s-rubros");
-  grid.innerHTML=RUBROS.map(([v,e])=>`<div class="rubro${v===pickedRubro?" sel":""}" data-r="${v}"><span>${e}</span>${v}</div>`).join("");
-  grid.querySelectorAll(".rubro").forEach(el=>el.onclick=()=>{pickedRubro=el.dataset.r;grid.querySelectorAll(".rubro").forEach(x=>x.classList.toggle("sel",x===el));});
-  $("#s-go").onclick=doSetup;
-  $("#s-pass").onkeydown=e=>{if(e.key==="Enter")doSetup();};
+    <button class="btn" id="s-go">Crear mi negocio</button><div class="formmsg" id="s-msg"></div>`;
+  const g=$("#s-rubros");
+  g.innerHTML=RUBROS.map(([v,e])=>`<div class="rubro${v===pickedRubro?" sel":""}" data-r="${v}"><span>${e}</span>${v}</div>`).join("");
+  $$(".rubro",g).forEach(el=>el.onclick=()=>{pickedRubro=el.dataset.r;$$(".rubro",g).forEach(x=>x.classList.toggle("sel",x===el));});
+  $("#s-go").onclick=doSetup;$("#s-pass").onkeydown=e=>{if(e.key==="Enter")doSetup();};
 }
 async function doSetup(){
-  const name=$("#s-name").value.trim(),email=$("#s-email").value.trim(),pass=$("#s-pass").value;
-  const msg=$("#s-msg");msg.className="formmsg";
+  const name=$("#s-name").value.trim(),email=$("#s-email").value.trim(),pass=$("#s-pass").value,msg=$("#s-msg");msg.className="formmsg";
   if(!name)return fail(msg,"Indica el nombre de tu negocio.");
   if(!email)return fail(msg,"Indica tu correo.");
   if(pass.length<8)return fail(msg,"La contraseña debe tener al menos 8 caracteres.");
-  const btn=$("#s-go");btn.disabled=true;btn.innerHTML='<span class="spin"></span>Creando…';
+  const b=$("#s-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Creando…';
   const r=await api("/api/v1/setup",{method:"POST",body:JSON.stringify({business_name:name,email,password:pass,vertical:pickedRubro})});
-  btn.disabled=false;btn.textContent="Crear mi negocio";
+  b.disabled=false;b.textContent="Crear mi negocio";
   if(!r.ok)return fail(msg,apiErr(r));
   token=r.body.token;sessionStorage.setItem("rb_token",token);
   if(r.body.tenant_slug){lastSlug=r.body.tenant_slug;sessionStorage.setItem("rb_slug",lastSlug);}
   const m=await api("/api/v1/me");me=m.ok?m.body:null;renderApp();toast("¡Negocio creado! 🎉");
 }
-
-// ---- login ----
 function renderLogin(){
   $("#auth-body").innerHTML=`
-    <h2>Entra a tu negocio</h2>
-    <p class="sub">Inicia sesión con tu correo y contraseña.</p>
+    <div class="agent-head"><div class="agent-mark">${svg(I.agente,1.7)}</div><div><h2>Entra a tu negocio</h2><p>Tu negocio, con su propio agente.</p></div></div>
     <div class="field"><label>Sucursal</label><input id="l-tenant" value="${esc(lastSlug)}" autocomplete="off" spellcheck="false"/></div>
     <div class="field"><label>Correo</label><input id="l-email" type="email" placeholder="tucorreo@negocio.cl" autocomplete="email"/></div>
     <div class="field"><label>Contraseña</label><input id="l-pass" type="password" placeholder="Tu contraseña" autocomplete="current-password"/></div>
-    <button class="btn" id="l-go">Entrar</button>
-    <div class="formmsg" id="l-msg"></div>`;
-  $("#l-go").onclick=doLogin;
-  $("#l-pass").onkeydown=e=>{if(e.key==="Enter")doLogin();};
+    <button class="btn" id="l-go">Entrar</button><div class="formmsg" id="l-msg"></div>`;
+  $("#l-go").onclick=doLogin;$("#l-pass").onkeydown=e=>{if(e.key==="Enter")doLogin();};
 }
 async function doLogin(){
-  const tenant=$("#l-tenant").value.trim(),email=$("#l-email").value.trim(),pass=$("#l-pass").value;
-  const msg=$("#l-msg");msg.className="formmsg";
+  const tenant=$("#l-tenant").value.trim(),email=$("#l-email").value.trim(),pass=$("#l-pass").value,msg=$("#l-msg");msg.className="formmsg";
   if(!tenant||!email||!pass)return fail(msg,"Completa sucursal, correo y contraseña.");
-  const btn=$("#l-go");btn.disabled=true;btn.innerHTML='<span class="spin"></span>Entrando…';
+  const b=$("#l-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Entrando…';
   const r=await api("/api/v1/login",{method:"POST",body:JSON.stringify({tenant,email,password:pass})});
-  btn.disabled=false;btn.textContent="Entrar";
+  b.disabled=false;b.textContent="Entrar";
   if(!r.ok)return fail(msg,r.status===401?"Correo o contraseña incorrectos.":apiErr(r));
-  token=r.body.token;sessionStorage.setItem("rb_token",token);
-  lastSlug=tenant;sessionStorage.setItem("rb_slug",tenant);
+  token=r.body.token;sessionStorage.setItem("rb_token",token);lastSlug=tenant;sessionStorage.setItem("rb_slug",tenant);
   const m=await api("/api/v1/me");me=m.ok?m.body:null;renderApp();
 }
-function fail(el,m){el.className="formmsg err";el.textContent=m;}
+const fail=(el,m)=>{el.className="formmsg err";el.textContent=m;};
 
-// ---- app (authed): agent chat + kpis ----
+/* ---------------- app shell + router ---------------- */
+const VIEWS=[
+  {id:"resumen",label:"Resumen",icon:I.resumen,fn:vResumen},
+  {id:"agente",label:"Agente",icon:I.agente,fn:vAgente},
+  {id:"ventas",label:"Ventas",icon:I.ventas,fn:vVentas},
+  {id:"inventario",label:"Inventario",icon:I.inventario,fn:vInventario},
+  {id:"caja",label:"Caja",icon:I.caja,fn:vCaja},
+  {id:"compras",label:"Compras",icon:I.compras,fn:vCompras},
+  {id:"clientes",label:"Clientes",icon:I.clientes,fn:vClientes},
+  {id:"gastos",label:"Gastos",icon:I.gastos,fn:vGastos},
+  {id:"reportes",label:"Reportes",icon:I.reportes,fn:vReportes},
+];
+let cur="resumen";
 function renderApp(){
-  $("#htenant").textContent=(me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug);
-  $("#htenant").classList.remove("hidden");
-  $("#logout").classList.remove("hidden");
-  $("#main").innerHTML=`
+  $("#htenant").innerHTML=`<span class="avatar">${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug).slice(0,1).toUpperCase())}</span><b>${esc((me&&me.tenant_id?me.tenant_id.replace(/^tenant:/,""):lastSlug))}</b>`;
+  $("#htenant").classList.remove("hidden");$("#logout").classList.remove("hidden");
+  $("#root").innerHTML=`<div class="shell">
+    <nav class="side" id="nav"><div class="navlbl">Mi negocio</div>${VIEWS.map(v=>`<div class="nav-i" data-v="${v.id}">${svg(v.icon)}<span>${v.label}</span></div>`).join("")}</nav>
+    <main id="view"></main></div>`;
+  $$("#nav .nav-i").forEach(el=>el.onclick=()=>go(el.dataset.v));
+  go(location.hash.replace("#","")||"resumen");
+}
+function go(id){
+  if(!VIEWS.find(v=>v.id===id))id="resumen";
+  cur=id;location.hash=id;
+  $$("#nav .nav-i").forEach(el=>el.classList.toggle("on",el.dataset.v===id));
+  const v=$("#view");v.scrollTop=0;
+  const def=VIEWS.find(x=>x.id===id);
+  v.innerHTML=`<div class="vh"><div><h1>${def.label}</h1></div></div><div class="card"><div class="skel" style="width:40%"></div><div class="skel" style="width:75%;margin-top:12px"></div><div class="skel" style="width:60%;margin-top:12px"></div></div>`;
+  def.fn(v);
+}
+window.addEventListener("hashchange",()=>{const h=location.hash.replace("#","");if(h&&h!==cur)go(h);});
+
+/* helpers for views */
+function vhead(t,sub,right){return `<div class="vh"><div><h1>${esc(t)}</h1>${sub?`<p>${esc(sub)}</p>`:""}</div>${right||""}</div>`;}
+function empty(icon,t,p){return `<div class="card"><div class="empty"><div class="ico">${svg(icon)}</div><h3>${esc(t)}</h3><p>${esc(p)}</p></div></div>`;}
+function errCard(m){return `<div class="card"><div class="empty"><div class="ico">${svg(I.spark)}</div><h3>No pudimos cargar esto</h3><p>${esc(m)}</p></div></div>`;}
+function kpi(k,v,cls,sub,icon){return `<div class="kpi ${cls||""}"><div class="k">${icon?svg(icon):""}${esc(k)}</div><div class="v ${cls||""}">${v}</div>${sub?`<div class="s">${esc(sub)}</div>`:""}</div>`;}
+const PM={pos_cash:["Efectivo","ok"],pos_debit:["Débito","info"],pos_credit:["Crédito","info"],pos_mixed:["Mixto","warn"]};
+const ST={paid:["Pagada","ok"],draft:["Borrador","warn"],received:["Recibida","ok"],cancelled:["Anulada","bad"],open:["Abierta","ok"],closed:["Cerrada",""]};
+const bdg=(map,k)=>{const m=(map[k]||[k,""]);return `<span class="bdg ${m[1]}">${esc(m[0])}</span>`;};
+
+/* ---------------- view: Resumen ---------------- */
+async function vResumen(v){
+  const [d,sd,cs,ne]=await Promise.all([api("/api/v1/reports/dashboard"),api("/api/v1/reports/sales-daily"),api("/api/v1/cash-sessions"),api("/api/v1/reports/near-expiry")]);
+  if(!d.ok)return v.innerHTML=vhead("Resumen")+errCard(apiErr(d));
+  const b=d.body, vh=b.ventas_hoy||{}, vm=b.ventas_mes||{}, inv=b.inventario||{};
+  const open=(cs.ok&&Array.isArray(cs.body))?cs.body.find(x=>x.status==="open"):null;
+  const enCaja=open?money(open.closing_cash_expected||open.opening_cash):"—";
+  const vencer=(ne.ok&&Array.isArray(ne.body))?ne.body.length:0;
+  let html=vhead("Resumen","Una mirada a tu día, en vivo.");
+  html+=`<div class="kpis">
+    ${kpi("Ventas hoy",money(vh.revenue),"accent ok",`${num(vh.orders)} ventas · efvo ${money(vh.cash)} · tarj ${money(vh.card)}`,I.ventas)}
+    ${kpi("En caja",enCaja,"accent",open?`caja «${esc(open.register_name)}» abierta`:"sin caja abierta",I.caja)}
+    ${kpi("Ventas del mes",money(vm.revenue),"","¿"+num(vm.orders)+" ventas".replace("¿","")+"",I.reportes)}
+    ${kpi("Valor inventario",money(inv.value),"",num(inv.active_skus)+" productos activos",I.inventario)}
+    ${kpi("Stock bajo",clp(inv.low_stock),num(inv.low_stock)>0?"warn":"","de "+num(inv.total_skus)+" SKU",I.box)}
+    ${kpi("Por vencer (30d)",clp(vencer),vencer>0?"warn":"","lotes próximos a vencer",I.spark)}
+  </div>`;
+  // chart
+  if(sd.ok&&Array.isArray(sd.body)&&sd.body.length){
+    const rows=sd.body.slice(-14), mx=Math.max(...rows.map(r=>num(r.revenue)),1), today=new Date().toISOString().slice(0,10);
+    html+=`<div class="card"><div class="sect-t">Ventas últimos días<span class="ln"></span><span class="muted2" style="font-size:11.5px">máx ${money(mx)}</span></div>
+      <div class="chart">${rows.map(r=>`<div class="bar ${r.date===today?"today":""}" style="height:${Math.round(num(r.revenue)/mx*100)}%" title="${esc(fday(r.date))}: ${money(r.revenue)} (${num(r.orders)} ventas)"></div>`).join("")}</div>
+      <div class="chart-x">${rows.map(r=>`<span>${esc(fday(r.date).replace(".",""))}</span>`).join("")}</div></div>`;
+  }
+  // top + agent cta
+  html+=`<div class="grid2">
+    <div class="card"><div class="sect-t">Más vendidos del mes<span class="ln"></span></div>${topList(b.top_productos||[])}</div>
+    <div class="card"><div class="agent-head"><div class="agent-mark">${svg(I.agente,1.7)}</div><div><h2>Pregúntale a tu negocio</h2><p>El agente te responde en segundos.</p></div></div>
+      <div class="chips">${["prepárame el día","¿cuánto vendí hoy?","¿qué tengo que reponer?"].map(c=>`<button class="chip" data-q="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+      <button class="btn" id="toagent">Abrir el agente</button></div>
+  </div>`;
+  v.innerHTML=html;
+  $("#toagent").onclick=()=>go("agente");
+  $$(".chip",v).forEach(c=>c.onclick=()=>{pendingQ=c.dataset.q;go("agente");});
+}
+function topList(arr){
+  if(!arr.length)return `<div class="muted">Aún sin ventas.</div>`;
+  return `<div class="tbl-wrap"><table><tbody>${arr.slice(0,5).map(p=>`<tr><td class="num muted2">${p.rank}</td><td class="name">${esc(p.product_name)} ${p.abc_class?`<span class="bdg abc-${esc(p.abc_class)}" style="margin-left:4px">${esc(p.abc_class)}</span>`:""}</td><td class="num muted2">${num(p.qty_sold)} u.</td><td class="num">${money(p.revenue)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+/* ---------------- view: Agente ---------------- */
+let pendingQ=null;
+function vAgente(v){
+  v.innerHTML=vhead("Agente","Háblale a tu negocio en español, como a tu socio.")+`
     <section class="card">
-      <div class="agent-head">
-        <div class="agent-mark">🤖</div>
-        <div><h2>Tu agente</h2><p>Pregúntale a tu negocio en español, como hablarías con tu socio.</p></div>
-      </div>
       <div class="chat" id="chat"></div>
       <div class="chips" id="chips"></div>
-      <div class="askbar">
-        <input id="q" placeholder="Escribe tu pregunta…" autocomplete="off"/>
-        <button class="btn" id="ask">Preguntar</button>
-      </div>
-    </section>
-    <section class="card">
-      <div class="agent-head" style="margin-bottom:12px"><div><h2 style="font-size:15px">Resumen rápido</h2></div></div>
-      <div class="kpis" id="kpis"><div class="muted">Cargando…</div></div>
+      <div class="askbar"><input id="q" placeholder="Escribe tu pregunta…" autocomplete="off"/><button class="btn" id="ask">Preguntar</button></div>
     </section>`;
-  const chips=["prepárame el día","¿cuánto vendí hoy?","ventas de la semana","¿qué tengo que reponer?","¿qué se vence?","órdenes pendientes","¿cuánto hay en caja?"];
+  const chips=["prepárame el día","¿cuánto vendí hoy?","ventas de la semana","productos más vendidos","¿qué tengo que reponer?","¿qué se vence?","órdenes pendientes","¿cuánto hay en caja?"];
   $("#chips").innerHTML=chips.map(c=>`<button class="chip">${esc(c)}</button>`).join("");
-  $("#chips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{$("#q").value=b.textContent;ask();});
-  $("#ask").onclick=ask;
-  $("#q").onkeydown=e=>{if(e.key==="Enter")ask();};
-  botSay("¡Hola! Soy tu agente. Pregúntame cosas como «¿cuánto vendí hoy?» o «¿qué se vence?». Toca un atajo o escribe.",false);
-  loadKpis();
-  $("#q").focus();
+  $$("#chips .chip").forEach(b=>b.onclick=()=>{$("#q").value=b.textContent;ask();});
+  $("#ask").onclick=ask;$("#q").onkeydown=e=>{if(e.key==="Enter")ask();};
+  botSay("¡Hola! Soy tu agente. Pregúntame «¿cuánto vendí hoy?», «prepárame el día» o «¿qué se vence?». Toca un atajo o escribe.");
+  if(pendingQ){$("#q").value=pendingQ;pendingQ=null;ask();}else $("#q").focus();
 }
-function botSay(text,isErr){
-  const c=$("#chat");const b=document.createElement("div");
-  b.className="bubble bot"+(isErr?" err":"");b.textContent=text;c.appendChild(b);c.scrollTop=c.scrollHeight;return b;
-}
-function meSay(text){const c=$("#chat");const b=document.createElement("div");b.className="bubble me";b.textContent=text;c.appendChild(b);c.scrollTop=c.scrollHeight;}
+function botSay(text,isErr){const c=$("#chat");const b=document.createElement("div");b.className="bubble bot"+(isErr?" err":"");
+  // render bullet lines a touch nicer
+  if(!isErr&&/(^|\n)\s*•/.test(text)){b.innerHTML=esc(text).split("\n").map(l=>/^\s*•/.test(l)?`<b class="li">${l}</b>`:l).join("\n");}
+  else b.textContent=text;
+  c.appendChild(b);c.scrollTop=c.scrollHeight;return b;}
+function meSay(t){const c=$("#chat");const b=document.createElement("div");b.className="bubble me";b.textContent=t;c.appendChild(b);c.scrollTop=c.scrollHeight;}
 async function ask(){
-  const q=$("#q").value.trim();if(!q)return;
-  $("#q").value="";meSay(q);
-  const t=$("#chat");const think=document.createElement("div");think.className="bubble bot think typing";
-  think.innerHTML="<span></span><span></span><span></span>";t.appendChild(think);t.scrollTop=t.scrollHeight;
-  const r=await api("/api/v1/assist/ask",{method:"POST",body:JSON.stringify({question:q})});
-  think.remove();
-  if(!r.ok){botSay(apiErr(r),true);return;}
-  botSay((r.body&&r.body.text)||"…",false);
-}
-async function loadKpis(){
-  const box=$("#kpis");
-  const r=await api("/api/v1/products/stats");
-  if(!r.ok||!r.body){box.innerHTML='<div class="muted">Aún no hay datos. Empieza a cargar productos y ventas y aquí verás tu resumen.</div>';return;}
-  const s=r.body;
-  box.innerHTML=`
-    <div class="kpi"><div class="k">Productos</div><div class="v">${clp(s.total)}</div></div>
-    <div class="kpi"><div class="k">Stock bajo</div><div class="v ${s.low_stock>0?"warn":""}">${clp(s.low_stock)}</div></div>
-    <div class="kpi"><div class="k">Sin stock</div><div class="v ${s.out_of_stock>0?"bad":""}">${clp(s.out_of_stock)}</div></div>`;
+  const q=$("#q").value.trim();if(!q)return;$("#q").value="";meSay(q);
+  const c=$("#chat");const th=document.createElement("div");th.className="bubble bot think typing";th.innerHTML="<span></span><span></span><span></span>";c.appendChild(th);c.scrollTop=c.scrollHeight;
+  const r=await api("/api/v1/assist/ask",{method:"POST",body:JSON.stringify({question:q})});th.remove();
+  if(!r.ok)return botSay(apiErr(r),true);
+  botSay((r.body&&r.body.text)||"…");
 }
 
-$("#logout").onclick=()=>{token=null;me=null;sessionStorage.removeItem("rb_token");
-  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");
-  $("#main").innerHTML='<section class="card center" id="auth"><div id="auth-body"></div></section>';boot();};
+/* ---------------- view: Ventas ---------------- */
+async function vVentas(v){
+  const r=await api("/api/v1/orders");
+  if(!r.ok)return v.innerHTML=vhead("Ventas")+errCard(apiErr(r));
+  const all=(Array.isArray(r.body)?r.body:[]).slice().sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  if(!all.length)return v.innerHTML=vhead("Ventas")+empty(I.ventas,"Aún no hay ventas","Cuando vendas en el POS, cada boleta aparece aquí al instante.");
+  const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
+  let html=vhead("Ventas",all.length+" ventas registradas");
+  html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
+  html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  v.innerHTML=html;
+}
+
+/* ---------------- view: Inventario ---------------- */
+async function vInventario(v){
+  const [p,st]=await Promise.all([api("/api/v1/products"),api("/api/v1/products/stats")]);
+  if(!p.ok)return v.innerHTML=vhead("Inventario")+errCard(apiErr(p));
+  const prods=Array.isArray(p.body)?p.body:[], s=st.body||{};
+  let html=vhead("Inventario",prods.length+" productos");
+  html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
+  html+=`<div class="card"><div class="search" style="margin-bottom:13px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div><div id="inv-tbl"></div></div>`;
+  v.innerHTML=html;
+  const draw=(q)=>{
+    const f=prods.filter(x=>!q||(x.name||"").toLowerCase().includes(q.toLowerCase()));
+    $("#inv-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Laboratorio</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead><tbody>${f.slice(0,120).map(x=>{
+      const low=num(x.stock)<=0?'bad':(num(x.stock)<5?'warn':'');
+      return `<tr><td class="name">${esc(x.name)}</td><td class="muted2">${esc(x.laboratory||"—")}</td><td class="num">${money(x.price)}</td><td class="num"><span class="bdg ${low}">${clp(x.stock)}</span></td></tr>`;}).join("")}</tbody></table></div>`:`<div class="muted" style="padding:14px">Sin resultados para «${esc(q)}».</div>`;
+  };
+  draw("");$("#inv-q").oninput=e=>draw(e.target.value);
+}
+
+/* ---------------- view: Caja ---------------- */
+async function vCaja(v){
+  const cs=await api("/api/v1/cash-sessions");
+  if(!cs.ok)return v.innerHTML=vhead("Caja")+errCard(apiErr(cs));
+  const list=Array.isArray(cs.body)?cs.body:[], open=list.find(x=>x.status==="open");
+  if(!open)return v.innerHTML=vhead("Caja")+empty(I.caja,"No hay caja abierta","Abre la caja al empezar el turno para registrar ventas en efectivo y cuadrar el cierre.");
+  const id=String(open.id).replace(/^cash_register_session:/,"");
+  const aq=await api("/api/v1/cash-sessions/"+id+"/arqueo");
+  const a=aq.ok?aq.body:{};const sess=a.session||open;
+  let html=vhead("Caja","Sesión «"+(open.register_name||"caja")+"» · abierta "+hhmm(open.opened_at));
+  html+=`<div class="kpis">
+    ${kpi("Efectivo esperado",money(sess.closing_cash_expected||sess.opening_cash),"accent ok","en la caja ahora",I.caja)}
+    ${kpi("Apertura",money(sess.opening_cash),"",null,I.box)}
+    ${kpi("Ventas efectivo",money(a.cash_sales),"",null,I.ventas)}
+    ${kpi("Ingresos / Retiros",money(a.movements_in)+" / "+money(a.movements_out),"",null,I.gastos)}
+  </div>`;
+  const mv=await api("/api/v1/cash-sessions/"+id+"/movements");
+  const moves=(mv.ok&&Array.isArray(mv.body))?mv.body:[];
+  html+=`<div class="card"><div class="sect-t">Movimientos<span class="ln"></span></div>${moves.length?`<div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Tipo</th><th>Motivo</th><th class="num">Monto</th></tr></thead><tbody>${moves.map(m=>`<tr><td class="muted2">${hhmm(m.created_at)}</td><td>${esc(m.kind||m.type||"—")}</td><td class="name">${esc(m.reason||m.notes||"—")}</td><td class="num">${money(m.amount)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin movimientos manuales (solo ventas).</div>`}</div>`;
+  v.innerHTML=html;
+}
+
+/* ---------------- view: Compras ---------------- */
+async function vCompras(v){
+  const [po,sp]=await Promise.all([api("/api/v1/purchase-orders"),api("/api/v1/suppliers")]);
+  const orders=(po.ok&&Array.isArray(po.body))?po.body:[], sups=(sp.ok&&Array.isArray(sp.body))?sp.body:[];
+  const supName=(id)=>{const s=sups.find(x=>x.id===id);return s?s.name:String(id||"").replace(/^supplier:/,"");};
+  let html=vhead("Compras",orders.length+" órdenes · "+sups.length+" proveedores");
+  html+=`<div class="grid2">
+    <div class="card"><div class="sect-t">Órdenes de compra<span class="ln"></span></div>${orders.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>Estado</th><th class="num">Total</th></tr></thead><tbody>${orders.map(o=>`<tr><td class="name">${esc(supName(o.supplier))}</td><td>${bdg(ST,o.status)}</td><td class="num">${money(o.total)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin órdenes de compra.</div>`}</div>
+    <div class="card"><div class="sect-t">Proveedores<span class="ln"></span></div>${sups.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>RUT</th><th>Contacto</th></tr></thead><tbody>${sups.map(s=>`<tr><td class="name">${esc(s.name)}</td><td class="muted2">${esc(s.rut||"—")}</td><td class="muted2">${esc(s.contact_phone||s.contact_name||"—")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin proveedores.</div>`}</div>
+  </div>`;
+  v.innerHTML=html;
+}
+
+/* ---------------- view: Clientes ---------------- */
+async function vClientes(v){
+  const r=await api("/api/v1/clientes");
+  const cl=(r.ok&&Array.isArray(r.body))?r.body:[];
+  if(!cl.length)return v.innerHTML=vhead("Clientes")+empty(I.clientes,"Aún no tienes clientes","Registra clientes para llevar su historial de compras, fiado y fidelización. El agente también puede crearlos por ti.");
+  v.innerHTML=vhead("Clientes",cl.length+" clientes")+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th></tr></thead><tbody>${cl.map(c=>`<tr><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
+/* ---------------- view: Gastos ---------------- */
+async function vGastos(v){
+  const r=await api("/api/v1/expenses");
+  const ex=(r.ok&&Array.isArray(r.body))?r.body:[];
+  if(!ex.length)return v.innerHTML=vhead("Gastos")+empty(I.gastos,"Sin gastos registrados","Anota arriendo, sueldos, servicios y compras menores para ver tu margen real. Dile al agente «registra un gasto de…».");
+  const tot=ex.reduce((s,e)=>s+num(e.amount),0);
+  v.innerHTML=vhead("Gastos",ex.length+" gastos")+`<div class="kpis">${kpi("Total gastos",money(tot),"warn",null,I.gastos)}</div><div class="card"><div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>Detalle</th><th class="num">Monto</th></tr></thead><tbody>${ex.map(e=>`<tr><td class="muted2">${fday(e.created_at||e.date)}</td><td>${esc(e.category||"—")}</td><td class="name">${esc(e.description||e.notes||"—")}</td><td class="num">${money(e.amount)}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
+/* ---------------- view: Reportes ---------------- */
+async function vReportes(v){
+  const [tp,ne,sd]=await Promise.all([api("/api/v1/reports/top-products"),api("/api/v1/reports/near-expiry"),api("/api/v1/reports/sales-daily")]);
+  const top=(tp.ok&&Array.isArray(tp.body))?tp.body:[], exp=(ne.ok&&Array.isArray(ne.body))?ne.body:[], days=(sd.ok&&Array.isArray(sd.body))?sd.body:[];
+  let html=vhead("Reportes","Lo que importa de tu negocio, claro.");
+  // sales chart
+  if(days.length){const rows=days.slice(-14),mx=Math.max(...rows.map(r=>num(r.revenue)),1),today=new Date().toISOString().slice(0,10);
+    html+=`<div class="card"><div class="sect-t">Ventas por día<span class="ln"></span></div><div class="chart">${rows.map(r=>`<div class="bar ${r.date===today?"today":""}" style="height:${Math.round(num(r.revenue)/mx*100)}%" title="${esc(fday(r.date))}: ${money(r.revenue)}"></div>`).join("")}</div><div class="chart-x">${rows.map(r=>`<span>${esc(fday(r.date).replace(".",""))}</span>`).join("")}</div></div>`;}
+  html+=`<div class="grid2">
+    <div class="card"><div class="sect-t">Productos más vendidos (ABC)<span class="ln"></span></div>${top.length?`<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Producto</th><th class="num">Vendidos</th><th class="num">Ingresos</th><th>Clase</th></tr></thead><tbody>${top.slice(0,10).map(p=>`<tr><td class="num muted2">${p.rank}</td><td class="name">${esc(p.product_name)}</td><td class="num muted2">${num(p.qty_sold)}</td><td class="num">${money(p.revenue)}</td><td><span class="bdg abc-${esc(p.abc_class||"C")}">${esc(p.abc_class||"—")}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Aún sin datos.</div>`}</div>
+    <div class="card"><div class="sect-t">Próximos a vencer<span class="ln"></span></div>${exp.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Lote</th><th class="num">Días</th><th class="num">Stock</th></tr></thead><tbody>${exp.map(e=>`<tr><td class="name">${esc(e.product_name)}</td><td class="muted2">${esc(e.batch_code||"—")}</td><td class="num"><span class="bdg ${num(e.days_to_expiry)<=15?'bad':'warn'}">${num(e.days_to_expiry)}d</span></td><td class="num">${clp(e.stock)}</td></tr>`).join("")}</tbody></table></div>`:empty2("Nada por vencer","Ningún lote vence en los próximos 30 días. 👍")}</div>
+  </div>`;
+  v.innerHTML=html;
+}
+const empty2=(t,p)=>`<div class="empty" style="padding:26px 16px"><h3>${esc(t)}</h3><p>${esc(p)}</p></div>`;
+
+/* logout */
+function doLogout(){token=null;me=null;sessionStorage.removeItem("rb_token");
+  $("#htenant").classList.add("hidden");$("#logout").classList.add("hidden");location.hash="";boot();}
+document.addEventListener("click",e=>{if(e.target.closest("#logout"))doLogout();});
 
 boot();
 </script>
