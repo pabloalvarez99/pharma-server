@@ -498,8 +498,9 @@ async function vVentas(v){
   const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
   let html=vhead("Ventas",all.length+" ventas registradas",actbtn("venta","+ Nueva venta"));
   html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
-  html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr data-oid="${esc(o.id)}" style="cursor:pointer"><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
   v.innerHTML=html;
+  $$("#view tr[data-oid]").forEach(tr=>tr.onclick=()=>saleDetail(tr.dataset.oid));
 }
 
 /* ---------------- view: Inventario ---------------- */
@@ -511,11 +512,13 @@ async function vInventario(v){
   html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
   html+=`<div class="card"><div class="search" style="margin-bottom:13px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div><div id="inv-tbl"></div></div>`;
   v.innerHTML=html;
+  const byId={};prods.forEach(p=>byId[p.id]=p);
   const draw=(q)=>{
     const f=prods.filter(x=>!q||(x.name||"").toLowerCase().includes(q.toLowerCase()));
-    $("#inv-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Laboratorio</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead><tbody>${f.slice(0,120).map(x=>{
+    $("#inv-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Laboratorio</th><th class="num">Precio</th><th class="num">Stock</th><th></th></tr></thead><tbody>${f.slice(0,120).map(x=>{
       const low=num(x.stock)<=0?'bad':(num(x.stock)<5?'warn':'');
-      return `<tr><td class="name">${esc(x.name)}</td><td class="muted2">${esc(x.laboratory||"—")}</td><td class="num">${money(x.price)}</td><td class="num"><span class="bdg ${low}">${clp(x.stock)}</span></td></tr>`;}).join("")}</tbody></table></div>`:`<div class="muted" style="padding:14px">Sin resultados para «${esc(q)}».</div>`;
+      return `<tr data-pid="${esc(x.id)}" style="cursor:pointer"><td class="name">${esc(x.name)}</td><td class="muted2">${esc(x.laboratory||"—")}</td><td class="num">${money(x.price)}</td><td class="num"><span class="bdg ${low}">${clp(x.stock)}</span></td><td class="num muted2">editar ›</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="muted" style="padding:14px">Sin resultados para «${esc(q)}».</div>`;
+    $$("#inv-tbl tr[data-pid]").forEach(tr=>tr.onclick=()=>editProduct(byId[tr.dataset.pid]));
   };
   draw("");$("#inv-q").oninput=e=>draw(e.target.value);
 }
@@ -602,8 +605,9 @@ function showModal(title,bodyHTML,footHTML){
   return o;
 }
 function ffield(f){
-  if(f.type==="select")return `<div class="field"><label>${esc(f.label)}</label><select id="f-${f.name}">${f.options.map(o=>`<option value="${esc(o[0])}">${esc(o[1])}</option>`).join("")}</select></div>`;
-  return `<div class="field"><label>${esc(f.label)}</label><input id="f-${f.name}" type="${f.type||"text"}" placeholder="${esc(f.ph||"")}" inputmode="${f.type==="number"?"numeric":"text"}"/></div>`;
+  const val=f.val!=null?` value="${esc(f.val)}"`:"";
+  if(f.type==="select")return `<div class="field"><label>${esc(f.label)}</label><select id="f-${f.name}">${f.options.map(o=>`<option value="${esc(o[0])}"${String(o[0])===String(f.val)?" selected":""}>${esc(o[1])}</option>`).join("")}</select></div>`;
+  return `<div class="field"><label>${esc(f.label)}</label><input id="f-${f.name}" type="${f.type||"text"}" placeholder="${esc(f.ph||"")}"${val} inputmode="${f.type==="number"?"numeric":"text"}"/></div>`;
 }
 function formModal(title,fields,submitLabel,onSubmit){
   showModal(title,fields.map(ffield).join("")+`<div class="formmsg" id="f-msg"></div>`,
@@ -684,6 +688,37 @@ async function posOpen(){
 }
 
 const actbtn=(act,label)=>`<button class="btn ghost" data-act="${esc(act)}">${esc(label)}</button>`;
+
+/* editar producto (precio + stock) */
+function editProduct(p){
+  showModal("Editar · "+p.name,
+    `<div class="field"><label>Precio (CLP)</label><input id="ep-price" type="number" inputmode="numeric" value="${esc(num(p.price))}"/></div>
+     <div class="field"><label>Stock</label><input id="ep-stock" type="number" inputmode="numeric" value="${esc(num(p.stock))}"/></div>
+     <div class="formmsg" id="ep-msg"></div>`,
+    `<button class="btn alt sm" id="ep-cancel">Cancelar</button><button class="btn" id="ep-go">Guardar</button>`);
+  $("#ep-cancel").onclick=closeModal;
+  $("#ep-go").onclick=async()=>{
+    const price=num($("#ep-price").value),stock=parseInt($("#ep-stock").value,10),msg=$("#ep-msg");msg.className="formmsg";
+    if(price<=0)return(msg.className="formmsg err",msg.textContent="Precio inválido.");
+    const b=$("#ep-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Guardando…';
+    let ok=true,err="";
+    if(price!==num(p.price)){const r=await api("/api/v1/products/"+p.id,{method:"PATCH",body:JSON.stringify({price:String(price)})});if(!r.ok){ok=false;err=apiErr(r);}}
+    if(ok&&!isNaN(stock)&&stock!==num(p.stock)){const r=await api("/api/v1/products/"+p.id+"/stock",{method:"POST",body:JSON.stringify({set:stock,reason:"Ajuste manual (web)"})});if(!r.ok){ok=false;err=apiErr(r);}}
+    b.disabled=false;b.textContent="Guardar";
+    if(!ok)return(msg.className="formmsg err",msg.textContent=err);
+    closeModal();toast("Producto actualizado ✓");go(cur);
+  };
+}
+/* detalle de venta */
+async function saleDetail(fullId){
+  showModal("Detalle de venta",`<div id="sd-body"><div class="skel" style="width:60%"></div><div class="skel" style="width:80%;margin-top:10px"></div></div>`);
+  const r=await api("/api/v1/orders/"+fullId);
+  if(!r.ok||!r.body)return $("#sd-body").innerHTML=`<div class="muted">No se pudo cargar.</div>`;
+  const o=r.body.order||r.body,items=r.body.items||[];
+  $("#sd-body").innerHTML=`<div class="kpis" style="margin-bottom:13px">${kpi("Total",money(o.total),"accent ok",bdgTxt(PM,o.payment_method),I.ventas)}${kpi("Hora",hhmm(o.created_at),"",fday(o.created_at),I.caja)}</div>
+    <div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit</th><th class="num">Subtotal</th></tr></thead><tbody>${items.map(it=>`<tr><td class="name">${esc(it.product_name)}</td><td class="num">${num(it.quantity)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(num(it.unit_price)*num(it.quantity))}</td></tr>`).join("")||`<tr><td colspan="4" class="muted">Sin detalle.</td></tr>`}</tbody></table></div>`;
+}
+const bdgTxt=(map,k)=>(map[k]||[k])[0];
 
 /* logout + action delegation */
 function doLogout(){token=null;me=null;sessionStorage.removeItem("rb_token");
