@@ -164,6 +164,7 @@
   .chip{font-size:12.5px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);
     background:var(--surface);color:var(--txt-2);cursor:pointer;transition:.14s;white-space:nowrap}
   .chip:hover{border-color:var(--brand);color:var(--txt);background:var(--brand-soft)}
+  .chip.on{border-color:var(--brand);color:var(--txt);background:var(--brand-soft);font-weight:600}
   .askbar{display:flex;gap:8px}
   .askbar input{font-size:16px}
   .askbar .btn{width:auto;flex:none;padding:12px 18px}
@@ -428,6 +429,14 @@ function renderApp(){
     <main id="view"></main></div>`;
   $$("#nav .nav-i").forEach(el=>el.onclick=()=>go(el.dataset.v));
   go(location.hash.replace("#","")||"resumen");
+  loadNavAlerts();
+}
+async function loadNavAlerts(){
+  const setBadge=(vid,n)=>{const el=$(`#nav .nav-i[data-v="${vid}"]`);if(!el)return;el.querySelector(".badge")?.remove();if(n>0){const b=document.createElement("span");b.className="badge";b.textContent=n;el.appendChild(b);}};
+  const [d,ne,po]=await Promise.all([api("/api/v1/reports/dashboard"),api("/api/v1/reports/near-expiry"),api("/api/v1/purchase-orders")]);
+  if(d.ok&&d.body&&d.body.inventario)setBadge("inventario",num(d.body.inventario.low_stock)+num(d.body.inventario.out_of_stock));
+  if(ne.ok&&Array.isArray(ne.body))setBadge("reportes",ne.body.length);
+  if(po.ok&&Array.isArray(po.body))setBadge("compras",po.body.filter(o=>o.status==="draft").length);
 }
 function go(id){
   if(!VIEWS.find(v=>v.id===id))id="resumen";
@@ -558,9 +567,22 @@ async function vVentas(v){
   const tot=all.reduce((s,o)=>s+num(o.total),0), efvo=all.reduce((s,o)=>s+num(o.cash_amount),0), tarj=all.reduce((s,o)=>s+num(o.card_amount),0);
   let html=vhead("Ventas",all.length+" ventas registradas",actbtn("venta","+ Nueva venta"));
   html+=`<div class="kpis">${kpi("Total",money(tot),"accent ok",all.length+" boletas",I.ventas)}${kpi("Efectivo",money(efvo),"",null,I.caja)}${kpi("Tarjeta",money(tarj),"",null,I.ventas)}</div>`;
-  html+=`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${all.slice(0,80).map(o=>`<tr data-oid="${esc(o.id)}" style="cursor:pointer"><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  html+=`<div class="card">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
+      <div class="search" style="flex:1;min-width:160px">${svg(I.search)}<input id="vt-q" placeholder="Buscar por cliente…"/></div>
+      <div class="chips" id="vt-f" style="margin:0">${[["","Todas"],["pos_cash","Efectivo"],["pos_debit","Débito"],["pos_credit","Crédito"]].map(([v2,l],i)=>`<button class="chip${i===0?" on":""}" data-pm="${v2}">${l}</button>`).join("")}</div>
+    </div>
+    <div id="vt-tbl"></div></div>`;
   v.innerHTML=html;
-  $$("#view tr[data-oid]").forEach(tr=>tr.onclick=()=>saleDetail(tr.dataset.oid));
+  let fpm="",fq="";
+  const draw=()=>{
+    const f=all.filter(o=>(!fpm||o.payment_method===fpm)&&(!fq||(o.customer_name||"").toLowerCase().includes(fq.toLowerCase())));
+    $("#vt-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Cliente</th><th>Método</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>${f.slice(0,100).map(o=>`<tr data-oid="${esc(o.id)}" style="cursor:pointer"><td class="muted2">${hhmm(o.created_at)}</td><td class="name">${esc(o.customer_name||"—")}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td><td>${bdg(ST,o.status)}</td></tr>`).join("")}</tbody></table></div><div class="muted2" style="padding:9px 2px 0;font-size:12px">${f.length} de ${all.length} ventas · ${money(f.reduce((s,o)=>s+num(o.total),0))}</div>`:`<div class="muted" style="padding:14px">Sin ventas que coincidan.</div>`;
+    $$("#vt-tbl tr[data-oid]").forEach(tr=>tr.onclick=()=>saleDetail(tr.dataset.oid));
+  };
+  draw();
+  $("#vt-q").oninput=e=>{fq=e.target.value;draw();};
+  $$("#vt-f .chip").forEach(c=>c.onclick=()=>{fpm=c.dataset.pm;$$("#vt-f .chip").forEach(x=>x.classList.toggle("on",x===c));draw();});
 }
 
 /* ---------------- view: Inventario ---------------- */
@@ -570,17 +592,23 @@ async function vInventario(v){
   const prods=Array.isArray(p.body)?p.body:[], s=st.body||{};
   let html=vhead("Inventario",prods.length+" productos",actbtn("prod","+ Nuevo producto"));
   html+=`<div class="kpis">${kpi("Productos",clp(s.total),"",null,I.inventario)}${kpi("Valor",money(s.inventory_value),"accent",null,I.box)}${kpi("Stock bajo",clp(s.low_stock),num(s.low_stock)>0?"warn":"",null,I.spark)}${kpi("Agotados",clp(s.out_of_stock),num(s.out_of_stock)>0?"bad":"",null,I.box)}</div>`;
-  html+=`<div class="card"><div class="search" style="margin-bottom:13px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div><div id="inv-tbl"></div></div>`;
+  html+=`<div class="card">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:13px;flex-wrap:wrap">
+      <div class="search" style="flex:1;min-width:160px">${svg(I.search)}<input id="inv-q" placeholder="Buscar producto…"/></div>
+      <div class="chips" id="inv-f" style="margin:0">${[["all","Todos"],["low","Stock bajo"],["out","Agotados"]].map(([v2,l],i)=>`<button class="chip${i===0?" on":""}" data-f="${v2}">${l}</button>`).join("")}</div>
+    </div><div id="inv-tbl"></div></div>`;
   v.innerHTML=html;
   const byId={};prods.forEach(p=>byId[p.id]=p);
+  let ff="all";
   const draw=(q)=>{
-    const f=prods.filter(x=>!q||(x.name||"").toLowerCase().includes(q.toLowerCase()));
+    const f=prods.filter(x=>(!q||(x.name||"").toLowerCase().includes(q.toLowerCase()))&&(ff==="all"||(ff==="out"?num(x.stock)<=0:num(x.stock)>0&&num(x.stock)<5)));
     $("#inv-tbl").innerHTML=f.length?`<div class="tbl-wrap"><table><thead><tr><th>Producto</th><th>Laboratorio</th><th class="num">Precio</th><th class="num">Stock</th><th></th></tr></thead><tbody>${f.slice(0,120).map(x=>{
       const low=num(x.stock)<=0?'bad':(num(x.stock)<5?'warn':'');
       return `<tr data-pid="${esc(x.id)}" style="cursor:pointer"><td class="name">${esc(x.name)}</td><td class="muted2">${esc(x.laboratory||"—")}</td><td class="num">${money(x.price)}</td><td class="num"><span class="bdg ${low}">${clp(x.stock)}</span></td><td class="num muted2">editar ›</td></tr>`;}).join("")}</tbody></table></div>`:`<div class="muted" style="padding:14px">Sin resultados para «${esc(q)}».</div>`;
     $$("#inv-tbl tr[data-pid]").forEach(tr=>tr.onclick=()=>editProduct(byId[tr.dataset.pid]));
   };
   draw("");$("#inv-q").oninput=e=>draw(e.target.value);
+  $$("#inv-f .chip").forEach(c=>c.onclick=()=>{ff=c.dataset.f;$$("#inv-f .chip").forEach(x=>x.classList.toggle("on",x===c));draw($("#inv-q").value);});
 }
 
 /* ---------------- view: Caja ---------------- */
