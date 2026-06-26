@@ -687,7 +687,18 @@ async function vClientes(v){
   const r=await api("/api/v1/clientes");
   const cl=(r.ok&&Array.isArray(r.body))?r.body:[];
   if(!cl.length)return v.innerHTML=vhead("Clientes","",actbtn("cliente","+ Nuevo cliente"))+empty(I.clientes,"Aún no tienes clientes","Registra clientes para llevar su historial de compras, fiado y fidelización. El agente también puede crearlos por ti.");
-  v.innerHTML=vhead("Clientes",cl.length+" clientes",actbtn("cliente","+ Nuevo cliente"))+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th></tr></thead><tbody>${cl.map(c=>`<tr><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  v.innerHTML=vhead("Clientes",cl.length+" clientes",actbtn("cliente","+ Nuevo cliente"))+`<div class="card"><div class="tbl-wrap"><table><thead><tr><th>Nombre</th><th>RUT</th><th>Teléfono</th><th class="num">Gastado</th><th></th></tr></thead><tbody>${cl.map(c=>`<tr data-cid="${esc(c.id)}" style="cursor:pointer"><td class="name">${esc(c.name||"—")}</td><td class="muted2">${esc(c.rut||"—")}</td><td class="muted2">${esc(c.phone||"—")}</td><td class="num">${money(c.total_spent||0)}</td><td class="num muted2">ver ›</td></tr>`).join("")}</tbody></table></div></div>`;
+  $$("#view tr[data-cid]").forEach(tr=>tr.onclick=()=>clientDetail(tr.dataset.cid));
+}
+async function clientDetail(id){
+  showModal("Cliente",`<div id="cd-body"><div class="skel" style="width:55%"></div><div class="skel" style="width:75%;margin-top:10px"></div></div>`);
+  const [d,h]=await Promise.all([api("/api/v1/customers/"+id),api("/api/v1/customers/"+id+"/history")]);
+  if(!d.ok||!d.body)return $("#cd-body").innerHTML=`<div class="muted">No se pudo cargar.</div>`;
+  const c=d.body, hist=(h.ok&&Array.isArray(h.body))?h.body:[];
+  $("#cd-body").innerHTML=`<h2 style="margin:0 0 2px">${esc(c.name)}</h2><p class="sub">${esc(c.rut||"sin RUT")}${c.phone?" · "+esc(c.phone):""}${c.email?" · "+esc(c.email):""}</p>
+    <div class="kpis" style="margin-bottom:13px">${kpi("Total gastado",money(c.total_spent),"accent ok",null,I.ventas)}${kpi("Visitas",clp(c.visit_count),"",null,I.clientes)}${kpi("Puntos",clp(c.loyalty_points),"",null,I.spark)}</div>
+    <div class="sect-t">Historial de compras<span class="ln"></span></div>
+    ${hist.length?`<div class="tbl-wrap"><table><thead><tr><th>Fecha</th><th>Método</th><th class="num">Total</th></tr></thead><tbody>${hist.slice(0,30).map(o=>`<tr><td class="muted2">${fday(o.created_at)} ${hhmm(o.created_at)}</td><td>${bdg(PM,o.payment_method)}</td><td class="num">${money(o.total)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin compras registradas aún.</div>`}`;
 }
 
 /* ---------------- view: Gastos ---------------- */
