@@ -550,12 +550,76 @@ async function vCompras(v){
   const [po,sp]=await Promise.all([api("/api/v1/purchase-orders"),api("/api/v1/suppliers")]);
   const orders=(po.ok&&Array.isArray(po.body))?po.body:[], sups=(sp.ok&&Array.isArray(sp.body))?sp.body:[];
   const supName=(id)=>{const s=sups.find(x=>x.id===id);return s?s.name:String(id||"").replace(/^supplier:/,"");};
-  let html=vhead("Compras",orders.length+" órdenes · "+sups.length+" proveedores");
+  window._sups=sups;
+  const right='<div class="actbar">'+actbtn("proveedor","+ Proveedor")+(sups.length?actbtn("oc","+ Orden de compra"):"")+'</div>';
+  let html=vhead("Compras",orders.length+" órdenes · "+sups.length+" proveedores",right);
   html+=`<div class="grid2">
-    <div class="card"><div class="sect-t">Órdenes de compra<span class="ln"></span></div>${orders.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>Estado</th><th class="num">Total</th></tr></thead><tbody>${orders.map(o=>`<tr><td class="name">${esc(supName(o.supplier))}</td><td>${bdg(ST,o.status)}</td><td class="num">${money(o.total)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin órdenes de compra.</div>`}</div>
-    <div class="card"><div class="sect-t">Proveedores<span class="ln"></span></div>${sups.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>RUT</th><th>Contacto</th></tr></thead><tbody>${sups.map(s=>`<tr><td class="name">${esc(s.name)}</td><td class="muted2">${esc(s.rut||"—")}</td><td class="muted2">${esc(s.contact_phone||s.contact_name||"—")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="muted">Sin proveedores.</div>`}</div>
+    <div class="card"><div class="sect-t">Órdenes de compra<span class="ln"></span></div>${orders.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>Estado</th><th class="num">Total</th><th></th></tr></thead><tbody>${orders.map(o=>`<tr><td class="name">${esc(supName(o.supplier))}</td><td>${bdg(ST,o.status)}</td><td class="num">${money(o.total)}</td><td class="num">${o.status==="draft"?`<button class="btn ghost sm" data-act="recibir:${esc(o.id)}">Recibir</button>`:""}</td></tr>`).join("")}</tbody></table></div>`:empty2("Sin órdenes de compra","Crea una orden para reponer stock con tus proveedores.")}</div>
+    <div class="card"><div class="sect-t">Proveedores<span class="ln"></span></div>${sups.length?`<div class="tbl-wrap"><table><thead><tr><th>Proveedor</th><th>RUT</th><th>Contacto</th></tr></thead><tbody>${sups.map(s=>`<tr><td class="name">${esc(s.name)}</td><td class="muted2">${esc(s.rut||"—")}</td><td class="muted2">${esc(s.contact_phone||s.contact_name||"—")}</td></tr>`).join("")}</tbody></table></div>`:empty2("Sin proveedores","Agrega un proveedor para empezar a comprar.")}</div>
   </div>`;
   v.innerHTML=html;
+}
+function newSupplier(){formModal("Nuevo proveedor",[{name:"name",label:"Nombre",ph:"Difarma Ltda."},{name:"rut",label:"RUT (opcional)",ph:"78.913.450-K"},{name:"contact_phone",label:"Teléfono (opcional)",ph:"+56 2 …"}],"Crear proveedor",async v=>{
+  if(!v.name)return{err:"Indica el nombre."};
+  const r=await api("/api/v1/suppliers",{method:"POST",body:JSON.stringify({name:v.name,rut:v.rut||null,contact_phone:v.contact_phone||null})});
+  return r.ok?{msg:"Proveedor creado ✓"}:{err:apiErr(r)};});}
+async function newPO(){
+  const sups=window._sups||[];
+  if(!sups.length)return toast("Primero crea un proveedor.");
+  if(!posProds.length){const r=await api("/api/v1/products");posProds=(r.ok&&Array.isArray(r.body))?r.body:[];}
+  let lines=[];
+  showModal("Nueva orden de compra",
+    `<div class="field"><label>Proveedor</label><select id="po-sup">${sups.map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}</select></div>
+     <div class="search" style="margin:4px 0 10px">${svg(I.search)}<input id="po-q" placeholder="Agregar producto…" autocomplete="off"/></div>
+     <div class="pos-res" id="po-res"></div><div class="cart" id="po-cart"></div>
+     <div class="cart-tot"><span>Total costo</span><span id="po-tot">$0</span></div><div class="formmsg" id="po-msg"></div>`,
+    `<button class="btn alt sm" id="po-cancel">Cancelar</button><button class="btn" id="po-go">Crear orden</button>`);
+  const tot=()=>lines.reduce((s,l)=>s+l.cost*l.qty,0);
+  const drawCart=()=>{$("#po-cart").innerHTML=lines.map(l=>`<div class="cart-i"><span class="nm">${esc(l.name)}</span><div class="qty"><button data-m="${esc(l.id)}">−</button><b>${l.qty}</b><button data-pl="${esc(l.id)}">+</button></div><span class="p" style="font-family:var(--ff-num);min-width:62px;text-align:right">${money(l.cost*l.qty)}</span></div>`).join("");
+    $("#po-tot").textContent=money(tot());
+    $$("#po-cart [data-pl]").forEach(b=>b.onclick=()=>{lines.find(x=>x.id===b.dataset.pl).qty++;drawCart();});
+    $$("#po-cart [data-m]").forEach(b=>b.onclick=()=>{let l=lines.find(x=>x.id===b.dataset.m);l.qty--;if(l.qty<=0)lines=lines.filter(x=>x.id!==l.id);drawCart();});};
+  const drawRes=(q)=>{const f=posProds.filter(p=>!q||(p.name||"").toLowerCase().includes(q.toLowerCase())).slice(0,25);
+    $("#po-res").innerHTML=f.map(p=>`<div class="pos-row" data-id="${esc(p.id)}"><span>${esc(p.name)}</span><span class="p">costo ${money(p.cost_price||p.price)}</span></div>`).join("");
+    $$("#po-res .pos-row[data-id]").forEach(el=>el.onclick=()=>{const p=posProds.find(x=>x.id===el.dataset.id);const ex=lines.find(l=>l.id===p.id);if(ex)ex.qty++;else lines.push({id:p.id,name:p.name,cost:num(p.cost_price||p.price),qty:1});drawCart();});};
+  drawRes("");drawCart();
+  $("#po-q").oninput=e=>drawRes(e.target.value);$("#po-cancel").onclick=closeModal;
+  $("#po-go").onclick=async()=>{
+    const msg=$("#po-msg");if(!lines.length)return(msg.className="formmsg err",msg.textContent="Agrega al menos un producto.");
+    const b=$("#po-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Creando…';
+    const body={supplier:$("#po-sup").value,items:lines.map(l=>({product:l.id,product_name:l.name,quantity:l.qty,unit_cost:String(l.cost)}))};
+    const r=await api("/api/v1/purchase-orders",{method:"POST",body:JSON.stringify(body)});
+    b.disabled=false;b.textContent="Crear orden";
+    if(!r.ok)return(msg.className="formmsg err",msg.textContent=apiErr(r));
+    closeModal();toast("Orden creada ✓");go(cur);
+  };
+}
+async function receivePO(fullId){
+  const r=await api("/api/v1/purchase-orders/"+fullId);
+  if(!r.ok||!r.body)return toast("No se pudo cargar la orden.");
+  const items=r.body.items||[];
+  const lines=items.map(it=>({po_line_id:it.id,qty_received:num(it.quantity)-num(it.qty_received||0)})).filter(l=>l.qty_received>0);
+  if(!lines.length)return toast("La orden ya está recibida.");
+  const today=new Date(),exp=new Date(today.getFullYear()+1,today.getMonth(),today.getDate());
+  const defLot="REC-"+today.toISOString().slice(0,10).replace(/-/g,""), defExp=exp.toISOString().slice(0,10);
+  showModal("Recibir orden",`<p class="sub">Vas a recibir ${lines.length} línea(s) — el stock subirá automáticamente.</p>
+    <div class="tbl-wrap" style="margin-bottom:12px"><table><tbody>${items.map(it=>`<tr><td class="name">${esc(it.product_name)}</td><td class="num">${num(it.quantity)} u.</td></tr>`).join("")}</tbody></table></div>
+    <div class="grid2"><div class="field"><label>Lote</label><input id="rc-lot" value="${esc(defLot)}"/></div><div class="field"><label>Vence</label><input id="rc-exp" type="date" value="${esc(defExp)}"/></div></div>
+    <div class="formmsg" id="rc-msg"></div>`,
+    `<button class="btn alt sm" id="rc-cancel">Cancelar</button><button class="btn" id="rc-go">Confirmar recepción</button>`);
+  $("#rc-cancel").onclick=closeModal;
+  const st=(r.body.order&&r.body.order.status)||r.body.status;
+  $("#rc-go").onclick=async()=>{
+    const b=$("#rc-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Recibiendo…';
+    const lot=$("#rc-lot").value.trim()||defLot, expd=($("#rc-exp").value||defExp)+"T00:00:00Z";
+    const rl=lines.map(l=>Object.assign({},l,{lot,expiry_date:expd}));
+    // una orden en borrador debe "enviarse" antes de recibir
+    if(st==="draft"){const s=await api("/api/v1/purchase-orders/"+fullId+"/send",{method:"POST",body:"{}"});if(!s.ok){b.disabled=false;b.textContent="Confirmar recepción";return($("#rc-msg").className="formmsg err",$("#rc-msg").textContent=apiErr(s));}}
+    const res=await api("/api/v1/purchase-orders/"+fullId+"/receive",{method:"POST",body:JSON.stringify({lines:rl})});
+    b.disabled=false;b.textContent="Confirmar recepción";
+    if(!res.ok)return($("#rc-msg").className="formmsg err",$("#rc-msg").textContent=apiErr(res));
+    closeModal();toast("Mercadería recibida · stock actualizado ✓");go(cur);
+  };
 }
 
 /* ---------------- view: Clientes ---------------- */
@@ -727,7 +791,7 @@ document.addEventListener("click",e=>{
   if(e.target.closest("#logout"))return doLogout();
   const a=e.target.closest("[data-act]");if(!a)return;
   const raw=a.dataset.act,ci=raw.indexOf(":"),k=ci<0?raw:raw.slice(0,ci),arg=ci<0?"":raw.slice(ci+1);
-  const map={venta:posOpen,prod:newProduct,gasto:newExpense,cliente:newCustomer,abrir:abrirCaja,cerrar:()=>cerrarCaja(arg),mov:()=>movCaja(arg)};
+  const map={venta:posOpen,prod:newProduct,gasto:newExpense,cliente:newCustomer,abrir:abrirCaja,cerrar:()=>cerrarCaja(arg),mov:()=>movCaja(arg),proveedor:newSupplier,oc:newPO,recibir:()=>receivePO(arg)};
   if(map[k])map[k]();
 });
 
