@@ -895,8 +895,31 @@ async function saleDetail(fullId){
   const r=await api("/api/v1/orders/"+fullId);
   if(!r.ok||!r.body)return $("#sd-body").innerHTML=`<div class="muted">No se pudo cargar.</div>`;
   const o=r.body.order||r.body,items=r.body.items||[];
+  const canRefund=o.status==="paid"&&items.length;
   $("#sd-body").innerHTML=`<div class="kpis" style="margin-bottom:13px">${kpi("Total",money(o.total),"accent ok",bdgTxt(PM,o.payment_method),I.ventas)}${kpi("Hora",hhmm(o.created_at),"",fday(o.created_at),I.caja)}</div>
-    <div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit</th><th class="num">Subtotal</th></tr></thead><tbody>${items.map(it=>`<tr><td class="name">${esc(it.product_name)}</td><td class="num">${num(it.quantity)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(num(it.unit_price)*num(it.quantity))}</td></tr>`).join("")||`<tr><td colspan="4" class="muted">Sin detalle.</td></tr>`}</tbody></table></div>`;
+    <div class="tbl-wrap"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit</th><th class="num">Subtotal</th></tr></thead><tbody>${items.map(it=>`<tr><td class="name">${esc(it.product_name)}</td><td class="num">${num(it.quantity)}</td><td class="num">${money(it.unit_price)}</td><td class="num">${money(num(it.unit_price)*num(it.quantity))}</td></tr>`).join("")||`<tr><td colspan="4" class="muted">Sin detalle.</td></tr>`}</tbody></table>
+    ${canRefund?`<button class="btn alt sm" id="sd-refund" style="margin-top:14px">Devolver productos</button>`:""}</div>`;
+  if(canRefund)$("#sd-refund").onclick=()=>refundSale(o,items);
+}
+function refundSale(o,items){
+  showModal("Devolver venta",
+    `<p class="sub">Se devolverán todos los productos de esta venta y el stock vuelve al inventario.</p>
+     <div class="field"><label>Motivo</label><select id="rf-tipo"><option value="cancelacion">Cliente se arrepintió / cancelación</option><option value="error">Error en la venta</option><option value="garantia">Garantía / producto fallado</option></select></div>
+     <div class="field"><label>Detalle (opcional)</label><input id="rf-mot" placeholder="Ej: producto en mal estado"/></div>
+     <div class="cart-tot"><span>A devolver</span><span>${money(o.total)}</span></div><div class="formmsg" id="rf-msg"></div>`,
+    `<button class="btn alt sm" id="rf-cancel">Cancelar</button><button class="btn" id="rf-go">Confirmar devolución</button>`);
+  $("#rf-cancel").onclick=closeModal;
+  $("#rf-go").onclick=async()=>{
+    const tipo=$("#rf-tipo").value, mot=$("#rf-mot").value.trim();
+    const motivo=mot||$("#rf-tipo").selectedOptions[0].textContent;
+    const b=$("#rf-go");b.disabled=true;b.innerHTML='<span class="spin"></span>Devolviendo…';
+    const body={order:o.id,tipo,motivo,metodo_reembolso:o.payment_method==="pos_cash"?"efectivo":"tarjeta",
+      items:items.map(it=>({product:it.product||null,product_name:it.product_name,quantity:num(it.quantity),unit_price:String(num(it.unit_price)),restock:true}))};
+    const res=await api("/api/v1/pos/returns",{method:"POST",body:JSON.stringify(body)});
+    b.disabled=false;b.textContent="Confirmar devolución";
+    if(!res.ok)return($("#rf-msg").className="formmsg err",$("#rf-msg").textContent=apiErr(res));
+    closeModal();toast("Devolución registrada · stock repuesto ✓");go(cur);
+  };
 }
 const bdgTxt=(map,k)=>(map[k]||[k])[0];
 
