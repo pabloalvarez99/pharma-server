@@ -93,13 +93,34 @@ static PACKS: &[RubroPack] = &[
         label: "Farmacia",
         tagline: "Tu farmacia, en regla.",
         accent: "#1fd3a3",
-        features: RubroFeatures { recetas: true, lotes: true, physical_stock: true, clinical: true },
+        features: RubroFeatures {
+            recetas: true,
+            lotes: true,
+            physical_stock: true,
+            clinical: true,
+        },
         vocab: GENERIC_VOCAB,
         attrs: &[
-            AttrField { key: "active_ingredient", label: "Principio activo", kind: "text" },
-            AttrField { key: "laboratory", label: "Laboratorio", kind: "text" },
-            AttrField { key: "therapeutic_action", label: "Acción terapéutica", kind: "text" },
-            AttrField { key: "prescription_type", label: "Tipo de receta", kind: "text" },
+            AttrField {
+                key: "active_ingredient",
+                label: "Principio activo",
+                kind: "text",
+            },
+            AttrField {
+                key: "laboratory",
+                label: "Laboratorio",
+                kind: "text",
+            },
+            AttrField {
+                key: "therapeutic_action",
+                label: "Acción terapéutica",
+                kind: "text",
+            },
+            AttrField {
+                key: "prescription_type",
+                label: "Tipo de receta",
+                kind: "text",
+            },
         ],
         seed_vertical: Some("pharmacy"),
         coming_soon: &[],
@@ -109,7 +130,12 @@ static PACKS: &[RubroPack] = &[
         label: "Minimarket / Almacén",
         tagline: "Tu almacén, al día.",
         accent: "#f5b53d",
-        features: RubroFeatures { recetas: false, lotes: true, physical_stock: true, clinical: false },
+        features: RubroFeatures {
+            recetas: false,
+            lotes: true,
+            physical_stock: true,
+            clinical: false,
+        },
         vocab: GENERIC_VOCAB,
         attrs: &[],
         seed_vertical: Some("minimarket"),
@@ -120,8 +146,16 @@ static PACKS: &[RubroPack] = &[
         label: "Restaurant / Comida",
         tagline: "Tu cocina, bajo control.",
         accent: "#ff6b5d",
-        features: RubroFeatures { recetas: false, lotes: false, physical_stock: true, clinical: false },
-        vocab: RubroVocab { item: "Plato", catalog: "Carta" },
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            physical_stock: true,
+            clinical: false,
+        },
+        vocab: RubroVocab {
+            item: "Plato",
+            catalog: "Carta",
+        },
         attrs: &[],
         seed_vertical: Some("restaurant"),
         coming_soon: &["Comandas y gestión de mesas"],
@@ -131,8 +165,16 @@ static PACKS: &[RubroPack] = &[
         label: "Café / Pastelería",
         tagline: "Tu café, listo cada mañana.",
         accent: "#c98a4b",
-        features: RubroFeatures { recetas: false, lotes: true, physical_stock: true, clinical: false },
-        vocab: RubroVocab { item: "Producto", catalog: "Vitrina" },
+        features: RubroFeatures {
+            recetas: false,
+            lotes: true,
+            physical_stock: true,
+            clinical: false,
+        },
+        vocab: RubroVocab {
+            item: "Producto",
+            catalog: "Vitrina",
+        },
         attrs: &[],
         seed_vertical: Some("cafe"),
         coming_soon: &["Producción y recetas de elaboración"],
@@ -142,25 +184,63 @@ static PACKS: &[RubroPack] = &[
         label: "Tienda / Retail",
         tagline: "Tu tienda, ordenada.",
         accent: "#5aa9ff",
-        features: RubroFeatures { recetas: false, lotes: false, physical_stock: true, clinical: false },
-        vocab: GENERIC_VOCAB,
+        // Retail Chile: stock físico sí; lotes/vencimiento no (bienes no
+        // perecibles). Variantes reales (un producto → N SKU talla/color) son
+        // P1 — hoy `talla`/`color`/`sku` viven como attrs de producto plano.
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            physical_stock: true,
+            clinical: false,
+        },
+        vocab: RubroVocab {
+            item: "Producto",
+            catalog: "Inventario",
+        },
         attrs: &[
-            AttrField { key: "talla", label: "Talla", kind: "text" },
-            AttrField { key: "color", label: "Color", kind: "text" },
+            AttrField {
+                key: "talla",
+                label: "Talla",
+                kind: "text",
+            },
+            AttrField {
+                key: "color",
+                label: "Color",
+                kind: "text",
+            },
+            // SKU interno del local (distinto del EAN de barra del POS).
+            AttrField {
+                key: "sku",
+                label: "SKU",
+                kind: "text",
+            },
         ],
         seed_vertical: Some("tienda"),
-        coming_soon: &["Variantes y tallas (un producto, varios SKU)"],
+        coming_soon: &[
+            "Variantes y tallas (un producto, varios SKU)",
+            "Etiquetas de precio y código de barras",
+        ],
     },
     RubroPack {
         rubro: "belleza",
         label: "Belleza / Estética",
         tagline: "Tu salón, agendado.",
         accent: "#e879c7",
-        features: RubroFeatures { recetas: false, lotes: false, physical_stock: false, clinical: false },
-        vocab: RubroVocab { item: "Servicio", catalog: "Servicios" },
-        attrs: &[
-            AttrField { key: "duracion_min", label: "Duración (min)", kind: "number" },
-        ],
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            physical_stock: false,
+            clinical: false,
+        },
+        vocab: RubroVocab {
+            item: "Servicio",
+            catalog: "Servicios",
+        },
+        attrs: &[AttrField {
+            key: "duracion_min",
+            label: "Duración (min)",
+            kind: "number",
+        }],
         seed_vertical: None,
         coming_soon: &["Agenda de horas y profesionales"],
     },
@@ -169,8 +249,16 @@ static PACKS: &[RubroPack] = &[
         label: "Servicios / Oficios",
         tagline: "Tu oficio, facturado.",
         accent: "#94a3c4",
-        features: RubroFeatures { recetas: false, lotes: false, physical_stock: false, clinical: false },
-        vocab: RubroVocab { item: "Servicio", catalog: "Servicios" },
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            physical_stock: false,
+            clinical: false,
+        },
+        vocab: RubroVocab {
+            item: "Servicio",
+            catalog: "Servicios",
+        },
         attrs: &[],
         seed_vertical: Some("servicios"),
         coming_soon: &["Órdenes de trabajo y presupuestos"],
@@ -180,7 +268,12 @@ static PACKS: &[RubroPack] = &[
         label: "Otro",
         tagline: "Tu negocio, a tu manera.",
         accent: "#8b97ad",
-        features: RubroFeatures { recetas: false, lotes: false, physical_stock: true, clinical: false },
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            physical_stock: true,
+            clinical: false,
+        },
         vocab: GENERIC_VOCAB,
         attrs: &[],
         seed_vertical: None,
@@ -233,5 +326,77 @@ mod tests {
             assert_eq!(p.features.clinical, p.rubro == "farmacia", "{}", p.rubro);
             assert_eq!(p.features.recetas, p.rubro == "farmacia", "{}", p.rubro);
         }
+    }
+
+    /// Tienda/retail (P1 beachhead Chile): stock físico, sin clínica ni lotes UI.
+    #[test]
+    fn tienda_is_retail_not_pharmacy() {
+        let p = pack_for("tienda");
+        assert_eq!(p.rubro, "tienda");
+        assert!(p.features.physical_stock, "retail vende bienes físicos");
+        assert!(!p.features.lotes, "no perecible → sin UI de vencimiento");
+        assert!(!p.features.recetas);
+        assert!(!p.features.clinical, "tienda ≠ farmacia");
+        assert_eq!(p.vocab.item, "Producto");
+        assert_eq!(p.vocab.catalog, "Inventario");
+        assert_eq!(p.seed_vertical, Some("tienda"));
+
+        let keys: Vec<&str> = p.attrs.iter().map(|a| a.key).collect();
+        assert!(keys.contains(&"talla"), "retail declara talla");
+        assert!(keys.contains(&"color"), "retail declara color");
+        assert!(keys.contains(&"sku"), "retail declara SKU interno");
+        assert!(
+            !p.coming_soon.is_empty(),
+            "variantes/etiquetas van en coming_soon, no como feature mentida"
+        );
+    }
+
+    /// Contraste explícito: lo que farmacia enciende, tienda apaga (y viceversa
+    /// en stock físico genérico).
+    #[test]
+    fn tienda_diverges_from_farmacia_on_clinical_surface() {
+        let farm = pack_for("farmacia");
+        let shop = pack_for("tienda");
+        assert!(farm.features.clinical && !shop.features.clinical);
+        assert!(farm.features.recetas && !shop.features.recetas);
+        assert!(farm.features.lotes && !shop.features.lotes);
+        // Ambos mueven inventario físico.
+        assert!(farm.features.physical_stock && shop.features.physical_stock);
+        // Farmacia no declara attrs de talla/color; tienda no declara clínicos.
+        let farm_keys: Vec<&str> = farm.attrs.iter().map(|a| a.key).collect();
+        let shop_keys: Vec<&str> = shop.attrs.iter().map(|a| a.key).collect();
+        assert!(farm_keys.contains(&"active_ingredient"));
+        assert!(!shop_keys.contains(&"active_ingredient"));
+        assert!(shop_keys.contains(&"talla"));
+        assert!(!farm_keys.contains(&"talla"));
+    }
+
+    /// Cada pack con `seed_vertical` apunta a un vertical real del seed service
+    /// (coherencia rubro-pack ↔ seed-demo). Parse sin depender del módulo seed
+    /// para no acoplar unit tests de rubro a Surreal.
+    #[test]
+    fn declared_seed_verticals_are_known_keys() {
+        // Claves que `SeedVertical::parse` acepta hoy (label canónico + sinónimos
+        // del default pharmacy). Si se agrega un pack con seed, actualizar aquí.
+        const KNOWN: &[&str] = &[
+            "pharmacy",
+            "minimarket",
+            "cafe",
+            "tienda",
+            "servicios",
+            "restaurant",
+        ];
+        for p in PACKS {
+            if let Some(sv) = p.seed_vertical {
+                assert!(
+                    KNOWN.contains(&sv),
+                    "rubro «{}» seed_vertical «{}» no está en el catálogo seed",
+                    p.rubro,
+                    sv
+                );
+            }
+        }
+        // Tienda siempre tiene pack demo (P1 beachhead).
+        assert_eq!(pack_for("tienda").seed_vertical, Some("tienda"));
     }
 }

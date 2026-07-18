@@ -1725,6 +1725,11 @@ mod tests {
     #[test]
     fn tienda_pack_is_shelf_stable_no_clinical() {
         let pack = tienda_pack();
+        assert!(
+            pack.len() >= 8,
+            "catálogo retail creíble (≥8 SKUs demo), got {}",
+            pack.len()
+        );
         for item in &pack {
             assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
             assert!(item.active_ingredient.is_none());
@@ -1734,7 +1739,48 @@ mod tests {
                 "{} debe ser no perecible",
                 item.name
             );
+            // Stock entra por lote (invariante ledger) aunque el pack UI tenga
+            // `lotes:false` — el lote es transporte del stock, no feature de
+            // vencimiento.
+            assert!(
+                !item.batch_code.is_empty(),
+                "{} necesita batch_code para el ledger",
+                item.name
+            );
+            assert!(item.stock > 0, "{} es bien físico → stock > 0", item.name);
         }
+        // Al menos un ítem en stock bajo para alertas de reposición.
+        assert!(
+            pack.iter().any(|i| i.stock <= 5),
+            "tienda demo debe incluir stock bajo"
+        );
+    }
+
+    /// Coherencia rubro-pack ↔ seed: todo `seed_vertical` del catálogo rubro
+    /// parsea a un `SeedVertical` real (y el pack de ese vertical no está vacío).
+    #[test]
+    fn rubro_seed_verticals_resolve_to_nonempty_packs() {
+        for key in crate::rubro::all_rubros() {
+            let pack = crate::rubro::pack_for(key);
+            let Some(sv) = pack.seed_vertical else {
+                continue;
+            };
+            let v = SeedVertical::parse(sv).unwrap_or_else(|e| {
+                panic!("rubro «{key}» seed_vertical «{sv}» no parsea: {e}");
+            });
+            let items = pack_for(v);
+            assert!(
+                !items.is_empty(),
+                "seed pack de «{sv}» (rubro {key}) no debe estar vacío"
+            );
+        }
+        // Beachhead P1: tienda es first-class en ambos lados.
+        assert_eq!(
+            crate::rubro::pack_for("tienda").seed_vertical,
+            Some("tienda")
+        );
+        assert_eq!(SeedVertical::parse("tienda").unwrap(), SeedVertical::Tienda);
+        assert!(!tienda_pack().is_empty());
     }
 
     #[test]
