@@ -21,7 +21,7 @@ import {
   type Dte,
 } from "../api";
 import { clp, num, fechaHora } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { emptyState, errorState } from "./ui";
 
 const LIST_LIMIT = 100;

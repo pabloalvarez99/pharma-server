@@ -19,7 +19,7 @@ import {
 } from "../api";
 import { fecha, isValidRut, canonicalRut, formatRut } from "../format";
 import { loadVertical, hasRecetas, verticalLabel } from "../vertical";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { emptyState, errorState, loadingState } from "./ui";
 
 const PAGE_LIMIT = 100;

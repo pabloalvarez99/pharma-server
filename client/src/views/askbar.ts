@@ -20,7 +20,7 @@ import {
   type AgentProposal,
   type AssistActResult,
 } from "../api";
-import { escapeHtml } from "./inventory";
+import { escapeHtml } from "./view-blocks";
 import { featuresForRubro, type Rubro } from "../vertical";
 import { shouldShowAgentIntro, dismissAgentIntro, type KeyStore } from "./agent-proactive";
 

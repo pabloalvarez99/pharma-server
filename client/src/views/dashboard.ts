@@ -30,12 +30,14 @@ import {
   tableSkeleton,
   asMessage,
   escapeHtml,
-} from "./inventory";
+} from "./view-blocks";
 import { dashboardActivation, type ActivationNav } from "./onboarding-ux";
 import {
-  loadRubro,
+  loadRubroPack,
   loadBusinessName,
-  featuresForRubro,
+  featuresFromPack,
+  parseRubro,
+  activeFeatures,
   rubroCard,
   type Rubro,
 } from "../vertical";
@@ -90,10 +92,13 @@ export function renderDashboard(host: HTMLElement, serverUrl: string): void {
 // is known before we render the data regions. The settings + business-name
 // reads are cheap and local; the heavy reports load right after, in parallel.
 async function hydrate(host: HTMLElement, serverUrl: string): Promise<void> {
-  const [rubro, name] = await Promise.all([
-    loadRubro(serverUrl),
+  // Pack is the live source of truth (shell usually already cached it).
+  const [pack, name] = await Promise.all([
+    loadRubroPack(serverUrl),
     loadBusinessName(serverUrl),
   ]);
+  const rubro = parseRubro(pack.rubro);
+  const f = featuresFromPack(pack.features);
   renderHero(host, rubro, name);
 
   // The agent ask-bar — the north star made visible (1 RUT = 1 agente). Mounted
@@ -107,8 +112,6 @@ async function hydrate(host: HTMLElement, serverUrl: string): Promise<void> {
   // the panel. Fire-and-forget so the KPI strip below loads in parallel.
   const alertsHost = host.querySelector<HTMLElement>("#dash-alerts");
   if (alertsHost) void loadProactive(alertsHost, serverUrl, rubro);
-
-  const f = featuresForRubro(rubro);
   await Promise.all([
     loadKpis(
       host.querySelector<HTMLElement>("#dash-kpis")!,
@@ -180,7 +183,8 @@ async function loadProactive(
   serverUrl: string,
   rubro: Rubro,
 ): Promise<void> {
-  const f = featuresForRubro(rubro);
+  // Prefer cached pack (shell/hydrate); fall back to local constants for rubro.
+  const f = activeFeatures(rubro);
   const [sessRes, expRes, invRes] = await Promise.all([
     settle(cashSessions(serverUrl, "open")),
     f.lotes ? settle(nearExpiry(serverUrl, NEAR_EXPIRY_DAYS)) : Promise.resolve(null),

@@ -36,7 +36,7 @@ import {
   attachRutAdvisory,
   emptyStateHtml,
   errorStateHtml,
-} from "./inventory";
+} from "./view-blocks";
 import {
   poIsReceivable,
   poIsSendable,

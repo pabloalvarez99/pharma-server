@@ -19,6 +19,7 @@ import {
   emitBoleta,
   sendDte,
   dteXml,
+  printReceiptPreferThermal,
   CUSTOMERS_MODULE_MISSING,
   type Product,
   type PosItem,
@@ -29,9 +30,9 @@ import {
   type LowStockAlert,
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { receiptText } from "./receipt-text";
-import { featuresForRubro, loadRubro } from "../vertical";
+import { loadFeatures } from "../vertical";
 import "./rutbrand.css";
 import {
   addToCart as addCartLine,
@@ -48,7 +49,6 @@ import {
   type HeldSale,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
-import { emptyState, errorState } from "./ui";
 
 interface PickedCustomer {
   id: string;
@@ -258,11 +258,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   });
   runSearch("");
 
-  // Resolve the rubro once; never throws (loadRubro defaults on any miss). For a
-  // service rubro, drop stock tracking and repaint the picker so the cards stop
-  // showing a phantom "agotado".
-  void loadRubro(serverUrl).then((rubro) => {
-    if (!featuresForRubro(rubro).physicalStock) {
+  // Pack features (cached after shell login); never throws. Service rubro →
+  // drop stock tracking and repaint so cards stop showing phantom "agotado".
+  void loadFeatures(serverUrl).then((f) => {
+    if (!f.physicalStock) {
       trackStock = false;
       runSearch(searchEl.value.trim());
     }
@@ -273,12 +272,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       const rows: Product[] = await listProducts(serverUrl, search || undefined, SEARCH_LIMIT);
       currentResults = rows;
       if (rows.length === 0) {
-        resultsEl.innerHTML = emptyState({
-          title: search ? `Sin resultados para «${search}»` : "Sin productos",
-          hint: search
-            ? "Revisa el término o el código de barras."
-            : "Agrega productos en Inventario para venderlos.",
-        });
+        resultsEl.innerHTML = `<p class="empty">Sin resultados${search ? ` para «${escapeHtml(search)}»` : ""}.</p>`;
         return;
       }
       resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock)).join("");
@@ -289,12 +283,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       });
     } catch (err) {
       currentResults = [];
-      resultsEl.innerHTML = errorState(asMessage(err), {
-        retry: { id: "pos-results-retry", label: "Reintentar" },
-      });
-      resultsEl
-        .querySelector<HTMLButtonElement>("#pos-results-retry")
-        ?.addEventListener("click", () => void loadResults(search));
+      resultsEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     }
   }
 
@@ -458,7 +447,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       if (!customerModuleOk) return;
       if (rows.length === 0) {
         custResultsEl.hidden = false;
-        custResultsEl.innerHTML = emptyState({ title: `Sin clientes para «${q}»` });
+        custResultsEl.innerHTML = `<p class="empty">Sin clientes para «${escapeHtml(q)}».</p>`;
         return;
       }
       custResultsEl.hidden = false;
@@ -494,7 +483,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         return;
       }
       custResultsEl.hidden = false;
-      custResultsEl.innerHTML = errorState(asMessage(err));
+      custResultsEl.innerHTML = `<p class="empty">${escapeHtml(asMessage(err))}</p>`;
     }
   }
 
@@ -551,10 +540,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   function renderCart(): void {
     if (cart.length === 0) {
-      linesEl.innerHTML = emptyState({
-        title: "El carrito está vacío",
-        hint: "Busca un producto para agregarlo.",
-      });
+      linesEl.innerHTML = `<p class="empty">El carrito está vacío. Busca un producto para agregarlo.</p>`;
     } else {
       linesEl.innerHTML = cart
         .map(
@@ -988,7 +974,11 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       searchEl.focus();
     };
     host.querySelector<HTMLButtonElement>("#rcpt-close")!.addEventListener("click", close);
-    host.querySelector<HTMLButtonElement>("#rcpt-print")!.addEventListener("click", () => window.print());
+    // Thermal when configured (localStorage rb.thermalPrinter); else browser print.
+    // Failures fall back to window.print so a dead spooler never blocks the cajero.
+    host.querySelector<HTMLButtonElement>("#rcpt-print")!.addEventListener("click", () => {
+      void printReceiptPreferThermal(r);
+    });
     host.querySelector<HTMLButtonElement>("#rcpt-copy")!.addEventListener("click", () => {
       void copyReceipt(r, host.querySelector<HTMLButtonElement>("#rcpt-copy")!);
     });

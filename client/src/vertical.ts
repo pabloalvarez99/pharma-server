@@ -382,3 +382,82 @@ export async function loadRubro(serverUrl: string): Promise<Rubro> {
     return DEFAULT_RUBRO;
   }
 }
+
+// --- server rubro pack (source of truth) ------------------------------------
+//
+// Since P0.3 the server serves the declarative pack (`GET /api/v1/rubro-pack`,
+// `domain::rubro`). The client consumes it with the LOCAL constants above as
+// an offline fallback: a LAN hiccup or an old server must never break gating.
+
+import { rubroPack, type RubroPack, type PackFeatures } from "./api";
+
+let packCache: RubroPack | null = null;
+
+/** Build a pack-shaped object from the local constants (offline fallback). */
+function localPack(rubro: Rubro): RubroPack {
+  const card = rubroCard(rubro);
+  const f = featuresForRubro(rubro);
+  return {
+    rubro,
+    label: card?.label ?? "Otro",
+    tagline: card?.tagline ?? "Tu negocio, a tu manera.",
+    accent: card?.accent ?? "#8b97ad",
+    features: {
+      recetas: f.recetas,
+      lotes: f.lotes,
+      physical_stock: f.physicalStock,
+      clinical: f.clinical,
+    },
+    vocab: { item: f.physicalStock ? "Producto" : "Servicio", catalog: "Inventario" },
+    attrs: [],
+    seed_vertical: card?.seedVertical ?? null,
+    coming_soon: card?.comingSoon ?? [],
+  };
+}
+
+/** Load the tenant's rubro pack from the server and cache it. On any failure
+ *  (offline LAN, old server without the route) returns the locally-built pack
+ *  — never throws, gating must not dead-end. Call once after login (shell). */
+export async function loadRubroPack(serverUrl: string): Promise<RubroPack> {
+  try {
+    packCache = await rubroPack(serverUrl);
+  } catch {
+    packCache = localPack(await loadRubro(serverUrl));
+  }
+  return packCache;
+}
+
+/** Drop the cached pack (logout / tenant switch). Next login reloads. */
+export function clearPackCache(): void {
+  packCache = null;
+}
+
+/** The cached pack, or `null` before {@link loadRubroPack} runs. */
+export function cachedPack(): RubroPack | null {
+  return packCache;
+}
+
+/** Capability flags from a server pack, in the client's `RubroFeatures` shape
+ *  (snake_case on the wire → camelCase here). */
+export function featuresFromPack(p: PackFeatures): RubroFeatures {
+  return {
+    recetas: p.recetas,
+    lotes: p.lotes,
+    physicalStock: p.physical_stock,
+    clinical: p.clinical,
+  };
+}
+
+/** Live gating flags after login: prefer the server pack cache; fall back to
+ *  local constants for the given rubro (or generic `otro`). Use this in shell
+ *  views so a pack reload can change the UI without editing every call site. */
+export function activeFeatures(fallbackRubro?: string | null): RubroFeatures {
+  if (packCache) return featuresFromPack(packCache.features);
+  return featuresForRubro(fallbackRubro);
+}
+
+/** Ensure the pack is loaded, then return its features. Never throws. */
+export async function loadFeatures(serverUrl: string): Promise<RubroFeatures> {
+  const pack = await loadRubroPack(serverUrl);
+  return featuresFromPack(pack.features);
+}

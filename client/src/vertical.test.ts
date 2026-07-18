@@ -8,6 +8,9 @@ import {
   VERTICAL_OPTIONS,
   parseRubro,
   featuresForRubro,
+  featuresFromPack,
+  activeFeatures,
+  clearPackCache,
   seedVerticalFor,
   DEFAULT_RUBRO,
   RUBRO_CATALOG,
@@ -226,6 +229,30 @@ describe("rubro depth (P3 showcase: native value copy + graceful roadmap)", () =
       } else {
         expect(r.comingSoon.length).toBeGreaterThan(0);
       }
+    });
+  });
+});
+
+describe("activeFeatures / pack cache", () => {
+  it("falls back to local constants when no pack is cached", () => {
+    clearPackCache();
+    expect(activeFeatures("farmacia")).toEqual(featuresForRubro("farmacia"));
+    expect(activeFeatures("belleza").physicalStock).toBe(false);
+  });
+
+  it("featuresFromPack maps snake_case wire flags", () => {
+    expect(
+      featuresFromPack({
+        recetas: true,
+        lotes: false,
+        physical_stock: true,
+        clinical: true,
+      }),
+    ).toEqual({
+      recetas: true,
+      lotes: false,
+      physicalStock: true,
+      clinical: true,
     });
   });
 });

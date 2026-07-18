@@ -16,7 +16,7 @@ import {
   escapeHtml,
   emptyStateHtml,
   errorStateHtml,
-} from "./inventory";
+} from "./view-blocks";
 import { toRfc3339Noon, parseExpense, expenseTotal, gastosEmpty } from "./stock-helpers";
 import { exportRows, type ExportColumn } from "./export-helpers";
 

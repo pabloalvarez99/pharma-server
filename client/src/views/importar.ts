@@ -14,7 +14,7 @@ import {
   exportProducts,
   type ImportSummary,
 } from "../api";
-import { asMessage, escapeHtml } from "./inventory";
+import { asMessage, escapeHtml } from "./view-blocks";
 
 // Columns the server understands (crates/api/src/v1/catalog.rs::import_products).
 const REQUIRED = ["name", "price"];

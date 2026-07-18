@@ -18,8 +18,8 @@ import {
   type RefundItem,
 } from "../api";
 import { clp, num } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
-import { featuresForRubro, loadRubro } from "../vertical";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
+import { loadFeatures } from "../vertical";
 import "./rutbrand.css";
 import {
   deriveTipo as deriveTipoOf,
@@ -29,7 +29,6 @@ import {
   type RefundDraftLine,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
-import { emptyState, errorState } from "./ui";
 
 const PAGE_LIMIT = 60;
 
@@ -89,8 +88,8 @@ export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
   // throws), then relax the stock wording for a service rubro. The modal reads
   // the resolved flag so its restock control matches the subtitle.
   let physicalStock = true;
-  void loadRubro(serverUrl).then((rubro) => {
-    physicalStock = featuresForRubro(rubro).physicalStock;
+  void loadFeatures(serverUrl).then((f) => {
+    physicalStock = f.physicalStock;
     if (!physicalStock) subtitleEl.textContent = devolucionesSubtitle(false);
   });
 
@@ -113,10 +112,7 @@ export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
 
 function renderTable(host: HTMLElement, rows: Devolucion[]): void {
   if (rows.length === 0) {
-    host.innerHTML = emptyState({
-      title: "Sin devoluciones registradas",
-      hint: "Las devoluciones que registres aparecerán aquí.",
-    });
+    host.innerHTML = `<p class="empty">Sin devoluciones registradas.</p>`;
     return;
   }
   host.innerHTML = `
@@ -178,10 +174,7 @@ function openRefundModal(
             <button type="button" class="btn-ghost" id="dev-f-load">Cargar boleta</button>
           </div>
         </div>
-        <div id="dev-f-items">${emptyState({
-          title: "Carga una boleta",
-          hint: "Ingresa el número de orden y pulsa «Cargar boleta» para elegir qué devolver.",
-        })}</div>
+        <div id="dev-f-items"><p class="empty">Carga una boleta para elegir qué devolver.</p></div>
         <div class="dev-fields-grid">
           <div class="modal-field">
             <span class="modal-label">Tipo</span>
@@ -295,7 +288,7 @@ function openRefundModal(
     } catch (err) {
       receipt = null;
       saveBtn.disabled = true;
-      itemsHost.innerHTML = errorState(asMessage(err));
+      itemsHost.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
     } finally {
       loadBtn.classList.remove("loading");
       loadBtn.disabled = false;
@@ -347,10 +340,7 @@ function openRefundModal(
 
 function renderItemRows(host: HTMLElement, receipt: Receipt): void {
   if (receipt.items.length === 0) {
-    host.innerHTML = emptyState({
-      title: "La boleta no tiene ítems",
-      hint: "No hay nada que devolver en esta venta.",
-    });
+    host.innerHTML = `<p class="empty">La boleta no tiene ítems.</p>`;
     return;
   }
   const rows = receipt.items
@@ -376,12 +366,15 @@ function renderItemRows(host: HTMLElement, receipt: Receipt): void {
 function renderError(err: unknown): string {
   const msg = asMessage(err);
   if (msg.includes("403") || msg.includes("denegado")) {
-    return emptyState({
-      title: "Sin acceso a devoluciones",
-      hint: "Tu rol no tiene permiso para registrar o ver devoluciones. Contacta al administrador.",
-    });
+    return `
+      <div class="caja-empty">
+        <div class="caja-empty-mark">●</div>
+        <h3>Sin acceso a devoluciones</h3>
+        <p class="muted">Tu rol no tiene permiso para registrar o ver devoluciones. Contacta al administrador.</p>
+      </div>
+    `;
   }
-  return errorState(msg);
+  return `<div class="view-error">${escapeHtml(msg)}</div>`;
 }
 
 function metodoLabel(m: string | null): string {

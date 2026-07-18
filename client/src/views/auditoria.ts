@@ -10,7 +10,7 @@
 // note instead of a hard error. Spanish throughout; same skeleton → fetch → swap.
 import { queryAuditLog, type AuditEntry, type AuditFilters } from "../api";
 import { num, fechaHora } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { emptyState, errorState } from "./ui";
 
 const PAGE_SIZE = 50;

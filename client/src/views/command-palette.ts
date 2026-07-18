@@ -7,7 +7,7 @@
 //
 // All dynamic text is escaped (escapeHtml) before it touches innerHTML — command
 // titles can come from rubro-renamed nav labels, so they are treated as data.
-import { escapeHtml } from "./inventory";
+import { escapeHtml } from "./view-blocks";
 import {
   filterCommands,
   nextIndex,
