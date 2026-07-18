@@ -159,6 +159,9 @@ struct ProductFull {
     prescription_type: String,
     presentation: Option<String>,
     discount_percent: Option<i64>,
+    /// Per-rubro flexible attributes (migration 0033); absent on older rows.
+    #[serde(default)]
+    attrs: Option<serde_json::Value>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -189,6 +192,7 @@ impl From<ProductFull> for ProductDto {
             prescription_type: r.prescription_type,
             presentation: r.presentation,
             discount_percent: r.discount_percent,
+            attrs: r.attrs,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

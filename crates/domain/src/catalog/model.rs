@@ -49,6 +49,11 @@ pub struct ProductDto {
     pub prescription_type: String,
     pub presentation: Option<String>,
     pub discount_percent: Option<i64>,
+    /// Per-rubro flexible attributes (migration 0033): keys declared by the
+    /// rubro pack (`GET /api/v1/rubro-pack`), e.g. `talla`, `duracion_min`.
+    /// Absent for products with no rubro extras.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attrs: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
