@@ -38,6 +38,7 @@ import {
   featuresFromPack,
   parseRubro,
   activeFeatures,
+  activeVocab,
   rubroCard,
   type Rubro,
 } from "../vertical";
@@ -464,10 +465,12 @@ async function loadTop(
       return;
     }
     const unitHead = physicalStock ? "Unid." : "Cant.";
+    // Prefer pack vocab (Producto / Servicio / Plato); offline falls back via activeVocab.
+    const itemHead = activeVocab().item;
     host.innerHTML = `
       <table class="data-table">
         <thead>
-          <tr><th>#</th><th>${physicalStock ? "Producto" : "Servicio"}</th><th class="num">${unitHead}</th><th class="num">Ingresos</th><th>ABC</th></tr>
+          <tr><th>#</th><th>${escapeHtml(itemHead)}</th><th class="num">${unitHead}</th><th class="num">Ingresos</th><th>ABC</th></tr>
         </thead>
         <tbody>${rows.map(topRow).join("")}</tbody>
       </table>

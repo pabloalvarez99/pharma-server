@@ -10,6 +10,7 @@ import {
   featuresForRubro,
   featuresFromPack,
   activeFeatures,
+  activeVocab,
   clearPackCache,
   seedVerticalFor,
   DEFAULT_RUBRO,
@@ -254,5 +255,21 @@ describe("activeFeatures / pack cache", () => {
       physicalStock: true,
       clinical: true,
     });
+  });
+});
+
+describe("activeVocab / pack cache", () => {
+  it("offline: physical rubro → Producto; service rubro → Servicio", () => {
+    clearPackCache();
+    expect(activeVocab("farmacia")).toEqual({ item: "Producto", catalog: "Inventario" });
+    expect(activeVocab("tienda")).toEqual({ item: "Producto", catalog: "Inventario" });
+    expect(activeVocab("belleza")).toEqual({ item: "Servicio", catalog: "Inventario" });
+    expect(activeVocab("servicios")).toEqual({ item: "Servicio", catalog: "Inventario" });
+  });
+
+  it("offline: unset rubro defaults like features (generic Producto)", () => {
+    clearPackCache();
+    expect(activeVocab(null).item).toBe("Producto");
+    expect(activeVocab(undefined).item).toBe("Producto");
   });
 });

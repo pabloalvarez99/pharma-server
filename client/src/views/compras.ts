@@ -48,6 +48,7 @@ import {
   comprasEmpty,
   type PoLineDraft,
 } from "./stock-helpers";
+import { activeVocab } from "../vertical";
 
 const PAGE_LIMIT = 60;
 
@@ -402,7 +403,7 @@ function openPoCreateModal(
       <div class="modal-field">
         <label class="modal-label">Ítems</label>
         <div class="po-line-head">
-          <span>Producto</span><span>Cant.</span><span>Costo unit.</span><span></span>
+          <span>${escapeHtml(activeVocab().item)}</span><span>Cant.</span><span>Costo unit.</span><span></span>
         </div>
         <div id="po-c-lines" class="po-lines"></div>
         <button type="button" class="btn-ghost po-line-add" id="po-c-add">+ Agregar línea</button>
@@ -429,7 +430,7 @@ function openPoCreateModal(
       const row = document.createElement("div");
       row.className = "po-line";
       row.innerHTML = `
-        <input class="po-l-name" type="text" placeholder="Producto" autocomplete="off" />
+        <input class="po-l-name" type="text" placeholder="${escapeHtml(activeVocab().item)}" autocomplete="off" />
         <input class="po-l-qty" type="number" min="1" step="1" value="1" />
         <input class="po-l-cost" type="number" min="0" step="1" placeholder="0" />
         <button class="po-l-del" type="button" title="Quitar">✕</button>
@@ -760,7 +761,7 @@ function renderPoDetail(po: PurchaseOrderDetail): string {
     <table class="data-table">
       <thead>
         <tr>
-          <th>Producto</th>
+          <th>${escapeHtml(activeVocab().item)}</th>
           <th class="num">Pedido</th>
           <th class="num">Recibido</th>
           <th class="num">Pendiente</th>

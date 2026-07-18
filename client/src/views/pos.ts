@@ -32,7 +32,7 @@ import {
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { receiptText } from "./receipt-text";
-import { loadFeatures } from "../vertical";
+import { loadFeatures, activeVocab } from "../vertical";
 import "./rutbrand.css";
 import {
   addToCart as addCartLine,
@@ -927,7 +927,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             ${r.cashier ? `<div class="rcpt-meta muted">Cajero: ${escapeHtml(r.cashier)}</div>` : ""}
           </div>
           <table class="data-table rcpt-table">
-            <thead><tr><th>Producto</th><th class="num">Cant</th><th class="num">P/U</th><th class="num">Total</th></tr></thead>
+            <thead><tr><th>${escapeHtml(activeVocab().item)}</th><th class="num">Cant</th><th class="num">P/U</th><th class="num">Total</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
           <div class="rcpt-totals">

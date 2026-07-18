@@ -389,7 +389,7 @@ export async function loadRubro(serverUrl: string): Promise<Rubro> {
 // `domain::rubro`). The client consumes it with the LOCAL constants above as
 // an offline fallback: a LAN hiccup or an old server must never break gating.
 
-import { rubroPack, type RubroPack, type PackFeatures } from "./api";
+import { rubroPack, type RubroPack, type PackFeatures, type PackVocab } from "./api";
 
 let packCache: RubroPack | null = null;
 
@@ -454,6 +454,19 @@ export function featuresFromPack(p: PackFeatures): RubroFeatures {
 export function activeFeatures(fallbackRubro?: string | null): RubroFeatures {
   if (packCache) return featuresFromPack(packCache.features);
   return featuresForRubro(fallbackRubro);
+}
+
+/** Operator-facing vocabulary (item/catalog labels) after login. Prefer the
+ *  cached server pack; offline or pre-login falls back to the same local
+ *  defaults as {@link localPack} so UI never hardcodes "Producto" when the
+ *  pack says "Servicio" / "Plato". */
+export function activeVocab(fallbackRubro?: string | null): PackVocab {
+  if (packCache) return packCache.vocab;
+  const f = featuresForRubro(fallbackRubro);
+  return {
+    item: f.physicalStock ? "Producto" : "Servicio",
+    catalog: "Inventario",
+  };
 }
 
 /** Ensure the pack is loaded, then return its features. Never throws. */

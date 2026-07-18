@@ -45,6 +45,7 @@ import {
   capRows,
   LIST_RENDER_CAP,
 } from "./stock-helpers";
+import { activeVocab, activeFeatures } from "../vertical";
 
 const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
@@ -56,17 +57,24 @@ const REORDER_SCAN = 500;
 type Tab = "productos" | "vencimientos" | "reposicion" | "rotacion";
 
 export function renderInventory(host: HTMLElement, serverUrl: string): void {
+  // Pack cache (shell post-login) drives labels + lotes tab; offline → local vocab.
+  const vocab = activeVocab();
+  const features = activeFeatures();
+  const itemLabel = vocab.item;
+  const itemPlural = `${itemLabel}s`;
+  const catalogLabel = vocab.catalog;
+
   host.innerHTML = `
     ${invStyles()}
     <section class="view view-inventory">
       <div class="view-head">
         <div>
-          <h2>Inventario</h2>
+          <h2>${escapeHtml(catalogLabel)}</h2>
           <p class="muted">Stock, lotes y vencimientos del catálogo.</p>
         </div>
         <div class="inv-head-actions">
           <div class="view-search" id="inv-search-wrap">
-            <input id="inv-search" type="search" placeholder="Buscar producto…" autocomplete="off" />
+            <input id="inv-search" type="search" placeholder="Buscar ${escapeHtml(itemLabel.toLowerCase())}…" autocomplete="off" />
           </div>
           <div class="inv-export-wrap" id="inv-export-wrap">
             <button id="inv-export-btn" class="btn-ghost inv-export-btn" type="button" aria-haspopup="menu" aria-expanded="false">Exportar ▾</button>
@@ -76,15 +84,15 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
             </div>
           </div>
           <button id="inv-new-btn" class="btn-primary inv-new-btn">
-            <span class="btn-label">+ Nuevo producto</span>
+            <span class="btn-label">+ Nuevo ${escapeHtml(itemLabel.toLowerCase())}</span>
             <span class="btn-pulse"></span>
           </button>
         </div>
       </div>
 
       <div class="inv-tabs" role="tablist">
-        <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true">Productos</button>
-        <button class="inv-tab" data-tab="vencimientos" role="tab" aria-selected="false">Próximos a vencer</button>
+        <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true">${escapeHtml(itemPlural)}</button>
+        <button class="inv-tab" data-tab="vencimientos" role="tab" aria-selected="false"${features.lotes ? "" : " hidden"}>Próximos a vencer</button>
         <button class="inv-tab" data-tab="reposicion" role="tab" aria-selected="false">Reposición</button>
         <button class="inv-tab" data-tab="rotacion" role="tab" aria-selected="false">Rotación</button>
       </div>
@@ -221,8 +229,9 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
 async function loadKpis(host: HTMLElement, serverUrl: string): Promise<void> {
   try {
     const s = await inventorySummary(serverUrl);
+    const itemPlural = `${activeVocab().item}s`;
     host.innerHTML = [
-      kpiCard("Productos", num(s.total), `${num(s.active)} activos`),
+      kpiCard(itemPlural, num(s.total), `${num(s.active)} activos`),
       kpiCard("Stock bajo", num(s.low_stock), "bajo el mínimo", s.low_stock > 0 ? "warn" : ""),
       kpiCard("Sin stock", num(s.out_of_stock), "agotados", s.out_of_stock > 0 ? "danger" : ""),
       kpiCard("Valorización", clp(s.inventory_value), "a precio de venta"),
@@ -249,16 +258,17 @@ async function loadProducts(
         );
       return;
     }
+    const itemLabel = activeVocab().item;
     host.innerHTML = `
       <table class="data-table inv-products">
         <thead>
-          <tr><th>Producto</th><th class="num">Precio</th><th class="num">Stock</th><th>Estado</th></tr>
+          <tr><th>${escapeHtml(itemLabel)}</th><th class="num">Precio</th><th class="num">Stock</th><th>Estado</th></tr>
         </thead>
         <tbody>
           ${rows.map(productRow).join("")}
         </tbody>
       </table>
-      <p class="table-foot muted">${rows.length} producto(s)${
+      <p class="table-foot muted">${rows.length} ${escapeHtml(itemLabel.toLowerCase())}(s)${
         rows.length === PAGE_LIMIT ? ` · mostrando los primeros ${PAGE_LIMIT}` : ""
       } · toca una fila para detalle, ajustar stock y lotes</p>
     `;
