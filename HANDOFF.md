@@ -1,8 +1,19 @@
 # HANDOFF — Continuar trabajo en RutBusiness (pharma-server)
 
 > **Para Grok Build CLI (o cualquier agente/dev)**: este documento es el punto
-> de entrada. Léelo completo antes de tocar código. Escrito: 2026-07-18, tras
-> ejecutar P0 del plan "ERP global para microempresas en Chile".
+> de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-18
+> (A: babysit PR #319 + sync estado).
+
+### Estado rápido (2026-07-18)
+
+| Item | Estado |
+|---|---|
+| **P0** | En **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319)** (`feat/p0-erp-global` → `feature/erp-parity`) |
+| Smoke | **18 PASS** |
+| rubro-pack | **200** con release rebuild |
+| Residual dirty | **assist rewrite** (y docs/bitácora locales) — **fuera de PR / no commitear aún** |
+| CI PR #319 | **FAIL** — `cargo fmt --check` en `crates/domain/src/rubro.rs` (dueño: **B**) |
+| **Próximo** | **P1 tienda (B)** + **pack-UX (C)** en curso |
 
 ---
 
@@ -24,8 +35,8 @@ universal).
 ## 2. Entorno de trabajo (Windows 11, máquina del dueño)
 
 - **Worktree activo**: `D:\Respaldo Proyectos\GitHub\.worktrees\pharma-server\assist-b2`
-  — TODO el trabajo P0 está aquí, SIN COMMITEAR. El repo principal está en
-  `D:\Respaldo Proyectos\GitHub\pharma-server` (no mezclar).
+  — rama `feat/p0-erp-global` tracking `origin/feat/p0-erp-global` (P0 en PR #319).
+  Residual local (assist rewrite, bitácora, etc.) **fuera de PR / no commitear aún**.
 - **DB del worktree**: `data/surreal` dentro del worktree. El server ancla la
   DB relativa a `C:\ProgramData\PharmaServer\data` (install dir) si no hay
   override → **siempre lanzar con `PHARMA__DB__PATH` absoluto** o usar
@@ -154,11 +165,12 @@ cd client && npx tsc --noEmit                        # ✅ PASS
 **No rehacer** (ya estaba): updater plugin/keys, `print_ticket` base, layout
 POS, Preferencias impresora (solo se añadió checkbox cajón), `loadRubroPack`.
 
-**Git worktree roto**: `assist-b2` apunta a
-`D:/Respaldo Proyectos/GitHub/pharma-server/.git/worktrees/pharma-wt-assist-b2`
-pero el repo padre `pharma-server` **no está en disco**. No hay commit hasta
-restaurar el repo o re-adjuntar el worktree. Código P0 vive en el filesystem
-del worktree, sin commitear.
+**Git / PR (A — 2026-07-18)**:
+- P0 **commiteado y pusheado** en `feat/p0-erp-global` → **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319)** (base `feature/erp-parity`).
+- Smoke **18 PASS**; rubro-pack **200** con release rebuild.
+- Residual dirty (assist rewrite + CLAUDE/bitácora/0016/tauri-smoke/Cargo.lock, etc.): **fuera de PR / no commitear aún**. No stagear `.git.orphaned-pointer` ni `client/keys/*`.
+- CI: FAIL en `cargo fmt --all -- --check` → solo `crates/domain/src/rubro.rs` (struct literals multilínea). **B** debe `rustfmt` + push; A no toca domain/client producto.
+- **Próximo**: P1 tienda (B) + pack-UX (C) en curso. No merge PR hasta CI verde.
 
 ## 5. Convenciones del codebase (respetar)
 
@@ -175,6 +187,7 @@ del worktree, sin commitear.
 
 ## 6. Roadmap después de P0 (contexto estratégico)
 
+- **Próximo (en curso)**: **P1 tienda (B)** + **pack-UX (C)**. Bloqueo de merge P0: CI fmt en `rubro.rs` (B).
 - **P1** (1-2 meses, UN rubro a la vez, validar con cliente real):
   1. Tienda/Retail (variantes+SKU, etiquetas) — rubro más común de Chile.
   2. Café/Restaurant (comandas + BOM).
