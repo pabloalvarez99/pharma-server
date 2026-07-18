@@ -15,6 +15,7 @@ pub mod operations;
 pub mod prescriptions;
 pub mod purchasing;
 pub mod reports;
+pub mod rubro;
 pub mod sales;
 pub mod seed;
 pub mod settings;

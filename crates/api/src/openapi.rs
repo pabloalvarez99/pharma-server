@@ -92,7 +92,6 @@ impl Modify for SecurityAddon {
         (name = "Backup", description = "Backup on-demand del data dir (SurrealKv + agent.key)."),
         (name = "ConfigCenter", description = "Sucursales + cajas: CRUD admin para multi-sucursal / multi-caja."),
         (name = "License", description = "Hot-reload + status de licencia activa. Admin only."),
-        (name = "Users", description = "Gestión de credenciales del negocio: crear/listar/editar usuarios. Admin/owner, tenant-scoped."),
     ),
     paths(
         // Sales
@@ -231,10 +230,6 @@ impl Modify for SecurityAddon {
         crate::v1::dte::emit_documento,
         crate::v1::dte::upload_cert,
         crate::v1::dte::upload_caf,
-        // Users (gestión de credenciales)
-        crate::v1::users::list_users,
-        crate::v1::users::create_user,
-        crate::v1::users::update_user,
     ),
     components(schemas(ErrorEnvelope, ErrorBody)),
     modifiers(&SecurityAddon),
