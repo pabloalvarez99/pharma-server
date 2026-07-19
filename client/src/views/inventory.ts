@@ -865,6 +865,13 @@ async function openProductDetail(
       bodyEl
         .querySelector<HTMLButtonElement>("#pd-add-variant")!
         .addEventListener("click", () => toggleVariantForm());
+      bodyEl.querySelectorAll<HTMLButtonElement>(".pd-matrix-chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const talla = chip.dataset.talla ?? "";
+          const color = chip.dataset.color ?? "";
+          toggleVariantForm({ talla, color });
+        });
+      });
     }
     if (packOpts.lotes && !isParent) {
       bodyEl
@@ -874,7 +881,7 @@ async function openProductDetail(
     }
   }
 
-  /** Thin talla×color honesty: missing combos as text (no full matrix API). */
+  /** Thin talla×color honesty: missing combos as chips that prefills attrs form. */
   function matrixHintHtml(kids: ProductDetail[]): string {
     const pack = cachedPack();
     const rawAttrs =
@@ -892,22 +899,31 @@ async function openProductDetail(
     });
     const tallas = existing.map((e) => e.talla).filter(Boolean);
     const colores = existing.map((e) => e.color).filter(Boolean);
-    // Seed common Chilean retail sizes when empty so the hint is useful after first SKUs.
     const tPool = tallas.length ? tallas : ["XS", "S", "M", "L", "XL"];
     const cPool = colores.length ? colores : [];
     if (tallas.length === 0 && colores.length === 0) return "";
     const combos = matrixComboSuggestions(tPool, cPool.length ? cPool : [""], existing);
     const missing = combos.filter((c) => c.missing && c.label.trim() !== "").slice(0, 8);
     if (missing.length === 0) return "";
-    return `<p class="muted pd-matrix-hint" role="note">Combinaciones sugeridas sin alta: ${escapeHtml(
-      missing.map((m) => m.label).join(", "),
-    )}. Agrégalas con código de barras (matriz completa próximamente).</p>`;
+    const chips = missing
+      .map(
+        (m) =>
+          `<button type="button" class="btn-ghost pd-matrix-chip" data-talla="${escapeHtml(
+            m.talla,
+          )}" data-color="${escapeHtml(m.color)}">${escapeHtml(m.label)}</button>`,
+      )
+      .join("");
+    return `<div class="pd-matrix-hint" role="note">
+      <p class="muted">Combinaciones sin alta (toca para prellenar el form):</p>
+      <div class="pd-matrix-chips">${chips}</div>
+    </div>`;
   }
 
-  function toggleVariantForm(): void {
+  function toggleVariantForm(prefill?: { talla?: string; color?: string }): void {
     const host = bodyEl.querySelector<HTMLElement>("#pd-variant-form");
     if (!host) return;
-    if (host.innerHTML !== "") {
+    // Re-open when chip prefill arrives while form is open.
+    if (host.innerHTML !== "" && !prefill) {
       host.innerHTML = "";
       return;
     }
@@ -972,6 +988,15 @@ async function openProductDetail(
       host.innerHTML = "";
     };
     host.querySelector<HTMLButtonElement>("#vf-cancel")!.addEventListener("click", closeForm);
+    // Prefill pack attrs from matrix chip (talla/color).
+    if (prefill?.talla) {
+      const el = host.querySelector<HTMLInputElement>('#vf-attr-talla, [data-attr-key="talla"]');
+      if (el) el.value = prefill.talla;
+    }
+    if (prefill?.color) {
+      const el = host.querySelector<HTMLInputElement>('#vf-attr-color, [data-attr-key="color"]');
+      if (el) el.value = prefill.color;
+    }
     barcodeEl.focus();
 
     const syncEanHint = (): void => {

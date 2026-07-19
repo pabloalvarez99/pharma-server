@@ -1676,6 +1676,16 @@ button {
   margin: 8px 0 0;
   line-height: 1.4;
 }
+.pd-matrix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pd-matrix-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+}
 .pos-agotado {
   color: var(--danger, #fca5a5);
   font-weight: 600;
