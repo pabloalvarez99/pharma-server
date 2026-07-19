@@ -7,11 +7,10 @@
 //! client renders from it (falling back to its local copy when offline).
 //!
 //! A pack answers four questions per rubro:
-//!   1. **features**   — which optional modules the UI turns on
-//!   2. **vocab**      — rubro-native nouns ("Producto" vs "Servicio" vs "Plato")
-//!   3. **attrs**      — which extra product fields the rubro declares
-//!                       (stored in `product.attrs`, migration 0033)
-//!   4. **seed/kpi**   — demo pack + dashboard hints
+//! 1. **features** — which optional modules the UI turns on
+//! 2. **vocab** — rubro-native nouns ("Producto" vs "Servicio" vs "Plato")
+//! 3. **attrs** — extra product fields (stored in `product.attrs`, migration 0033)
+//! 4. **seed/kpi** — demo pack + dashboard hints
 //!
 //! Adding a rubro = adding one entry to [`PACKS`]. No endpoint changes.
 //!
@@ -185,8 +184,8 @@ static PACKS: &[RubroPack] = &[
         tagline: "Tu tienda, ordenada.",
         accent: "#5aa9ff",
         // Retail Chile: stock físico sí; lotes/vencimiento no (bienes no
-        // perecibles). Variantes reales (un producto → N SKU talla/color) son
-        // P1 — hoy `talla`/`color`/`sku` viven como attrs de producto plano.
+        // perecibles). Variantes multi-SKU: hijos `product` con `parent_id`
+        // (migración 0034) + attrs talla/color/sku.
         features: RubroFeatures {
             recetas: false,
             lotes: false,
@@ -216,10 +215,7 @@ static PACKS: &[RubroPack] = &[
             },
         ],
         seed_vertical: Some("tienda"),
-        coming_soon: &[
-            "Variantes y tallas (un producto, varios SKU)",
-            "Etiquetas de precio y código de barras",
-        ],
+        coming_soon: &["Etiquetas de precio y código de barras"],
     },
     RubroPack {
         rubro: "belleza",
