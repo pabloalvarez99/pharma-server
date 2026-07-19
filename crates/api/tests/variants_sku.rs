@@ -489,3 +489,77 @@ async fn by_barcode_empty_and_unknown() {
         "whitespace barcode: {st} {body}"
     );
 }
+
+#[tokio::test]
+async fn nested_variant_rejected_and_default_list_hides_children() {
+    let s = spawn().await;
+    let (st, parent) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products",
+        serde_json::json!({"name": "Camisa", "price": "12000", "stock": 0}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{parent}");
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+
+    let (st, child) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 2,
+            "barcode": "7804999900011",
+            "attrs": { "talla": "S" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{child}");
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    // Nested variants forbidden.
+    let (st, nest) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{child_id}/variants"),
+        serde_json::json!({
+            "stock": 1,
+            "barcode": "7804999900097",
+            "attrs": { "talla": "nested" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "nested: {nest}");
+    assert_eq!(nest["error"]["code"], "INVALID_INPUT");
+
+    // Default product list hides children (only parent).
+    let (st, list) = get_json(&s.app, &s.token, "/api/v1/products?limit=50").await;
+    assert_eq!(st, StatusCode::OK);
+    let ids: Vec<&str> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert!(ids.contains(&parent_id.as_str()));
+    assert!(
+        !ids.contains(&child_id.as_str()),
+        "child must be hidden by default list"
+    );
+
+    // include_variants=true surfaces the child.
+    let (st, all) = get_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products?include_variants=true&limit=50",
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let ids: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|p| p["id"].as_str())
+        .collect();
+    assert!(ids.contains(&child_id.as_str()));
+}
