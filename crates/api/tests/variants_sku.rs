@@ -390,11 +390,12 @@ async fn parent_not_sellable_duplicate_barcode_list_order_and_parent_shell() {
         assert!(k["barcode"].as_str().is_some(), "list enriches barcode");
     }
 
-    // Parent GET: stock 0 + variants_stock sum (read-side, no ledger write).
+    // Parent GET: stock 0 + variants_stock sum + variant_count (read-side).
     let (st, pget) = get_json(&s.app, &s.token, &format!("/api/v1/products/{parent_id}")).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(pget["stock"], 0);
     assert_eq!(pget["variants_stock"], 13);
+    assert_eq!(pget["variant_count"], 2);
 
     // Duplicate barcode → 409 CONFLICT, ES message.
     let (st, dup) = post_json(
