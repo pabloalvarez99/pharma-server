@@ -842,6 +842,7 @@ async fn list_variants_ordered_by_name_with_stock_and_barcode() {
     let parent2 = service::get_product(&db, &t, &parent.id).await.unwrap();
     assert_eq!(parent2.stock, 0, "padre no materializa stock de hijos");
     assert_eq!(parent2.variants_stock, Some(11));
+    assert_eq!(parent2.variant_count, Some(2));
     let sum = service::variants_stock_sum(&db, &t, &parent.id)
         .await
         .unwrap();
@@ -966,6 +967,7 @@ async fn plain_pharmacy_sku_untouched_by_variants_stock_field() {
     let got = service::get_product(&db, &t, &p.id).await.unwrap();
     assert!(got.parent_id.is_none());
     assert!(got.variants_stock.is_none());
+    assert!(got.variant_count.is_none());
     assert_eq!(got.stock, 40);
 }
 
@@ -998,6 +1000,7 @@ async fn list_products_sets_variants_stock_on_parents() {
 
     let p = by_id.get(&parent.id).expect("parent in list");
     assert_eq!(p.variants_stock, Some(7));
+    assert_eq!(p.variant_count, Some(2));
     // Children hidden by default.
     assert!(!by_id.contains_key(
         // any child id would appear under include_variants only
@@ -1006,7 +1009,7 @@ async fn list_products_sets_variants_stock_on_parents() {
 
     let plain_dto = by_id.get(&plain.id).expect("plain in list");
     assert!(
-        plain_dto.variants_stock.is_none(),
+        plain_dto.variants_stock.is_none() && plain_dto.variant_count.is_none(),
         "farmacia plain SKU must not look like a multi-SKU parent"
     );
     assert_eq!(plain_dto.stock, 12);

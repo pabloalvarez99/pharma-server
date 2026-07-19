@@ -67,6 +67,10 @@ pub struct ProductDto {
     /// plain SKUs keep stock on the product itself).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variants_stock: Option<i64>,
+    /// Count of active children (list badge without N+1). Present iff parent
+    /// has ≥1 active variant — same keying as `variants_stock`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_count: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -99,6 +99,7 @@ impl From<ProductRow> for ProductDto {
             // Enriched by service after join to product_barcode / children.
             barcode: None,
             variants_stock: None,
+            variant_count: None,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -489,13 +490,13 @@ pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> Doma
     Ok(row.and_then(|s| s.total).unwrap_or(0))
 }
 
-/// Batch: parent id → sum of active children stock. One query for a page of
-/// list results (client uses `variants_stock != null` as parent multi-SKU flag).
-pub async fn children_stock_by_parents(
+/// Batch: parent id → (sum stock, count) of active children. One query for a
+/// list page (client uses field presence as multi-SKU parent flag).
+pub async fn children_agg_by_parents(
     db: &Db,
     tenant: &Thing,
     parents: &[Thing],
-) -> DomainResult<std::collections::HashMap<String, i64>> {
+) -> DomainResult<std::collections::HashMap<String, (i64, i64)>> {
     if parents.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
@@ -513,11 +514,23 @@ pub async fn children_stock_by_parents(
         stock: i64,
     }
     let rows: Vec<Row> = r.take(0).unwrap_or_default();
-    let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut map: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
     for row in rows {
-        *map.entry(row.parent_id.to_string()).or_insert(0) += row.stock;
+        let e = map.entry(row.parent_id.to_string()).or_insert((0, 0));
+        e.0 += row.stock;
+        e.1 += 1;
     }
     Ok(map)
+}
+
+/// Batch: parent id → sum of active children stock.
+pub async fn children_stock_by_parents(
+    db: &Db,
+    tenant: &Thing,
+    parents: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, i64>> {
+    let agg = children_agg_by_parents(db, tenant, parents).await?;
+    Ok(agg.into_iter().map(|(k, (stock, _))| (k, stock)).collect())
 }
 
 #[allow(clippy::too_many_arguments)]

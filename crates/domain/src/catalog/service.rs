@@ -201,14 +201,13 @@ async fn enrich_list_variants_stock(
     if parents.is_empty() {
         return Ok(rows);
     }
-    let sums = repo::children_stock_by_parents(db, tenant, &parents).await?;
+    let aggs = repo::children_agg_by_parents(db, tenant, &parents).await?;
     for p in &mut rows {
         if p.parent_id.is_none() {
-            if let Some(&sum) = sums.get(&p.id) {
-                // Even sum==0 means "has at least one active child row" was
-                // true only if key present — map only includes parents that
-                // have ≥1 active child.
+            if let Some(&(sum, count)) = aggs.get(&p.id) {
+                // Key present ⇒ ≥1 active child (even if sum stock is 0).
                 p.variants_stock = Some(sum);
+                p.variant_count = Some(count);
             }
         }
     }
@@ -551,9 +550,16 @@ pub async fn enrich_product_dto(
         if p.barcode.is_none() {
             p.barcode = repo::barcode_of_product(db, tenant, &pid).await?;
         }
-        // Only parents (no parent_id) get variants_stock.
-        if p.parent_id.is_none() && repo::has_active_variants(db, tenant, &pid).await? {
-            p.variants_stock = Some(repo::sum_children_stock(db, tenant, &pid).await?);
+        // Only parents (no parent_id) get variants_stock / variant_count.
+        if p.parent_id.is_none() {
+            if let Some(&(sum, count)) =
+                repo::children_agg_by_parents(db, tenant, std::slice::from_ref(&pid))
+                    .await?
+                    .get(&p.id)
+            {
+                p.variants_stock = Some(sum);
+                p.variant_count = Some(count);
+            }
         }
     }
     Ok(p)

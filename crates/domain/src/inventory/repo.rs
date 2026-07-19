@@ -199,6 +199,7 @@ impl From<ProductFull> for ProductDto {
             parent_id: r.parent_id.map(|p| p.to_string()),
             barcode: None,
             variants_stock: None,
+            variant_count: None,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

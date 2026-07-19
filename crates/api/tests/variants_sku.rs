@@ -594,6 +594,7 @@ async fn list_products_exposes_variants_stock_on_parent() {
         .find(|p| p["id"] == parent_id)
         .expect("parent in list");
     assert_eq!(row["variants_stock"], 6, "C POS/list parent flag");
+    assert_eq!(row["variant_count"], 1, "list badge count without N+1");
 }
 
 #[tokio::test]
