@@ -164,17 +164,31 @@ export interface EmptyCopy {
   cta?: string;
 }
 
-export function inventoryEmpty(filtered: boolean): EmptyCopy {
+/** Empty catalog copy. `itemWord` from pack vocab (Producto / Servicio / Plato).
+ *  `physicalStock` switches stock-oriented vs service-oriented hints. */
+export function inventoryEmpty(
+  filtered: boolean,
+  opts: { itemWord?: string; physicalStock?: boolean } = {},
+): EmptyCopy {
+  const item = (opts.itemWord ?? "Producto").trim() || "Producto";
+  const lower = item.toLowerCase();
+  const physical = opts.physicalStock !== false;
   return filtered
     ? {
         title: "Sin coincidencias",
-        hint: "Ningún producto coincide con tu búsqueda. Prueba con otro término.",
+        hint: `Ningún ${lower} coincide con tu búsqueda. Prueba con otro término.`,
       }
-    : {
-        title: "Aún no hay productos",
-        hint: "Crea tu primer producto para controlar stock, lotes y vencimientos.",
-        cta: "+ Nuevo producto",
-      };
+    : physical
+      ? {
+          title: `Aún no hay ${lower}s`,
+          hint: `Crea tu primer ${lower} para controlar stock, lotes y vencimientos.`,
+          cta: `+ Nuevo ${lower}`,
+        }
+      : {
+          title: `Aún no hay ${lower}s`,
+          hint: `Crea tu primer ${lower} para venderlo en el POS.`,
+          cta: `+ Nuevo ${lower}`,
+        };
 }
 
 export function comprasEmpty(filtered: boolean): EmptyCopy {

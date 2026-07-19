@@ -19,19 +19,16 @@ import {
   createBatch,
   nearExpiry,
   stockRotation,
-  getSetting,
   type Product,
   type ProductDetail,
   type Batch,
   type NearExpiryRow,
-  type NewProductInput,
 } from "../api";
 import { clp, num, fecha } from "../format";
 import {
   toRfc3339Noon,
   stockLevel,
   expiryStatus,
-  pharmaFieldsVisible,
   validateStockAdjust,
   nearExpiryView,
   reorderSuggestion,
@@ -45,7 +42,21 @@ import {
   capRows,
   LIST_RENDER_CAP,
 } from "./stock-helpers";
-import { activeVocab, activeFeatures } from "../vertical";
+import {
+  activeVocab,
+  activeFeatures,
+  cachedPack,
+  loadRubroPack,
+  localAttrsForRubro,
+} from "../vertical";
+import {
+  productFormLabels,
+  visibleAttrFields,
+  attrFieldsHtml,
+  readAttrValues,
+  buildProductInput,
+  type ProductFormOptions,
+} from "./product-form";
 
 const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
@@ -58,19 +69,21 @@ type Tab = "productos" | "vencimientos" | "reposicion" | "rotacion";
 
 export function renderInventory(host: HTMLElement, serverUrl: string): void {
   // Pack cache (shell post-login) drives labels + lotes tab; offline → local vocab.
-  const vocab = activeVocab();
-  const features = activeFeatures();
-  const itemLabel = vocab.item;
-  const itemPlural = `${itemLabel}s`;
-  const catalogLabel = vocab.catalog;
+  // Race: if this view mounts before hydrateBranding finishes, we re-apply after
+  // loadRubroPack so tabs/labels never stay on the generic "Producto" default.
+  let vocab = activeVocab();
+  let features = activeFeatures();
+  let itemLabel = vocab.item;
+  let itemPlural = `${itemLabel}s`;
+  let catalogLabel = vocab.catalog;
 
   host.innerHTML = `
     ${invStyles()}
     <section class="view view-inventory">
       <div class="view-head">
         <div>
-          <h2>${escapeHtml(catalogLabel)}</h2>
-          <p class="muted">Stock, lotes y vencimientos del catálogo.</p>
+          <h2 id="inv-title">${escapeHtml(catalogLabel)}</h2>
+          <p class="muted" id="inv-subtitle">${escapeHtml(inventorySubtitle(features))}</p>
         </div>
         <div class="inv-head-actions">
           <div class="view-search" id="inv-search-wrap">
@@ -84,17 +97,17 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
             </div>
           </div>
           <button id="inv-new-btn" class="btn-primary inv-new-btn">
-            <span class="btn-label">+ Nuevo ${escapeHtml(itemLabel.toLowerCase())}</span>
+            <span class="btn-label" id="inv-new-label">+ Nuevo ${escapeHtml(itemLabel.toLowerCase())}</span>
             <span class="btn-pulse"></span>
           </button>
         </div>
       </div>
 
       <div class="inv-tabs" role="tablist">
-        <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true">${escapeHtml(itemPlural)}</button>
+        <button class="inv-tab" data-tab="productos" role="tab" aria-selected="true" id="inv-tab-productos">${escapeHtml(itemPlural)}</button>
         <button class="inv-tab" data-tab="vencimientos" role="tab" aria-selected="false"${features.lotes ? "" : " hidden"}>Próximos a vencer</button>
-        <button class="inv-tab" data-tab="reposicion" role="tab" aria-selected="false">Reposición</button>
-        <button class="inv-tab" data-tab="rotacion" role="tab" aria-selected="false">Rotación</button>
+        <button class="inv-tab" data-tab="reposicion" role="tab" aria-selected="false"${features.physicalStock ? "" : " hidden"}>Reposición</button>
+        <button class="inv-tab" data-tab="rotacion" role="tab" aria-selected="false"${features.physicalStock ? "" : " hidden"}>Rotación</button>
       </div>
 
       <div id="inv-kpis" class="kpi-grid">${kpiSkeleton()}</div>
@@ -117,29 +130,72 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
 
   let tab: Tab = "productos";
 
-  // Multi-rubro: pharmacy-only product fields (laboratorio, principio activo)
-  // are shown by default and hidden when the tenant runs a non-pharmacy vertical
-  // (minimarket / general store). Read once; tolerate a 403/404/null by keeping
-  // the pharmacy default (back-compat). Lote/vencimiento stay for everyone —
-  // perishables (pan, leche) need them as much as fármacos do.
-  let showPharma = true;
-  void getSetting(serverUrl, "business_vertical")
-    .then((s) => {
-      showPharma = pharmaFieldsVisible(s?.value ?? null);
+  // Pack-driven clinical flag (not the legacy business_vertical setting).
+  // Default false until pack loads — never flash farmacia ficha on a tienda.
+  let showClinical = features.clinical;
+  let physicalStock = features.physicalStock;
+
+  function applyPackChrome(): void {
+    vocab = activeVocab();
+    features = activeFeatures();
+    itemLabel = vocab.item;
+    itemPlural = `${itemLabel}s`;
+    catalogLabel = vocab.catalog;
+    showClinical = features.clinical;
+    physicalStock = features.physicalStock;
+
+    const titleEl = host.querySelector<HTMLElement>("#inv-title");
+    const subEl = host.querySelector<HTMLElement>("#inv-subtitle");
+    const newLabel = host.querySelector<HTMLElement>("#inv-new-label");
+    const tabProd = host.querySelector<HTMLElement>("#inv-tab-productos");
+    if (titleEl) titleEl.textContent = catalogLabel;
+    if (subEl) subEl.textContent = inventorySubtitle(features);
+    if (newLabel) newLabel.textContent = `+ Nuevo ${itemLabel.toLowerCase()}`;
+    if (tabProd) tabProd.textContent = itemPlural;
+    searchEl.placeholder = `Buscar ${itemLabel.toLowerCase()}…`;
+
+    host.querySelectorAll<HTMLButtonElement>(".inv-tab").forEach((b) => {
+      const t = b.dataset.tab as Tab;
+      if (t === "vencimientos") b.hidden = !features.lotes;
+      if (t === "reposicion" || t === "rotacion") b.hidden = !features.physicalStock;
+    });
+    // If the active tab was hidden by the pack, fall back to productos.
+    if (
+      (tab === "vencimientos" && !features.lotes) ||
+      ((tab === "reposicion" || tab === "rotacion") && !features.physicalStock)
+    ) {
+      selectTab("productos");
+    }
+  }
+
+  // Re-hydrate when shell pack arrives after this view mounted (C4 race).
+  void loadRubroPack(serverUrl)
+    .then(() => {
+      applyPackChrome();
+      if (tab === "productos") {
+        void loadKpis(kpiHost, serverUrl);
+        const table = panel.querySelector<HTMLElement>("#inv-table");
+        if (table) void loadProducts(table, serverUrl, searchEl.value.trim(), openDetail, physicalStock);
+      }
     })
     .catch(() => {
-      /* keep pharmacy default when the setting can't be read */
+      /* loadRubroPack never throws; belt-and-suspenders */
     });
 
   function openDetail(id: string): void {
-    void openProductDetail(modalHost, serverUrl, id, toast, refreshProductos);
+    void openProductDetail(modalHost, serverUrl, id, toast, refreshProductos, {
+      clinical: showClinical,
+      physicalStock,
+      lotes: features.lotes,
+      itemWord: itemLabel,
+    });
   }
 
   function refreshProductos(): void {
     if (tab !== "productos") return;
     void loadKpis(kpiHost, serverUrl);
     const table = panel.querySelector<HTMLElement>("#inv-table");
-    if (table) void loadProducts(table, serverUrl, searchEl.value.trim(), openDetail);
+    if (table) void loadProducts(table, serverUrl, searchEl.value.trim(), openDetail, physicalStock);
   }
 
   function selectTab(next: Tab): void {
@@ -157,6 +213,7 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
         serverUrl,
         searchEl.value.trim(),
         openDetail,
+        physicalStock,
       );
     } else if (next === "vencimientos") {
       renderVencimientos(panel, serverUrl, openDetail);
@@ -172,15 +229,10 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
   );
 
   newBtn.addEventListener("click", () =>
-    openNewProduct(
-      modalHost,
-      serverUrl,
-      (created) => {
-        toast(`Producto creado: ${created.name}`);
-        refreshProductos();
-      },
-      showPharma,
-    ),
+    openNewProduct(modalHost, serverUrl, (created) => {
+      toast(`${itemLabel} creado: ${created.name}`);
+      refreshProductos();
+    }),
   );
 
   // Export menu (CSV / JSON) — vendor-agnostic: the owner can take their data
@@ -204,7 +256,7 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
   exportMenu.querySelectorAll<HTMLButtonElement>("button[data-fmt]").forEach((b) =>
     b.addEventListener("click", () => {
       closeExportMenu();
-      void runInventoryExport(serverUrl, b.dataset.fmt === "json" ? "json" : "csv", showPharma, toast);
+      void runInventoryExport(serverUrl, b.dataset.fmt === "json" ? "json" : "csv", showClinical, toast);
     }),
   );
 
@@ -220,10 +272,17 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
       const table = panel.querySelector<HTMLElement>("#inv-table");
       if (table) {
         table.innerHTML = tableSkeleton();
-        void loadProducts(table, serverUrl, searchEl.value.trim(), openDetail);
+        void loadProducts(table, serverUrl, searchEl.value.trim(), openDetail, physicalStock);
       }
     }, 220);
   });
+}
+
+/** Subtitle under the catalog title — honest per pack (no "lotes" on tienda). */
+export function inventorySubtitle(f: { lotes: boolean; physicalStock: boolean }): string {
+  if (!f.physicalStock) return "Catálogo de servicios para el POS.";
+  if (f.lotes) return "Stock, lotes y vencimientos del catálogo.";
+  return "Stock y catálogo de productos.";
 }
 
 async function loadKpis(host: HTMLElement, serverUrl: string): Promise<void> {
@@ -246,11 +305,16 @@ async function loadProducts(
   serverUrl: string,
   search: string,
   onOpen: (id: string) => void,
+  physicalStock = true,
 ): Promise<void> {
   try {
     const rows: Product[] = await listProducts(serverUrl, search || undefined, PAGE_LIMIT);
+    const itemLabel = activeVocab().item;
     if (rows.length === 0) {
-      host.innerHTML = emptyStateHtml(inventoryEmpty(search !== ""), search ? undefined : "inv-empty-new");
+      host.innerHTML = emptyStateHtml(
+        inventoryEmpty(search !== "", { itemWord: itemLabel, physicalStock }),
+        search ? undefined : "inv-empty-new",
+      );
       host
         .querySelector<HTMLButtonElement>("#inv-empty-new")
         ?.addEventListener("click", () =>
@@ -258,19 +322,22 @@ async function loadProducts(
         );
       return;
     }
-    const itemLabel = activeVocab().item;
+    const stockHead = physicalStock ? `<th class="num">Stock</th><th>Estado</th>` : `<th>Estado</th>`;
+    const footHint = physicalStock
+      ? "toca una fila para detalle, ajustar stock y lotes"
+      : "toca una fila para ver el detalle";
     host.innerHTML = `
       <table class="data-table inv-products">
         <thead>
-          <tr><th>${escapeHtml(itemLabel)}</th><th class="num">Precio</th><th class="num">Stock</th><th>Estado</th></tr>
+          <tr><th>${escapeHtml(itemLabel)}</th><th class="num">Precio</th>${stockHead}</tr>
         </thead>
         <tbody>
-          ${rows.map(productRow).join("")}
+          ${rows.map((p) => productRow(p, physicalStock)).join("")}
         </tbody>
       </table>
       <p class="table-foot muted">${rows.length} ${escapeHtml(itemLabel.toLowerCase())}(s)${
         rows.length === PAGE_LIMIT ? ` · mostrando los primeros ${PAGE_LIMIT}` : ""
-      } · toca una fila para detalle, ajustar stock y lotes</p>
+      } · ${footHint}</p>
     `;
     host.querySelectorAll<HTMLElement>("tr[data-id]").forEach((tr) =>
       tr.addEventListener("click", () => onOpen(tr.dataset.id!)),
@@ -323,14 +390,17 @@ function downloadExport(filename: string, mime: string, content: string): void {
   URL.revokeObjectURL(url);
 }
 
-function productRow(p: Product): string {
+function productRow(p: Product, physicalStock = true): string {
   const sub = p.laboratory || p.active_ingredient || "";
-  // Min-stock signal: when a SKU is low/out, surface a concrete reorder hint so
-  // the operator knows not just THAT it ran low but HOW MUCH to buy back.
+  // Min-stock signal: only meaningful when the rubro tracks physical stock.
   const reorder =
-    stockLevel(p.stock) !== "ok"
+    physicalStock && stockLevel(p.stock) !== "ok"
       ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
       : "";
+  const stockCells = physicalStock
+    ? `<td class="num">${num(p.stock)}</td>
+      <td>${stockPill(p.stock)}${reorder}</td>`
+    : `<td><span class="pill pill-ok">Servicio</span></td>`;
   return `
     <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0">
       <td>
@@ -338,78 +408,79 @@ function productRow(p: Product): string {
         ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
       </td>
       <td class="num">${clp(p.price)}</td>
-      <td class="num">${num(p.stock)}</td>
-      <td>${stockPill(p.stock)}${reorder}</td>
+      ${stockCells}
     </tr>
   `;
 }
 
-// --- "Nuevo producto" modal ------------------------------------------------
+// --- "Nuevo producto" modal (pack-driven attrs + clinical + service UX) -----
 
 function openNewProduct(
   modalHost: HTMLElement,
   serverUrl: string,
   onDone: (created: ProductDetail) => void,
-  showPharma = true,
 ): void {
-  // Pharmacy-only fields (laboratorio, principio activo) — rendered only for a
-  // pharmacy vertical. Presentación stays for everyone (generic: "500ml", "pack
-  // x6"). When hidden the fields are simply omitted → sent undefined → null.
-  const pharmaRow = showPharma
-    ? `
+  const pack = cachedPack();
+  const features = activeFeatures();
+  const vocab = activeVocab();
+  // Prefer server pack attrs; offline localPack already fills them. Extra
+  // safety: if cache is empty (pre-hydrate race), use local mirror by rubro.
+  const rawAttrs =
+    pack?.attrs?.length
+      ? pack.attrs
+      : localAttrsForRubro(pack?.rubro ?? null);
+  const attrFields = visibleAttrFields(rawAttrs, features.clinical);
+  const formOpts: ProductFormOptions = {
+    vocab,
+    physicalStock: features.physicalStock,
+    clinical: features.clinical,
+    attrFields,
+  };
+  const labels = productFormLabels(formOpts);
+  // Presentación is universal (size / format) and NOT a pack attr for most
+  // rubros — keep a single optional field. Clinical keys come from pack attrs
+  // when clinical (farmacia), so we don't double-render lab/ingredient.
+  const stockBlock = features.physicalStock
+    ? `<label class="field modal-field">
+          <span class="modal-label">${escapeHtml(labels.stockLabel)}</span>
+          <input id="np-stock" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+        </label>`
+    : `<div class="field modal-field">
+          <span class="modal-label">${escapeHtml(labels.stockLabel)}</span>
+          <p class="muted inv-service-hint">${escapeHtml(labels.stockHint ?? "")}</p>
+        </div>`;
+
+  modalHost.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="${escapeHtml(labels.title)}">
+        <h3 class="modal-title">${escapeHtml(labels.title)}</h3>
+        <label class="field modal-field">
+          <span class="modal-label">${escapeHtml(labels.nameLabel)}</span>
+          <input id="np-name" type="text" autocomplete="off" placeholder="${escapeHtml(labels.namePlaceholder)}" />
+        </label>
         <div class="inv-form-row">
           <label class="field modal-field">
-            <span class="modal-label">Principio activo</span>
-            <input id="np-ingredient" type="text" autocomplete="off" placeholder="opcional" />
+            <span class="modal-label">${escapeHtml(labels.priceLabel)}</span>
+            <input id="np-price" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
           </label>
+          <label class="field modal-field">
+            <span class="modal-label">${escapeHtml(labels.costLabel)}</span>
+            <input id="np-cost" type="text" inputmode="numeric" placeholder="opcional" autocomplete="off" />
+          </label>
+        </div>
+        <div class="inv-form-row">
+          ${stockBlock}
           <label class="field modal-field">
             <span class="modal-label">Presentación</span>
             <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
           </label>
-        </div>`
-    : `
-        <label class="field modal-field">
-          <span class="modal-label">Presentación</span>
-          <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
-        </label>`;
-  modalHost.innerHTML = `
-    <div class="modal-backdrop">
-      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="Nuevo producto">
-        <h3 class="modal-title">Nuevo producto</h3>
-        <label class="field modal-field">
-          <span class="modal-label">Nombre *</span>
-          <input id="np-name" type="text" autocomplete="off" placeholder="Paracetamol 500mg" />
-        </label>
-        <div class="inv-form-row">
-          <label class="field modal-field">
-            <span class="modal-label">Precio venta (CLP) *</span>
-            <input id="np-price" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
-          </label>
-          <label class="field modal-field">
-            <span class="modal-label">Costo (CLP)</span>
-            <input id="np-cost" type="number" inputmode="numeric" min="0" step="1" placeholder="opcional" />
-          </label>
         </div>
-        <div class="inv-form-row">
-          <label class="field modal-field">
-            <span class="modal-label">Stock inicial</span>
-            <input id="np-stock" type="number" inputmode="numeric" min="0" step="1" placeholder="0" />
-          </label>
-          ${
-            showPharma
-              ? `<label class="field modal-field">
-            <span class="modal-label">Laboratorio</span>
-            <input id="np-lab" type="text" autocomplete="off" placeholder="opcional" />
-          </label>`
-              : ""
-          }
-        </div>
-        ${pharmaRow}
+        ${attrFieldsHtml(attrFields, escapeHtml)}
         <div id="np-error" class="pos-error" hidden></div>
         <div class="modal-actions">
           <button id="np-cancel" class="btn-ghost">Cancelar</button>
           <button id="np-confirm" class="btn-primary modal-confirm">
-            <span class="btn-label">Crear producto</span>
+            <span class="btn-label">${escapeHtml(labels.submitLabel)}</span>
             <span class="btn-pulse"></span>
           </button>
         </div>
@@ -423,10 +494,7 @@ function openNewProduct(
   const nameEl = modalHost.querySelector<HTMLInputElement>("#np-name")!;
   const priceEl = modalHost.querySelector<HTMLInputElement>("#np-price")!;
   const costEl = modalHost.querySelector<HTMLInputElement>("#np-cost")!;
-  const stockEl = modalHost.querySelector<HTMLInputElement>("#np-stock")!;
-  // Pharma-only fields are absent in a non-pharmacy vertical → may be null.
-  const labEl = modalHost.querySelector<HTMLInputElement>("#np-lab");
-  const ingEl = modalHost.querySelector<HTMLInputElement>("#np-ingredient");
+  const stockEl = modalHost.querySelector<HTMLInputElement>("#np-stock");
   const presEl = modalHost.querySelector<HTMLInputElement>("#np-presentation")!;
   const errEl = modalHost.querySelector<HTMLElement>("#np-error")!;
   const confirmBtn = modalHost.querySelector<HTMLButtonElement>("#np-confirm")!;
@@ -437,31 +505,36 @@ function openNewProduct(
   modalHost.querySelector<HTMLButtonElement>("#np-cancel")!.addEventListener("click", close);
   nameEl.focus();
 
+  // Enter on price confirms (keyboard-first alta).
+  for (const el of [nameEl, priceEl, costEl, stockEl, presEl].filter(Boolean) as HTMLInputElement[]) {
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        confirmBtn.click();
+      }
+    });
+  }
+
   confirmBtn.addEventListener("click", async () => {
-    const name = nameEl.value.trim();
-    const priceRaw = priceEl.value.trim();
-    const price = Number(priceRaw);
-    if (name === "") {
-      showErr(errEl, "Ingresa el nombre del producto.");
+    const built = buildProductInput(
+      {
+        name: nameEl.value,
+        price: priceEl.value,
+        costPrice: costEl.value,
+        stock: stockEl?.value,
+        presentation: presEl.value,
+        attrs: readAttrValues(modalHost, attrFields),
+      },
+      formOpts,
+    );
+    if (!built.ok) {
+      showErr(errEl, built.error);
       return;
     }
-    if (priceRaw === "" || !Number.isFinite(price) || price < 0) {
-      showErr(errEl, "Ingresa un precio de venta válido (0 o más).");
-      return;
-    }
-    const input: NewProductInput = {
-      name,
-      price: String(Math.trunc(price)),
-      costPrice: intStrOrUndef(costEl.value),
-      stock: intOrUndef(stockEl.value),
-      laboratory: labEl ? trimOrUndef(labEl.value) : undefined,
-      activeIngredient: ingEl ? trimOrUndef(ingEl.value) : undefined,
-      presentation: trimOrUndef(presEl.value),
-    };
     errEl.hidden = true;
     busy(confirmBtn, true);
     try {
-      const created = await createProduct(serverUrl, input);
+      const created = await createProduct(serverUrl, built.value);
       close();
       onDone(created);
     } catch (err) {
@@ -473,16 +546,29 @@ function openNewProduct(
 
 // --- product detail modal: detail + ajustar stock + lotes ------------------
 
+interface DetailPackOpts {
+  clinical: boolean;
+  physicalStock: boolean;
+  lotes: boolean;
+  itemWord: string;
+}
+
 async function openProductDetail(
   modalHost: HTMLElement,
   serverUrl: string,
   id: string,
   toast: (msg: string) => void,
   onChanged: () => void,
+  packOpts: DetailPackOpts = {
+    clinical: true,
+    physicalStock: true,
+    lotes: true,
+    itemWord: "Producto",
+  },
 ): Promise<void> {
   modalHost.innerHTML = `
     <div class="modal-backdrop">
-      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="Detalle de producto">
+      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="Detalle">
         <button id="pd-close" class="inv-modal-x" aria-label="Cerrar">×</button>
         <div id="pd-body">${detailSkeleton()}</div>
       </div>
@@ -506,16 +592,16 @@ async function openProductDetail(
   }
 
   function paintDetail(): void {
-    const sub = [p.laboratory, p.active_ingredient, p.presentation].filter(Boolean).join(" · ");
-    bodyEl.innerHTML = `
-      <h3 class="modal-title">${escapeHtml(p.name)}</h3>
-      ${sub ? `<p class="muted pd-sub">${escapeHtml(sub)}</p>` : ""}
-      <div class="pd-grid">
-        ${pdStat("Precio venta", clp(p.price))}
-        ${pdStat("Costo", p.cost_price ? clp(p.cost_price) : "—")}
-        ${pdStat("Stock", `${num(p.stock)} ${stockPill(p.stock)}`)}
-      </div>
-
+    const clinicalBits = packOpts.clinical
+      ? [p.laboratory, p.active_ingredient, p.presentation]
+      : [p.presentation];
+    const attrBits = formatAttrsSubline(p.attrs);
+    const sub = [...clinicalBits.filter(Boolean), ...attrBits].join(" · ");
+    const stockStat = packOpts.physicalStock
+      ? pdStat("Stock", `${num(p.stock)} ${stockPill(p.stock)}`)
+      : pdStat("Tipo", "Servicio");
+    const adjustSection = packOpts.physicalStock
+      ? `
       <div class="pd-section">
         <div class="pd-section-head"><h4>Ajustar stock</h4></div>
         <div class="inv-form-row">
@@ -540,8 +626,10 @@ async function openProductDetail(
           <span class="btn-label">Aplicar ajuste</span>
           <span class="btn-pulse"></span>
         </button>
-      </div>
-
+      </div>`
+      : "";
+    const lotesSection = packOpts.lotes
+      ? `
       <div class="pd-section">
         <div class="pd-section-head">
           <h4>Lotes y vencimientos</h4>
@@ -549,13 +637,37 @@ async function openProductDetail(
         </div>
         <div id="pd-lotes">${tableSkeleton(3)}</div>
         <div id="pd-lote-form"></div>
+      </div>`
+      : "";
+    bodyEl.innerHTML = `
+      <h3 class="modal-title">${escapeHtml(p.name)}</h3>
+      ${sub ? `<p class="muted pd-sub">${escapeHtml(sub)}</p>` : ""}
+      <div class="pd-grid">
+        ${pdStat("Precio venta", clp(p.price))}
+        ${pdStat("Costo", p.cost_price ? clp(p.cost_price) : "—")}
+        ${stockStat}
       </div>
+      ${adjustSection}
+      ${lotesSection}
     `;
-    wireAdjust();
-    bodyEl
-      .querySelector<HTMLButtonElement>("#pd-add-lote")!
-      .addEventListener("click", toggleLoteForm);
-    void loadLotes();
+    if (packOpts.physicalStock) wireAdjust();
+    if (packOpts.lotes) {
+      bodyEl
+        .querySelector<HTMLButtonElement>("#pd-add-lote")!
+        .addEventListener("click", toggleLoteForm);
+      void loadLotes();
+    }
+  }
+
+  /** Flatten product.attrs into short subline tokens (talla M · color Azul). */
+  function formatAttrsSubline(attrs: ProductDetail["attrs"]): string[] {
+    if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return [];
+    const out: string[] = [];
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === "") continue;
+      out.push(`${k}: ${String(v)}`);
+    }
+    return out.slice(0, 6);
   }
 
   function wireAdjust(): void {
