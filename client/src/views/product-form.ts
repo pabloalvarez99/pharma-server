@@ -9,22 +9,13 @@
 // (laboratory / active_ingredient / …) are promoted so they persist today;
 // every other key goes into `product.attrs` JSON.
 //
-// ## BLOCKED (persist attrs end-to-end) — 2026-07-18
+// ## Persist attrs E2E (B c4c704b + migr. 0035 FLEXIBLE) — DONE
 //
-// **Read path OK:** `ProductDto.attrs` + GET detail return the bag; client
-// `ProductDetail.attrs` deserializes it (variants already write attrs).
+// Client POSTs `{ "attrs": { "talla", "color", "sku", … } }` via
+// {@link productAttrsWireBody}; domain `NewProduct`/`UpdateProduct` bind the
+// bag; GET detail returns the same keys (verified HTTP round-trip).
 //
-// **Write path BLOCKED on B (domain):**
-// - `NewProduct` has NO `attrs` field → serde drops the key on POST /products.
-// - `UpdateProduct` has NO `attrs` field → PATCH cannot update the bag.
-// - `repo::create_product` SQL does not SET `attrs` (only `create_variant_product` does).
-//
-// Client already POSTs the correct serde key (see {@link productAttrsWireBody}):
-//   `{ "attrs": { "talla": "M", "color": "Negro", "sku": "…" } }`
-// When B adds `attrs: Option<serde_json::Value>` on NewProduct/UpdateProduct and
-// binds it in repo create/update, round-trip works with zero client renames.
-//
-// Variantes multi-SKU (parent_id / N SKU) use a separate API (`NewVariant`);
+// Variantes multi-SKU (parent_id / N SKU) use `NewVariant` + by-barcode POS;
 // this form is the flat product + attrs path for a single SKU row.
 
 import type { PackAttrField, PackVocab } from "../api/rubro";

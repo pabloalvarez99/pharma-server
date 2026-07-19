@@ -73,13 +73,8 @@ pub async fn inventory_summary(
 /// POST `/api/v1/products` (Bearer, admin+). Money strings (`price`,
 /// `cost_price`) forwarded verbatim.
 ///
-/// Optional `attrs` is the pack-driven flexible bag (talla/color/sku/…). Wire
-/// key is **`attrs`** (matches future `NewProduct.attrs: Option<Value>`).
-///
-/// **BLOCKED (domain write, B):** as of P1 variants, only `create_variant_product`
-/// SETs `attrs`. Plain `create_product` / `UpdateProduct` drop the field until
-/// B adds it to the input structs + Surreal CREATE/UPDATE. Client still sends
-/// the bag (forward-compat; serde ignores unknown on current NewProduct).
+/// Optional `attrs` pack bag (talla/color/sku/…). Wire key **`attrs`**
+/// (`NewProduct.attrs` + migr. 0035 FLEXIBLE). Forwarded as JSON object.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn create_product(

@@ -111,10 +111,8 @@ export interface NewProductInput {
 /** POST /api/v1/products (Bearer, admin+). Rejects with a Spanish string
  *  ("Permiso denegado…" on a non-admin 403). Money stays STRING on the wire.
  *
- *  `attrs` is the pack bag (`{ talla, color, sku, … }`). Wire key is **`attrs`**
- *  (serde, snake-free). **BLOCKED persist:** until domain `NewProduct.attrs` +
- *  `repo::create_product` SET attrs, the server ignores this field (no 4xx).
- *  GET detail already returns attrs when present (variants / future create). */
+ *  `attrs` pack bag (`{ talla, color, sku, … }`) — wire key **`attrs`**
+ *  (`NewProduct.attrs` + migr. 0035 FLEXIBLE). E2E: create → GET detail keeps keys. */
 export function createProduct(
   serverUrl: string,
   input: NewProductInput,
