@@ -61,6 +61,7 @@ fn np(name: &str, price: &str, stock: i64) -> NewProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 
@@ -935,4 +936,223 @@ async fn concurrent_refunds_never_exceed_sold_quantity() {
             .stock,
         6
     );
+}
+
+// ---------------------------------------------------------------------------
+// Variantes multi-SKU: stock por hijo, padre no vendible, plain SKU intacto
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn sale_of_variant_decrements_only_that_variant() {
+    let (db, tenant, admin) = setup().await;
+    let parent = catalog::create_product(&db, &tenant, np("Polera basica", "9990", 0))
+        .await
+        .unwrap();
+    let m = catalog::create_variant(
+        &db,
+        &tenant,
+        &parent.id,
+        domain::catalog::model::NewVariant {
+            name: None,
+            slug: None,
+            price: None,
+            cost_price: None,
+            stock: 10,
+            barcode: Some("7804999400012".into()),
+            attrs: Some(serde_json::json!({"talla": "M"})),
+            external_id: None,
+            image_url: None,
+        },
+    )
+    .await
+    .unwrap();
+    let l = catalog::create_variant(
+        &db,
+        &tenant,
+        &parent.id,
+        domain::catalog::model::NewVariant {
+            name: None,
+            slug: None,
+            price: None,
+            cost_price: None,
+            stock: 7,
+            barcode: Some("7804999400029".into()),
+            attrs: Some(serde_json::json!({"talla": "L"})),
+            external_id: None,
+            image_url: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // Barcode resolves to variant M
+    let resolved = catalog::find_by_barcode(&db, &tenant, "7804999400012")
+        .await
+        .unwrap();
+    assert_eq!(resolved.id, m.id);
+
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: m.id.clone(),
+            product_name: m.name.clone(),
+            quantity: 3,
+            unit_price: dec("9990"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("30000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+
+    let m2 = catalog::get_product(&db, &tenant, &m.id).await.unwrap();
+    let l2 = catalog::get_product(&db, &tenant, &l.id).await.unwrap();
+    let p2 = catalog::get_product(&db, &tenant, &parent.id)
+        .await
+        .unwrap();
+    assert_eq!(m2.stock, 7, "only M decremented");
+    assert_eq!(l2.stock, 7, "L untouched");
+    assert_eq!(p2.stock, 0, "parent stock untouched");
+}
+
+#[tokio::test]
+async fn sale_rejects_insufficient_stock_on_variant() {
+    let (db, tenant, admin) = setup().await;
+    let parent = catalog::create_product(&db, &tenant, np("Gorro", "5000", 0))
+        .await
+        .unwrap();
+    let v = catalog::create_variant(
+        &db,
+        &tenant,
+        &parent.id,
+        domain::catalog::model::NewVariant {
+            name: None,
+            slug: None,
+            price: None,
+            cost_price: None,
+            stock: 2,
+            barcode: Some("7804999500019".into()),
+            attrs: Some(serde_json::json!({"talla": "U"})),
+            external_id: None,
+            image_url: None,
+        },
+    )
+    .await
+    .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: v.id.clone(),
+            product_name: v.name.clone(),
+            quantity: 5,
+            unit_price: dec("5000"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("25000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INSUFFICIENT_STOCK");
+    let v2 = catalog::get_product(&db, &tenant, &v.id).await.unwrap();
+    assert_eq!(v2.stock, 2);
+}
+
+#[tokio::test]
+async fn sale_rejects_parent_when_has_variants() {
+    let (db, tenant, admin) = setup().await;
+    let parent = catalog::create_product(&db, &tenant, np("Chaqueta", "20000", 50))
+        .await
+        .unwrap();
+    catalog::create_variant(
+        &db,
+        &tenant,
+        &parent.id,
+        domain::catalog::model::NewVariant {
+            name: None,
+            slug: None,
+            price: None,
+            cost_price: None,
+            stock: 5,
+            barcode: Some("7804999600016".into()),
+            attrs: Some(serde_json::json!({"talla": "M"})),
+            external_id: None,
+            image_url: None,
+        },
+    )
+    .await
+    .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: parent.id.clone(),
+            product_name: parent.name.clone(),
+            quantity: 1,
+            unit_price: dec("20000"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("20000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn plain_product_without_variants_still_sells() {
+    // Farmacia / minimarket path: no parent_id, no children.
+    let (db, tenant, admin) = setup().await;
+    let p = catalog::create_product(&db, &tenant, np("Paracetamol 500", "1500", 20))
+        .await
+        .unwrap();
+    let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    let req = PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 2,
+            unit_price: dec("1500"),
+        }],
+        payment_method: "pos_cash".into(),
+        cash_amount: Some(dec("3000")),
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+    };
+    sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
+        .await
+        .unwrap();
+    let p2 = catalog::get_product(&db, &tenant, &p.id).await.unwrap();
+    assert_eq!(p2.stock, 18);
 }

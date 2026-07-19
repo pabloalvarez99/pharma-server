@@ -14,7 +14,7 @@ import {
   exportProducts,
   type ImportSummary,
 } from "../api";
-import { asMessage, escapeHtml } from "./inventory";
+import { asMessage, escapeHtml } from "./view-blocks";
 
 // Columns the server understands (crates/api/src/v1/catalog.rs::import_products).
 const REQUIRED = ["name", "price"];
@@ -37,11 +37,14 @@ const OPTIONAL = [
 ];
 
 export function renderImportar(host: HTMLElement, serverUrl: string): void {
+  // DEFER (C3): column labels by pack vocab (Producto→Servicio, etc.) need a
+  // server import header map for Spanish pack attrs (talla/color). Until then
+  // keep the fixed column list below; the form alta already uses pack attrs.
   host.innerHTML = `
     <section class="view view-importar">
       <div class="view-head">
         <div>
-          <h2>Importar / Exportar productos</h2>
+          <h2>Importar / Exportar catálogo</h2>
           <p class="muted">Carga masiva del catálogo desde CSV (admin) o descarga todo el catálogo actual.</p>
         </div>
         <button id="imp-export" class="btn-ghost">Exportar catálogo CSV</button>

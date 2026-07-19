@@ -2045,6 +2045,7 @@ pub async fn execute(
                     prescription_type: None,
                     presentation: None,
                     discount_percent: None,
+                    attrs: None,
                 },
             )
             .await?;

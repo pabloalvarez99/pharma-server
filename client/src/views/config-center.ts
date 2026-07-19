@@ -97,6 +97,10 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
       { label: "Tema", keywords: ["apariencia", "oscuro", "claro", "modo"] },
       { label: "Idioma", keywords: ["lenguaje", "español"] },
       { label: "Conexión al servidor", keywords: ["url", "ip", "servidor"] },
+      {
+        label: "Impresora térmica",
+        keywords: ["ticket", "escpos", "thermal", "pos", "papel 58", "papel 80", "hardware"],
+      },
       { label: "Telemetría anónima", keywords: ["estadísticas", "uso", "opt-in", "privacidad"] },
     ],
   },
@@ -105,6 +109,7 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
     label: "Usuarios y roles",
     blurb: "Cajeros, químicos y administradores con sus permisos.",
     icon: "users",
+    placeholder: true,
     fields: [
       { label: "Usuarios", keywords: ["cuentas", "personas"] },
       { label: "Roles", keywords: ["permisos", "cajero", "químico", "admin", "dueño"] },

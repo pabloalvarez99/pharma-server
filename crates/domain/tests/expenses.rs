@@ -360,6 +360,7 @@ fn new_product(name: &str, price: &str, stock: i64) -> NewProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 
@@ -571,6 +572,7 @@ async fn margins_daily_revenue_cost_margin_and_unknown_cost() {
             prescription_type: None,
             presentation: None,
             discount_percent: None,
+            attrs: None,
         },
     )
     .await

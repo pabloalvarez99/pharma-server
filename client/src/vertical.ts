@@ -382,3 +382,123 @@ export async function loadRubro(serverUrl: string): Promise<Rubro> {
     return DEFAULT_RUBRO;
   }
 }
+
+// --- server rubro pack (source of truth) ------------------------------------
+//
+// Since P0.3 the server serves the declarative pack (`GET /api/v1/rubro-pack`,
+// `domain::rubro`). The client consumes it with the LOCAL constants above as
+// an offline fallback: a LAN hiccup or an old server must never break gating.
+
+import { rubroPack, type RubroPack, type PackFeatures, type PackVocab, type PackAttrField } from "./api";
+
+let packCache: RubroPack | null = null;
+
+/**
+ * Offline attr catalog (mirrors `domain::rubro` packs). Used when the server
+ * pack is unreachable so the product form still shows talla/color/sku etc.
+ * Keep in sync with crates/domain/src/rubro.rs — C owns the client mirror.
+ */
+export function localAttrsForRubro(rubro: string | null | undefined): PackAttrField[] {
+  switch ((rubro ?? "").trim().toLowerCase()) {
+    case "farmacia":
+      return [
+        { key: "active_ingredient", label: "Principio activo", kind: "text" },
+        { key: "laboratory", label: "Laboratorio", kind: "text" },
+        { key: "therapeutic_action", label: "Acción terapéutica", kind: "text" },
+      ];
+    case "tienda":
+      return [
+        { key: "talla", label: "Talla", kind: "text" },
+        { key: "color", label: "Color", kind: "text" },
+        { key: "sku", label: "SKU", kind: "text" },
+      ];
+    case "belleza":
+      return [{ key: "duracion_min", label: "Duración (min)", kind: "number" }];
+    default:
+      return [];
+  }
+}
+
+/** Build a pack-shaped object from the local constants (offline fallback).
+ *  Attrs mirror domain::rubro so the product form still shows talla/color/sku
+ *  when the LAN is down or the server is older than P0.3. */
+function localPack(rubro: Rubro): RubroPack {
+  const card = rubroCard(rubro);
+  const f = featuresForRubro(rubro);
+  return {
+    rubro,
+    label: card?.label ?? "Otro",
+    tagline: card?.tagline ?? "Tu negocio, a tu manera.",
+    accent: card?.accent ?? "#8b97ad",
+    features: {
+      recetas: f.recetas,
+      lotes: f.lotes,
+      physical_stock: f.physicalStock,
+      clinical: f.clinical,
+    },
+    vocab: { item: f.physicalStock ? "Producto" : "Servicio", catalog: "Inventario" },
+    attrs: localAttrsForRubro(rubro),
+    seed_vertical: card?.seedVertical ?? null,
+    coming_soon: card?.comingSoon ?? [],
+  };
+}
+
+/** Load the tenant's rubro pack from the server and cache it. On any failure
+ *  (offline LAN, old server without the route) returns the locally-built pack
+ *  — never throws, gating must not dead-end. Call once after login (shell). */
+export async function loadRubroPack(serverUrl: string): Promise<RubroPack> {
+  try {
+    packCache = await rubroPack(serverUrl);
+  } catch {
+    packCache = localPack(await loadRubro(serverUrl));
+  }
+  return packCache;
+}
+
+/** Drop the cached pack (logout / tenant switch). Next login reloads. */
+export function clearPackCache(): void {
+  packCache = null;
+}
+
+/** The cached pack, or `null` before {@link loadRubroPack} runs. */
+export function cachedPack(): RubroPack | null {
+  return packCache;
+}
+
+/** Capability flags from a server pack, in the client's `RubroFeatures` shape
+ *  (snake_case on the wire → camelCase here). */
+export function featuresFromPack(p: PackFeatures): RubroFeatures {
+  return {
+    recetas: p.recetas,
+    lotes: p.lotes,
+    physicalStock: p.physical_stock,
+    clinical: p.clinical,
+  };
+}
+
+/** Live gating flags after login: prefer the server pack cache; fall back to
+ *  local constants for the given rubro (or generic `otro`). Use this in shell
+ *  views so a pack reload can change the UI without editing every call site. */
+export function activeFeatures(fallbackRubro?: string | null): RubroFeatures {
+  if (packCache) return featuresFromPack(packCache.features);
+  return featuresForRubro(fallbackRubro);
+}
+
+/** Operator-facing vocabulary (item/catalog labels) after login. Prefer the
+ *  cached server pack; offline or pre-login falls back to the same local
+ *  defaults as {@link localPack} so UI never hardcodes "Producto" when the
+ *  pack says "Servicio" / "Plato". */
+export function activeVocab(fallbackRubro?: string | null): PackVocab {
+  if (packCache) return packCache.vocab;
+  const f = featuresForRubro(fallbackRubro);
+  return {
+    item: f.physicalStock ? "Producto" : "Servicio",
+    catalog: "Inventario",
+  };
+}
+
+/** Ensure the pack is loaded, then return its features. Never throws. */
+export async function loadFeatures(serverUrl: string): Promise<RubroFeatures> {
+  const pack = await loadRubroPack(serverUrl);
+  return featuresFromPack(pack.features);
+}

@@ -23,12 +23,8 @@
   --accent: #18d1a8;
   --accent-2: #0e8c72;
   --accent-3: #4cf0c9;
-  /* Glow atenuado (refinamiento elegante/minimalista 2026-06-27): el acento se
-   * usa con restraint — sombras discretas en vez de halos. El foco mantiene su
-   * propio anillo legible (--focus-glow) para no perder accesibilidad. */
-  --accent-glow: rgba(24, 209, 168, 0.1);
-  --accent-glow-strong: rgba(24, 209, 168, 0.16);
-  --focus-glow: rgba(24, 209, 168, 0.35);
+  --accent-glow: rgba(24, 209, 168, 0.32);
+  --accent-glow-strong: rgba(24, 209, 168, 0.55);
   --danger: #ff5d6c;
   --danger-soft: rgba(255, 93, 108, 0.14);
   --warn: #f0b429;
@@ -39,13 +35,11 @@
   --tier-business: #b07cff;
   --tier-enterprise: #f0b429;
 
-  --radius-card: 14px;
-  --radius-field: 9px;
+  --radius-card: 18px;
+  --radius-field: 10px;
   --radius-pill: 999px;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.18), 0 12px 30px -22px rgba(0, 0, 0, 0.55);
-
-  --focus-ring: 0 0 0 3px var(--focus-glow);
+  --focus-ring: 0 0 0 3px var(--accent-glow);
 
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
     sans-serif;
@@ -504,16 +498,16 @@ button {
   font-weight: 800;
   letter-spacing: 2.4px;
   color: #062019;
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  background-size: 100% 100%;
+  background: linear-gradient(135deg, var(--accent-3), var(--accent), var(--accent-2));
+  background-size: 200% 100%;
   background-position: 0% 0%;
   border: none;
   border-radius: var(--radius-field);
   cursor: pointer;
   overflow: hidden;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.16) inset,
-    0 8px 20px -10px var(--accent-glow-strong);
+    0 10px 28px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
   transition:
     transform 0.08s ease,
     filter 0.18s ease,
@@ -527,10 +521,10 @@ button {
 }
 
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background-position: 100% 0%;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.2) inset,
-    0 10px 24px -10px var(--accent-glow-strong);
+    0 14px 32px var(--accent-glow-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -629,8 +623,8 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 680;
-  letter-spacing: -0.2px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
   font-size: 17px;
   color: var(--text);
   padding: 4px 8px 22px;
@@ -674,14 +668,13 @@ button {
 }
 
 .nav-item.active {
-  background: rgba(24, 209, 168, 0.1);
-  border-color: rgba(24, 209, 168, 0.24);
+  background: linear-gradient(180deg, rgba(24, 209, 168, 0.16), rgba(24, 209, 168, 0.06));
+  border-color: rgba(24, 209, 168, 0.4);
 }
 
 .nav-label {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 14px;
-  letter-spacing: -0.1px;
 }
 
 .nav-hint {
@@ -798,9 +791,7 @@ button {
 }
 
 .panel h2 {
-  font-size: 23px;
-  font-weight: 640;
-  letter-spacing: -0.5px;
+  font-size: 22px;
   margin-bottom: 6px;
 }
 
@@ -864,18 +855,16 @@ button {
 }
 
 .view-head h2 {
-  font-size: 23px;
-  font-weight: 640;
-  letter-spacing: -0.5px;
+  font-size: 22px;
   margin-bottom: 4px;
 }
 
 .section-title {
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.5px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--muted-strong);
   margin: 4px 0 2px;
 }
 
@@ -1575,7 +1564,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
 }
 
 .modal-title {
@@ -2075,7 +2064,7 @@ button {
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 14px 34px -14px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
   padding: 4px;
 }
 

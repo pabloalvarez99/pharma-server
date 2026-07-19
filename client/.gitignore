@@ -9,3 +9,4 @@ src-tauri/gen/
 # only (mobile not set up — src-tauri/gen is ignored), so they're byproducts.
 src-tauri/icons/android/
 src-tauri/icons/ios/
+keys/

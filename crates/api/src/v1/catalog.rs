@@ -30,10 +30,13 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
+    // Static path segments before `{id}` so `by-barcode` is not captured as an id.
     let reads = Router::new()
         .route("/api/v1/products", get(list_products))
         .route("/api/v1/products/stats", get(product_stats))
         .route("/api/v1/products/export", get(export_products))
+        .route("/api/v1/products/by-barcode/{code}", get(get_by_barcode))
+        .route("/api/v1/products/{id}/variants", get(list_variants))
         .route("/api/v1/products/{id}", get(get_product))
         .route("/api/v1/categories", get(list_categories))
         .route("/api/v1/categories/{id}", get(get_category))
@@ -44,6 +47,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/products/import", post(import_products))
         .route("/api/v1/products/bulk-price", post(bulk_price))
         .route("/api/v1/products/update-prices", post(update_prices))
+        .route("/api/v1/products/{id}/variants", post(create_variant))
         .route(
             "/api/v1/products/{id}",
             axum::routing::patch(update_product).delete(delete_product),
@@ -61,18 +65,53 @@ pub fn router(state: AppState) -> Router<AppState> {
 
 // --- products: reads -------------------------------------------------------
 
-/// Lista productos del tenant.
+/// Query string for product list. Fields are flat (no `#[serde(flatten)]`)
+/// because `serde_urlencoded` + flatten rejects `?limit=5` with 400.
+#[derive(Debug, Default, Deserialize)]
+pub struct ListProductsQuery {
+    pub search: Option<String>,
+    pub category: Option<String>,
+    pub active: Option<bool>,
+    pub low_stock: Option<i64>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    /// `true` = include variant children (default: only top-level).
+    #[serde(default)]
+    pub include_variants: bool,
+}
+
+impl ListProductsQuery {
+    fn into_parts(self) -> (ProductFilters, bool) {
+        (
+            ProductFilters {
+                search: self.search,
+                category: self.category,
+                active: self.active,
+                low_stock: self.low_stock,
+                limit: self.limit,
+                offset: self.offset,
+            },
+            self.include_variants,
+        )
+    }
+}
+
+/// Lista productos del tenant. Por defecto oculta variantes hijas (`parent_id`);
+/// pasar `?include_variants=true` para verlas, o usar `GET .../variants`.
 #[utoipa::path(get, path = "/api/v1/products", tag = "Catalog",
     responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope)),
     security(("bearer_jwt" = [])))]
 pub async fn list_products(
     State(s): State<AppState>,
     AuthUser(claims): AuthUser,
-    Query(filters): Query<ProductFilters>,
+    Query(q): Query<ListProductsQuery>,
 ) -> Result<Json<Vec<ProductDto>>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
-    Ok(Json(service::list_products(&db, &t, filters).await?))
+    let (filters, include_variants) = q.into_parts();
+    Ok(Json(
+        service::list_products_with_variants(&db, &t, filters, include_variants).await?,
+    ))
 }
 
 /// Detalle de un producto.
@@ -89,6 +128,58 @@ pub async fn get_product(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::get_product(&db, &t, &id).await?))
+}
+
+/// Resuelve un código de barras del tenant al producto vendible (variante o SKU plano).
+#[utoipa::path(get, path = "/api/v1/products/by-barcode/{code}", tag = "Catalog",
+    params(("code" = String, Path, description = "EAN/UPC u otro barcode del local")),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn get_by_barcode(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(code): Path<String>,
+) -> Result<Json<ProductDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::find_by_barcode(&db, &t, &code).await?))
+}
+
+/// Lista variantes (hijos multi-SKU) de un producto padre.
+#[utoipa::path(get, path = "/api/v1/products/{id}/variants", tag = "Catalog",
+    params(("id" = String, Path, description = "Id del producto padre")),
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn list_variants(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<ProductDto>>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::list_variants(&db, &t, &id).await?))
+}
+
+/// Crea una variante vendible bajo el producto padre (stock + barcode propios).
+#[utoipa::path(post, path = "/api/v1/products/{id}/variants", tag = "Catalog",
+    params(("id" = String, Path, description = "Id del producto padre")),
+    request_body = serde_json::Value,
+    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+        (status = 409, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn create_variant(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    Json(input): Json<NewVariant>,
+) -> Result<Json<ProductDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(service::create_variant(&db, &t, &id, input).await?))
 }
 
 /// Estadísticas de catálogo (totales, sin stock, etc.).
@@ -707,6 +798,7 @@ pub async fn import_products(
                         prescription_type: prescription_type.clone(),
                         presentation: presentation.clone(),
                         discount_percent,
+                        attrs: None,
                     };
                     match service::update_product(&db, &t, &existing.to_string(), patch).await {
                         Ok(_) => {
@@ -766,6 +858,7 @@ pub async fn import_products(
             prescription_type,
             presentation,
             discount_percent,
+            attrs: None,
         };
         match service::create_product(&db, &t, input).await {
             Ok(dto) => {

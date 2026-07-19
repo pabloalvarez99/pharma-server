@@ -283,6 +283,22 @@ export function splitPayment(
     : { ok: false, tendered, change: 0, short: total - tendered };
 }
 
+/** Remaining pesos to put on card given cash already entered (for mixto UX).
+ *  0 when cash already covers the total; never negative. */
+export function remainingOnCard(cash: number, total: number): number {
+  const c = Math.max(0, Math.trunc(Number.isFinite(cash) ? cash : 0));
+  const t = Math.max(0, Math.trunc(Number.isFinite(total) ? total : 0));
+  return Math.max(0, t - c);
+}
+
+/** Whether a cash-only tender is short (cashier typed a positive amount below
+ *  total). Blank/0 is NOT short — that path means "pago exacto" at the till. */
+export function cashTenderShort(tendered: number, total: number): boolean {
+  const t = Math.max(0, Math.trunc(Number.isFinite(tendered) ? tendered : 0));
+  const due = Math.max(0, Math.trunc(Number.isFinite(total) ? total : 0));
+  return t > 0 && t < due;
+}
+
 // --- caja drawer naming ------------------------------------------------------
 // The Business tier runs N drawers per tenant (one per cashier). The open-caja
 // modal defaulted to a hard-coded "caja-1" every time, so opening a second

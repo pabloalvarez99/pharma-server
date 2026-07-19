@@ -90,6 +90,44 @@ async fn seeds_minimarket_pack() {
     assert_ledger_consistent(&db, &tenant).await;
 }
 
+/// Tienda/retail (P1): bienes no perecibles con stock físico + barcode +
+/// proveedores. Sin campos clínicos (el pack no los siembra).
+#[tokio::test]
+async fn seeds_tienda_pack() {
+    let (db, tenant) = setup().await;
+    let s = seed_demo(&db, &tenant, "tienda", false).await.unwrap();
+    assert_eq!(s.vertical, "tienda");
+    assert!(s.products_created >= 8);
+    // Todo el pack es físico → un lote + un movimiento por producto.
+    assert_eq!(s.products_created, s.batches_created);
+    assert_eq!(s.movements_emitted, s.batches_created);
+    assert!(s.suppliers_created >= 3);
+    assert!(s.historic_orders_created >= 6);
+    assert_eq!(
+        count(&db, &tenant, "product_barcode").await,
+        s.products_created,
+        "cada SKU retail lleva EAN"
+    );
+    // Cero campos clínicos en el catálogo sembrado.
+    let clinical: Vec<Option<String>> = db
+        .query(
+            "SELECT VALUE active_ingredient FROM product \
+             WHERE tenant = $t AND string::starts_with(external_id, 'DEMO-')",
+        )
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take(0)
+        .unwrap();
+    assert!(
+        clinical
+            .iter()
+            .all(|v| v.as_ref().map(|s| s.is_empty()).unwrap_or(true)),
+        "tienda no siembra principio activo"
+    );
+    assert_ledger_consistent(&db, &tenant).await;
+}
+
 #[tokio::test]
 async fn second_seed_without_force_is_rejected() {
     let (db, tenant) = setup().await;

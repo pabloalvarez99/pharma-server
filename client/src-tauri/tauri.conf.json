@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "RutBusiness",
   "version": "0.1.0",
-  "identifier": "cl.pharmaserver.client",
+  "identifier": "cl.rutbusiness.client",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,5 +39,16 @@
     ],
     "shortDescription": "Launcher de escritorio para pharma-server",
     "longDescription": "Cliente de escritorio estilo launcher: login contra pharma-server, estado de licencia/tier y servidor, y acceso al shell ERP."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY1MzQ0NTcwRDA3REU4NEIKUldSTDZIM1FjRVUwWmFMaWdDS2dxanZ1UHI2QzhFeURrNkgrRFF2Q0FHRlF5MytqRXdBM0pKMWwK",
+      "endpoints": [
+        "https://cdn.pharma-server.cl/updates/rutbusiness/{{target}}-{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

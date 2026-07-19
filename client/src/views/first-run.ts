@@ -19,6 +19,7 @@ import type { HealthInfo, InventorySummary, DailySalesRow } from "../api";
 import {
   type Vertical,
   type Rubro,
+  type RubroFeatures,
   hasRecetas,
   featuresForRubro,
   seedVerticalFor,
@@ -283,17 +284,22 @@ export function visibleModules(vertical: Vertical): ModuleId[] {
   return ALL_MODULES.filter((m) => (m === "recetas" ? hasRecetas(vertical) : true));
 }
 
-/** Modules visible for a full rubro, gated by its capability flags
- *  ({@link featuresForRubro}). Service rubros (belleza/servicios) also drop the
- *  physical-stock modules (inventario/compras) — they sell without inventory.
- *  Single source the shell nav + onboarding preview both read. */
-export function visibleModulesForRubro(rubro: Rubro): ModuleId[] {
-  const f = featuresForRubro(rubro);
+/** Modules visible given capability flags. Shell uses pack features after
+ *  login; onboarding preview uses local {@link featuresForRubro}. */
+export function visibleModulesForFeatures(f: RubroFeatures): ModuleId[] {
   return ALL_MODULES.filter((m) => {
     if (m === "recetas") return f.recetas;
     if (m === "inventory" || m === "compras") return f.physicalStock;
     return true;
   });
+}
+
+/** Modules visible for a full rubro, gated by its capability flags
+ *  ({@link featuresForRubro}). Service rubros (belleza/servicios) also drop the
+ *  physical-stock modules (inventario/compras) — they sell without inventory.
+ *  Single source the shell nav + onboarding preview both read. */
+export function visibleModulesForRubro(rubro: Rubro): ModuleId[] {
+  return visibleModulesForFeatures(featuresForRubro(rubro));
 }
 
 // --- Live ERP preview per rubro (the "mostrar, no contar" of rubro select) ---

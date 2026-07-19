@@ -33,7 +33,7 @@ import {
   tableSkeleton,
   asMessage,
   escapeHtml,
-} from "./inventory";
+} from "./view-blocks";
 import { exportFilename, type ExportBundle } from "./stock-helpers";
 import {
   pickTodayRow,

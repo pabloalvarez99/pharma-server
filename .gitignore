@@ -32,5 +32,8 @@ claudeapp.md
 installer/sign/*.pfx
 installer/sign/.cert-password.txt
 
+# Local CDN staging from scripts/publish-updater-artifacts.ps1 (never upload secrets).
+dist-updater/
+
 # Sandbox smoke artifacts (logs, install.log, verdicts) — transient, never committed.
 installer/sandbox/out/

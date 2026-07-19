@@ -8,6 +8,10 @@ import {
   VERTICAL_OPTIONS,
   parseRubro,
   featuresForRubro,
+  featuresFromPack,
+  activeFeatures,
+  activeVocab,
+  clearPackCache,
   seedVerticalFor,
   DEFAULT_RUBRO,
   RUBRO_CATALOG,
@@ -227,5 +231,54 @@ describe("rubro depth (P3 showcase: native value copy + graceful roadmap)", () =
         expect(r.comingSoon.length).toBeGreaterThan(0);
       }
     });
+  });
+});
+
+describe("activeFeatures / pack cache", () => {
+  it("falls back to local constants when no pack is cached", () => {
+    clearPackCache();
+    expect(activeFeatures("farmacia")).toEqual(featuresForRubro("farmacia"));
+    expect(activeFeatures("belleza").physicalStock).toBe(false);
+  });
+
+  it("featuresFromPack maps snake_case wire flags", () => {
+    expect(
+      featuresFromPack({
+        recetas: true,
+        lotes: false,
+        physical_stock: true,
+        clinical: true,
+      }),
+    ).toEqual({
+      recetas: true,
+      lotes: false,
+      physicalStock: true,
+      clinical: true,
+    });
+  });
+});
+
+describe("activeVocab / pack cache", () => {
+  it("offline: physical rubro → Producto; service rubro → Servicio", () => {
+    clearPackCache();
+    expect(activeVocab("farmacia")).toEqual({ item: "Producto", catalog: "Inventario" });
+    expect(activeVocab("tienda")).toEqual({ item: "Producto", catalog: "Inventario" });
+    expect(activeVocab("belleza")).toEqual({ item: "Servicio", catalog: "Inventario" });
+    expect(activeVocab("servicios")).toEqual({ item: "Servicio", catalog: "Inventario" });
+  });
+
+  it("offline: unset rubro defaults like features (generic Producto)", () => {
+    clearPackCache();
+    expect(activeVocab(null).item).toBe("Producto");
+    expect(activeVocab(undefined).item).toBe("Producto");
+  });
+});
+
+describe("localAttrsForRubro (offline pack attrs)", () => {
+  it("mirrors domain packs for tienda / farmacia / belleza", async () => {
+    const { localAttrsForRubro } = await import("./vertical");
+    expect(localAttrsForRubro("tienda").map((a) => a.key)).toEqual(["talla", "color", "sku"]);
+    expect(localAttrsForRubro("farmacia").some((a) => a.key === "laboratory")).toBe(true);
+    expect(localAttrsForRubro("belleza")[0]?.key).toBe("duracion_min");
   });
 });

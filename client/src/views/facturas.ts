@@ -21,7 +21,7 @@ import {
   type DocReferencia,
 } from "../api";
 import { clp, num, fechaHora, isValidRut, canonicalRut, formatRut } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { facturaTotals } from "./facturas-helpers";
 import { emptyState, errorState } from "./ui";
 

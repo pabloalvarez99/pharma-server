@@ -14,9 +14,11 @@ import {
   rememberServerUrl,
   licenseStatus,
   dteCafStatus,
-  listUsers,
-  createUser,
-  updateUser,
+  thermalPrinterName,
+  thermalWidth58,
+  setThermalPrinter,
+  openDrawerEnabled,
+  setOpenDrawer,
   SEED_ALREADY_EXISTS,
   type LicenseSummary,
   type CafStatus,
@@ -32,7 +34,7 @@ import {
 } from "../vertical";
 import { rubroPreview } from "./first-run";
 import { rubroIconSvg } from "../brand/rubro-icons";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import {
   CONFIG_SECTIONS,
   resolveSection,
@@ -247,9 +249,6 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
       case "preferencias":
         renderPreferencias();
         break;
-      case "usuarios":
-        renderUsuarios();
-        break;
       default:
         renderPlaceholder(id);
         break;
@@ -373,222 +372,51 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
         </div>
       </div>
       <div class="cfg-card">
+        <h4 class="cfg-card-title">Impresora térmica (POS)</h4>
+        <p class="muted cfg-help">Nombre exacto de la impresora en Windows (Panel de control → Dispositivos e impresoras). Se guarda <strong>solo en este equipo</strong>, no en el servidor. Si lo dejas vacío, el POS usa la impresión del navegador.</p>
+        <div class="cfg-emisor-form rb">
+          <div class="field">
+            <label class="rb-label" for="cfg-thermal-printer">Nombre de la impresora</label>
+            <input id="cfg-thermal-printer" class="rb-input" type="text" spellcheck="false"
+                   placeholder="EPSON TM-T20II" value="${escapeHtml(thermalPrinterName())}" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label class="rb-label" for="cfg-thermal-width">Ancho de papel</label>
+            <select id="cfg-thermal-width" class="rb-input">
+              <option value="58"${thermalWidth58() ? " selected" : ""}>58 mm (32 columnas)</option>
+              <option value="80"${thermalWidth58() ? "" : " selected"}>80 mm (48 columnas)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="rb-check">
+              <input id="cfg-open-drawer" type="checkbox"${openDrawerEnabled() ? " checked" : ""} />
+              Abrir cajón de dinero al imprimir ticket (pulso ESC/POS)
+            </label>
+            <p class="muted cfg-help">Solo si el cajón va cableado a la impresora térmica (RJ-11). Desactivado por defecto.</p>
+          </div>
+          <div class="cfg-edit">
+            <button class="rb-btn" id="cfg-thermal-save" type="button">Guardar impresora</button>
+            <span class="cfg-status" id="cfg-thermal-status" hidden></span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-card">
         <h4 class="cfg-card-title">Telemetría anónima</h4>
         <p class="muted cfg-help">Estadísticas de uso anónimas para mejorar el producto. <strong>Desactivada por defecto</strong>, sin datos personales (Ley 19.628). Tú decides si la activas.</p>
         <div id="cfg-telemetry">${tableSkeleton(1)}</div>
       </div>
     `;
     wireServerAndTheme();
+    wireThermalPrinter();
     void loadTelemetry();
-  }
-
-  // --- Usuarios y roles: gestión de credenciales del negocio -----------------
-  const ROLE_LABELS: Record<string, string> = {
-    owner: "Dueño",
-    admin: "Administrador",
-    pharmacist: "Químico",
-    cashier: "Cajero",
-  };
-  const ASSIGNABLE_ROLES = ["cashier", "pharmacist", "admin", "owner"] as const;
-  const roleLabel = (r: string): string => ROLE_LABELS[r] ?? r;
-
-  function renderUsuarios(): void {
-    panelEl.innerHTML = `
-      ${sectionHead("usuarios")}
-      <div class="cfg-card">
-        <h4 class="cfg-card-title">Crear usuario</h4>
-        <p class="muted cfg-help">Crea una credencial para tu equipo. Cada persona entra con su propio correo y contraseña; el rol define qué puede hacer dentro del sistema.</p>
-        <div class="cfg-emisor-form rb">
-          <div class="field">
-            <label class="rb-label" for="cfg-user-email">Correo</label>
-            <input id="cfg-user-email" class="rb-input" type="email" autocomplete="off" spellcheck="false" placeholder="cajero@minegocio.cl" />
-          </div>
-          <div class="field">
-            <label class="rb-label" for="cfg-user-pass">Contraseña</label>
-            <input id="cfg-user-pass" class="rb-input" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres" />
-          </div>
-          <div class="field">
-            <span class="rb-label">Rol</span>
-            <div class="cfg-roles" role="group" aria-label="Roles del usuario">
-              ${ASSIGNABLE_ROLES.map(
-                (r) => `
-                <label class="cfg-role-opt">
-                  <input type="checkbox" value="${r}"${r === "cashier" ? " checked" : ""} />
-                  <span>${escapeHtml(roleLabel(r))}</span>
-                </label>`,
-              ).join("")}
-            </div>
-            <p class="muted cfg-help">Cajero: venta y caja · Químico: + recetas y controlados · Administrador: + configuración y usuarios · Dueño: control total.</p>
-          </div>
-          <div class="cfg-edit">
-            <button class="btn-primary" id="cfg-user-create" type="button">Crear usuario</button>
-            <span class="cfg-status" id="cfg-user-status" hidden></span>
-          </div>
-        </div>
-      </div>
-      <div class="cfg-card">
-        <h4 class="cfg-card-title">Usuarios del negocio</h4>
-        <p class="muted cfg-help">Quienes pueden iniciar sesión en este negocio. Puedes desactivar a alguien (deja de entrar, sin borrar su historial) o cambiarle la contraseña.</p>
-        <div id="cfg-users-list">${tableSkeleton(3)}</div>
-      </div>
-    `;
-    wireUserCreate();
-    void loadUsers();
-  }
-
-  function wireUserCreate(): void {
-    const emailEl = panelEl.querySelector<HTMLInputElement>("#cfg-user-email");
-    const passEl = panelEl.querySelector<HTMLInputElement>("#cfg-user-pass");
-    const btn = panelEl.querySelector<HTMLButtonElement>("#cfg-user-create");
-    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-user-status");
-    if (!emailEl || !passEl || !btn || !statusEl) return;
-    btn.addEventListener("click", async () => {
-      const email = emailEl.value.trim();
-      const password = passEl.value;
-      const roles = Array.from(
-        panelEl.querySelectorAll<HTMLInputElement>('.cfg-roles input[type="checkbox"]'),
-      )
-        .filter((c) => c.checked)
-        .map((c) => c.value);
-      if (!email) {
-        applyStatus(statusEl, toFailed("Indica el correo del usuario."));
-        return;
-      }
-      if (password.length < 8) {
-        applyStatus(statusEl, toFailed("La contraseña debe tener al menos 8 caracteres."));
-        return;
-      }
-      if (roles.length === 0) {
-        applyStatus(statusEl, toFailed("Elige al menos un rol."));
-        return;
-      }
-      btn.disabled = true;
-      applyStatus(statusEl, toSaving());
-      try {
-        await createUser(serverUrl, email, password, roles);
-        applyStatus(statusEl, toSaved("Usuario creado."));
-        toast(`Usuario ${email} creado.`);
-        emailEl.value = "";
-        passEl.value = "";
-        await loadUsers();
-      } catch (err) {
-        applyStatus(statusEl, toFailed(asMessage(err)));
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  }
-
-  async function loadUsers(): Promise<void> {
-    const listEl = panelEl.querySelector<HTMLElement>("#cfg-users-list");
-    if (!listEl) return;
-    listEl.innerHTML = tableSkeleton(3);
-    try {
-      const users = await listUsers(serverUrl);
-      if (users.length === 0) {
-        listEl.innerHTML = `<p class="muted cfg-help">Aún no hay usuarios. Crea el primero con el formulario de arriba.</p>`;
-        return;
-      }
-      listEl.innerHTML = `
-        <div class="cfg-users-list">
-          ${users
-            .map(
-              (u) => `
-            <div class="cfg-user-row${u.active ? "" : " off"}" data-id="${escapeHtml(u.id)}" data-active="${u.active}">
-              <div class="cfg-user-id">
-                <span class="cfg-user-email">${escapeHtml(u.email)}</span>
-                <span class="cfg-user-roles">${u.roles
-                  .map((r) => `<span class="cfg-role-badge">${escapeHtml(roleLabel(r))}</span>`)
-                  .join("")}</span>
-              </div>
-              <div class="cfg-user-side">
-                <span class="cfg-user-state ${u.active ? "on" : "off"}">${u.active ? "Activo" : "Inactivo"}</span>
-                <div class="cfg-user-actions">
-                  <button class="rb-btn ghost sm" data-act="reset" type="button">Cambiar clave</button>
-                  <button class="rb-btn sm${u.active ? " danger" : ""}" data-act="toggle" type="button">${u.active ? "Desactivar" : "Activar"}</button>
-                </div>
-              </div>
-            </div>`,
-            )
-            .join("")}
-        </div>
-      `;
-      wireUserRows(listEl);
-    } catch (err) {
-      listEl.innerHTML = `<div class="view-error">${escapeHtml(asMessage(err))}</div>`;
-    }
-  }
-
-  function wireUserRows(listEl: HTMLElement): void {
-    listEl.querySelectorAll<HTMLButtonElement>("button[data-act]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const row = btn.closest<HTMLElement>(".cfg-user-row");
-        if (!row) return;
-        const id = row.dataset.id ?? "";
-        const active = row.dataset.active === "true";
-        if (btn.dataset.act === "toggle") {
-          if (
-            active &&
-            !window.confirm(
-              "¿Desactivar este usuario? No podrá iniciar sesión hasta que lo reactives. Su historial se conserva.",
-            )
-          )
-            return;
-          btn.disabled = true;
-          try {
-            await updateUser(serverUrl, id, { active: !active });
-            toast(active ? "Usuario desactivado." : "Usuario activado.");
-            await loadUsers();
-          } catch (err) {
-            toast(asMessage(err));
-            btn.disabled = false;
-          }
-        } else if (btn.dataset.act === "reset") {
-          openResetInline(row, id);
-        }
-      });
-    });
-  }
-
-  function openResetInline(row: HTMLElement, id: string): void {
-    if (row.querySelector(".cfg-reset-inline")) return;
-    const box = document.createElement("div");
-    box.className = "cfg-reset-inline";
-    box.innerHTML = `
-      <input class="rb-input" type="password" autocomplete="new-password" placeholder="Nueva contraseña (mín. 8)" aria-label="Nueva contraseña" />
-      <button class="rb-btn sm" data-reset-save type="button">Guardar</button>
-      <button class="rb-btn ghost sm" data-reset-cancel type="button">Cancelar</button>
-      <span class="cfg-status" hidden></span>
-    `;
-    row.appendChild(box);
-    const input = box.querySelector<HTMLInputElement>("input");
-    const status = box.querySelector<HTMLElement>(".cfg-status");
-    const saveBtn = box.querySelector<HTMLButtonElement>("[data-reset-save]");
-    const cancelBtn = box.querySelector<HTMLButtonElement>("[data-reset-cancel]");
-    if (!input || !status || !saveBtn || !cancelBtn) return;
-    input.focus();
-    cancelBtn.addEventListener("click", () => box.remove());
-    saveBtn.addEventListener("click", async () => {
-      const pw = input.value;
-      if (pw.length < 8) {
-        applyStatus(status, toFailed("Mínimo 8 caracteres."));
-        return;
-      }
-      saveBtn.disabled = true;
-      applyStatus(status, toSaving());
-      try {
-        await updateUser(serverUrl, id, { password: pw });
-        toast("Contraseña actualizada.");
-        box.remove();
-      } catch (err) {
-        applyStatus(status, toFailed(asMessage(err)));
-        saveBtn.disabled = false;
-      }
-    });
   }
 
   // --- Placeholder sections (honest "próximamente", never a dead-end) --------
   const PLACEHOLDER_COPY: Record<string, { what: string; today: string }> = {
+    usuarios: {
+      what: "Crear cajeros, químicos y administradores, con sus roles y permisos por módulo, desde esta pantalla.",
+      today: "Hoy las cuentas se crean por terminal: <code>pharma user-create</code>. La gestión visual llega en esta misma tanda de mejoras.",
+    },
     sucursales: {
       what: "Administrar varias sucursales y puntos de caja desde una sola instalación.",
       today: "Tu instalación ya opera una sucursal. El alta de sucursales y cajas adicionales desde la UI llega pronto.",
@@ -1273,6 +1101,33 @@ export function renderConfiguracion(host: HTMLElement, serverUrl: string): void 
     themeEl.addEventListener("change", () => {
       applyTheme(themeEl.value === "light" ? "light" : "dark");
       toast("Tema actualizado");
+    });
+  }
+
+  function wireThermalPrinter(): void {
+    const nameEl = panelEl.querySelector<HTMLInputElement>("#cfg-thermal-printer");
+    const widthEl = panelEl.querySelector<HTMLSelectElement>("#cfg-thermal-width");
+    const drawerEl = panelEl.querySelector<HTMLInputElement>("#cfg-open-drawer");
+    const saveBtn = panelEl.querySelector<HTMLButtonElement>("#cfg-thermal-save");
+    const statusEl = panelEl.querySelector<HTMLElement>("#cfg-thermal-status");
+    if (!nameEl || !widthEl || !saveBtn || !statusEl) return;
+
+    saveBtn.addEventListener("click", () => {
+      const name = nameEl.value.trim();
+      const width58 = widthEl.value !== "80";
+      const drawer = drawerEl?.checked ?? false;
+      setThermalPrinter(name, width58);
+      setOpenDrawer(drawer);
+      const drawerNote = drawer ? " · cajón al imprimir" : "";
+      applyStatus(
+        statusEl,
+        toSaved(
+          name
+            ? `Guardado — tickets van a «${name}» (${width58 ? "58" : "80"} mm)${drawerNote}.`
+            : "Guardado — se usará la impresión del navegador.",
+        ),
+      );
+      toast(name ? "Impresora térmica guardada" : "Impresión térmica desactivada");
     });
   }
 

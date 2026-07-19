@@ -26,8 +26,13 @@ import { renderConfiguracion } from "./configuracion";
 import { renderImportar } from "./importar";
 import { renderBoletas } from "./boletas";
 import { renderFacturas } from "./facturas";
-import { loadRubro, loadBusinessName } from "../vertical";
-import { visibleModulesForRubro } from "./first-run";
+import {
+  loadRubroPack,
+  loadBusinessName,
+  clearPackCache,
+  featuresFromPack,
+} from "../vertical";
+import { visibleModulesForFeatures } from "./first-run";
 import { installCommandPalette } from "./command-palette";
 
 const NAV = [
@@ -208,6 +213,7 @@ export function renderShell(
     } catch {
       // even if the backend logout fails, drop back to login locally
     }
+    clearPackCache(); // next login reloads pack for the new tenant
     onLogout();
   });
 
@@ -255,21 +261,22 @@ function installAskShortcut(): void {
   });
 }
 
-// Apply the operator-chosen business name + rubro: rename the brand and hide
-// nav for modules the rubro doesn't use (Recetas/Ley 20.000 off farmacia;
-// Inventario+Compras for service rubros that sell without physical stock).
+// Apply the operator-chosen business name + rubro pack: rename the brand and
+// hide nav for modules the pack doesn't enable (Recetas/Ley 20.000, Inventario
+// + Compras for service rubros). Loads the server pack once (P0.3) so every
+// view can read `activeFeatures()` / `cachedPack()` without another round-trip.
 // Done post-render so renderShell stays synchronous; default state shows the
-// generic brand and the full nav until the setting says otherwise.
+// generic brand and the full nav until the pack arrives.
 async function hydrateBranding(root: HTMLElement, serverUrl: string): Promise<void> {
-  const [rubro, name] = await Promise.all([
-    loadRubro(serverUrl),
+  const [pack, name] = await Promise.all([
+    loadRubroPack(serverUrl),
     loadBusinessName(serverUrl),
   ]);
   if (name) {
     const brand = root.querySelector<HTMLSpanElement>("#brand-name");
     if (brand) brand.textContent = name;
   }
-  const visible = new Set<string>(visibleModulesForRubro(rubro));
+  const visible = new Set<string>(visibleModulesForFeatures(featuresFromPack(pack.features)));
   root.querySelectorAll<HTMLButtonElement>(".nav-item[data-nav]").forEach((btn) => {
     const id = btn.dataset.nav;
     if (id && !visible.has(id)) btn.remove();

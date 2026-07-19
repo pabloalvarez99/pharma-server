@@ -5,7 +5,7 @@
 // sells the item as a servicio — while a physical rubro keeps the stock line and
 // the out-of-stock lock intact.
 import { describe, it, expect } from "vitest";
-import { resultCard } from "./pos";
+import { resultCard, posSearchPlaceholder, friendlyPosError } from "./pos";
 import { devolucionesSubtitle, restockControlHtml } from "./devoluciones";
 import { featuresForRubro } from "../vertical";
 import type { Product } from "../api";
@@ -80,5 +80,21 @@ describe("devoluciones — stock copy gated by rubro", () => {
   it("service rubro drops every stock reference", () => {
     expect(devolucionesSubtitle(false).toLowerCase()).not.toContain("stock");
     expect(restockControlHtml(false)).toBe("");
+  });
+});
+
+describe("POS copy — pack vocab + professional errors", () => {
+  it("search placeholder uses the pack item word", () => {
+    expect(posSearchPlaceholder("Servicio")).toMatch(/servicio/i);
+    expect(posSearchPlaceholder("Producto")).toMatch(/producto/i);
+  });
+
+  it("service card can show custom item label", () => {
+    expect(resultCard(product(0), false, "Servicio")).toContain("Servicio");
+  });
+
+  it("friendlyPosError never surfaces stack-like English", () => {
+    expect(friendlyPosError("Error: boom\n    at foo.js:1")).toMatch(/no se pudo/i);
+    expect(friendlyPosError("timeout waiting")).toMatch(/tiempo/i);
   });
 });

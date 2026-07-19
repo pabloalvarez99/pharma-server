@@ -243,6 +243,16 @@ pub async fn post_sale(
                     .get(&pthing.to_string())
                     .copied()
                     .ok_or(DomainError::NotFound)?;
+                // Retail multi-SKU: the parent is not sellable when it has
+                // active children — POS must scan the variant barcode / id
+                // so stock decrements at variant level (migración 0034).
+                if crate::catalog::repo::has_active_variants(db, tenant, pthing).await? {
+                    return Err(DomainError::Invalid(format!(
+                        "el producto '{}' tiene variantes; venda por talla/SKU o \
+                         escanee el código de barras de la variante",
+                        req_item.product_name
+                    )));
+                }
                 if is_physical && stock < req_item.quantity {
                     return Err(DomainError::InsufficientStock);
                 }

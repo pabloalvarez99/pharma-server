@@ -65,6 +65,7 @@ pub async fn seed_product(
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     };
     let dto = domain::catalog::service::create_product(db, tenant, input)
         .await

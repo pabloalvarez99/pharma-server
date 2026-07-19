@@ -58,6 +58,7 @@ fn new_product(name: &str, price: &str, cost: Option<&str>) -> NewProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 

@@ -12,6 +12,9 @@
 // `change` on the receipt.
 import {
   listProducts,
+  listProductVariants,
+  productByBarcode,
+  productFromDetail,
   posSale,
   parseSaleError,
   customerSearch,
@@ -19,6 +22,7 @@ import {
   emitBoleta,
   sendDte,
   dteXml,
+  printReceiptPreferThermal,
   CUSTOMERS_MODULE_MISSING,
   type Product,
   type PosItem,
@@ -29,9 +33,9 @@ import {
   type LowStockAlert,
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
-import { tableSkeleton, asMessage, escapeHtml } from "./inventory";
+import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { receiptText } from "./receipt-text";
-import { featuresForRubro, loadRubro } from "../vertical";
+import { loadFeatures, activeVocab, loadBusinessName } from "../vertical";
 import "./rutbrand.css";
 import {
   addToCart as addCartLine,
@@ -48,7 +52,11 @@ import {
   type HeldSale,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
-import { emptyState, errorState } from "./ui";
+import {
+  parentWithVariantsError,
+  preferBarcodeLookup,
+  isParentHasVariantsMessage,
+} from "./variants-ui";
 
 interface PickedCustomer {
   id: string;
@@ -86,6 +94,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // (the physical-rubro behaviour) until the persisted rubro loads, then relax it
   // for services and repaint the picker so the cards read honestly.
   let trackStock = true;
+  // Pack item word (Producto / Servicio / Plato) — refreshed after loadFeatures.
+  let itemWord = activeVocab().item || "Producto";
+  // Business display name for ticket footer when the receipt has none.
+  let businessName: string | null = null;
   // Parked sales (ventas en espera): each is a frozen snapshot of the draft. The
   // cashier holds the current cart to ring up someone else, then recalls it.
   let held: HeldSale[] = [];
@@ -101,7 +113,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         <!-- left: product picker -->
         <div class="pos-pick">
           <div class="view-search">
-            <input id="pos-search" type="search" placeholder="Buscar producto (Enter agrega el primero)…" autocomplete="off" />
+            <input id="pos-search" type="search" placeholder="${escapeHtml(posSearchPlaceholder(itemWord))}" autocomplete="off" />
           </div>
           <div id="pos-results" class="pos-results">${tableSkeleton(6)}</div>
         </div>
@@ -239,33 +251,101 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => runSearch(searchEl.value.trim()), 220);
   });
-  // Scan-fast: Enter adds the first sellable result (USB scanners emit Enter). On
-  // a physical rubro that's the first in-stock row; on a service rubro stock is
-  // meaningless, so the first row period. A code with no hit flashes the box and
-  // keeps the cashier in the field — the scan flow never dead-ends.
+  // Scan-fast: Enter prefers by-barcode (multi-SKU child / plain EAN), then the
+  // first sellable search hit. USB scanners dump the code + Enter. Parent
+  // products with variants are blocked client-side with Spanish copy (server
+  // also rejects on charge). Misses never dead-end the field.
   searchEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const code = searchEl.value.trim();
-    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
-    if (first) {
-      addToCart(first);
-      searchEl.value = "";
-      runSearch("");
-    } else if (code) {
-      scanMiss(code);
-    }
+    void handleScanEnter(searchEl.value.trim());
   });
   runSearch("");
 
-  // Resolve the rubro once; never throws (loadRubro defaults on any miss). For a
-  // service rubro, drop stock tracking and repaint the picker so the cards stop
-  // showing a phantom "agotado".
-  void loadRubro(serverUrl).then((rubro) => {
-    if (!featuresForRubro(rubro).physicalStock) {
-      trackStock = false;
-      runSearch(searchEl.value.trim());
+  /** Session cache: product id → has active variants (avoid GET on every click). */
+  const variantsCache = new Map<string, boolean>();
+
+  async function productHasVariants(id: string): Promise<boolean> {
+    if (variantsCache.has(id)) return variantsCache.get(id)!;
+    try {
+      const kids = await listProductVariants(serverUrl, id);
+      const has = kids.length > 0;
+      variantsCache.set(id, has);
+      return has;
+    } catch {
+      // Old server without variants route — treat as plain SKU (no block).
+      variantsCache.set(id, false);
+      return false;
     }
+  }
+
+  async function tryAddSellable(p: Product): Promise<boolean> {
+    if (await productHasVariants(p.id)) {
+      showError(parentWithVariantsError(p.name));
+      beep(false);
+      return false;
+    }
+    addToCart(p);
+    return true;
+  }
+
+  async function handleScanEnter(code: string): Promise<void> {
+    if (!code) {
+      const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+      if (first) void tryAddSellable(first);
+      return;
+    }
+    // 1) Barcode path (variant or plain SKU with product_barcode).
+    if (preferBarcodeLookup(code) || currentResults.length === 0) {
+      try {
+        const hit = await productByBarcode(serverUrl, code);
+        // by-barcode returns the sellable row (child or plano) — never the bare parent.
+        addToCart(productFromDetail(hit));
+        searchEl.value = "";
+        runSearch("");
+        return;
+      } catch {
+        // Not a registered barcode — fall through to name search hit.
+      }
+    }
+    // 2) First sellable search result (name match), with parent-variants guard.
+    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+    if (first) {
+      const ok = await tryAddSellable(first);
+      if (ok) {
+        searchEl.value = "";
+        runSearch("");
+      }
+      return;
+    }
+    // 3) Last chance: try by-barcode even when preferBarcodeLookup was false
+    // (short internal codes) before declaring a miss.
+    try {
+      const hit = await productByBarcode(serverUrl, code);
+      addToCart(productFromDetail(hit));
+      searchEl.value = "";
+      runSearch("");
+      return;
+    } catch {
+      scanMiss(code);
+    }
+  }
+
+  // Pack features (cached after shell login); never throws. Service rubro →
+  // drop stock tracking and repaint so cards stop showing phantom "agotado".
+  // Also re-hydrate vocab + business name if this view mounted before shell
+  // hydrate finished (C4 race).
+  void Promise.all([loadFeatures(serverUrl), loadBusinessName(serverUrl)]).then(([f, name]) => {
+    itemWord = activeVocab().item || "Producto";
+    searchEl.placeholder = posSearchPlaceholder(itemWord);
+    businessName = name;
+    const nextTrack = f.physicalStock;
+    if (nextTrack !== trackStock) {
+      trackStock = nextTrack;
+    }
+    // Always repaint results so service/physical cards + vocab are honest.
+    runSearch(searchEl.value.trim());
+    if (cart.length === 0) renderCart();
   });
 
   async function loadResults(search: string): Promise<void> {
@@ -273,28 +353,22 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       const rows: Product[] = await listProducts(serverUrl, search || undefined, SEARCH_LIMIT);
       currentResults = rows;
       if (rows.length === 0) {
-        resultsEl.innerHTML = emptyState({
-          title: search ? `Sin resultados para «${search}»` : "Sin productos",
-          hint: search
-            ? "Revisa el término o el código de barras."
-            : "Agrega productos en Inventario para venderlos.",
-        });
+        resultsEl.innerHTML = `<p class="empty">${escapeHtml(
+          search
+            ? `Sin ${itemWord.toLowerCase()}s para «${search}». Revisa el código o el nombre.`
+            : `No hay ${itemWord.toLowerCase()}s en el catálogo todavía.`,
+        )}</p>`;
         return;
       }
-      resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock)).join("");
+      resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock, itemWord)).join("");
       resultsEl.querySelectorAll<HTMLButtonElement>(".pos-result").forEach((b, i) => {
         b.addEventListener("click", () => {
-          if (!trackStock || rows[i].stock > 0) addToCart(rows[i]);
+          if (!trackStock || rows[i].stock > 0) void tryAddSellable(rows[i]);
         });
       });
     } catch (err) {
       currentResults = [];
-      resultsEl.innerHTML = errorState(asMessage(err), {
-        retry: { id: "pos-results-retry", label: "Reintentar" },
-      });
-      resultsEl
-        .querySelector<HTMLButtonElement>("#pos-results-retry")
-        ?.addEventListener("click", () => void loadResults(search));
+      resultsEl.innerHTML = `<div class="view-error">${escapeHtml(friendlyPosError(err))}</div>`;
     }
   }
 
@@ -305,6 +379,14 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       b.classList.add("active");
       method = b.dataset.method as PaymentMethod;
       syncPayment();
+      // Focus the relevant tender field so the cashier can type immediately.
+      if (method === "pos_cash") {
+        cashIn.focus();
+        cashIn.select();
+      } else if (method === "pos_mixed") {
+        splitCashIn.focus();
+        splitCashIn.select();
+      }
     });
   });
 
@@ -426,14 +508,36 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     chargeBtn.disabled = !chargeEnabled();
   }
 
-  cashIn.addEventListener("input", renderVuelto);
+  cashIn.addEventListener("input", () => {
+    renderVuelto();
+    syncChargeBtn();
+  });
+  // Mixed: as the cashier types cash, auto-suggest the remaining on card when
+  // card is still empty (common path: "paga 5 mil en efectivo y el resto tarjeta").
   splitCashIn.addEventListener("input", () => {
+    const total = payable();
+    const cash = parseCash(splitCashIn.value);
+    if (splitCardIn.value.trim() === "" && cash > 0 && cash < total) {
+      // Don't fight a cashier who already typed card — only fill when blank.
+      // Value is display-only digits; parseCash strips grouping.
+      splitCardIn.placeholder = String(total - cash);
+    }
     renderSplit();
     syncChargeBtn();
   });
   splitCardIn.addEventListener("input", () => {
     renderSplit();
     syncChargeBtn();
+  });
+  // Tab from empty card with a cash shortfall → fill the remainder (keyboard path).
+  splitCardIn.addEventListener("focus", () => {
+    const total = payable();
+    const cash = parseCash(splitCashIn.value);
+    if (splitCardIn.value.trim() === "" && cash > 0 && cash < total) {
+      splitCardIn.value = String(total - cash);
+      renderSplit();
+      syncChargeBtn();
+    }
   });
 
   // ---- customer picker (loyalty) ----
@@ -458,7 +562,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       if (!customerModuleOk) return;
       if (rows.length === 0) {
         custResultsEl.hidden = false;
-        custResultsEl.innerHTML = emptyState({ title: `Sin clientes para «${q}»` });
+        custResultsEl.innerHTML = `<p class="empty">Sin clientes para «${escapeHtml(q)}».</p>`;
         return;
       }
       custResultsEl.hidden = false;
@@ -494,7 +598,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         return;
       }
       custResultsEl.hidden = false;
-      custResultsEl.innerHTML = errorState(asMessage(err));
+      custResultsEl.innerHTML = `<p class="empty">${escapeHtml(asMessage(err))}</p>`;
     }
   }
 
@@ -551,10 +655,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   function renderCart(): void {
     if (cart.length === 0) {
-      linesEl.innerHTML = emptyState({
-        title: "El carrito está vacío",
-        hint: "Busca un producto para agregarlo.",
-      });
+      linesEl.innerHTML = `<p class="empty">El carrito está vacío. Busca un ${escapeHtml(itemWord.toLowerCase())} para agregarlo.</p>`;
     } else {
       linesEl.innerHTML = cart
         .map(
@@ -684,7 +785,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // the code selected, so the next scan (or a retype) just works.
   function scanMiss(code: string): void {
     beep(false);
-    showError(`Sin producto para «${code}». Revisa el código.`);
+    showError(`No encontramos «${code}» en el catálogo. Revisa el código o el nombre.`);
     searchEl.classList.remove("pos-scan-miss");
     void searchEl.offsetWidth; // reflow so the CSS animation restarts
     searchEl.classList.add("pos-scan-miss");
@@ -805,13 +906,26 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     let cash: string | undefined;
     let card: string | undefined;
     if (method === "pos_cash") {
-      cash = String(effectiveTender(parseCash(cashIn.value), total));
+      const tendered = parseCash(cashIn.value);
+      // Explicit short cash: warn and keep focus so the cashier can top up.
+      // Blank/0 still means "pago exacto" (effectiveTender floors up) — the
+      // common path when the customer hands exact change.
+      if (tendered > 0 && tendered < total) {
+        showError(`Faltan ${clp(total - tendered)} en efectivo. Completa el monto o elige otro medio.`);
+        chargeBtn.classList.remove("loading");
+        syncChargeBtn();
+        cashIn.focus();
+        cashIn.select();
+        return;
+      }
+      cash = String(effectiveTender(tendered, total));
     } else if (method === "pos_mixed") {
       const s = currentSplit();
       if (!s.ok) {
-        showError(`El pago dividido no cubre el total. Faltan ${clp(s.short)}.`);
+        showError(`El pago mixto no cubre el total. Faltan ${clp(s.short)}.`);
         chargeBtn.classList.remove("loading");
         syncChargeBtn();
+        splitCashIn.focus();
         return;
       }
       cash = String(parseCash(splitCashIn.value));
@@ -842,8 +956,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       renderVuelto();
 
       const pts = result.loyaltyPointsAwarded;
-      toast(`Venta registrada · ${num(count)} ítem(es) · ${clp(total)}${pts > 0 ? ` · +${num(pts)} pts` : ""}`);
-      flashLowStock(result.lowStockAlerts);
+      const unit = count === 1 ? itemWord.toLowerCase() : `${itemWord.toLowerCase()}s`;
+      toast(`Venta registrada · ${num(count)} ${unit} · ${clp(total)}${pts > 0 ? ` · +${num(pts)} pts` : ""}`);
+      if (trackStock) flashLowStock(result.lowStockAlerts);
 
       // Reset the customer for the next sale, then fetch + show the boleta.
       const orderId = result.orderId;
@@ -862,11 +977,20 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       searchEl.focus();
     } catch (err) {
       const { code, message } = parseSaleError(err);
-      showError(
-        code === "INSUFFICIENT_STOCK"
-          ? `Stock insuficiente para completar la venta. ${message}`
-          : message,
-      );
+      if (code === "INSUFFICIENT_STOCK") {
+        showError(
+          trackStock
+            ? `Stock insuficiente. Revisa el carrito o repone el inventario. ${message}`
+            : friendlyPosError(message),
+        );
+      } else if (isParentHasVariantsMessage(message)) {
+        // Server-side parent guard (domain sales) — surface as-is (Spanish).
+        showError(message);
+      } else {
+        showError(friendlyPosError(message || err));
+      }
+      // Return focus to search so the next scan isn't lost after a failed charge.
+      searchEl.focus();
     } finally {
       chargeBtn.classList.remove("loading");
       syncChargeBtn();
@@ -884,7 +1008,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   function flashLowStock(alerts: LowStockAlert[]): void {
-    if (!alerts || alerts.length === 0) return;
+    if (!trackStock || !alerts || alerts.length === 0) return;
     const names = alerts.map((a) => a.product_name).slice(0, 3).join(", ");
     const more = alerts.length > 3 ? ` +${alerts.length - 3}` : "";
     showError(`Stock bajo: ${escapeHtml(names)}${more}. Revisa reposición.`);
@@ -932,16 +1056,20 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         ? `<div class="rcpt-line accent"><span>Puntos ganados</span><strong class="rb-num">+${num(r.loyalty_points_awarded)}</strong></div>`
         : "";
 
+    // Footer: prefer server footer_note; else business.name; never blank brand.
+    const foot = (r.footer_note && r.footer_note.trim()) || businessName || r.tenant_name || "";
+    const headName = (businessName && businessName.trim()) || r.tenant_name;
+
     modalHost.innerHTML = `
       <div class="modal-backdrop" id="rcpt-backdrop">
         <div class="modal receipt-modal" id="receipt-print">
           <div class="rcpt-head">
-            <div class="rcpt-tenant">${escapeHtml(r.tenant_name)}</div>
+            <div class="rcpt-tenant">${escapeHtml(headName)}</div>
             <div class="rcpt-meta muted">Boleta <span class="rb-num">${escapeHtml(r.folio_or_number)}</span> · ${escapeHtml(when)}</div>
             ${r.cashier ? `<div class="rcpt-meta muted">Cajero: ${escapeHtml(r.cashier)}</div>` : ""}
           </div>
           <table class="data-table rcpt-table">
-            <thead><tr><th>Producto</th><th class="num">Cant</th><th class="num">P/U</th><th class="num">Total</th></tr></thead>
+            <thead><tr><th>${escapeHtml(itemWord)}</th><th class="num">Cant</th><th class="num">P/U</th><th class="num">Total</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
           <div class="rcpt-totals">
@@ -952,7 +1080,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             ${cashBlock}
             ${loyaltyBlock}
           </div>
-          <div class="rcpt-foot muted">${escapeHtml(r.footer_note)}</div>
+          <div class="rcpt-foot muted">${escapeHtml(foot)}</div>
           <!-- Boleta electrónica SII — optional, collapsed: the everyday cash
                sale stays a one-key flow (print/copy/close). Emission needs the
                cert passphrase, so it never blocks the hot path. -->
@@ -987,10 +1115,22 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       modalHost.innerHTML = "";
       searchEl.focus();
     };
+    // Enrich ticket with business display name for thermal + clipboard paths
+    // (window.print still uses the on-screen modal HTML).
+    const ticket: Receipt = {
+      ...r,
+      tenant_name: headName,
+      footer_note: foot || r.footer_note,
+    };
+
     host.querySelector<HTMLButtonElement>("#rcpt-close")!.addEventListener("click", close);
-    host.querySelector<HTMLButtonElement>("#rcpt-print")!.addEventListener("click", () => window.print());
+    // Thermal when configured (localStorage rb.thermalPrinter); else browser print.
+    // Failures fall back to window.print so a dead spooler never blocks the cajero.
+    host.querySelector<HTMLButtonElement>("#rcpt-print")!.addEventListener("click", () => {
+      void printReceiptPreferThermal(ticket);
+    });
     host.querySelector<HTMLButtonElement>("#rcpt-copy")!.addEventListener("click", () => {
-      void copyReceipt(r, host.querySelector<HTMLButtonElement>("#rcpt-copy")!);
+      void copyReceipt(ticket, host.querySelector<HTMLButtonElement>("#rcpt-copy")!);
     });
     host.querySelector<HTMLElement>("#rcpt-backdrop")!.addEventListener("click", (e) => {
       if (e.target === e.currentTarget) close();
@@ -1125,16 +1265,17 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 }
 
 // A picker card. On a service rubro (`trackStock` false) stock is meaningless, so
-// the card never shows a count or an "agotado" dead-end — it reads "Servicio" and
-// stays sellable. On a physical rubro it keeps the stock line + out-of-stock lock.
-// Exported (pure, no DOM) so the per-rubro render is unit-tested directly.
-export function resultCard(p: Product, trackStock: boolean): string {
+// the card never shows a count or an "agotado" dead-end — it reads the pack item
+// word ("Servicio") and stays sellable. On a physical rubro it keeps the stock
+// line + out-of-stock lock. Exported (pure, no DOM) so the per-rubro render is
+// unit-tested directly.
+export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servicio"): string {
   if (!trackStock) {
     return `
     <button type="button" class="pos-result is-service">
       <div class="pos-result-info">
         <div class="cell-main">${escapeHtml(p.name)}</div>
-        <div class="cell-sub muted">Servicio</div>
+        <div class="cell-sub muted">${escapeHtml(itemLabel)}</div>
       </div>
       <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>
@@ -1150,4 +1291,30 @@ export function resultCard(p: Product, trackStock: boolean): string {
       <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>
   `;
+}
+
+/** Search box placeholder — pack vocab so a peluquería never reads "producto". */
+export function posSearchPlaceholder(itemWord: string): string {
+  const w = (itemWord || "producto").toLowerCase();
+  return `Buscar ${w} (Enter agrega el primero)…`;
+}
+
+/** Operator-facing POS error: strip raw/dev English when possible. */
+export function friendlyPosError(err: unknown): string {
+  const msg = typeof err === "string" ? err : asMessage(err);
+  const low = msg.toLowerCase();
+  if (low.includes("timeout") || low.includes("timed out")) {
+    return "El servidor no respondió a tiempo. Inténtalo de nuevo.";
+  }
+  if (low.includes("network") || low.includes("conexión") || low.includes("conectar")) {
+    return "Sin conexión al servidor. Verifica que esté en marcha e inténtalo de nuevo.";
+  }
+  if (low.includes("403") || low.includes("denegado") || low.includes("permiso")) {
+    return "No tienes permiso para cobrar. Contacta al administrador.";
+  }
+  // Keep Spanish server messages; never surface raw stack traces.
+  if (msg.includes("\n") || msg.includes("at ") || msg.startsWith("Error:")) {
+    return "No se pudo completar la venta. Inténtalo de nuevo.";
+  }
+  return msg || "No se pudo completar la venta. Inténtalo de nuevo.";
 }
