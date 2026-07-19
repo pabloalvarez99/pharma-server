@@ -12,6 +12,8 @@ import {
   orderDiscount,
   payableTotal,
   splitPayment,
+  remainingOnCard,
+  cashTenderShort,
   validateRefund,
   deriveTipo,
   expectedCash,
@@ -217,5 +219,31 @@ describe("edge · multi-caja drawer naming under gaps and custom names", () => {
 
   it("only custom names fall back to count+1 so a second drawer never collides", () => {
     expect(nextDrawerName(["Mostrador"])).toBe("caja-2");
+  });
+});
+
+describe("edge · mixto remainder + cash short (cashier UX)", () => {
+  it("remainingOnCard fills the card leg when cash is partial", () => {
+    expect(remainingOnCard(3000, 7500)).toBe(4500);
+    expect(remainingOnCard(7500, 7500)).toBe(0);
+    expect(remainingOnCard(9000, 7500)).toBe(0);
+    expect(remainingOnCard(-5, 1000)).toBe(1000); // floors negatives
+  });
+
+  it("cashTenderShort: blank/0 is exact-path, partial typed amount is short", () => {
+    expect(cashTenderShort(0, 5000)).toBe(false);
+    expect(cashTenderShort(5000, 5000)).toBe(false);
+    expect(cashTenderShort(4999, 5000)).toBe(true);
+    expect(cashTenderShort(10000, 5000)).toBe(false);
+  });
+
+  it("splitPayment + remainingOnCard stay consistent for a common mix", () => {
+    const total = 12990;
+    const cash = 5000;
+    const card = remainingOnCard(cash, total);
+    const s = splitPayment({ cash, card }, total);
+    expect(s.ok).toBe(true);
+    expect(s.change).toBe(0);
+    expect(s.tendered).toBe(total);
   });
 });
