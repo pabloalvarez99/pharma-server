@@ -421,6 +421,17 @@ pub async fn create_variant(
             // Hard-delete just-created orphan (no movements yet) so list/POS
             // never see a half-claimed variant after a barcode race.
             let _ = repo::hard_delete_product(db, tenant, &child).await;
+            // Concurrent unique-index races often surface as raw DB_ERROR from
+            // Surreal before our pre-check sees the winner — normalize to
+            // CONFLICT so the POS/admin client gets a stable ES contract.
+            if repo::product_id_by_barcode(db, tenant, &code)
+                .await?
+                .is_some()
+            {
+                return Err(DomainError::Conflict(format!(
+                    "el código de barras '{code}' ya está asignado"
+                )));
+            }
             return Err(e);
         }
         created.barcode = Some(code);

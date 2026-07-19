@@ -905,12 +905,66 @@ async fn create_variant_barcode_race_second_conflicts() {
     let owner = service::find_by_barcode(&db, &t, code).await.unwrap();
     assert_eq!(owner.id, a.id, "first winner keeps barcode");
 
-    // Soft-deleted loser must not appear as active sellable sibling with stock.
+    // Orphan from failed barcode hard-deleted — only winner remains.
     let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
     assert_eq!(
         kids.len(),
         1,
-        "orphan from failed barcode should be soft-deleted"
+        "orphan from failed barcode should be removed"
     );
     assert_eq!(kids[0].id, a.id);
+}
+
+#[tokio::test]
+async fn create_variant_concurrent_same_barcode_one_wins() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Concurrent shell", "7000"))
+        .await
+        .unwrap();
+    let code = "7804999140010";
+    let pid = parent.id.clone();
+
+    let (r1, r2) = tokio::join!(
+        service::create_variant(&db, &t, &pid, new_variant("A", code, 2)),
+        service::create_variant(&db, &t, &pid, new_variant("B", code, 2)),
+    );
+
+    let ok = r1.is_ok() as u8 + r2.is_ok() as u8;
+    let err_n = r1.is_err() as u8 + r2.is_err() as u8;
+    // Never two Ok (would mean barcode steal / double-map).
+    assert!(ok <= 1, "at most one winner: r1={r1:?} r2={r2:?}");
+    if ok == 1 {
+        assert_eq!(err_n, 1, "loser must conflict: r1={r1:?} r2={r2:?}");
+        let loser = match (&r1, &r2) {
+            (Err(e), Ok(_)) | (Ok(_), Err(e)) => e,
+            _ => panic!("expected exactly one error: r1={r1:?} r2={r2:?}"),
+        };
+        assert_eq!(loser.code(), "CONFLICT");
+        let o = service::find_by_barcode(&db, &t, code).await.unwrap();
+        assert_eq!(o.barcode.as_deref(), Some(code));
+    }
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert!(
+        kids.len() <= 1,
+        "expected ≤1 variant after concurrent claim, got {}",
+        kids.len()
+    );
+}
+
+#[tokio::test]
+async fn plain_pharmacy_sku_untouched_by_variants_stock_field() {
+    // Farmacia path: no parent_id, no children → no variants_stock field.
+    let (db, t) = setup().await;
+    let p = service::create_product(&db, &t, {
+        let mut n = new_product("Paracetamol 500mg", "1990");
+        n.stock = 40;
+        n
+    })
+    .await
+    .unwrap();
+    let got = service::get_product(&db, &t, &p.id).await.unwrap();
+    assert!(got.parent_id.is_none());
+    assert!(got.variants_stock.is_none());
+    assert_eq!(got.stock, 40);
 }

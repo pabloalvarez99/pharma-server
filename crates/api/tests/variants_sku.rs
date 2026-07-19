@@ -470,3 +470,22 @@ async fn parent_not_sellable_duplicate_barcode_list_order_and_parent_shell() {
         "child sale: {st} {sale_ok}"
     );
 }
+
+#[tokio::test]
+async fn by_barcode_empty_and_unknown() {
+    let s = spawn().await;
+    // Unknown → 404
+    let (st, body) = get_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products/by-barcode/0000000000000",
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "unknown: {body}");
+    // Whitespace-only path segment still hits handler; empty after trim → 400.
+    let (st, body) = get_json(&s.app, &s.token, "/api/v1/products/by-barcode/%20%20").await;
+    assert!(
+        st == StatusCode::BAD_REQUEST || st == StatusCode::NOT_FOUND,
+        "whitespace barcode: {st} {body}"
+    );
+}

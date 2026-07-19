@@ -360,12 +360,32 @@ pub async fn create_barcode(
         .bind(("b", barcode.to_string()))
         .await;
     match res {
-        Ok(mut r) => {
-            let id: Option<Thing> = r.take((0, "id"))?;
-            if id.is_some() {
-                return Ok(());
+        Ok(mut r) => match r.take::<Option<Thing>>((0, "id")) {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(e) => {
+                // Surreal may return Ok with an error payload on unique violation.
+                if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+                    if owner == *product {
+                        return Ok(());
+                    }
+                    return Err(DomainError::Conflict(format!(
+                        "el código de barras '{barcode}' ya está asignado a {owner}"
+                    )));
+                }
+                let es = e.to_string();
+                if es.contains("unique")
+                    || es.contains("already")
+                    || es.contains("index")
+                    || es.contains("conflict")
+                {
+                    return Err(DomainError::Conflict(format!(
+                        "el código de barras '{barcode}' ya está asignado"
+                    )));
+                }
+                return Err(DomainError::Db(Box::new(e)));
             }
-        }
+        },
         Err(e) => {
             // Unique race or other DB fault — re-check ownership.
             if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
@@ -374,6 +394,16 @@ pub async fn create_barcode(
                 }
                 return Err(DomainError::Conflict(format!(
                     "el código de barras '{barcode}' ya está asignado a {owner}"
+                )));
+            }
+            let es = e.to_string();
+            if es.contains("unique")
+                || es.contains("already")
+                || es.contains("index")
+                || es.contains("conflict")
+            {
+                return Err(DomainError::Conflict(format!(
+                    "el código de barras '{barcode}' ya está asignado"
                 )));
             }
             return Err(DomainError::Db(Box::new(e)));
