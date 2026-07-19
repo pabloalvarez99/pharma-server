@@ -12,6 +12,9 @@
 // `change` on the receipt.
 import {
   listProducts,
+  listProductVariants,
+  productByBarcode,
+  productFromDetail,
   posSale,
   parseSaleError,
   customerSearch,
@@ -49,6 +52,11 @@ import {
   type HeldSale,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
+import {
+  parentWithVariantsError,
+  preferBarcodeLookup,
+  isParentHasVariantsMessage,
+} from "./variants-ui";
 
 interface PickedCustomer {
   id: string;
@@ -243,24 +251,85 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(() => runSearch(searchEl.value.trim()), 220);
   });
-  // Scan-fast: Enter adds the first sellable result (USB scanners emit Enter). On
-  // a physical rubro that's the first in-stock row; on a service rubro stock is
-  // meaningless, so the first row period. A code with no hit flashes the box and
-  // keeps the cashier in the field — the scan flow never dead-ends.
+  // Scan-fast: Enter prefers by-barcode (multi-SKU child / plain EAN), then the
+  // first sellable search hit. USB scanners dump the code + Enter. Parent
+  // products with variants are blocked client-side with Spanish copy (server
+  // also rejects on charge). Misses never dead-end the field.
   searchEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const code = searchEl.value.trim();
-    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
-    if (first) {
-      addToCart(first);
-      searchEl.value = "";
-      runSearch("");
-    } else if (code) {
-      scanMiss(code);
-    }
+    void handleScanEnter(searchEl.value.trim());
   });
   runSearch("");
+
+  /** Session cache: product id → has active variants (avoid GET on every click). */
+  const variantsCache = new Map<string, boolean>();
+
+  async function productHasVariants(id: string): Promise<boolean> {
+    if (variantsCache.has(id)) return variantsCache.get(id)!;
+    try {
+      const kids = await listProductVariants(serverUrl, id);
+      const has = kids.length > 0;
+      variantsCache.set(id, has);
+      return has;
+    } catch {
+      // Old server without variants route — treat as plain SKU (no block).
+      variantsCache.set(id, false);
+      return false;
+    }
+  }
+
+  async function tryAddSellable(p: Product): Promise<boolean> {
+    if (await productHasVariants(p.id)) {
+      showError(parentWithVariantsError(p.name));
+      beep(false);
+      return false;
+    }
+    addToCart(p);
+    return true;
+  }
+
+  async function handleScanEnter(code: string): Promise<void> {
+    if (!code) {
+      const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+      if (first) void tryAddSellable(first);
+      return;
+    }
+    // 1) Barcode path (variant or plain SKU with product_barcode).
+    if (preferBarcodeLookup(code) || currentResults.length === 0) {
+      try {
+        const hit = await productByBarcode(serverUrl, code);
+        // by-barcode returns the sellable row (child or plano) — never the bare parent.
+        addToCart(productFromDetail(hit));
+        searchEl.value = "";
+        runSearch("");
+        return;
+      } catch {
+        // Not a registered barcode — fall through to name search hit.
+      }
+    }
+    // 2) First sellable search result (name match), with parent-variants guard.
+    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+    if (first) {
+      const ok = await tryAddSellable(first);
+      if (ok) {
+        searchEl.value = "";
+        runSearch("");
+      }
+      return;
+    }
+    // 3) Last chance: try by-barcode even when preferBarcodeLookup was false
+    // (short internal codes) before declaring a miss.
+    try {
+      const hit = await productByBarcode(serverUrl, code);
+      addToCart(productFromDetail(hit));
+      searchEl.value = "";
+      runSearch("");
+      return;
+    } catch {
+      scanMiss(code);
+    }
+  }
 
   // Pack features (cached after shell login); never throws. Service rubro →
   // drop stock tracking and repaint so cards stop showing phantom "agotado".
@@ -294,7 +363,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock, itemWord)).join("");
       resultsEl.querySelectorAll<HTMLButtonElement>(".pos-result").forEach((b, i) => {
         b.addEventListener("click", () => {
-          if (!trackStock || rows[i].stock > 0) addToCart(rows[i]);
+          if (!trackStock || rows[i].stock > 0) void tryAddSellable(rows[i]);
         });
       });
     } catch (err) {
@@ -914,6 +983,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
             ? `Stock insuficiente. Revisa el carrito o repone el inventario. ${message}`
             : friendlyPosError(message),
         );
+      } else if (isParentHasVariantsMessage(message)) {
+        // Server-side parent guard (domain sales) — surface as-is (Spanish).
+        showError(message);
       } else {
         showError(friendlyPosError(message || err));
       }

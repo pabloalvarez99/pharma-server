@@ -19,6 +19,7 @@ import {
   createBatch,
   nearExpiry,
   stockRotation,
+  listProductVariants,
   type Product,
   type ProductDetail,
   type Batch,
@@ -57,6 +58,7 @@ import {
   buildProductInput,
   type ProductFormOptions,
 } from "./product-form";
+import { variantsParentBanner, variantAttrsLabel } from "./variants-ui";
 
 const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
@@ -591,16 +593,64 @@ async function openProductDetail(
     return;
   }
 
+  // Multi-SKU children (empty when product is plain or is itself a child).
+  let variants: ProductDetail[] = [];
+  try {
+    // Only fetch for top-level products; a child has parent_id set.
+    if (!p.parent_id) {
+      variants = await listProductVariants(serverUrl, id);
+    }
+  } catch {
+    // Pre-variants server or 404 — show plain detail (no banner).
+    variants = [];
+  }
+
   function paintDetail(): void {
+    const kids = variants;
     const clinicalBits = packOpts.clinical
       ? [p.laboratory, p.active_ingredient, p.presentation]
       : [p.presentation];
     const attrBits = formatAttrsSubline(p.attrs);
     const sub = [...clinicalBits.filter(Boolean), ...attrBits].join(" · ");
-    const stockStat = packOpts.physicalStock
-      ? pdStat("Stock", `${num(p.stock)} ${stockPill(p.stock)}`)
-      : pdStat("Tipo", "Servicio");
-    const adjustSection = packOpts.physicalStock
+    const isChild = Boolean(p.parent_id);
+    const isParent = kids.length > 0;
+    // Parent multi-SKU: stock lives on children — hide adjust on the shell product.
+    const showStockOps = packOpts.physicalStock && !isParent;
+    const stockStat = !packOpts.physicalStock
+      ? pdStat("Tipo", "Servicio")
+      : isParent
+        ? pdStat("Stock", "En variantes")
+        : pdStat("Stock", `${num(p.stock)} ${stockPill(p.stock)}`);
+    const childNote = isChild
+      ? `<p class="muted pd-sub">Variante multi-SKU · vender por su código de barras</p>`
+      : "";
+    const variantsSection =
+      isParent
+        ? `
+      <div class="pd-section pd-variants">
+        <div class="pd-section-head"><h4>Variantes (multi-SKU)</h4></div>
+        <p class="pd-variants-banner" role="status">${escapeHtml(variantsParentBanner(kids.length))}</p>
+        <table class="data-table pd-variant-table">
+          <thead><tr><th>Variante</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
+          <tbody>
+            ${kids
+              .map((v) => {
+                const lab = variantAttrsLabel(v.attrs as Record<string, unknown> | null) || v.name;
+                return `<tr>
+                  <td><div class="cell-main">${escapeHtml(v.name)}</div>
+                    ${lab && lab !== v.name ? `<div class="cell-sub muted">${escapeHtml(lab)}</div>` : ""}</td>
+                  <td class="num">${clp(v.price)}</td>
+                  <td class="num">${num(v.stock)}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+        <!-- TODO(C): thin "agregar variante" form via createProductVariant — no full matrix yet. -->
+        <p class="muted pd-variants-todo">Alta de tallas/colores: por API o CSV. Matriz completa próximamente.</p>
+      </div>`
+        : "";
+    const adjustSection = showStockOps
       ? `
       <div class="pd-section">
         <div class="pd-section-head"><h4>Ajustar stock</h4></div>
@@ -628,7 +678,7 @@ async function openProductDetail(
         </button>
       </div>`
       : "";
-    const lotesSection = packOpts.lotes
+    const lotesSection = packOpts.lotes && !isParent
       ? `
       <div class="pd-section">
         <div class="pd-section-head">
@@ -642,16 +692,18 @@ async function openProductDetail(
     bodyEl.innerHTML = `
       <h3 class="modal-title">${escapeHtml(p.name)}</h3>
       ${sub ? `<p class="muted pd-sub">${escapeHtml(sub)}</p>` : ""}
+      ${childNote}
       <div class="pd-grid">
         ${pdStat("Precio venta", clp(p.price))}
         ${pdStat("Costo", p.cost_price ? clp(p.cost_price) : "—")}
         ${stockStat}
       </div>
+      ${variantsSection}
       ${adjustSection}
       ${lotesSection}
     `;
-    if (packOpts.physicalStock) wireAdjust();
-    if (packOpts.lotes) {
+    if (showStockOps) wireAdjust();
+    if (packOpts.lotes && !isParent) {
       bodyEl
         .querySelector<HTMLButtonElement>("#pd-add-lote")!
         .addEventListener("click", toggleLoteForm);
