@@ -75,6 +75,304 @@ export function variantsStockListBadge(variantsStock: number): string {
   return `Multi-SKU · ${n} u.`;
 }
 
+/**
+ * Prefer `variant_count` (N variantes) when B exposes it; fall back to stock sum.
+ * Chile retail copy — short for table cells.
+ */
+export function variantsListBadgeFromDto(p: {
+  variant_count?: number | null;
+  variants_stock?: number | null;
+}): string {
+  if (p.variant_count != null && typeof p.variant_count === "number") {
+    return variantsListBadge(p.variant_count);
+  }
+  if (p.variants_stock != null && typeof p.variants_stock === "number") {
+    return variantsStockListBadge(p.variants_stock);
+  }
+  return "";
+}
+
+/** Stock cell for a variant row: number + optional Agotado pill label. */
+export function variantStockCellLabel(stock: number): { text: string; out: boolean } {
+  const n = typeof stock === "number" && Number.isFinite(stock) ? Math.trunc(stock) : 0;
+  if (n <= 0) return { text: "Agotado", out: true };
+  return { text: String(n), out: false };
+}
+
+/** Accessible label for a variant table row. */
+export function variantRowAriaLabel(row: {
+  name: string;
+  barcode?: string;
+  stock: number;
+  attrsLabel?: string;
+}): string {
+  const name = (row.name || "Variante").trim() || "Variante";
+  const parts = [name];
+  if (row.attrsLabel) parts.push(row.attrsLabel);
+  if (row.barcode && row.barcode !== "—") parts.push(`código ${row.barcode}`);
+  const st = variantStockCellLabel(row.stock);
+  parts.push(st.out ? "agotado" : `stock ${st.text}`);
+  return parts.join(", ");
+}
+
+/** Loading skeleton copy (announced / aria-busy). */
+export function variantsLoadingLabel(): string {
+  return "Cargando variantes…";
+}
+
+/** Minimal HTML skeleton for the variants block (no DOM API; inventory injects). */
+export function variantsLoadingHtml(escapeHtml: (s: string) => string): string {
+  return `<div class="pd-section pd-variants" aria-busy="true" role="status">
+    <div class="pd-section-head"><h4>${escapeHtml(variantsLoadingLabel())}</h4></div>
+    <div class="pd-variants-skel">
+      <div class="skel-line"></div>
+      <div class="skel-line skel-short"></div>
+      <div class="skel-line"></div>
+    </div>
+  </div>`;
+}
+
+/** Load error (Spanish, operator-facing). */
+export function variantsLoadError(detail?: string): string {
+  const d = (detail || "").trim();
+  if (d) return `No se pudieron cargar las variantes. ${d}`;
+  return "No se pudieron cargar las variantes. Revisa la conexión e intenta de nuevo.";
+}
+
+/**
+ * Thin matrix helper (no full grid API): cartesian of talla × color values
+ * for "quick add" chips / honesty about missing combos. Caps at 24 combos.
+ */
+export function matrixComboSuggestions(
+  tallas: readonly string[],
+  colores: readonly string[],
+  existing?: readonly { talla?: string; color?: string }[],
+): { talla: string; color: string; label: string; missing: boolean }[] {
+  const ts = uniqueNonEmpty(tallas).slice(0, 8);
+  const cs = uniqueNonEmpty(colores).slice(0, 8);
+  if (ts.length === 0 && cs.length === 0) return [];
+  const have = new Set(
+    (existing ?? []).map((e) => `${(e.talla || "").trim().toLowerCase()}|${(e.color || "").trim().toLowerCase()}`),
+  );
+  const out: { talla: string; color: string; label: string; missing: boolean }[] = [];
+  if (ts.length > 0 && cs.length > 0) {
+    for (const t of ts) {
+      for (const c of cs) {
+        const key = `${t.toLowerCase()}|${c.toLowerCase()}`;
+        out.push({
+          talla: t,
+          color: c,
+          label: `${t} · ${c}`,
+          missing: !have.has(key),
+        });
+        if (out.length >= 24) return out;
+      }
+    }
+    return out;
+  }
+  // One dimension only.
+  const singles = ts.length > 0 ? ts : cs;
+  const dim = ts.length > 0 ? "talla" : "color";
+  for (const v of singles) {
+    const key = dim === "talla" ? `${v.toLowerCase()}|` : `|${v.toLowerCase()}`;
+    out.push({
+      talla: dim === "talla" ? v : "",
+      color: dim === "color" ? v : "",
+      label: v,
+      missing: !have.has(key) && !have.has(`${v.toLowerCase()}|`) && !have.has(`|${v.toLowerCase()}`),
+    });
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
+function uniqueNonEmpty(vals: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of vals) {
+    const v = (raw ?? "").trim();
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+  }
+  return out;
+}
+
+/** Chile copy: soft note when edit/delete variant API is not exposed. */
+export function variantEditBlockedHint(): string {
+  return "Editar o desactivar variantes: por API de producto (PATCH) o CSV. Próximamente en este panel.";
+}
+
+/** Keyboard help under variant form. */
+export function variantFormKeyboardHint(): string {
+  return "Enter en el código de barras crea la variante · Esc cierra el formulario.";
+}
+
+/**
+ * Future PATCH body for edit variant (name/price/stock/attrs).
+ * No Tauri command yet — pure validation for when B/C wire update.
+ */
+export interface EditVariantRaw {
+  name?: string;
+  price?: string;
+  costPrice?: string;
+  stock?: string;
+  attrs?: Record<string, string>;
+  active?: boolean;
+}
+
+export type EditVariantBuildResult =
+  | {
+      ok: true;
+      value: {
+        name?: string;
+        price?: string;
+        costPrice?: string;
+        stock?: number;
+        attrs?: Record<string, string>;
+        active?: boolean;
+      };
+    }
+  | { ok: false; error: string };
+
+export function buildEditVariantInput(raw: EditVariantRaw): EditVariantBuildResult {
+  let price: string | undefined;
+  if ((raw.price ?? "").trim() !== "") {
+    const p = parseOptionalMoney(raw.price, "Precio de venta");
+    if (!p.ok) return p;
+    price = p.value;
+  }
+  let costPrice: string | undefined;
+  if ((raw.costPrice ?? "").trim() !== "") {
+    const c = parseOptionalMoney(raw.costPrice, "Costo");
+    if (!c.ok) return c;
+    costPrice = c.value;
+  }
+  let stock: number | undefined;
+  if ((raw.stock ?? "").trim() !== "") {
+    const st = parseOptionalNonNegInt(raw.stock);
+    if (!st.ok) return st;
+    stock = st.value;
+  }
+  const attrs = cleanAttrs(raw.attrs);
+  const name = (raw.name ?? "").trim() || undefined;
+  return {
+    ok: true,
+    value: {
+      name,
+      price,
+      costPrice,
+      stock,
+      attrs: Object.keys(attrs).length > 0 ? attrs : undefined,
+      active: raw.active,
+    },
+  };
+}
+
+/**
+ * Soft barcode rules for create form (required, min length, no spaces).
+ * Internal 13-digit non-EAN codes are allowed — many Chilean SKUs are not GS1.
+ * Use {@link isEan13ChecksumValid} only as optional UI hint, not hard reject.
+ */
+export function validateBarcodeSoft(raw: string): { ok: true } | { ok: false; error: string } {
+  const s = (raw ?? "").trim();
+  if (s === "") {
+    return { ok: false, error: "Ingresa el código de barras de la variante (escáner o teclado)." };
+  }
+  if (s.length < 3) {
+    return { ok: false, error: "El código de barras es demasiado corto (mín. 3 caracteres)." };
+  }
+  if (/\s/.test(s)) {
+    return { ok: false, error: "El código de barras no debe tener espacios." };
+  }
+  return { ok: true };
+}
+
+/** Optional GS1 EAN-13 checksum (hint only — never blocks internal codes). */
+export function isEan13ChecksumValid(raw: string): boolean {
+  const s = (raw ?? "").trim();
+  if (!/^\d{13}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = Number(s[i]);
+    sum += i % 2 === 0 ? d : d * 3;
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return check === Number(s[12]);
+}
+
+/** Operator hint when 13 digits fail GS1 (still allowed to save). */
+export function ean13ChecksumHint(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!/^\d{13}$/.test(s)) return "";
+  if (isEan13ChecksumValid(s)) return "";
+  return "Aviso: este EAN-13 no cuadra el dígito verificador. Si es un código interno, puedes guardarlo igual.";
+}
+
+/** Inactive child row note (when active=false). */
+export function variantInactiveLabel(): string {
+  return "Inactiva";
+}
+
+/** List-row presentation model (inventory table). Pure for tests. */
+export interface ProductListVariantMeta {
+  isParent: boolean;
+  badge: string;
+  stockDisplay: string;
+  statusPill: "agotado" | "multi-sku" | "ok" | "servicio" | null;
+  subNote: string;
+}
+
+export function productListVariantMeta(
+  p: {
+    stock: number;
+    variant_count?: number | null;
+    variants_stock?: number | null;
+  },
+  physicalStock: boolean,
+): ProductListVariantMeta {
+  if (!physicalStock) {
+    return {
+      isParent: false,
+      badge: "",
+      stockDisplay: "—",
+      statusPill: "servicio",
+      subNote: "",
+    };
+  }
+  const isParent =
+    (p.variant_count != null && typeof p.variant_count === "number") ||
+    (p.variants_stock != null && typeof p.variants_stock === "number");
+  if (isParent) {
+    return {
+      isParent: true,
+      badge: variantsListBadgeFromDto(p),
+      stockDisplay:
+        p.variants_stock != null ? `${Math.trunc(Number(p.variants_stock))} u. en variantes` : "—",
+      statusPill: "multi-sku",
+      subNote: "Vender por código de barras del hijo",
+    };
+  }
+  if (p.stock <= 0) {
+    return {
+      isParent: false,
+      badge: "",
+      stockDisplay: "0",
+      statusPill: "agotado",
+      subNote: "",
+    };
+  }
+  return {
+    isParent: false,
+    badge: "",
+    stockDisplay: String(Math.trunc(p.stock)),
+    statusPill: "ok",
+    subNote: "",
+  };
+}
+
 /** Child row note under the product name in detail. */
 export function variantChildNote(): string {
   return "Variante multi-SKU · vender por su código de barras";
@@ -331,24 +629,8 @@ export type NewVariantBuildResult =
  */
 export function buildNewVariantInput(raw: NewVariantRaw): NewVariantBuildResult {
   const barcode = (raw.barcode ?? "").trim();
-  if (barcode === "") {
-    return {
-      ok: false,
-      error: "Ingresa el código de barras de la variante (escáner o teclado).",
-    };
-  }
-  if (barcode.length < 3) {
-    return {
-      ok: false,
-      error: "El código de barras es demasiado corto (mín. 3 caracteres).",
-    };
-  }
-  if (/\s/.test(barcode)) {
-    return {
-      ok: false,
-      error: "El código de barras no debe tener espacios.",
-    };
-  }
+  const bc = validateBarcodeSoft(barcode);
+  if (!bc.ok) return bc;
 
   let price: string | undefined;
   if ((raw.price ?? "").trim() !== "") {

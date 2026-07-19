@@ -1669,6 +1669,63 @@ button {
   color: #7dd3fc;
   border: 1px solid rgba(56, 189, 248, 0.28);
 }
+.pd-variants-edit-hint,
+.pd-matrix-hint,
+.pd-kb-hint {
+  font-size: 12px;
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+.pd-matrix-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pd-matrix-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.pos-agotado {
+  color: var(--danger, #fca5a5);
+  font-weight: 600;
+}
+.pd-variants-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+.pd-variants-skel .skel-line {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.04)
+  );
+  background-size: 200% 100%;
+  animation: pd-skel 1.1s ease-in-out infinite;
+}
+.pd-variants-skel .skel-short {
+  width: 55%;
+}
+.pd-variant-table tr.is-inactive {
+  opacity: 0.55;
+}
+.pd-var-inactive {
+  margin-left: 6px;
+  font-size: 10px;
+}
+@keyframes pd-skel {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
 
 .modal-confirm {
   width: auto;

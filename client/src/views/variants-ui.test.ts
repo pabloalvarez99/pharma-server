@@ -10,6 +10,15 @@ import {
   sumVariantStock,
   variantsListBadge,
   variantsStockListBadge,
+  variantsListBadgeFromDto,
+  variantStockCellLabel,
+  variantRowAriaLabel,
+  variantsLoadingLabel,
+  variantsLoadingHtml,
+  variantsLoadError,
+  matrixComboSuggestions,
+  variantEditBlockedHint,
+  variantFormKeyboardHint,
   variantChildNote,
   addVariantButtonLabel,
   addVariantModalTitle,
@@ -135,6 +144,41 @@ describe("stock helpers", () => {
   it("variantsStockListBadge uses units not child count", () => {
     expect(variantsStockListBadge(12)).toMatch(/Multi-SKU/);
     expect(variantsStockListBadge(12)).toMatch(/12 u/);
+  });
+  it("variantsListBadgeFromDto prefers count over stock sum", () => {
+    expect(variantsListBadgeFromDto({ variant_count: 3, variants_stock: 99 })).toBe("3 variantes");
+    expect(variantsListBadgeFromDto({ variants_stock: 5 })).toMatch(/5 u/);
+    expect(variantsListBadgeFromDto({})).toBe("");
+  });
+  it("variantStockCellLabel Agotado when 0", () => {
+    expect(variantStockCellLabel(0)).toEqual({ text: "Agotado", out: true });
+    expect(variantStockCellLabel(4)).toEqual({ text: "4", out: false });
+  });
+  it("variantRowAriaLabel includes name and stock state", () => {
+    expect(variantRowAriaLabel({ name: "Polera M", stock: 0, barcode: "780" })).toMatch(/agotado/i);
+    expect(variantRowAriaLabel({ name: "Polera M", stock: 2, attrsLabel: "M" })).toMatch(/stock 2/i);
+  });
+  it("loading/error/edit/keyboard hints in Spanish Chile", () => {
+    expect(variantsLoadingLabel()).toMatch(/cargando/i);
+    expect(variantsLoadError()).toMatch(/variantes/i);
+    expect(variantsLoadError("timeout")).toMatch(/timeout/i);
+    expect(variantEditBlockedHint()).toMatch(/editar|desactivar/i);
+    expect(variantFormKeyboardHint()).toMatch(/enter|esc/i);
+    const sk = variantsLoadingHtml((s) => s);
+    expect(sk).toMatch(/aria-busy="true"/);
+    expect(sk).toMatch(/Cargando variantes/);
+  });
+  it("matrixComboSuggestions cartesian + missing flag", () => {
+    const combos = matrixComboSuggestions(["S", "M"], ["Negro", "Blanco"], [{ talla: "S", color: "Negro" }]);
+    expect(combos).toHaveLength(4);
+    expect(combos.find((c) => c.label === "S · Negro")?.missing).toBe(false);
+    expect(combos.find((c) => c.label === "M · Blanco")?.missing).toBe(true);
+  });
+  it("matrixComboSuggestions caps and dedupes", () => {
+    const manyT = Array.from({ length: 20 }, (_, i) => `T${i}`);
+    const manyC = Array.from({ length: 20 }, (_, i) => `C${i}`);
+    expect(matrixComboSuggestions(manyT, manyC).length).toBeLessThanOrEqual(24);
+    expect(matrixComboSuggestions(["M", "m", ""], ["Rojo"]).map((c) => c.label)).toEqual(["M · Rojo"]);
   });
 });
 
