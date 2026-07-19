@@ -563,3 +563,42 @@ async fn nested_variant_rejected_and_default_list_hides_children() {
         .collect();
     assert!(ids.contains(&child_id.as_str()));
 }
+
+#[tokio::test]
+async fn by_barcode_parent_shell_rejected_child_ok() {
+    let s = spawn().await;
+    let (st, parent) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products",
+        serde_json::json!({"name": "Shell EAN", "price": "5000", "stock": 0}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+
+    let (st, child) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 3,
+            "barcode": "7804999160014",
+            "attrs": { "talla": "U" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{child}");
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    // Child scan works.
+    let (st, hit) = get_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products/by-barcode/7804999160014",
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(hit["id"], child_id);
+    assert_eq!(hit["barcode"], "7804999160014");
+}

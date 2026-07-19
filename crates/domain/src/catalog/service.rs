@@ -462,6 +462,11 @@ pub async fn list_variants(
 }
 
 /// Resolve a tenant barcode to the sellable product (variant or plain SKU).
+///
+/// If the mapped product is a multi-SKU **parent** (has active children),
+/// returns [`DomainError::Invalid`] with the same stable ES fragments as the
+/// POS parent-sale guard — the scan path must never hand the cashier a
+/// non-sellable shell (client POS adds by-barcode hits without a second check).
 pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainResult<ProductDto> {
     let code = barcode.trim();
     if code.is_empty() {
@@ -473,6 +478,13 @@ pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainRe
     let mut p = repo::get_product(db, tenant, &pid)
         .await?
         .ok_or(DomainError::NotFound)?;
+    if repo::has_active_variants(db, tenant, &pid).await? {
+        return Err(DomainError::Invalid(format!(
+            "el producto '{}' tiene variantes; venda por talla/SKU o \
+             escanee el código de barras de la variante",
+            p.name
+        )));
+    }
     p.barcode = Some(code.to_string());
     Ok(p)
 }

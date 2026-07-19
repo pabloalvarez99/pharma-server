@@ -968,3 +968,33 @@ async fn plain_pharmacy_sku_untouched_by_variants_stock_field() {
     assert!(got.variants_stock.is_none());
     assert_eq!(got.stock, 40);
 }
+
+#[tokio::test]
+async fn find_by_barcode_rejects_parent_shell_with_variants() {
+    // Edge: parent somehow has a product_barcode row (import/UPSERT). Scan must
+    // not resolve to the non-sellable shell — same ES contract as POS sale.
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Shell con EAN", "9990"))
+        .await
+        .unwrap();
+    service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999150017", 4))
+        .await
+        .unwrap();
+    let parent_thing = surrealdb::sql::thing(&parent.id).unwrap();
+    domain::catalog::repo::upsert_barcode(&db, &t, &parent_thing, "7804999150093")
+        .await
+        .unwrap();
+
+    let err = service::find_by_barcode(&db, &t, "7804999150093")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+    let msg = err.to_string().to_lowercase();
+    assert!(msg.contains("tiene variantes"), "{msg}");
+
+    // Child barcode still resolves.
+    let child = service::find_by_barcode(&db, &t, "7804999150017")
+        .await
+        .unwrap();
+    assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+}
