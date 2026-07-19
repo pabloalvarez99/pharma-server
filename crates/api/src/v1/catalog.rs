@@ -65,13 +65,35 @@ pub fn router(state: AppState) -> Router<AppState> {
 
 // --- products: reads -------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+/// Query string for product list. Fields are flat (no `#[serde(flatten)]`)
+/// because `serde_urlencoded` + flatten rejects `?limit=5` with 400.
+#[derive(Debug, Default, Deserialize)]
 pub struct ListProductsQuery {
-    #[serde(flatten)]
-    filters: ProductFilters,
-    /// `true` = include variant children in the list (default: only top-level).
+    pub search: Option<String>,
+    pub category: Option<String>,
+    pub active: Option<bool>,
+    pub low_stock: Option<i64>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    /// `true` = include variant children (default: only top-level).
     #[serde(default)]
-    include_variants: bool,
+    pub include_variants: bool,
+}
+
+impl ListProductsQuery {
+    fn into_parts(self) -> (ProductFilters, bool) {
+        (
+            ProductFilters {
+                search: self.search,
+                category: self.category,
+                active: self.active,
+                low_stock: self.low_stock,
+                limit: self.limit,
+                offset: self.offset,
+            },
+            self.include_variants,
+        )
+    }
 }
 
 /// Lista productos del tenant. Por defecto oculta variantes hijas (`parent_id`);
@@ -86,8 +108,9 @@ pub async fn list_products(
 ) -> Result<Json<Vec<ProductDto>>, ApiError> {
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
+    let (filters, include_variants) = q.into_parts();
     Ok(Json(
-        service::list_products_with_variants(&db, &t, q.filters, q.include_variants).await?,
+        service::list_products_with_variants(&db, &t, filters, include_variants).await?,
     ))
 }
 
