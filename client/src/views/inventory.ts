@@ -82,6 +82,7 @@ import {
   variantEditBlockedHint,
   variantFormKeyboardHint,
   matrixComboSuggestions,
+  variantsLoadingHtml,
 } from "./variants-ui";
 import { bindModalKeys } from "./modal-keys";
 
@@ -440,7 +441,9 @@ function productRow(p: Product, physicalStock = true): string {
   const stockCells = physicalStock
     ? isParent
       ? `<td class="num">${
-          p.variants_stock != null ? `${num(Number(p.variants_stock))} <span class="muted">u. var.</span>` : "—"
+          p.variants_stock != null
+            ? `${num(Number(p.variants_stock))} <span class="muted">u. en variantes</span>`
+            : "—"
         }</td>
       <td>${badge}</td>`
       : plainOut
@@ -688,9 +691,23 @@ async function openProductDetail(
   // Multi-SKU children (empty when product is plain or is itself a child).
   let variants: ProductDetail[] = [];
   let variantsLoadErr = "";
+  const offerShell =
+    shouldOfferVariantsUi(packOpts.physicalStock) && !p.parent_id;
+  // Progressive: show product KPIs + variants skeleton while GET /variants runs.
+  if (offerShell) {
+    bodyEl.innerHTML = `
+      <h3 class="modal-title" id="pd-title">${escapeHtml(p.name)}</h3>
+      <div class="pd-grid">
+        ${pdStat("Precio venta", clp(p.price))}
+        ${pdStat("Costo", p.cost_price ? clp(p.cost_price) : "—")}
+        ${pdStat("Stock", "…")}
+      </div>
+      ${variantsLoadingHtml(escapeHtml)}
+    `;
+  }
   try {
     // Only fetch for top-level products; a child has parent_id set.
-    if (!p.parent_id && shouldOfferVariantsUi(packOpts.physicalStock)) {
+    if (offerShell) {
       bodyEl.setAttribute("aria-busy", "true");
       bodyEl.setAttribute("aria-live", "polite");
       variants = await listProductVariants(serverUrl, id);

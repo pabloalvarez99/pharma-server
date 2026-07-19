@@ -14,6 +14,7 @@ import {
   variantStockCellLabel,
   variantRowAriaLabel,
   variantsLoadingLabel,
+  variantsLoadingHtml,
   variantsLoadError,
   matrixComboSuggestions,
   variantEditBlockedHint,
@@ -163,6 +164,9 @@ describe("stock helpers", () => {
     expect(variantsLoadError("timeout")).toMatch(/timeout/i);
     expect(variantEditBlockedHint()).toMatch(/editar|desactivar/i);
     expect(variantFormKeyboardHint()).toMatch(/enter|esc/i);
+    const sk = variantsLoadingHtml((s) => s);
+    expect(sk).toMatch(/aria-busy="true"/);
+    expect(sk).toMatch(/Cargando variantes/);
   });
   it("matrixComboSuggestions cartesian + missing flag", () => {
     const combos = matrixComboSuggestions(["S", "M"], ["Negro", "Blanco"], [{ talla: "S", color: "Negro" }]);

@@ -120,6 +120,18 @@ export function variantsLoadingLabel(): string {
   return "Cargando variantes…";
 }
 
+/** Minimal HTML skeleton for the variants block (no DOM API; inventory injects). */
+export function variantsLoadingHtml(escapeHtml: (s: string) => string): string {
+  return `<div class="pd-section pd-variants" aria-busy="true" role="status">
+    <div class="pd-section-head"><h4>${escapeHtml(variantsLoadingLabel())}</h4></div>
+    <div class="pd-variants-skel">
+      <div class="skel-line"></div>
+      <div class="skel-line skel-short"></div>
+      <div class="skel-line"></div>
+    </div>
+  </div>`;
+}
+
 /** Load error (Spanish, operator-facing). */
 export function variantsLoadError(detail?: string): string {
   const d = (detail || "").trim();
