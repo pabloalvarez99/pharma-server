@@ -313,6 +313,7 @@ async fn seed_product(db: &Db, tenant: &Thing, name: &str, price: &str) {
             prescription_type: None,
             presentation: None,
             discount_percent: None,
+            attrs: None,
         },
     )
     .await
