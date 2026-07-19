@@ -2,19 +2,52 @@
 
 > **Para Grok Build CLI (o cualquier agente/dev)**: este documento es el punto
 > de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-19
-> (A: PR #319 **MERGED**; épica agent lista para "go agent épica").
+> (A night 6h: variants UI pro + promote main; PR #319 ya MERGED).
 
-### Estado rápido (2026-07-19)
+### Estado rápido (2026-07-19 — A night run)
 
 | Item | Estado |
 |---|---|
-| **P0 / P1** | **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319) MERGED** → `feature/erp-parity` @ **`5da62ce`** (head pre-merge `ca655d9`) |
+| **P0 stack** | **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319) MERGED** → `feature/erp-parity` @ **`5da62ce`** |
+| **Variants light (en base)** | `6246109` light UX inventory+POS + API multi-SKU (B) + wire (C) **ya en** `feature/erp-parity` vía #319 |
+| **Variants UI pro** | **NO PR remoto** `feat/variants-ui-pro`. Worktree `assist-b2` branch local `feat/variants-ui-pro` @ `40bf7e1` (tracks `origin/feat/p0-erp-global`). **Dirty B/C unstaged** ~+640 LOC (`variants-ui.ts`, `variants-ui.test.ts`, `inventory.ts`) — **A no stagea / no commitea**. Owner: **B o C** → commit + `gh pr create --base feature/erp-parity --head feat/variants-ui-pro` |
+| **PR variants** | `gh pr list --head feat/variants-ui-pro` → **vacío**. Merge cascade paso 1 = **WAIT B/C** |
+| **Promote main** | default branch = **`main`** (`a6e6aa5`). `feature/erp-parity` **+780** commits. Promote PR: ver § Night ops abajo |
 | Smoke | **18 PASS** (P0 baseline) |
-| rubro-pack | **200** con release rebuild |
-| **En base** | **B** variants (mig 0034/0035, multi-SKU, API) · **C** catalog-POS · clippy rubro + firstrun + assist attrs fixes |
-| CI #319 | **PASS** al merge (último verde en tip pre-merge) |
-| Residual A (assist) | Rewrite dirty unstaged local — **fuera de merge / no en #319**. Plan 4 commits §4.2; orquestador: **"go agent épica"** |
-| **Próximo** | Branch `feat/agent-assist` desde `feature/erp-parity` @ `5da62ce`; no mezclar residual con worktree sucio B/C |
+| Residual assist (A) | Dirty unstaged local (assist rewrite + docs/ops) — **nunca en merge night**. Plan §4.2; orquestador: **"go agent épica"** |
+| **A night policy** | No force-push · no keys · no residual dirty · merge squash variants→erp-parity solo CI PASS · promote main solo CI PASS |
+
+### Variants UI pro — estado + demo (night)
+
+**Branch / PR**
+- Local: `feat/variants-ui-pro` @ worktree `assist-b2`
+- Remote head branch variants: **no existe** (`origin/feat/variants-ui-pro` missing)
+- Tracking actual: `origin/feat/p0-erp-global` @ `40bf7e1`
+- PR open: **ninguno**
+- Ya merged (light): https://github.com/pabloalvarez99/pharma-server/pull/319
+
+**Qué es “pro” vs light**
+- **Light (merged #319):** banner padre multi-SKU, lista hijos, POS by-barcode, bloqueo cobro del padre (ES).
+- **Pro (dirty local B/C, uncommitted):** ampliación `variants-ui.ts` / tests / `inventory.ts` (~640 líneas). A **no** reimplementa UI; solo ops/merge cuando exista PR verde.
+
+**Demo steps (light — ya en `feature/erp-parity` @ `5da62ce`)**
+1. `./start-server.cmd` (o `PHARMA__DB__PATH` absoluto) + cliente Tauri.
+2. Login `admin@demo.cl` / `demo1234`, tenant `demo`.
+3. Inventario: abrir producto padre con variantes → banner «Tiene N variantes…».
+4. POS: escanear barcode hijo (Enter path by-barcode) → agrega línea; intentar padre → error ES «tiene variantes».
+5. API (opcional): `GET /api/v1/products/by-barcode/{code}`, `GET/POST .../products/{id}/variants`.
+
+**Cuando B/C suba PR**
+1. Push branch limpia (solo paths variants UI; sin residual assist).
+2. `gh pr create --base feature/erp-parity --head feat/variants-ui-pro --title "feat(client): variants UI pro"` …
+3. A: `gh pr checks N` → PASS → `gh pr merge N --squash` (autorizado night).
+4. Luego promote `feature/erp-parity` → `main` si CI promote PASS.
+
+### Night ops log (A)
+
+| UTC/local | Evento |
+|---|---|
+| 2026-07-19 ~00:26 | Cycle 1: fetch; no PR variants-ui-pro; open legacy #273/#270/#272/#159 (sin checks / stale); erp-parity `5da62ce`; main `a6e6aa5` +780; residual B/C variants dirty local; A HANDOFF update |
 
 ---
 
