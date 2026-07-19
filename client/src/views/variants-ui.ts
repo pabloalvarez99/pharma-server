@@ -316,6 +316,63 @@ export function variantInactiveLabel(): string {
   return "Inactiva";
 }
 
+/** List-row presentation model (inventory table). Pure for tests. */
+export interface ProductListVariantMeta {
+  isParent: boolean;
+  badge: string;
+  stockDisplay: string;
+  statusPill: "agotado" | "multi-sku" | "ok" | "servicio" | null;
+  subNote: string;
+}
+
+export function productListVariantMeta(
+  p: {
+    stock: number;
+    variant_count?: number | null;
+    variants_stock?: number | null;
+  },
+  physicalStock: boolean,
+): ProductListVariantMeta {
+  if (!physicalStock) {
+    return {
+      isParent: false,
+      badge: "",
+      stockDisplay: "—",
+      statusPill: "servicio",
+      subNote: "",
+    };
+  }
+  const isParent =
+    (p.variant_count != null && typeof p.variant_count === "number") ||
+    (p.variants_stock != null && typeof p.variants_stock === "number");
+  if (isParent) {
+    return {
+      isParent: true,
+      badge: variantsListBadgeFromDto(p),
+      stockDisplay:
+        p.variants_stock != null ? `${Math.trunc(Number(p.variants_stock))} u. en variantes` : "—",
+      statusPill: "multi-sku",
+      subNote: "Vender por código de barras del hijo",
+    };
+  }
+  if (p.stock <= 0) {
+    return {
+      isParent: false,
+      badge: "",
+      stockDisplay: "0",
+      statusPill: "agotado",
+      subNote: "",
+    };
+  }
+  return {
+    isParent: false,
+    badge: "",
+    stockDisplay: String(Math.trunc(p.stock)),
+    statusPill: "ok",
+    subNote: "",
+  };
+}
+
 /** Child row note under the product name in detail. */
 export function variantChildNote(): string {
   return "Variante multi-SKU · vender por su código de barras";

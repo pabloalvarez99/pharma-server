@@ -14,6 +14,7 @@ import {
   shouldOfferVariantsUi,
   matrixComboSuggestions,
   variantInactiveLabel,
+  productListVariantMeta,
 } from "./variants-ui";
 import { hasVariantsStockFlag, productFromDetail, type ProductDetail } from "../api/catalog";
 
@@ -136,5 +137,15 @@ describe("EAN-13 soft + edit model (future PATCH)", () => {
   });
   it("inactive label Spanish", () => {
     expect(variantInactiveLabel()).toMatch(/inactiva/i);
+  });
+  it("productListVariantMeta parent / agotado / servicio", () => {
+    expect(productListVariantMeta({ stock: 0, variant_count: 2, variants_stock: 9 }, true)).toMatchObject({
+      isParent: true,
+      statusPill: "multi-sku",
+      badge: "2 variantes",
+    });
+    expect(productListVariantMeta({ stock: 0 }, true).statusPill).toBe("agotado");
+    expect(productListVariantMeta({ stock: 5 }, false).statusPill).toBe("servicio");
+    expect(productListVariantMeta({ stock: 5 }, true).statusPill).toBe("ok");
   });
 });

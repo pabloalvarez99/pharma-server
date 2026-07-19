@@ -75,7 +75,6 @@ import {
   buildNewVariantInput,
   toVariantTableRow,
   parentStockWhenHasVariants,
-  variantsListBadgeFromDto,
   variantStockCellLabel,
   variantRowAriaLabel,
   variantsLoadError,
@@ -84,6 +83,7 @@ import {
   matrixComboSuggestions,
   variantsLoadingHtml,
   ean13ChecksumHint,
+  productListVariantMeta,
 } from "./variants-ui";
 import { bindModalKeys } from "./modal-keys";
 
@@ -425,34 +425,27 @@ function downloadExport(filename: string, mime: string, content: string): void {
 
 function productRow(p: Product, physicalStock = true): string {
   const sub = p.laboratory || p.active_ingredient || "";
-  const isParent =
-    physicalStock &&
-    (p.variant_count != null || p.variants_stock != null) &&
-    (typeof p.variant_count === "number" || typeof p.variants_stock === "number");
-  const badgeLabel = isParent ? variantsListBadgeFromDto(p) : "";
-  const badge = badgeLabel
-    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(badgeLabel)}</span>`
+  const meta = productListVariantMeta(p, physicalStock);
+  const isParent = meta.isParent;
+  const badge = meta.badge
+    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(meta.badge)}</span>`
     : "";
   // Min-stock signal: only for plain physical rows (parent shell stock is not sellable).
   const reorder =
     physicalStock && !isParent && stockLevel(p.stock) !== "ok"
       ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
       : "";
-  const plainOut = physicalStock && !isParent && p.stock <= 0;
-  const stockCells = physicalStock
-    ? isParent
-      ? `<td class="num">${
-          p.variants_stock != null
-            ? `${num(Number(p.variants_stock))} <span class="muted">u. en variantes</span>`
-            : "—"
-        }</td>
+  const stockCells =
+    meta.statusPill === "servicio"
+      ? `<td><span class="pill pill-ok">Servicio</span></td>`
+      : meta.statusPill === "multi-sku"
+        ? `<td class="num">${escapeHtml(meta.stockDisplay)}</td>
       <td>${badge}</td>`
-      : plainOut
-        ? `<td class="num">0</td>
+        : meta.statusPill === "agotado"
+          ? `<td class="num">0</td>
       <td><span class="pill pill-danger">Agotado</span>${reorder}</td>`
-        : `<td class="num">${num(p.stock)}</td>
-      <td>${stockPill(p.stock)}${reorder}</td>`
-    : `<td><span class="pill pill-ok">Servicio</span></td>`;
+          : `<td class="num">${num(p.stock)}</td>
+      <td>${stockPill(p.stock)}${reorder}</td>`;
   return `
     <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0" ${
       isParent ? 'aria-description="Producto multi-SKU con variantes"' : ""
@@ -460,7 +453,7 @@ function productRow(p: Product, physicalStock = true): string {
       <td>
         <div class="cell-main">${escapeHtml(p.name)}</div>
         ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
-        ${isParent ? `<div class="cell-sub muted">Vender por código de barras del hijo</div>` : ""}
+        ${meta.subNote ? `<div class="cell-sub muted">${escapeHtml(meta.subNote)}</div>` : ""}
       </td>
       <td class="num">${clp(p.price)}</td>
       ${stockCells}
