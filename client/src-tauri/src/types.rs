@@ -75,6 +75,9 @@ pub struct Product {
     /// Sum of active children stock when this row is a multi-SKU parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variants_stock: Option<i64>,
+    /// Active children count when multi-SKU parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_count: Option<i64>,
     /// Multi-SKU child → parent id (migración 0034).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
@@ -517,6 +520,9 @@ pub struct ProductDetail {
     /// Sum of active children stock when this row is a multi-SKU parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variants_stock: Option<i64>,
+    /// Active children count when multi-SKU parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_count: Option<i64>,
 }
 
 /// One product batch / lote (`domain::inventory::model::BatchDto`). `expiry_date`
