@@ -171,7 +171,8 @@ pub async fn list_products(
     filters: ProductFilters,
 ) -> DomainResult<Vec<ProductDto>> {
     // Hides child variants by default (retail padres + SKUs planos).
-    repo::list_products(db, tenant, &filters).await
+    let rows = repo::list_products(db, tenant, &filters).await?;
+    enrich_list_variants_stock(db, tenant, rows).await
 }
 
 /// Same as [`list_products`] but can include variant children (`parent_id` set).
@@ -181,7 +182,37 @@ pub async fn list_products_with_variants(
     filters: ProductFilters,
     include_variants: bool,
 ) -> DomainResult<Vec<ProductDto>> {
-    repo::list_products_opts(db, tenant, &filters, include_variants).await
+    let rows = repo::list_products_opts(db, tenant, &filters, include_variants).await?;
+    enrich_list_variants_stock(db, tenant, rows).await
+}
+
+/// Attach `variants_stock` on multi-SKU parents in a list page (batch query).
+/// Presence of the field is the client POS/list parent flag (C contract).
+async fn enrich_list_variants_stock(
+    db: &Db,
+    tenant: &Thing,
+    mut rows: Vec<ProductDto>,
+) -> DomainResult<Vec<ProductDto>> {
+    let parents: Vec<Thing> = rows
+        .iter()
+        .filter(|p| p.parent_id.is_none())
+        .filter_map(|p| parse_thing(&p.id).ok())
+        .collect();
+    if parents.is_empty() {
+        return Ok(rows);
+    }
+    let sums = repo::children_stock_by_parents(db, tenant, &parents).await?;
+    for p in &mut rows {
+        if p.parent_id.is_none() {
+            if let Some(&sum) = sums.get(&p.id) {
+                // Even sum==0 means "has at least one active child row" was
+                // true only if key present — map only includes parents that
+                // have ≥1 active child.
+                p.variants_stock = Some(sum);
+            }
+        }
+    }
+    Ok(rows)
 }
 
 pub async fn get_product(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ProductDto> {

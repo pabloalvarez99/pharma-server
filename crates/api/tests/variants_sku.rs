@@ -565,6 +565,38 @@ async fn nested_variant_rejected_and_default_list_hides_children() {
 }
 
 #[tokio::test]
+async fn list_products_exposes_variants_stock_on_parent() {
+    let s = spawn().await;
+    let (st, parent) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products",
+        serde_json::json!({"name": "List parent", "price": "4000", "stock": 0}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    let (st, _) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({"stock": 6, "barcode": "7804999180018", "attrs": {"talla": "M"}}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+
+    let (st, list) = get_json(&s.app, &s.token, "/api/v1/products?limit=50").await;
+    assert_eq!(st, StatusCode::OK);
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == parent_id)
+        .expect("parent in list");
+    assert_eq!(row["variants_stock"], 6, "C POS/list parent flag");
+}
+
+#[tokio::test]
 async fn by_barcode_parent_shell_rejected_child_ok() {
     let s = spawn().await;
     let (st, parent) = post_json(

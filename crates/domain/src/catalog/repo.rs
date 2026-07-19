@@ -489,6 +489,37 @@ pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> Doma
     Ok(row.and_then(|s| s.total).unwrap_or(0))
 }
 
+/// Batch: parent id → sum of active children stock. One query for a page of
+/// list results (client uses `variants_stock != null` as parent multi-SKU flag).
+pub async fn children_stock_by_parents(
+    db: &Db,
+    tenant: &Thing,
+    parents: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, i64>> {
+    if parents.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut r = db
+        .query(
+            "SELECT parent_id, stock FROM product \
+             WHERE tenant = $t AND parent_id INSIDE $ps AND active = true",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ps", parents.to_vec()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct Row {
+        parent_id: Thing,
+        stock: i64,
+    }
+    let rows: Vec<Row> = r.take(0).unwrap_or_default();
+    let mut map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for row in rows {
+        *map.entry(row.parent_id.to_string()).or_insert(0) += row.stock;
+    }
+    Ok(map)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn create_product(
     db: &Db,
