@@ -79,9 +79,20 @@ Click padre   → «Polera básica» tiene variantes. Escanea…
 - Servicios (belleza): sin toggle ni panel multi-SKU
 - Attrs del pack (`talla`/`color`/`sku`) alimentan el form; fallback offline talla/color/sku
 
-## BLOCKED_API (UI)
+## API delete/update (B desbloqueó — 2026-07-19)
 
-- **PATCH/DELETE variante** en panel: no hay comando Tauri fino; hint “por API/CSV”. Modelo puro listo: `buildEditVariantInput`.
+| Acción | Endpoint | Notas |
+|---|---|---|
+| Editar variante | `PATCH /api/v1/products/{variant_id}` | name, price, attrs, `active`, **`barcode`** |
+| Stock hijo | `POST /api/v1/products/{variant_id}/stock` | `set` o `delta` |
+| Eliminar variante | `DELETE /api/v1/products/{parent_id}/variants/{variant_id}` | soft-delete; libera EAN |
+| (alt) | `DELETE /api/v1/products/{variant_id}` | mismo soft-delete si no hay hijos activos |
+
+**BLOCKED_API cerrado en server.** Falta solo wire UI/Tauri (comando fino + botón panel).
+Modelo puro listo: `buildEditVariantInput`.
+
+## UI residual
+
 - **Matriz talla×color completa**: helper `matrixComboSuggestions` (thin) solo sugiere combos faltantes; no POST masivo
 
 ## Validación barcode

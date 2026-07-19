@@ -10,6 +10,9 @@
 //! Una variante es un `product` hijo con `parent_id` apuntando al padre,
 //! `attrs` (talla/color/sku), barcode y stock propios. Ver
 //! `docs/product/variants-design.md`. No hay tabla `product_variant`.
+//!
+//! Delete: [`service::delete_variant`] (soft + free barcode). Edit: generic
+//! [`service::update_product`] (incluye `barcode` opcional).
 
 pub mod model;
 pub mod repo;
