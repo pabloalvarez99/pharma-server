@@ -1421,6 +1421,7 @@ pub async fn seed_demo(
                 prescription_type: None,
                 presentation: item.presentation.map(str::to_string),
                 discount_percent: None,
+                attrs: None,
             },
         )
         .await?;

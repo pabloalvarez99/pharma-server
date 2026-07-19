@@ -108,6 +108,10 @@ pub struct NewProduct {
     pub prescription_type: Option<String>,
     pub presentation: Option<String>,
     pub discount_percent: Option<i64>,
+    /// Per-rubro flexible attributes (migration 0033). Omitted on wire → `None`.
+    /// Keys come from the rubro pack (e.g. `talla`, `color`, `sku`, `duracion_min`).
+    #[serde(default)]
+    pub attrs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -130,6 +134,10 @@ pub struct UpdateProduct {
     pub prescription_type: Option<String>,
     pub presentation: Option<String>,
     pub discount_percent: Option<i64>,
+    /// Replace entire attrs object when `Some`. `None` = leave unchanged.
+    /// To clear: send `Some(json!({}))` or explicit null object (client choice).
+    #[serde(default)]
+    pub attrs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

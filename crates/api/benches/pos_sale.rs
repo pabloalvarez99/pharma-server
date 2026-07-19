@@ -122,6 +122,7 @@ async fn build_harness() -> Harness {
             prescription_type: None,
             presentation: None,
             discount_percent: None,
+            attrs: None,
         },
     )
     .await

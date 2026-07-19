@@ -798,6 +798,7 @@ pub async fn import_products(
                         prescription_type: prescription_type.clone(),
                         presentation: presentation.clone(),
                         discount_percent,
+                        attrs: None,
                     };
                     match service::update_product(&db, &t, &existing.to_string(), patch).await {
                         Ok(_) => {
@@ -857,6 +858,7 @@ pub async fn import_products(
             prescription_type,
             presentation,
             discount_percent,
+            attrs: None,
         };
         match service::create_product(&db, &t, input).await {
             Ok(dto) => {

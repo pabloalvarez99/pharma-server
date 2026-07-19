@@ -124,6 +124,48 @@ fn dec_opt(d: Option<Decimal>) -> surrealdb::sql::Value {
     }
 }
 
+/// Convert `serde_json::Value` into a native SurrealQL value.
+/// Binding a raw `serde_json::Value` against SCHEMAFULL `option<object>`
+/// fields silently stores `{}` — Surreal's bind path does not map JSON
+/// objects the way we need. Used for `product.attrs` (and variants).
+fn json_to_sql(v: &serde_json::Value) -> surrealdb::sql::Value {
+    use std::collections::BTreeMap;
+    use surrealdb::sql::{Array, Object, Value};
+    match v {
+        serde_json::Value::Null => Value::None,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::from(i)
+            } else if let Some(u) = n.as_u64() {
+                Value::from(u)
+            } else if let Some(f) = n.as_f64() {
+                Value::from(f)
+            } else {
+                Value::None
+            }
+        }
+        serde_json::Value::String(s) => Value::from(s.clone()),
+        serde_json::Value::Array(items) => Value::Array(Array::from(
+            items.iter().map(json_to_sql).collect::<Vec<_>>(),
+        )),
+        serde_json::Value::Object(map) => {
+            let mut obj: BTreeMap<String, Value> = BTreeMap::new();
+            for (k, val) in map {
+                obj.insert(k.clone(), json_to_sql(val));
+            }
+            Value::Object(Object::from(obj))
+        }
+    }
+}
+
+fn attrs_bind(attrs: &Option<serde_json::Value>) -> surrealdb::sql::Value {
+    match attrs {
+        None => surrealdb::sql::Value::None,
+        Some(v) => json_to_sql(v),
+    }
+}
+
 // --- categories ------------------------------------------------------------
 
 pub async fn category_slug_exists(db: &Db, tenant: &Thing, slug: &str) -> DomainResult<bool> {
@@ -300,7 +342,7 @@ pub async fn create_product(
              external_id = $external_id, laboratory = $laboratory, \
              therapeutic_action = $therapeutic_action, active_ingredient = $active_ingredient, \
              prescription_type = $prescription_type, presentation = $presentation, \
-             discount_percent = $discount_percent RETURN AFTER",
+             discount_percent = $discount_percent, attrs = $attrs RETURN AFTER",
         )
         .bind(("t", tenant.clone()))
         .bind(("name", input.name.clone()))
@@ -324,6 +366,7 @@ pub async fn create_product(
         ))
         .bind(("presentation", input.presentation.clone()))
         .bind(("discount_percent", input.discount_percent))
+        .bind(("attrs", attrs_bind(&input.attrs)))
         .await?;
     let row: Option<ProductRow> = r.take(0)?;
     row.map(Into::into).ok_or(DomainError::NotFound)
@@ -366,7 +409,7 @@ pub async fn create_variant_product(
         .bind(("image_url", image_url))
         .bind(("external_id", external_id))
         .bind(("parent", parent.clone()))
-        .bind(("attrs", attrs))
+        .bind(("attrs", attrs_bind(&attrs)))
         .bind(("physical_stock", physical_stock))
         .await?;
     let row: Option<ProductRow> = r.take(0)?;
@@ -573,6 +616,9 @@ pub async fn update_product(
     if patch.discount_percent.is_some() {
         sets.push("discount_percent = $discount_percent");
     }
+    if patch.attrs.is_some() {
+        sets.push("attrs = $attrs");
+    }
     if category.is_some() {
         sets.push("category = $category");
     }
@@ -602,6 +648,7 @@ pub async fn update_product(
         .bind(("prescription_type", patch.prescription_type.clone()))
         .bind(("presentation", patch.presentation.clone()))
         .bind(("discount_percent", patch.discount_percent))
+        .bind(("attrs", attrs_bind(&patch.attrs)))
         .bind(("category", category.flatten()))
         .await?;
     let row: Option<ProductRow> = r.take(0)?;

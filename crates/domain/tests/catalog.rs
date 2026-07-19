@@ -46,6 +46,7 @@ fn new_product(name: &str, price: &str) -> NewProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 
@@ -285,6 +286,7 @@ fn empty_update() -> UpdateProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 
@@ -637,6 +639,54 @@ async fn stats_perf_50k_view_vs_scan() {
         .unwrap();
     assert_eq!(v.total, sc.total);
     assert_eq!(v.inventory_value, sc.inventory_value);
+}
+
+// ---------------------------------------------------------------------------
+// product.attrs persist on create/update (wire contract for rubro pack)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_and_update_persist_attrs() {
+    let (db, t) = setup().await;
+    let mut input = new_product("Polera basica", "9990");
+    input.attrs = Some(serde_json::json!({
+        "talla": "M",
+        "color": "Negro",
+        "sku": "POL-M-NEG"
+    }));
+    let created = service::create_product(&db, &t, input).await.unwrap();
+    assert_eq!(
+        created.attrs,
+        Some(serde_json::json!({
+            "talla": "M",
+            "color": "Negro",
+            "sku": "POL-M-NEG"
+        }))
+    );
+    let fetched = service::get_product(&db, &t, &created.id).await.unwrap();
+    assert_eq!(fetched.attrs, created.attrs);
+
+    let mut patch = empty_update();
+    patch.attrs = Some(serde_json::json!({"talla": "L", "color": "Azul"}));
+    let updated = service::update_product(&db, &t, &created.id, patch)
+        .await
+        .unwrap();
+    assert_eq!(
+        updated.attrs,
+        Some(serde_json::json!({"talla": "L", "color": "Azul"}))
+    );
+
+    // Omitted attrs on patch leaves previous value.
+    let mut patch2 = empty_update();
+    patch2.name = Some("Polera basica L".into());
+    let renamed = service::update_product(&db, &t, &created.id, patch2)
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "Polera basica L");
+    assert_eq!(
+        renamed.attrs,
+        Some(serde_json::json!({"talla": "L", "color": "Azul"}))
+    );
 }
 
 // ---------------------------------------------------------------------------

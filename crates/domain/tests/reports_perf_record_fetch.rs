@@ -69,6 +69,7 @@ fn np(name: &str, stock: i64) -> NewProduct {
         prescription_type: None,
         presentation: None,
         discount_percent: None,
+        attrs: None,
     }
 }
 
