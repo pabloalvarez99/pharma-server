@@ -273,3 +273,12 @@ describe("activeVocab / pack cache", () => {
     expect(activeVocab(undefined).item).toBe("Producto");
   });
 });
+
+describe("localAttrsForRubro (offline pack attrs)", () => {
+  it("mirrors domain packs for tienda / farmacia / belleza", async () => {
+    const { localAttrsForRubro } = await import("./vertical");
+    expect(localAttrsForRubro("tienda").map((a) => a.key)).toEqual(["talla", "color", "sku"]);
+    expect(localAttrsForRubro("farmacia").some((a) => a.key === "laboratory")).toBe(true);
+    expect(localAttrsForRubro("belleza")[0]?.key).toBe("duracion_min");
+  });
+});

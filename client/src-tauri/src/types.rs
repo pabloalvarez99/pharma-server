@@ -496,6 +496,9 @@ pub struct ProductDetail {
     pub prescription_type: String,
     pub presentation: Option<String>,
     pub discount_percent: Option<i64>,
+    /// Per-rubro flexible bag (P0.2). Serde ignores if the server omits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attrs: Option<serde_json::Value>,
 }
 
 /// One product batch / lote (`domain::inventory::model::BatchDto`). `expiry_date`

@@ -389,11 +389,39 @@ export async function loadRubro(serverUrl: string): Promise<Rubro> {
 // `domain::rubro`). The client consumes it with the LOCAL constants above as
 // an offline fallback: a LAN hiccup or an old server must never break gating.
 
-import { rubroPack, type RubroPack, type PackFeatures, type PackVocab } from "./api";
+import { rubroPack, type RubroPack, type PackFeatures, type PackVocab, type PackAttrField } from "./api";
 
 let packCache: RubroPack | null = null;
 
-/** Build a pack-shaped object from the local constants (offline fallback). */
+/**
+ * Offline attr catalog (mirrors `domain::rubro` packs). Used when the server
+ * pack is unreachable so the product form still shows talla/color/sku etc.
+ * Keep in sync with crates/domain/src/rubro.rs — C owns the client mirror.
+ */
+export function localAttrsForRubro(rubro: string | null | undefined): PackAttrField[] {
+  switch ((rubro ?? "").trim().toLowerCase()) {
+    case "farmacia":
+      return [
+        { key: "active_ingredient", label: "Principio activo", kind: "text" },
+        { key: "laboratory", label: "Laboratorio", kind: "text" },
+        { key: "therapeutic_action", label: "Acción terapéutica", kind: "text" },
+      ];
+    case "tienda":
+      return [
+        { key: "talla", label: "Talla", kind: "text" },
+        { key: "color", label: "Color", kind: "text" },
+        { key: "sku", label: "SKU", kind: "text" },
+      ];
+    case "belleza":
+      return [{ key: "duracion_min", label: "Duración (min)", kind: "number" }];
+    default:
+      return [];
+  }
+}
+
+/** Build a pack-shaped object from the local constants (offline fallback).
+ *  Attrs mirror domain::rubro so the product form still shows talla/color/sku
+ *  when the LAN is down or the server is older than P0.3. */
 function localPack(rubro: Rubro): RubroPack {
   const card = rubroCard(rubro);
   const f = featuresForRubro(rubro);
@@ -409,7 +437,7 @@ function localPack(rubro: Rubro): RubroPack {
       clinical: f.clinical,
     },
     vocab: { item: f.physicalStock ? "Producto" : "Servicio", catalog: "Inventario" },
-    attrs: [],
+    attrs: localAttrsForRubro(rubro),
     seed_vertical: card?.seedVertical ?? null,
     coming_soon: card?.comingSoon ?? [],
   };

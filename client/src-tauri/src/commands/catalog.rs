@@ -71,7 +71,10 @@ pub async fn inventory_summary(
 }
 
 /// POST `/api/v1/products` (Bearer, admin+). Money strings (`price`,
-/// `cost_price`) forwarded verbatim. Returns the created product detail.
+/// `cost_price`) forwarded verbatim. Optional `attrs` is the pack-driven
+/// flexible bag (talla/color/sku/…); the server may ignore it until
+/// `NewProduct.attrs` is wired on domain — still safe to send (forward-compat).
+/// Returns the created product detail.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn create_product(
@@ -86,6 +89,7 @@ pub async fn create_product(
     active_ingredient: Option<String>,
     prescription_type: Option<String>,
     presentation: Option<String>,
+    attrs: Option<serde_json::Value>,
 ) -> Result<ProductDetail, String> {
     let token = token_of(&state)?;
     let http = client();
@@ -106,6 +110,12 @@ pub async fn create_product(
     ] {
         if let Some(s) = v.filter(|s| !s.is_empty()) {
             body[k] = serde_json::Value::String(s);
+        }
+    }
+    // Pack attrs bag — only attach a non-empty object so we never send `null`.
+    if let Some(a) = attrs {
+        if a.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+            body["attrs"] = a;
         }
     }
     let resp = http

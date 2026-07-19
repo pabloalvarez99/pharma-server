@@ -57,6 +57,8 @@ export interface ProductDetail {
   prescription_type: string;
   presentation: string | null;
   discount_percent: number | null;
+  /** Per-rubro flexible bag (P0.2). Absent when the product has no pack extras. */
+  attrs?: Record<string, unknown> | null;
 }
 
 /** One product batch / lote (`BatchDto`). `expiry_date` RFC3339; `cost` STRING|null. */
@@ -86,7 +88,8 @@ export interface NearExpiryRow {
   expired: boolean;
 }
 
-/** Fields the "Nuevo producto" form collects. `price`/`costPrice` are STRINGS. */
+/** Fields the "Nuevo producto" form collects. `price`/`costPrice` are STRINGS.
+ *  `attrs` is the pack-driven flexible bag (talla, color, sku, …). */
 export interface NewProductInput {
   name: string;
   price: string;
@@ -95,10 +98,12 @@ export interface NewProductInput {
   laboratory?: string;
   activeIngredient?: string;
   presentation?: string;
+  /** Pack attrs not promoted to top-level columns. Omitted when empty. */
+  attrs?: Record<string, string>;
 }
 
 /** POST /api/v1/products (Bearer, admin+). Rejects with a Spanish string
- *  ("Permiso denegado…" on a non-admin 403). */
+ *  ("Permiso denegado…" on a non-admin 403). Money stays STRING on the wire. */
 export function createProduct(
   serverUrl: string,
   input: NewProductInput,
@@ -112,6 +117,7 @@ export function createProduct(
     laboratory: input.laboratory,
     activeIngredient: input.activeIngredient,
     presentation: input.presentation,
+    attrs: input.attrs,
   });
 }
 
