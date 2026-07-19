@@ -2,53 +2,92 @@
 
 > **Para Grok Build CLI (o cualquier agente/dev)**: este documento es el punto
 > de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-19
-> (A night 6h: variants UI pro + promote main; PR #319 ya MERGED).
+> (A night: **PR #321** variants UI pro OPEN + CI; no inventar features).
 
-### Estado rápido (2026-07-19 — A night run)
+### Estado rápido (2026-07-19 — A night)
 
 | Item | Estado |
 |---|---|
 | **P0 stack** | **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319) MERGED** → `feature/erp-parity` @ **`5da62ce`** |
-| **Variants light (en base)** | `6246109` light UX inventory+POS + API multi-SKU (B) + wire (C) **ya en** `feature/erp-parity` vía #319 |
-| **Variants UI pro** | **NO PR remoto** `feat/variants-ui-pro`. Worktree `assist-b2` branch local `feat/variants-ui-pro` @ `40bf7e1` (tracks `origin/feat/p0-erp-global`). **Dirty B/C unstaged** ~+640 LOC (`variants-ui.ts`, `variants-ui.test.ts`, `inventory.ts`) — **A no stagea / no commitea**. Owner: **B o C** → commit + `gh pr create --base feature/erp-parity --head feat/variants-ui-pro` |
-| **PR variants** | `gh pr list --head feat/variants-ui-pro` → **vacío**. Merge cascade paso 1 = **WAIT B/C** |
-| **Promote main** | default branch = **`main`** (`a6e6aa5`). `feature/erp-parity` **+780** commits. Promote PR: ver § Night ops abajo |
-| Smoke | **18 PASS** (P0 baseline) |
-| Residual assist (A) | Dirty unstaged local (assist rewrite + docs/ops) — **nunca en merge night**. Plan §4.2; orquestador: **"go agent épica"** |
-| **A night policy** | No force-push · no keys · no residual dirty · merge squash variants→erp-parity solo CI PASS · promote main solo CI PASS |
+| **Variants light (en base)** | `6246109` en `feature/erp-parity` vía #319 |
+| **Variants UI pro** | **[PR #321](https://github.com/pabloalvarez99/pharma-server/pull/321)** OPEN · `feat/variants-ui-pro` → `feature/erp-parity` · tip **`ca4b853`** · MERGEABLE · CI **IN_PROGRESS** ([run](https://github.com/pabloalvarez99/pharma-server/actions/runs/29673372418)) |
+| **A acción** | **WAIT CI #321**. Merge squash **solo** si PASS. No reimplementa UI. No inventa features. |
+| **Promote main** | **[PR #320](https://github.com/pabloalvarez99/pharma-server/pull/320)** `feature/erp-parity` → `main` · CI pending · merge **después** de #321 si se quiere el pro en el promote, o re-promover post-merge |
+| Smoke P0 | **18 PASS** baseline previo |
+| Residual assist (A) | Unstaged local — **nunca stagear** en night |
+| **Policy** | No force-push · no keys · merge solo CI PASS |
 
-### Variants UI pro — estado + demo (night)
+### Variants UI pro — branch / log (real)
 
-**Branch / PR**
-- Local: `feat/variants-ui-pro` @ worktree `assist-b2`
-- Remote head branch variants: **no existe** (`origin/feat/variants-ui-pro` missing)
-- Tracking actual: `origin/feat/p0-erp-global` @ `40bf7e1`
-- PR open: **ninguno**
-- Ya merged (light): https://github.com/pabloalvarez99/pharma-server/pull/319
+| Ref | SHA / URL |
+|---|---|
+| Branch | `feat/variants-ui-pro` |
+| Tip | `ca4b853` `feat(client): professional multi-SKU variants UI` |
+| Base | `feature/erp-parity` @ `5da62ce` |
+| PR | https://github.com/pabloalvarez99/pharma-server/pull/321 |
+| Files (code) | `variants-ui.ts` +386, `variants-ui.test.ts` +189, `inventory.ts` +204/−25, `pos.ts` +37/−15, `styles.css` +51, `pos-service.test.ts` tweak |
+| Also in PR | `HANDOFF.md` (docs night) |
 
-**Qué es “pro” vs light**
-- **Light (merged #319):** banner padre multi-SKU, lista hijos, POS by-barcode, bloqueo cobro del padre (ES).
-- **Pro (dirty local B/C, uncommitted):** ampliación `variants-ui.ts` / tests / `inventory.ts` (~640 líneas). A **no** reimplementa UI; solo ops/merge cuando exista PR verde.
+**git log (head stack, no inventar):**
+```
+ca4b853 feat(client): professional multi-SKU variants UI
+7bfea5a docs: HANDOFF variants UI pro night run
+5336df9 docs: HANDOFF variants UI pro night run
+40bf7e1 docs: HANDOFF post-merge PR #319 and agent epic next
+… (ancestry pre-merge p0; light variants already on erp-parity: 6246109)
+```
 
-**Demo steps (light — ya en `feature/erp-parity` @ `5da62ce`)**
-1. `./start-server.cmd` (o `PHARMA__DB__PATH` absoluto) + cliente Tauri.
-2. Login `admin@demo.cl` / `demo1234`, tenant `demo`.
-3. Inventario: abrir producto padre con variantes → banner «Tiene N variantes…».
-4. POS: escanear barcode hijo (Enter path by-barcode) → agrega línea; intentar padre → error ES «tiene variantes».
-5. API (opcional): `GET /api/v1/products/by-barcode/{code}`, `GET/POST .../products/{id}/variants`.
+**En scope (solo lo del PR body + código `ca4b853`):**
+1. Detalle producto: tabla variantes + modal **barcode-first** (`createProductVariant`)
+2. Form nuevo producto: toggle **tiene variantes** → stock padre 0 + toast ES
+3. POS: scan barcode → variante; guard padre con hijos; shells stock-0 clickeables
+4. Modelo puro `variants-ui.ts` + vitest denso (34 en PR; suite client 706 pass claim)
+5. Multi-rubro honesty: UI variantes **solo** si `physicalStock`
 
-**Cuando B/C suba PR**
-1. Push branch limpia (solo paths variants UI; sin residual assist).
-2. `gh pr create --base feature/erp-parity --head feat/variants-ui-pro --title "feat(client): variants UI pro"` …
-3. A: `gh pr checks N` → PASS → `gh pr merge N --squash` (autorizado night).
-4. Luego promote `feature/erp-parity` → `main` si CI promote PASS.
+**Fuera de scope / BLOCKED (explícito en PR — no inventar ni QA-forzar):**
+- Badge de lista con count **sin N+1** (DTO list sin `has_variants` / `variant_count`) — deferred hasta B
+- Editor matriz full talla×color — out of scope
+
+### Checklist QA (manual + auto) — solo features reales del PR
+
+**Auto (CI / local client)**
+- [ ] `gh pr checks 321` → `build + test (windows)` **PASS**
+- [ ] `cd client && npx tsc --noEmit` (claim PR)
+- [ ] `cd client && npm test` — claim PR: 706 passed / 7 todo; **no regresión** cashier/rubro
+- [ ] Vitest `variants-ui.test.ts`: banners, section title, parent error, stock helpers, multi-rubro honesty (`physicalStock`), attr fields pack (sin keys clínicas como dims), `preferBarcodeLookup`, `buildNewVariantInput` (barcode required/spaces/short/money), `parentStockWhenHasVariants`
+
+**Manual demo (5 pasos del PR — tenant demo)**
+| # | Paso | Resultado esperado (copy real del modelo) |
+|---|---|---|
+| 1 | Login `admin@demo.cl` / `demo1234`, rubro **con stock físico** (p.ej. tienda/minimarket, no servicio) | Shell OK; variants UI ofrecida solo si `physicalStock` |
+| 2 | Inventario → **+ Nuevo producto** → marcar *tiene variantes* → crear padre | Stock padre = 0; toast: «creado como padre multi-SKU… agrega variantes» |
+| 3 | Detalle padre → **+ Agregar variante** → barcode + talla/color → 2 hijos | Tabla con filas; empty state previo: «Aún no hay variantes…»; CTA «+ Agregar variante»; modal «Nueva variante · …» |
+| 4 | POS: escanear barcode hijo | Entra al carrito; hint búsqueda menciona barcode |
+| 4b | POS: click/selección del **padre** | Error ES: «tiene variantes. Escanea el código…» |
+| 5 | Cobrar línea de variante | Smoke cobro OK (no regresión caja) |
+
+**Checks de honestidad multi-rubro (del código, no inventados)**
+- [ ] Rubro **sin** `physicalStock` (servicio/belleza): **no** ofrece toggle/UI variantes
+- [ ] Pack farmacia: dims de variante **no** meten keys clínicas (tests `variantAttrFieldsFromPack`)
+- [ ] Stock en variantes: label «En variantes · N u.» suma hijos; hijo note: vender por barcode
+
+**Negativos barcode-first (`buildNewVariantInput`)**
+- [ ] Barcode vacío / con espacios / corto → reject
+- [ ] Money inválido → error ES de campo
+- [ ] Stock no entero ≥0 → «El stock debe ser un entero ≥ 0.»
+
+**No QA de (out of scope)**
+- Matrix talla×color editor
+- Badge count en listado catálogo (BLOCKED_API N+1)
+- Features no listadas en PR #321
 
 ### Night ops log (A)
 
 | UTC/local | Evento |
 |---|---|
+| 2026-07-19 ~00:35 | PR **#321** OPEN + CI IN_PROGRESS; tip `ca4b853`; QA checklist from PR only; WAIT merge; promote #320 still pending |
 | 2026-07-19 00:28 | cycle 1 erp=5da62ce main=a6e6aa5 variantsPR=0 merges=[none] |
-| 2026-07-19 ~00:26 | Cycle 1: fetch; no PR variants-ui-pro; open legacy #273/#270/#272/#159 (sin checks / stale); erp-parity `5da62ce`; main `a6e6aa5` +780; residual B/C variants dirty local; A HANDOFF update |
+| 2026-07-19 ~00:26 | Cycle 1 pre-#321: no PR; residual dirty; HANDOFF |
 
 ---
 
