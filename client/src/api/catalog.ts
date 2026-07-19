@@ -267,14 +267,18 @@ export function productFromDetail(d: ProductDetail): Product {
 }
 
 /**
- * Parent multi-SKU when B sets `variants_stock` (sum of active children units).
- * Presence of the field (including 0) means the row is a parent shell.
+ * Parent multi-SKU when B sets `variants_stock` and/or `variant_count`.
+ * Presence of either field (including 0) means the row is a parent shell.
  * Omitted on plain SKUs and older servers.
  */
 export function hasVariantsStockFlag(p: {
   variants_stock?: number | null;
+  variant_count?: number | null;
 }): boolean {
-  return p.variants_stock != null && typeof p.variants_stock === "number";
+  return (
+    (p.variants_stock != null && typeof p.variants_stock === "number") ||
+    (p.variant_count != null && typeof p.variant_count === "number")
+  );
 }
 
 /** POST /api/v1/products/{id}/stock (Bearer, admin+). Pass `set` (absolute) or

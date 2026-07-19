@@ -268,8 +268,11 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   const variantsCache = new Map<string, boolean>();
 
   async function productHasVariants(p: Product): Promise<boolean> {
-    // Fast path: B list/detail exposes variants_stock on multi-SKU parents.
-    if (p.variants_stock != null && typeof p.variants_stock === "number") {
+    // Fast path: B list/detail exposes variants_stock / variant_count on parents.
+    if (
+      (p.variants_stock != null && typeof p.variants_stock === "number") ||
+      (p.variant_count != null && typeof p.variant_count === "number")
+    ) {
       variantsCache.set(p.id, true);
       return true;
     }
@@ -1304,14 +1307,25 @@ export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servici
     </button>
   `;
   }
-  const isParent = p.variants_stock != null && typeof p.variants_stock === "number";
+  const isParent =
+    (p.variants_stock != null && typeof p.variants_stock === "number") ||
+    (p.variant_count != null && typeof p.variant_count === "number");
   if (isParent) {
-    const sum = Number(p.variants_stock);
+    const sum = p.variants_stock != null ? Number(p.variants_stock) : null;
+    const count = p.variant_count != null ? Number(p.variant_count) : null;
+    const mid =
+      count != null
+        ? count === 1
+          ? "1 variante"
+          : `${count} variantes`
+        : sum != null
+          ? `stock en variantes: ${num(sum)}`
+          : "multi-SKU";
     return `
-    <button type="button" class="pos-result is-parent-variants">
+    <button type="button" class="pos-result is-parent-variants" aria-description="Producto con variantes; escanear código de barras del hijo">
       <div class="pos-result-info">
         <div class="cell-main">${escapeHtml(p.name)}</div>
-        <div class="cell-sub muted">Multi-SKU · stock en variantes: <span class="rb-num">${num(sum)}</span> · escanear barcode hijo</div>
+        <div class="cell-sub muted">Multi-SKU · ${escapeHtml(mid)} · escanear barcode hijo</div>
       </div>
       <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>

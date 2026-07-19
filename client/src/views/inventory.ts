@@ -550,9 +550,12 @@ function openNewProduct(
     </div>
   `;
 
+  let unbindNpKeys: (() => void) | undefined;
   const close = (): void => {
+    unbindNpKeys?.();
     modalHost.innerHTML = "";
   };
+  unbindNpKeys = bindModalKeys(close);
   const nameEl = modalHost.querySelector<HTMLInputElement>("#np-name")!;
   const priceEl = modalHost.querySelector<HTMLInputElement>("#np-price")!;
   const costEl = modalHost.querySelector<HTMLInputElement>("#np-cost")!;

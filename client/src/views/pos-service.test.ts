@@ -25,7 +25,7 @@ describe("POS picker card — physical rubro (trackStock=true)", () => {
     const html = resultCard(product(7), true);
     expect(html).toContain("Stock:");
     expect(html).toContain(">7<");
-    expect(html).not.toContain("agotado");
+    expect(html).not.toMatch(/agotado/i);
     expect(html).not.toContain("disabled");
     expect(html).not.toContain("Servicio");
   });
@@ -36,6 +36,20 @@ describe("POS picker card — physical rubro (trackStock=true)", () => {
     expect(html).toMatch(/variantes/i);
     expect(html).not.toContain("disabled");
     expect(html).toContain("is-out");
+  });
+
+  it("parent with variant_count shows multi-SKU card (not Agotado)", () => {
+    const parent: Product = {
+      ...product(0),
+      name: "Polera básica",
+      variant_count: 2,
+      variants_stock: 12,
+    };
+    const html = resultCard(parent, true);
+    expect(html).toContain("is-parent-variants");
+    expect(html).toMatch(/2 variantes/i);
+    expect(html).toMatch(/barcode|código/i);
+    expect(html).not.toContain("is-out");
   });
 });
 
