@@ -75,6 +75,129 @@ export function variantsStockListBadge(variantsStock: number): string {
   return `Multi-SKU · ${n} u.`;
 }
 
+/**
+ * Prefer `variant_count` (N variantes) when B exposes it; fall back to stock sum.
+ * Chile retail copy — short for table cells.
+ */
+export function variantsListBadgeFromDto(p: {
+  variant_count?: number | null;
+  variants_stock?: number | null;
+}): string {
+  if (p.variant_count != null && typeof p.variant_count === "number") {
+    return variantsListBadge(p.variant_count);
+  }
+  if (p.variants_stock != null && typeof p.variants_stock === "number") {
+    return variantsStockListBadge(p.variants_stock);
+  }
+  return "";
+}
+
+/** Stock cell for a variant row: number + optional Agotado pill label. */
+export function variantStockCellLabel(stock: number): { text: string; out: boolean } {
+  const n = typeof stock === "number" && Number.isFinite(stock) ? Math.trunc(stock) : 0;
+  if (n <= 0) return { text: "Agotado", out: true };
+  return { text: String(n), out: false };
+}
+
+/** Accessible label for a variant table row. */
+export function variantRowAriaLabel(row: {
+  name: string;
+  barcode?: string;
+  stock: number;
+  attrsLabel?: string;
+}): string {
+  const name = (row.name || "Variante").trim() || "Variante";
+  const parts = [name];
+  if (row.attrsLabel) parts.push(row.attrsLabel);
+  if (row.barcode && row.barcode !== "—") parts.push(`código ${row.barcode}`);
+  const st = variantStockCellLabel(row.stock);
+  parts.push(st.out ? "agotado" : `stock ${st.text}`);
+  return parts.join(", ");
+}
+
+/** Loading skeleton copy (announced / aria-busy). */
+export function variantsLoadingLabel(): string {
+  return "Cargando variantes…";
+}
+
+/** Load error (Spanish, operator-facing). */
+export function variantsLoadError(detail?: string): string {
+  const d = (detail || "").trim();
+  if (d) return `No se pudieron cargar las variantes. ${d}`;
+  return "No se pudieron cargar las variantes. Revisa la conexión e intenta de nuevo.";
+}
+
+/**
+ * Thin matrix helper (no full grid API): cartesian of talla × color values
+ * for "quick add" chips / honesty about missing combos. Caps at 24 combos.
+ */
+export function matrixComboSuggestions(
+  tallas: readonly string[],
+  colores: readonly string[],
+  existing?: readonly { talla?: string; color?: string }[],
+): { talla: string; color: string; label: string; missing: boolean }[] {
+  const ts = uniqueNonEmpty(tallas).slice(0, 8);
+  const cs = uniqueNonEmpty(colores).slice(0, 8);
+  if (ts.length === 0 && cs.length === 0) return [];
+  const have = new Set(
+    (existing ?? []).map((e) => `${(e.talla || "").trim().toLowerCase()}|${(e.color || "").trim().toLowerCase()}`),
+  );
+  const out: { talla: string; color: string; label: string; missing: boolean }[] = [];
+  if (ts.length > 0 && cs.length > 0) {
+    for (const t of ts) {
+      for (const c of cs) {
+        const key = `${t.toLowerCase()}|${c.toLowerCase()}`;
+        out.push({
+          talla: t,
+          color: c,
+          label: `${t} · ${c}`,
+          missing: !have.has(key),
+        });
+        if (out.length >= 24) return out;
+      }
+    }
+    return out;
+  }
+  // One dimension only.
+  const singles = ts.length > 0 ? ts : cs;
+  const dim = ts.length > 0 ? "talla" : "color";
+  for (const v of singles) {
+    const key = dim === "talla" ? `${v.toLowerCase()}|` : `|${v.toLowerCase()}`;
+    out.push({
+      talla: dim === "talla" ? v : "",
+      color: dim === "color" ? v : "",
+      label: v,
+      missing: !have.has(key) && !have.has(`${v.toLowerCase()}|`) && !have.has(`|${v.toLowerCase()}`),
+    });
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
+function uniqueNonEmpty(vals: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of vals) {
+    const v = (raw ?? "").trim();
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+  }
+  return out;
+}
+
+/** Chile copy: soft note when edit/delete variant API is not exposed. */
+export function variantEditBlockedHint(): string {
+  return "Editar o desactivar variantes: por API de producto (PATCH) o CSV. Próximamente en este panel.";
+}
+
+/** Keyboard help under variant form. */
+export function variantFormKeyboardHint(): string {
+  return "Enter en el código de barras crea la variante · Esc cierra el formulario.";
+}
+
 /** Child row note under the product name in detail. */
 export function variantChildNote(): string {
   return "Variante multi-SKU · vender por su código de barras";

@@ -1321,10 +1321,14 @@ export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servici
   // Never `disabled` on stock=0: multi-SKU parents without variants_stock flag
   // (old server) still need click → GET /variants. Plain OOS gets Spanish copy.
   return `
-    <button type="button" class="pos-result ${out ? "is-out" : ""}">
+    <button type="button" class="pos-result ${out ? "is-out" : ""}" ${
+      out ? 'aria-description="Agotado o posible padre multi-SKU"' : ""
+    }>
       <div class="pos-result-info">
         <div class="cell-main">${escapeHtml(p.name)}</div>
-        <div class="cell-sub muted">Stock: <span class="rb-num">${num(p.stock)}</span>${out ? " · sin stock / ¿variantes?" : ""}</div>
+        <div class="cell-sub muted">Stock: <span class="rb-num">${num(p.stock)}</span>${
+          out ? ' · <span class="pos-agotado">Agotado</span> · ¿variantes?' : ""
+        }</div>
       </div>
       <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>

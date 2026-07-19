@@ -1669,6 +1669,17 @@ button {
   color: #7dd3fc;
   border: 1px solid rgba(56, 189, 248, 0.28);
 }
+.pd-variants-edit-hint,
+.pd-matrix-hint,
+.pd-kb-hint {
+  font-size: 12px;
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+.pos-agotado {
+  color: var(--danger, #fca5a5);
+  font-weight: 600;
+}
 
 .modal-confirm {
   width: auto;

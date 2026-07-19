@@ -75,8 +75,15 @@ import {
   buildNewVariantInput,
   toVariantTableRow,
   parentStockWhenHasVariants,
-  variantsStockListBadge,
+  variantsListBadgeFromDto,
+  variantStockCellLabel,
+  variantRowAriaLabel,
+  variantsLoadError,
+  variantEditBlockedHint,
+  variantFormKeyboardHint,
+  matrixComboSuggestions,
 } from "./variants-ui";
+import { bindModalKeys } from "./modal-keys";
 
 const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
@@ -417,26 +424,35 @@ function downloadExport(filename: string, mime: string, content: string): void {
 function productRow(p: Product, physicalStock = true): string {
   const sub = p.laboratory || p.active_ingredient || "";
   const isParent =
-    physicalStock && p.variants_stock != null && typeof p.variants_stock === "number";
-  const badge = isParent
-    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(
-        variantsStockListBadge(Number(p.variants_stock)),
-      )}</span>`
+    physicalStock &&
+    (p.variant_count != null || p.variants_stock != null) &&
+    (typeof p.variant_count === "number" || typeof p.variants_stock === "number");
+  const badgeLabel = isParent ? variantsListBadgeFromDto(p) : "";
+  const badge = badgeLabel
+    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(badgeLabel)}</span>`
     : "";
   // Min-stock signal: only for plain physical rows (parent shell stock is not sellable).
   const reorder =
     physicalStock && !isParent && stockLevel(p.stock) !== "ok"
       ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
       : "";
+  const plainOut = physicalStock && !isParent && p.stock <= 0;
   const stockCells = physicalStock
     ? isParent
-      ? `<td class="num">${num(Number(p.variants_stock))} <span class="muted">var.</span></td>
+      ? `<td class="num">${
+          p.variants_stock != null ? `${num(Number(p.variants_stock))} <span class="muted">u. var.</span>` : "—"
+        }</td>
       <td>${badge}</td>`
-      : `<td class="num">${num(p.stock)}</td>
+      : plainOut
+        ? `<td class="num">0</td>
+      <td><span class="pill pill-danger">Agotado</span>${reorder}</td>`
+        : `<td class="num">${num(p.stock)}</td>
       <td>${stockPill(p.stock)}${reorder}</td>`
     : `<td><span class="pill pill-ok">Servicio</span></td>`;
   return `
-    <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0">
+    <tr data-id="${escapeHtml(p.id)}" class="inv-row" tabindex="0" ${
+      isParent ? 'aria-description="Producto multi-SKU con variantes"' : ""
+    }>
       <td>
         <div class="cell-main">${escapeHtml(p.name)}</div>
         ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
@@ -639,15 +655,18 @@ async function openProductDetail(
 ): Promise<void> {
   modalHost.innerHTML = `
     <div class="modal-backdrop">
-      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-label="Detalle">
-        <button id="pd-close" class="inv-modal-x" aria-label="Cerrar">×</button>
-        <div id="pd-body">${detailSkeleton()}</div>
+      <div class="modal inv-modal-wide" role="dialog" aria-modal="true" aria-labelledby="pd-title" aria-label="Detalle de producto">
+        <button id="pd-close" class="inv-modal-x" aria-label="Cerrar detalle">×</button>
+        <div id="pd-body" aria-busy="true">${detailSkeleton()}</div>
       </div>
     </div>
   `;
+  let unbindKeys: (() => void) | undefined;
   const close = (): void => {
+    unbindKeys?.();
     modalHost.innerHTML = "";
   };
+  unbindKeys = bindModalKeys(close);
   modalHost.querySelector<HTMLElement>(".modal-backdrop")!.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) close();
   });
@@ -658,21 +677,32 @@ async function openProductDetail(
   try {
     p = await productDetail(serverUrl, id);
   } catch (err) {
+    bodyEl.setAttribute("aria-busy", "false");
     bodyEl.innerHTML = errorStateHtml(err);
     return;
   }
 
   // Multi-SKU children (empty when product is plain or is itself a child).
   let variants: ProductDetail[] = [];
+  let variantsLoadErr = "";
   try {
     // Only fetch for top-level products; a child has parent_id set.
-    if (!p.parent_id) {
+    if (!p.parent_id && shouldOfferVariantsUi(packOpts.physicalStock)) {
+      bodyEl.setAttribute("aria-busy", "true");
+      bodyEl.setAttribute("aria-live", "polite");
       variants = await listProductVariants(serverUrl, id);
     }
-  } catch {
-    // Pre-variants server or 404 — show plain detail (no banner).
-    variants = [];
+  } catch (err) {
+    // Pre-variants server: silent empty. Real network errors: surface Spanish.
+    const msg = asMessage(err);
+    if (/404|not found|no encontr/i.test(msg)) {
+      variants = [];
+    } else {
+      variantsLoadErr = variantsLoadError(msg);
+      variants = [];
+    }
   }
+  bodyEl.setAttribute("aria-busy", "false");
 
   function paintDetail(): void {
     const kids = variants;
@@ -721,19 +751,34 @@ async function openProductDetail(
                   barcode: v.barcode,
                 });
                 const lab = row.attrsLabel;
-                return `<tr data-variant-id="${escapeHtml(v.id)}">
+                const st = variantStockCellLabel(row.stock);
+                const aria = variantRowAriaLabel({
+                  name: row.name,
+                  barcode: row.barcode,
+                  stock: row.stock,
+                  attrsLabel: lab,
+                });
+                return `<tr data-variant-id="${escapeHtml(v.id)}" aria-label="${escapeHtml(aria)}">
                   <td><div class="cell-main">${escapeHtml(row.name)}</div>
                     ${lab && lab !== row.name ? `<div class="cell-sub muted">${escapeHtml(lab)}</div>` : ""}</td>
                   <td class="rb-num">${escapeHtml(row.barcode)}</td>
                   <td class="num">${clp(row.price)}</td>
-                  <td class="num">${num(row.stock)}</td>
+                  <td class="num">${
+                    st.out
+                      ? `<span class="pill pill-danger" title="Sin stock">${escapeHtml(st.text)}</span>`
+                      : escapeHtml(st.text)
+                  }</td>
                 </tr>`;
               })
               .join("")}
           </tbody>
-        </table>`
-            : `<p class="muted pd-variants-empty" role="status">${escapeHtml(variantsEmptyHint())}</p>`
+        </table>
+        <p class="muted pd-variants-edit-hint">${escapeHtml(variantEditBlockedHint())}</p>`
+            : variantsLoadErr
+              ? `<p class="pos-error pd-variants-empty" role="alert">${escapeHtml(variantsLoadErr)}</p>`
+              : `<p class="muted pd-variants-empty" role="status">${escapeHtml(variantsEmptyHint())}</p>`
         }
+        ${matrixHintHtml(kids)}
         <div id="pd-variant-form"></div>
       </div>`
       : "";
@@ -777,7 +822,7 @@ async function openProductDetail(
       </div>`
       : "";
     bodyEl.innerHTML = `
-      <h3 class="modal-title">${escapeHtml(p.name)}</h3>
+      <h3 class="modal-title" id="pd-title">${escapeHtml(p.name)}</h3>
       ${sub ? `<p class="muted pd-sub">${escapeHtml(sub)}</p>` : ""}
       ${childNote}
       <div class="pd-grid">
@@ -803,6 +848,36 @@ async function openProductDetail(
     }
   }
 
+  /** Thin talla×color honesty: missing combos as text (no full matrix API). */
+  function matrixHintHtml(kids: ProductDetail[]): string {
+    const pack = cachedPack();
+    const rawAttrs =
+      pack?.attrs?.length
+        ? pack.attrs
+        : localAttrsForRubro(pack?.rubro ?? null);
+    const keys = new Set((rawAttrs ?? []).map((a) => a.key.toLowerCase()));
+    if (!keys.has("talla") && !keys.has("color")) return "";
+    const existing = kids.map((k) => {
+      const a = (k.attrs ?? {}) as Record<string, unknown>;
+      return {
+        talla: a.talla != null ? String(a.talla) : "",
+        color: a.color != null ? String(a.color) : "",
+      };
+    });
+    const tallas = existing.map((e) => e.talla).filter(Boolean);
+    const colores = existing.map((e) => e.color).filter(Boolean);
+    // Seed common Chilean retail sizes when empty so the hint is useful after first SKUs.
+    const tPool = tallas.length ? tallas : ["XS", "S", "M", "L", "XL"];
+    const cPool = colores.length ? colores : [];
+    if (tallas.length === 0 && colores.length === 0) return "";
+    const combos = matrixComboSuggestions(tPool, cPool.length ? cPool : [""], existing);
+    const missing = combos.filter((c) => c.missing && c.label.trim() !== "").slice(0, 8);
+    if (missing.length === 0) return "";
+    return `<p class="muted pd-matrix-hint" role="note">Combinaciones sugeridas sin alta: ${escapeHtml(
+      missing.map((m) => m.label).join(", "),
+    )}. Agrégalas con código de barras (matriz completa próximamente).</p>`;
+  }
+
   function toggleVariantForm(): void {
     const host = bodyEl.querySelector<HTMLElement>("#pd-variant-form");
     if (!host) return;
@@ -818,11 +893,14 @@ async function openProductDetail(
     const vFields = variantFormAttrFields(rawAttrs);
     host.innerHTML = `
       <div class="pd-variant-form-inner" role="form" aria-label="${escapeHtml(addVariantModalTitle(p.name))}">
-        <h4 class="pd-variant-form-title">${escapeHtml(addVariantModalTitle(p.name))}</h4>
+        <h4 class="pd-variant-form-title" id="vf-title">${escapeHtml(addVariantModalTitle(p.name))}</h4>
         <p class="muted pd-sub">Código de barras primero — el POS vende escaneando este SKU.</p>
+        <p class="muted pd-sub pd-kb-hint">${escapeHtml(variantFormKeyboardHint())}</p>
         <label class="field modal-field">
           <span class="modal-label">Código de barras *</span>
-          <input id="vf-barcode" type="text" autocomplete="off" inputmode="text" placeholder="Escanear o escribir EAN/SKU" />
+          <input id="vf-barcode" type="text" autocomplete="off" inputmode="text"
+                 placeholder="Escanear o escribir EAN/SKU" aria-required="true"
+                 aria-describedby="vf-title" />
         </label>
         <div class="inv-form-row">
           <label class="field modal-field">
@@ -862,12 +940,13 @@ async function openProductDetail(
     const costEl = host.querySelector<HTMLInputElement>("#vf-cost")!;
     const errEl = host.querySelector<HTMLElement>("#vf-error")!;
     const btn = host.querySelector<HTMLButtonElement>("#vf-confirm")!;
-    host.querySelector<HTMLButtonElement>("#vf-cancel")!.addEventListener("click", () => {
+    const closeForm = (): void => {
       host.innerHTML = "";
-    });
+    };
+    host.querySelector<HTMLButtonElement>("#vf-cancel")!.addEventListener("click", closeForm);
     barcodeEl.focus();
 
-    btn.addEventListener("click", async () => {
+    const submit = async (): Promise<void> => {
       const built = buildNewVariantInput({
         barcode: barcodeEl.value,
         name: nameEl.value,
@@ -878,6 +957,7 @@ async function openProductDetail(
       });
       if (!built.ok) {
         showErr(errEl, built.error);
+        barcodeEl.focus();
         return;
       }
       errEl.hidden = true;
@@ -891,16 +971,27 @@ async function openProductDetail(
       } catch (err) {
         showErr(errEl, asMessage(err));
         busy(btn, false);
+        barcodeEl.focus();
       }
+    };
+
+    btn.addEventListener("click", () => {
+      void submit();
     });
 
-    // Enter on barcode submits (scan gun dumps code + Enter).
-    barcodeEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+    // Enter on barcode submits (scan gun dumps code + Enter). Esc closes form
+    // without closing the whole product detail (scoped handler).
+    const onFormKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
         e.preventDefault();
-        btn.click();
+        e.stopPropagation();
+        closeForm();
+      } else if (e.key === "Enter" && e.target === barcodeEl) {
+        e.preventDefault();
+        void submit();
       }
-    });
+    };
+    host.addEventListener("keydown", onFormKey);
   }
 
   /** Flatten product.attrs into short subline tokens (talla M · color Azul). */

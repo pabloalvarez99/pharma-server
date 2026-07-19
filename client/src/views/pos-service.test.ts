@@ -30,9 +30,10 @@ describe("POS picker card — physical rubro (trackStock=true)", () => {
     expect(html).not.toContain("Servicio");
   });
 
-  it("marks out-of-stock visually but stays clickable (parent multi-SKU / sin stock)", () => {
+  it("marks out-of-stock as Agotado but stays clickable (parent multi-SKU / sin stock)", () => {
     const html = resultCard(product(0), true);
-    expect(html).toMatch(/sin stock|variantes/i);
+    expect(html).toMatch(/agotado/i);
+    expect(html).toMatch(/variantes/i);
     expect(html).not.toContain("disabled");
     expect(html).toContain("is-out");
   });

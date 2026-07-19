@@ -19,6 +19,8 @@ export interface Product {
    * Present on list/detail after B contract harden; undefined on older servers.
    */
   variants_stock?: number | null;
+  /** Active children count when multi-SKU parent (B ProductDto.variant_count). */
+  variant_count?: number | null;
   /** Set when this row is a sellable multi-SKU child. */
   parent_id?: string | null;
 }
@@ -78,6 +80,8 @@ export interface ProductDetail {
   barcode?: string | null;
   /** Sum of active children stock when this row is a multi-SKU parent. */
   variants_stock?: number | null;
+  /** Active children count when multi-SKU parent. */
+  variant_count?: number | null;
 }
 
 /** One product batch / lote (`BatchDto`). `expiry_date` RFC3339; `cost` STRING|null. */
@@ -257,6 +261,7 @@ export function productFromDetail(d: ProductDetail): Product {
     active_ingredient: d.active_ingredient,
     barcode: d.barcode ?? null,
     variants_stock: d.variants_stock ?? null,
+    variant_count: d.variant_count ?? null,
     parent_id: d.parent_id ?? null,
   };
 }
