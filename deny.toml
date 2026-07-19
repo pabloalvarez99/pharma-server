@@ -1,0 +1,34 @@
+# cargo-deny config. Schema v2 (cargo-deny >= 0.18).
+# Policy mirrors the original ci-hardening spec; key names updated for v2.
+
+[graph]
+all-features = true
+
+[bans]
+# Multiple versions of the same crate → warn (informational, surfaces dupe trees).
+multiple-versions = "warn"
+# Wildcard `*` version requirements → deny (footgun for supply chain).
+wildcards = "deny"
+
+[licenses]
+# SPDX expression allow-list. Anything outside this list fails the check.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+
+[advisories]
+version = 2
+# Vulnerabilities are always deny in v2 (no longer toggleable).
+# Unmaintained: scope = "all" mirrors legacy "warn" semantics (report across full graph).
+unmaintained = "all"
+yanked = "deny"

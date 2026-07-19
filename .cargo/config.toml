@@ -1,0 +1,13 @@
+# Workspace-local target dir keeps the integration branch's build artifacts
+# isolated from worktree-shared caches. Override with CARGO_TARGET_DIR when
+# building from a worktree.
+[build]
+target-dir = "target"
+
+# Static CRT: link the MSVC runtime into each binary so the installed service
+# has zero external DLL dependencies (no VCRUNTIME140.dll). Without this the
+# service fails to start on a clean Windows with Error 1920 (process can't
+# launch — missing runtime), rolling back the MSI with 1603. Matches the
+# product pillar "instalación 1 click, sin dependencias externas".
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

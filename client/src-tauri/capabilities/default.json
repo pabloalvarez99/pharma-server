@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main Pharma Client window. Custom `invoke` commands (login, license_status, server_health, logout) do not require a permission entry; only plugin APIs do.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "updater:default"
+  ]
+}

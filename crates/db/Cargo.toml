@@ -1,0 +1,22 @@
+[package]
+name = "db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pharma-core = { path = "../core" }
+surrealdb.workspace = true
+include_dir.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+surrealdb = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

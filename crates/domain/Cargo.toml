@@ -1,0 +1,42 @@
+[package]
+name = "domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pharma-core = { path = "../core" }
+db = { path = "../db" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+surrealdb.workspace = true
+utoipa.workspace = true
+rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+# Async mutex (per-tenant sale serialization) + timer (conflict backoff) for
+# the BUG-003/004 concurrency-safe sale path. Workspace tokio = full features.
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+chrono = { workspace = true }
+# kv-mem only enabled for domain's own test build (not the shipped binary).
+surrealdb = { workspace = true, features = ["kv-mem"] }
+# Property-based testing of the canonical invariants (`crate::invariants`).
+proptest = "1"
+# join_all for the concurrent-open cash-session race test.
+futures = { workspace = true }
+# POS hot-path bench (benches/pos_hotpath.rs). Mirrors crates/api/benches.
+criterion = { version = "0.5", default-features = false, features = ["async_tokio"] }
+# Render a boleta 39 for a *service* line in the agnostic-core integration test
+# (tests/seed_service_rubro.rs). Test-only — domain never depends on dte at
+# runtime (the API layer owns the DTE wiring).
+dte = { path = "../dte" }
+
+[[bench]]
+name = "pos_hotpath"
+harness = false

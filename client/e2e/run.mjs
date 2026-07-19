@@ -1,0 +1,223 @@
+// E2E entrypoint — `npm run e2e`.
+//
+// One command: build (cached) -> temp DB -> bootstrap two tenants/users via the
+// CLI -> boot pharma-api -> run the golden path for BOTH verticals (pharmacy +
+// minimarket) over real HTTP -> tear everything down. Exit non-zero on any
+// assertion failure so it works as a local gate (CI is billing-walled — this is
+// a LOCAL gate, see client/e2e/README.md).
+
+import {
+  buildBinaries,
+  cli,
+  startServer,
+  waitReady,
+  makeTempDb,
+  cleanTempDb,
+  summary,
+  section,
+  REPO_ROOT,
+} from "./lib/harness.mjs";
+import {
+  goldenPath,
+  multiTenderFlow,
+  goodsReceiptFlow,
+  complianceFlow,
+  noPrescriptionFlow,
+  dteLifecycleFlow,
+  reports402Matrix,
+  rubroShowcaseFlow,
+  agentAskFlow,
+  agentActionFlow,
+  serviceSaleFlow,
+  DTE_EMISOR_RUT,
+  DTE_CERT_PASS,
+} from "./flows.mjs";
+import { writeCaf } from "./lib/caf.mjs";
+import { join } from "node:path";
+
+const PASSWORD = "e2e-pass-1234";
+const EMAIL = "admin@e2e.cl";
+// A non-admin (cashier) user used by the agent WRITE-action flow to prove the
+// role gate: a cashier may ask read questions but may NOT execute write actions.
+const CASHIER_EMAIL = "cajero@e2e.cl";
+const CASHIER_PASSWORD = "e2e-cajero-1234";
+const TENANTS = [
+  { slug: "e2e-farmacia", name: "Farmacia E2E", vertical: "pharmacy" },
+  { slug: "e2e-mini", name: "Minimarket E2E", vertical: "minimarket" },
+];
+// Dedicated tenant for the DTE document lifecycle: it gets a digital cert + CAFs
+// wired in below (server down), so its boleta/factura/nota emit for REAL. Kept
+// separate so the golden-path tenants above still exercise the *Free, no-CAF*
+// clean-gate contract (a fresh install with nothing configured).
+const DTE_TENANT = { slug: "e2e-dte", name: "DTE Lifecycle E2E", vertical: "pharmacy" };
+// Dedicated tenant for the rubro-select showcase: its vertical is driven through
+// the live settings API by the flow itself (it round-trips all 8 catalog rubros),
+// so it bootstraps with no fixed vertical.
+const SHOWCASE_TENANT = { slug: "e2e-rubro", name: "Rubro Showcase E2E" };
+// Dedicated tenant for the service-rubro inventory contract (physical_stock =
+// false, migración 0031): the flow seeds the `servicios` pack itself and sells a
+// stock-0 service, so it bootstraps with no fixed vertical.
+const SERVICE_TENANT = { slug: "e2e-servicios", name: "Servicios E2E" };
+// Dedicated tenant for the agent WRITE-action flow (propose/confirm + role gate).
+// It gets an admin user (created in the common loop) AND an extra cashier user
+// (created below) so the flow can assert a cashier is blocked from /assist/act.
+const ACTION_TENANT = { slug: "e2e-accion", name: "Agente Acción E2E", vertical: "pharmacy" };
+const TEST_PFX = join(REPO_ROOT, "crates", "dte", "tests", "assets", "test-cert.pfx");
+
+let server;
+let dbPath;
+
+async function main() {
+  await buildBinaries();
+
+  dbPath = makeTempDb();
+  console.log(`• temp DB: ${dbPath}`);
+
+  // Bootstrap with the server DOWN (SurrealKv single-writer file lock).
+  section("bootstrap (CLI, server down)");
+  await cli(["migrate"], dbPath);
+  console.log("  ✓ migrations applied");
+  for (const t of [...TENANTS, DTE_TENANT, SHOWCASE_TENANT, SERVICE_TENANT, ACTION_TENANT]) {
+    await cli(["tenant-create", t.name, "--slug", t.slug], dbPath);
+    await cli(
+      [
+        "user-create",
+        "--tenant",
+        t.slug,
+        "--email",
+        EMAIL,
+        "--roles",
+        "admin,owner",
+        "--password",
+        PASSWORD,
+      ],
+      dbPath,
+    );
+    console.log(`  ✓ tenant + admin user: ${t.slug}`);
+  }
+
+  // The agent-action tenant also needs a non-admin (cashier) user to prove the
+  // /assist/act role gate (admin/owner only). Created with the server still down.
+  await cli(
+    [
+      "user-create",
+      "--tenant",
+      ACTION_TENANT.slug,
+      "--email",
+      CASHIER_EMAIL,
+      "--roles",
+      "cashier",
+      "--password",
+      CASHIER_PASSWORD,
+    ],
+    dbPath,
+  );
+  console.log(`  ✓ cashier user: ${ACTION_TENANT.slug}`);
+
+  // DTE lifecycle prerequisites (server still down — CLI holds the file lock):
+  // a digital cert + folio CAFs the live emit path needs. Boleta 39 gets a
+  // 2-folio range (advance assertion), factura 33 a single folio (exhaustion
+  // assertion), nota-crédito 61 + nota-débito 56 wider ranges (the NC/ND
+  // reference chain); guía 52 gets NONE (sin-CAF case).
+  section("dte fixtures (cert + CAF, server down)");
+  await cli(
+    [
+      "cert", "import", TEST_PFX,
+      "--tenant", DTE_TENANT.slug,
+      "--passphrase-env", "E2E_PFX_PASS",
+      "--rut", DTE_EMISOR_RUT,
+      "--from", "2020-01-01",
+      "--to", "2035-12-31",
+    ],
+    dbPath,
+    { E2E_PFX_PASS: DTE_CERT_PASS },
+  );
+  console.log("  ✓ digital cert imported");
+  const cafs = [
+    { tipo: 39, desde: 1, hasta: 2 },
+    { tipo: 33, desde: 1, hasta: 1 },
+    { tipo: 61, desde: 1, hasta: 10 }, // nota-crédito
+    { tipo: 56, desde: 1, hasta: 10 }, // nota-débito (completes the NC/ND chain)
+  ];
+  for (const spec of cafs) {
+    const path = writeCaf(dbPath, { rut: DTE_EMISOR_RUT, ...spec });
+    await cli(["caf", "import", path, "--tenant", DTE_TENANT.slug], dbPath);
+    console.log(`  ✓ CAF tipo ${spec.tipo} folios ${spec.desde}..${spec.hasta}`);
+  }
+
+  // Boot once; both tenants share the multi-tenant server.
+  section("boot pharma-api");
+  server = startServer(dbPath);
+  await waitReady(server);
+  console.log("  ✓ server ready");
+
+  for (const t of TENANTS) {
+    const ctx = { tenant: t.slug, email: EMAIL, password: PASSWORD, vertical: t.vertical };
+    await goldenPath(ctx);
+    await multiTenderFlow(ctx);
+    await goodsReceiptFlow(ctx);
+    await complianceFlow(ctx);
+    await reports402Matrix(ctx);
+    // Business agent ask-bar (W2, read-only): the headline questions answer
+    // correctly AND the figure matches /reports (same source). Runs last so the
+    // tenant already has the day's sales seeded.
+    await agentAskFlow(ctx);
+    // Multi-rubro: a non-pharmacy rubro must never be forced through
+    // receta/controlados machinery, yet boleta stays universal.
+    if (t.vertical === "minimarket") await noPrescriptionFlow(ctx);
+  }
+
+  // Rubro-select showcase (the configurator + live preview, ULTRA-PLAN): every
+  // catalog rubro persists through the settings API and the agnostic core works
+  // end-to-end under a SERVICE rubro (belleza).
+  await rubroShowcaseFlow({
+    tenant: SHOWCASE_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+  });
+
+  // Service-rubro inventory contract (physical_stock = false, migración 0031):
+  // a stock-0 service sells, moves NO inventory, and never pollutes out-of-stock.
+  await serviceSaleFlow({
+    tenant: SERVICE_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+  });
+
+  // Business agent WRITE actions (W3, "el agente actúa"): two-step propose/confirm
+  // over HTTP — propose writes nothing, confirm executes the real domain write,
+  // the token is single-use, and a cashier is blocked from /assist/act (403).
+  await agentActionFlow({
+    tenant: ACTION_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+    cashierEmail: CASHIER_EMAIL,
+    cashierPassword: CASHIER_PASSWORD,
+  });
+
+  // DTE document lifecycle on its dedicated, fully-provisioned tenant.
+  await dteLifecycleFlow({
+    tenant: DTE_TENANT.slug,
+    email: EMAIL,
+    password: PASSWORD,
+    vertical: DTE_TENANT.vertical,
+  });
+}
+
+main()
+  .then(async () => {
+    const ok = summary();
+    if (server) await server.stop();
+    cleanTempDb(dbPath);
+    process.exit(ok ? 0 : 1);
+  })
+  .catch(async (e) => {
+    console.error("\nE2E ABORTED:", e.message);
+    if (server) {
+      const log = server.getLog().trim().split("\n").slice(-25).join("\n");
+      if (log) console.error("\n--- server log (tail) ---\n" + log);
+      await server.stop();
+    }
+    cleanTempDb(dbPath);
+    process.exit(1);
+  });

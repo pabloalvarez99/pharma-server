@@ -1,0 +1,24 @@
+<Configuration>
+  <VGpu>Disable</VGpu>
+  <Networking>Default</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\Administrator\Documents\GitHub\pharma-server\target\release</HostFolder>
+      <SandboxFolder>C:\bin</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\Administrator\Documents\GitHub\pharma-server\installer\sandbox</HostFolder>
+      <SandboxFolder>C:\scripts</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Users\Administrator\Documents\GitHub\pharma-server\installer\sandbox\out</HostFolder>
+      <SandboxFolder>C:\out</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\scripts\diag3-inside.ps1</Command>
+  </LogonCommand>
+</Configuration>

@@ -1,0 +1,25 @@
+name: bench
+
+on:
+  # Manual only — GitHub Actions billing is locked on this repo, so no auto-triggers.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bench:
+    name: cargo bench (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo bench
+        shell: bash
+        run: cargo bench --workspace || echo "no benches yet"

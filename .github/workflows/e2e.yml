@@ -1,0 +1,52 @@
+name: e2e
+
+# Live-stack end-to-end gate: builds a REAL pharma-api + pharma, boots the server
+# on a throwaway SurrealKv DB, and drives the operator's daily loop over real HTTP
+# for BOTH verticals (see client/e2e/README.md). No mocks, no webview.
+#
+# MANUAL on purpose. CI minutes on this repo are billing-walled (CLAUDE.md regla
+# #9 / teamwork_op.txt), so the canonical gate is LOCAL:
+#
+#     cd client && npm run gate      # build + unit tests + live-stack e2e
+#
+# This workflow reproduces that EXACT gate in CI when a human opts in. It does
+# NOT run on push/PR, so it never auto-burns minutes. Flip `on:` to push/pull_request
+# only once CI billing is unblocked — the job already runs the full gate.
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e:
+    name: live-stack e2e (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Pre-build the binaries through cargo so rust-cache covers them; the
+      # harness then finds them present and skips its own build (E2E_REBUILD unset).
+      - name: build server + cli (release)
+        run: cargo build --release -p api -p cli
+
+      - name: install client deps
+        working-directory: client
+        run: npm ci
+
+      # Canonical gate: client build (tsc + vite) + unit tests + live-stack e2e.
+      # Same command a dev runs locally (`npm run gate`) — one reproducible path.
+      - name: client gate (build + test + live-stack e2e)
+        working-directory: client
+        run: npm run gate

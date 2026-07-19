@@ -1,0 +1,26 @@
+[advisories]
+ignore = [
+    # FALSE POSITIVE: matches our local crate `telemetry` by name + version
+    # range, but the advisory is for the abandoned crates.io `telemetry`
+    # crate (last release 2018). Our `crates/telemetry/Cargo.toml` only
+    # depends on tracing/opentelemetry — has no `misc::vec_with_size`.
+    # Verified 2026-05-27. TODO: rename to `pharma-telemetry` after open PR
+    # stack stabilizes (touches all 32 worktree baselines today).
+    "RUSTSEC-2021-0046",
+    # Upstream-driven: surrealdb-core 2.6 pins rsa 0.9 (Marvin Attack 5.9
+    # medium). Mitigation requires surrealdb upgrade — tracked upstream.
+    "RUSTSEC-2023-0071",
+    # Upstream-driven: surrealdb/reqwest pin rustls-webpki 0.102; fix in
+    # 0.103. Tracked for surrealdb 2.7+.
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    # Unmaintained transitives via surrealdb/embassy/tracing-opentelemetry;
+    # no actionable upgrade path today. Re-evaluate quarterly.
+    "RUSTSEC-2023-0089", # atomic-polyfill
+    "RUSTSEC-2025-0141", # bincode
+    "RUSTSEC-2024-0436", # paste
+    "RUSTSEC-2025-0134", # rustls-pemfile
+    "RUSTSEC-2026-0002", # lru IterMut unsound
+]

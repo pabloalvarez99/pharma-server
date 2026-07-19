@@ -15,3 +15,25 @@ installer/wix/*.msi
 .vscode/
 *.swp
 .DS_Store
+.claude/scheduled_tasks.lock
+
+# DB-coordination dumps (real catalog data, may contain pricing — never commit)
+demo-data/
+
+# Custom cargo target dir used across sessions (CARGO_TARGET_DIR=target-shared)
+target-shared/
+
+# Notas locales del fundador (historial de prompts/sesiones), nunca commitear
+a*_historial_*.md
+a_historial_*.md
+claudeapp.md
+
+# Code-signing private key (ADR-0008). pilot.cer (public) IS committed; pilot.pfx NEVER.
+installer/sign/*.pfx
+installer/sign/.cert-password.txt
+
+# Local CDN staging from scripts/publish-updater-artifacts.ps1 (never upload secrets).
+dist-updater/
+
+# Sandbox smoke artifacts (logs, install.log, verdicts) — transient, never committed.
+installer/sandbox/out/

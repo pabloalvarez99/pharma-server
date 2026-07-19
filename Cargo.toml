@@ -1,0 +1,157 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/db",
+    "crates/api",
+    "crates/auth",
+    "crates/jobs",
+    "crates/telemetry",
+    "crates/service",
+    "crates/cli",
+    "crates/domain",
+    "crates/agent",
+    "crates/license",
+    "crates/dte",
+    "crates/sync",
+    "crates/assist",
+]
+# `client/` is the Tauri 2 desktop client (LoL-style operator launcher). It is a
+# STANDALONE cargo project with its own [workspace] in client/src-tauri so the
+# server workspace build (`cargo build --workspace`) never compiles WebView/Tauri
+# deps. Excluded explicitly to keep cargo from auto-discovering it as a member.
+exclude = ["client/src-tauri"]
+
+[workspace.package]
+version = "0.1.28"
+edition = "2021"
+rust-version = "1.85"
+license = "Proprietary"
+authors = ["Pablo Alvarez <pablobfa1999@gmail.com>"]
+repository = "https://github.com/pabloalvarez99/pharma-server"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1.41", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# web
+axum = { version = "0.8", features = ["macros", "tokio", "multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "compression-gzip", "request-id", "timeout"] }
+hyper = "1.5"
+
+# serde / errors
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+
+# db
+surrealdb = { version = "2.1", features = ["kv-surrealkv"] }
+include_dir = "0.7"
+
+# auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+
+# openapi
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-axum = "0.1"
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# config
+config = "0.14"
+toml = "0.8"
+
+# observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.28"
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
+axum-prometheus = "0.7"
+
+# jobs
+tokio-cron-scheduler = "0.13"
+async-nats = "0.38"
+
+# windows
+windows-service = "0.7"
+
+# cli
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
+
+# base64 (license signature encoding)
+base64 = "0.22"
+
+# lock-free Arc swap for license hot-reload
+arc-swap = "1"
+
+# rate limiting (token bucket, in-memory, keyed)
+governor = "0.7"
+nonzero_ext = "0.3"
+
+# time
+chrono = { version = "0.4", features = ["serde"] }
+
+# csv import/export
+csv = "1.3"
+
+# DTE XML + RSA-SHA1 (TED firma). SHA1 obligatorio SII (legacy spec) — no
+# usar para nuevos protocolos, sólo compatibilidad SII Chile.
+quick-xml = { version = "0.36", features = ["serialize"] }
+rsa = "0.9"
+sha1 = { version = "0.10", features = ["oid"] }
+
+# DTE cert encrypt-at-rest (PFX AES-256-GCM + Argon2id KDF).
+aes-gcm = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+
+# HTTP client (DTE upload SII + CLI license reload). rustls-tls evita libssl
+# en Windows. `multipart` requerido por DTE upload (SII espera form-data).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+
+# Mock HTTP server para tests offline contra endpoints SII (dev-only).
+wiremock = "0.6"
+
+# backup archives
+tar = "0.4"
+flate2 = "1.0"
+
+# agent identity / signed envelopes (Fase 11 ecosystem)
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+bs58 = "0.5"
+sha2 = "0.10"
+hex = "0.4"
+hmac = "0.12"
+
+# HMAC-SHA256 + constant-time comparison (web push orders signature verify)
+subtle = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+# `line-tables-only` keeps backtraces but shrinks PDBs ~10x. Required: the full
+# surrealdb dependency graph in debug=1 overflows MSVC's per-PDB size limit
+# (LNK1140) and fills the disk. Workspace crates still get line info.
+debug = "line-tables-only"
+
+# Third-party deps don't need debug info at all — biggest PDB/disk win.
+[profile.dev.package."*"]
+debug = false
+
+# Tests inherit dev; keep them linkable on Windows MSVC.
+[profile.test.package."*"]
+debug = false

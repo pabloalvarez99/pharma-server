@@ -1,0 +1,685 @@
+/* RutBusiness — design system (canonical tokens + base components)
+ *
+ * Marca: "El sistema operativo de tu negocio. Tu RUT es la llave."
+ * Multi-rubro (farmacia = beachhead). Fuente de verdad visual; el showcase
+ * vivo está en client/brand/rutbusiness-ui.html (ADR-0015 cliente universal).
+ *
+ * Uso: import "./brand.css" en main.ts (lo cablea la lane de onboarding/shell).
+ * Tipografías (cargar en index.html <head>):
+ *   Fraunces (display) · IBM Plex Sans (UI) · IBM Plex Mono (RUT/CLP/folios)
+ *   https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap
+ */
+
+:root{
+  /* superficie (dark = default) */
+  --rb-ink:#0a0d13; --rb-bg:#0b0f16; --rb-surface:#121826; --rb-surface-2:#161d2d;
+  --rb-raise:#1b2335; --rb-line:#232c40; --rb-line-soft:#1a2233;
+  /* texto */
+  --rb-txt:#eef2f9; --rb-txt-2:#9aa6bd; --rb-txt-3:#5c6880;
+  /* marca + estados */
+  --rb-brand:#19d39a; --rb-brand-deep:#0f9d75; --rb-brand-soft:rgba(25,211,154,.12);
+  --rb-amber:#f5b53d; --rb-danger:#ff5d6c; --rb-info:#5aa9ff;
+  /* forma */
+  --rb-radius:14px; --rb-radius-sm:9px;
+  --rb-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 18px 40px -22px rgba(0,0,0,.8);
+  /* tipografía */
+  --rb-ff-display:"Fraunces",Georgia,serif;
+  --rb-ff-sans:"IBM Plex Sans",system-ui,sans-serif;
+  --rb-ff-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+:root[data-theme="light"]{
+  --rb-ink:#f3efe7; --rb-bg:#f7f4ee; --rb-surface:#ffffff; --rb-surface-2:#fbf9f5;
+  --rb-raise:#ffffff; --rb-line:#e6e0d4; --rb-line-soft:#efeae0;
+  --rb-txt:#161d12; --rb-txt-2:#5c6657; --rb-txt-3:#97a08c;
+  --rb-brand:#0f9d75; --rb-brand-deep:#0b7d5d; --rb-brand-soft:rgba(15,157,117,.10);
+  --rb-shadow:0 1px 0 rgba(255,255,255,.6) inset, 0 22px 44px -28px rgba(40,30,10,.35);
+}
+
+/* base */
+body.rb{margin:0;background:var(--rb-bg);color:var(--rb-txt);
+  font-family:var(--rb-ff-sans);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+
+/* tipografía utilitaria */
+.rb-display{font-family:var(--rb-ff-display);font-weight:600;letter-spacing:-.02em}
+.rb-mono{font-family:var(--rb-ff-mono)}
+.rb-num{font-family:var(--rb-ff-mono);letter-spacing:-.01em} /* CLP / RUT / folios */
+.rb-muted{color:var(--rb-txt-2)} .rb-dim{color:var(--rb-txt-3)}
+
+/* wordmark + mark */
+.rb-wordmark{font-family:var(--rb-ff-display);font-weight:600;letter-spacing:-.02em}
+.rb-wordmark b{color:var(--rb-brand);font-weight:600}
+.rb-mark{display:inline-grid;place-items:center;width:38px;height:38px;border-radius:11px;
+  background:linear-gradient(145deg,var(--rb-raise),var(--rb-surface));
+  border:1px solid var(--rb-line);box-shadow:var(--rb-shadow);position:relative}
+.rb-mark svg{width:22px;height:22px;color:var(--rb-txt)}
+.rb-mark .rb-dv{position:absolute;right:6px;bottom:6px;width:7px;height:7px;border-radius:50%;
+  background:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-bg),0 0 14px var(--rb-brand)}
+
+/* botón primario */
+.rb-btn{border:none;border-radius:var(--rb-radius-sm);padding:13px 16px;cursor:pointer;
+  font-family:var(--rb-ff-sans);font-weight:600;font-size:15px;transition:.18s;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep));color:#04140e;
+  box-shadow:0 10px 24px -12px var(--rb-brand)}
+.rb-btn:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.rb-btn:active{transform:translateY(0)}
+.rb-btn.ghost{background:var(--rb-surface);color:var(--rb-txt-2);border:1px solid var(--rb-line);box-shadow:none}
+.rb-btn.ghost:hover{color:var(--rb-txt);border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+/* input (+ estados validación, p.ej. RUT mód-11) */
+.rb-input{width:100%;background:var(--rb-surface);border:1px solid var(--rb-line);
+  border-radius:var(--rb-radius-sm);color:var(--rb-txt);font-family:var(--rb-ff-mono);
+  font-size:15px;padding:13px 14px;transition:.18s;outline:none}
+.rb-input::placeholder{color:var(--rb-txt-3)}
+.rb-input:focus{border-color:var(--rb-brand);box-shadow:0 0 0 4px var(--rb-brand-soft);background:var(--rb-surface-2)}
+.rb-input.ok{border-color:var(--rb-brand)} .rb-input.bad{border-color:var(--rb-danger)}
+.rb-label{display:block;font-size:12px;color:var(--rb-txt-2);margin-bottom:7px;font-weight:500}
+
+/* card / panel */
+.rb-card{background:var(--rb-surface);border:1px solid var(--rb-line);
+  border-radius:var(--rb-radius);box-shadow:var(--rb-shadow)}
+
+/* KPI */
+.rb-kpi{background:var(--rb-surface);border:1px solid var(--rb-line);border-radius:var(--rb-radius);
+  padding:17px 18px;box-shadow:var(--rb-shadow)}
+.rb-kpi .k{font-size:12px;color:var(--rb-txt-2);margin-bottom:10px}
+.rb-kpi .v{font-family:var(--rb-ff-mono);font-weight:600;font-size:26px}
+.rb-kpi.alert{border-color:color-mix(in srgb,var(--rb-amber) 45%,var(--rb-line))}
+.rb-kpi.alert .v{color:var(--rb-amber)}
+.rb-up{color:var(--rb-brand)} .rb-down{color:var(--rb-danger)}
+
+/* pills (tipo de producto/venta) */
+.rb-pill{font-family:var(--rb-ff-mono);font-size:11px;padding:2px 8px;border-radius:6px}
+.rb-pill.ok{color:var(--rb-brand);background:var(--rb-brand-soft)}
+.rb-pill.rx{color:var(--rb-info);background:color-mix(in srgb,var(--rb-info) 14%,transparent)}
+.rb-pill.ctrl{color:var(--rb-amber);background:color-mix(in srgb,var(--rb-amber) 14%,transparent)}
+
+/* nav (sidebar) */
+.rb-nav{font-size:14px;color:var(--rb-txt-2);display:flex;align-items:center;gap:11px;
+  padding:10px 11px;border-radius:10px;cursor:pointer;transition:.15s}
+.rb-nav:hover{background:var(--rb-surface-2);color:var(--rb-txt)}
+.rb-nav.active{background:var(--rb-brand-soft);color:var(--rb-txt)}
+.rb-tag{font-family:var(--rb-ff-mono);font-size:10px;color:var(--rb-amber);
+  border:1px solid color-mix(in srgb,var(--rb-amber) 40%,transparent);padding:1px 6px;border-radius:6px}
+
+/* tabla de datos */
+.rb-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.rb-table th{text-align:left;font-weight:500;color:var(--rb-txt-3);font-size:11px;
+  text-transform:uppercase;letter-spacing:.06em;padding:11px 18px}
+.rb-table td{padding:12px 18px;border-top:1px solid var(--rb-line-soft)}
+.rb-table .num{text-align:right;font-family:var(--rb-ff-mono)}
+
+/* reveal escalonado (carga de pantalla) */
+.rb-rv{opacity:0;transform:translateY(10px);animation:rb-rv .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes rb-rv{to{opacity:1;transform:none}}
+
+/* ── Rubro select — configurador 2-paneles + vista previa en vivo del ERP ──
+ * Lane feat/rubro-showcase-p1 (docs/strategy/rubro-select-experience.md FASE P1).
+ * Eleva el selector de rubro a "vitrina": grid de rubros + panel preview sticky
+ * que muestra el ERP exacto por rubro. Usa los tokens globales de styles.css
+ * (--bg-N, --line, --text, --muted, --accent) para cohesion con .rubro-card.
+ * Append-only; NO toca styles.css/main.ts. */
+.rubro-config{display:grid;grid-template-columns:1fr minmax(300px,360px);gap:20px;
+  align-items:start;margin-bottom:18px}
+.rubro-config .rubro-grid{margin-bottom:0}
+
+/* card como radio accesible: focus ring visible + el ✓ de selección */
+.rubro-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rubro-card.selected::after{content:"✓";position:absolute;bottom:12px;right:12px;
+  width:20px;height:20px;display:grid;place-items:center;border-radius:50%;
+  font-size:12px;font-weight:700;color:var(--bg-0);background:var(--accent)}
+.rubro-card .rubro-tag{top:auto;bottom:12px}
+.rubro-card.selected .rubro-tag{display:none}
+
+/* panel preview (sticky a la derecha) */
+.rubro-preview{position:sticky;top:16px;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:var(--radius-card);padding:18px}
+.rubro-pv-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.rubro-pv-icon{font-size:30px;line-height:1}
+.rubro-pv-name{margin:0;font-size:17px;font-weight:650}
+.rubro-pv-tag{margin:2px 0 0;font-size:13px;color:var(--accent)}
+.rubro-pv-count{font-size:12.5px;margin:0 0 14px}
+.rubro-pv-block{margin:0 0 14px}
+.rubro-pv-title{margin:0 0 7px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--muted);font-weight:600}
+.rubro-pv-muted{font-size:12.5px;margin:0}
+
+/* "Qué incluye" — categorías on/off */
+.rubro-cats,.rubro-native{list-style:none;margin:0;padding:0;display:flex;
+  flex-direction:column;gap:6px}
+.rubro-cat{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)}
+.rubro-cat.off{color:var(--muted)}
+.rubro-cat-mark{width:18px;height:18px;display:grid;place-items:center;border-radius:50%;
+  font-size:11px;font-weight:700;flex:0 0 auto}
+.rubro-cat.on .rubro-cat-mark{color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.rubro-cat.off .rubro-cat-mark{color:var(--muted);border:1px solid var(--line)}
+.rubro-native li{position:relative;padding-left:16px;font-size:13px;color:var(--text)}
+.rubro-native li::before{content:"▸";position:absolute;left:0;color:var(--accent)}
+
+/* demo + nota compliance */
+.rubro-pv-demo{display:inline-block;font-size:11.5px;letter-spacing:.03em;
+  padding:4px 10px;border-radius:var(--radius-pill);border:1px solid var(--line);
+  color:var(--muted)}
+.rubro-pv-demo.on{color:var(--accent);border-color:var(--accent-2);
+  background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.rubro-pv-note{font-size:11.5px;line-height:1.5;margin:14px 0 0;
+  padding-top:12px;border-top:1px solid var(--line-soft,var(--line))}
+
+/* responsive: el preview pasa de panel lateral a bloque inferior */
+@media (max-width:900px){
+  .rubro-config{grid-template-columns:1fr}
+  .rubro-preview{position:static}
+}
+/* respeta prefers-reduced-motion (las cards ya animan vía styles.css) */
+@media (prefers-reduced-motion:reduce){
+  .rubro-card{transition:none}
+}
+
+/* ── Rubro select — P2: producción visual (iconos SVG custom + accent por rubro
+ * + estados de card + motion). Lane feat/rubro-showcase-p2 (ULTRA-PLAN §4).
+ * Todo bajo `.rubro-config` para ganar especificidad sobre `.rubro-card` de
+ * styles.css (que carga DESPUÉS de brand.css) y NO filtrar a otros usos de
+ * `.rubro-grid` (login usa un <select>). Cada card trae `--rubro-accent` inline;
+ * los estados caen al `--accent` de marca si faltara. Self-hosted, sin CDN. */
+.rubro-config .rubro-card{--rubro-accent:var(--accent);
+  transition:border-color .16s ease,box-shadow .16s ease,background .16s ease,transform .12s ease}
+
+/* icono en azulejo: neutro en reposo, se enciende con el accent del rubro */
+.rubro-config .rubro-icon{width:42px;height:42px;display:grid;place-items:center;
+  border-radius:12px;background:var(--bg-2);border:1px solid var(--line);
+  color:var(--muted);font-size:0;
+  transition:color .18s ease,background .18s ease,border-color .18s ease}
+.rubro-config .rubro-icon svg{display:block;width:24px;height:24px}
+
+/* hover = lift + borde/sombra accent; el icono toma el accent en hover/focus/sel */
+.rubro-config .rubro-card:hover{border-color:var(--rubro-accent);transform:translateY(-2px);
+  box-shadow:0 14px 30px -20px var(--rubro-accent)}
+.rubro-config .rubro-card:hover .rubro-icon,
+.rubro-config .rubro-card:focus-visible .rubro-icon,
+.rubro-config .rubro-card.selected .rubro-icon{color:var(--rubro-accent);
+  border-color:color-mix(in srgb,var(--rubro-accent) 55%,var(--line));
+  background:color-mix(in srgb,var(--rubro-accent) 14%,var(--bg-2))}
+
+/* focus ring accesible en el accent del rubro */
+.rubro-config .rubro-card:focus-visible{outline:2px solid var(--rubro-accent);outline-offset:2px}
+
+/* seleccionado: borde accent + relleno tenue + ✓ accent */
+.rubro-config .rubro-card.selected{border-color:var(--rubro-accent);
+  background:color-mix(in srgb,var(--rubro-accent) 8%,var(--bg-1));
+  box-shadow:0 0 0 1px var(--rubro-accent),0 16px 32px -24px var(--rubro-accent)}
+.rubro-config .rubro-card.selected::after{background:var(--rubro-accent);color:var(--bg-0)}
+
+/* tags: "datos demo" en accent vs "pronto" (próximamente) en muted — seleccionable */
+.rubro-config .rubro-tag.demo{color:var(--rubro-accent);
+  border-color:color-mix(in srgb,var(--rubro-accent) 45%,transparent);
+  background:color-mix(in srgb,var(--rubro-accent) 10%,transparent)}
+.rubro-config .rubro-tag.soon{color:var(--muted);border-color:var(--line);background:transparent}
+
+/* preview tematizada al accent del rubro espiado/fijado (var inline en el panel) */
+.rubro-config .rubro-preview{transition:border-color .2s ease}
+.rubro-config .rubro-pv-icon{width:46px;height:46px;display:grid;place-items:center;
+  border-radius:13px;color:var(--rubro-accent,var(--accent));font-size:0;
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 13%,var(--bg-1));
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 40%,var(--line))}
+.rubro-config .rubro-pv-icon svg{display:block;width:26px;height:26px}
+.rubro-config .rubro-pv-tag{color:var(--rubro-accent,var(--accent))}
+.rubro-config .rubro-cat.on .rubro-cat-mark{color:var(--rubro-accent,var(--accent));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 16%,transparent)}
+.rubro-config .rubro-native li::before{color:var(--rubro-accent,var(--accent))}
+.rubro-config .rubro-pv-demo.on{color:var(--rubro-accent,var(--accent));
+  border-color:color-mix(in srgb,var(--rubro-accent,var(--accent)) 50%,var(--line));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 10%,transparent)}
+
+/* presupuesto de motion: respeta reduced-motion (sin lift; el estado igual cambia) */
+@media (prefers-reduced-motion:reduce){
+  .rubro-config .rubro-card,
+  .rubro-config .rubro-icon,
+  .rubro-config .rubro-preview{transition:none}
+  .rubro-config .rubro-card:hover{transform:none}
+}
+
+/* ── Rubro select — P3: profundidad por rubro (value copy nativo + roadmap
+ * "Próximamente" con gracia). Lane feat/rubro-showcase-p3 (ULTRA-PLAN §3/§8).
+ * El bloque roadmap es deliberadamente sobrio (muted, separado por una línea
+ * punteada, ícono de reloj) para leerse como DIRECCIÓN futura — nunca como una
+ * feature activa ni un dead-end. */
+.rubro-config .rubro-pv-soon{border-top:1px dashed var(--line);padding-top:12px}
+.rubro-config .rubro-coming{list-style:none;margin:0 0 6px;padding:0;display:flex;
+  flex-direction:column;gap:5px}
+.rubro-config .rubro-coming li{position:relative;padding-left:16px;font-size:12.5px;
+  color:var(--muted)}
+.rubro-config .rubro-coming li::before{content:"\25F7";position:absolute;left:0;
+  color:color-mix(in srgb,var(--rubro-accent,var(--accent)) 60%,var(--muted))}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Dashboard showcase — the owner's home (lane feat/dashboard-activation, ye).
+ * Elevates the panel from "de dev" to a produced product surface: a personal
+ * hero, a guided first-value band, and a refined KPI/top-list rhythm. Uses the
+ * global tokens from styles.css (loaded AFTER this sheet, so var() resolves).
+ * Own `.dash-*` namespace — NO collision with paul/POS (rutbrand.css) and does
+ * NOT touch styles.css/main.ts. Append-only.
+ * ════════════════════════════════════════════════════════════════════════ */
+
+.dash-showcase{display:flex;flex-direction:column;gap:18px}
+
+/* ── Hero header ─────────────────────────────────────────────────────────
+ * A personal, time-aware greeting with the business name + rubro chip. A soft
+ * brand glow on the right gives it production polish without a heavy graphic. */
+.dash-hero{position:relative;overflow:hidden;display:flex;align-items:flex-end;
+  justify-content:space-between;gap:18px;
+  padding:22px 24px;border:1px solid var(--line);border-radius:var(--radius-card,18px);
+  background:
+    radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--accent) 14%,transparent),transparent 55%),
+    linear-gradient(180deg,var(--bg-1),color-mix(in srgb,var(--bg-1) 80%,#000))}
+.dash-hero-main{position:relative;z-index:1;min-width:0}
+.dash-hero-rubro{display:inline-flex;align-items:center;gap:7px;
+  margin-bottom:9px;padding:4px 11px 4px 9px;
+  font-size:12px;font-weight:600;letter-spacing:.2px;
+  color:var(--rubro-accent,var(--accent));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 35%,transparent);
+  border-radius:var(--radius-pill,999px)}
+.dash-hero-rubro .dash-hero-ico{flex:0 0 auto}
+.dash-hero-title{font-family:var(--rb-ff-display,inherit);
+  font-size:clamp(22px,3vw,30px);font-weight:600;line-height:1.12;
+  letter-spacing:-.4px;color:var(--text);margin:0}
+.dash-hero-name{color:var(--accent)}
+.dash-hero-sub{margin:6px 0 0;font-size:13.5px;color:var(--muted);
+  text-transform:capitalize}
+.dash-hero-glow{position:absolute;z-index:0;top:-60%;right:-8%;width:340px;height:340px;
+  border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 26%,transparent),transparent 68%);
+  filter:blur(8px)}
+
+/* ── Activation band (guided first value) ────────────────────────────────
+ * Replaces a wall of "$0" on a fresh install with one teaching next step.
+ * Reads as an inviting card, not an error; the rubro accent themes its edge. */
+.dash-activate-card{display:flex;align-items:center;gap:16px;
+  padding:16px 18px;border-radius:var(--radius-card,18px);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 40%,var(--line));
+  background:linear-gradient(180deg,
+    color-mix(in srgb,var(--rubro-accent,var(--accent)) 11%,var(--bg-1)),
+    color-mix(in srgb,var(--rubro-accent,var(--accent)) 4%,var(--bg-1)))}
+.dash-activate-ico{flex:0 0 auto;display:grid;place-items:center;width:44px;height:44px;
+  border-radius:12px;color:var(--rubro-accent,var(--accent));
+  background:color-mix(in srgb,var(--rubro-accent,var(--accent)) 16%,transparent);
+  border:1px solid color-mix(in srgb,var(--rubro-accent,var(--accent)) 32%,transparent)}
+.dash-activate-text{flex:1 1 auto;min-width:0}
+.dash-activate-text strong{display:block;font-size:15.5px;color:var(--text);margin-bottom:3px}
+.dash-activate-text p{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.dash-activate-actions{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.dash-activate-btn{white-space:nowrap}
+.dash-activate-link{background:none;border:none;cursor:pointer;padding:2px 4px;
+  font-size:12.5px;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+.dash-activate-link:hover{color:var(--text)}
+
+/* ── KPI + top rhythm (tighten the produced spacing) ─────────────────────── */
+.dash-top-card .card-head{display:flex;align-items:center;justify-content:space-between}
+
+/* ── Motion: a calm staggered reveal on mount. Cheap, on-brand, and fully
+ * disabled under prefers-reduced-motion (the panel still renders instantly). */
+@media (prefers-reduced-motion:no-preference){
+  .dash-showcase>.dash-hero,
+  .dash-showcase>.dash-activate:not([hidden]),
+  .dash-showcase>.dash-kpis,
+  .dash-showcase>.dash-top-card{
+    animation:dash-rise .42s cubic-bezier(.22,.61,.36,1) both}
+  .dash-showcase>.dash-activate:not([hidden]){animation-delay:.05s}
+  .dash-showcase>.dash-kpis{animation-delay:.1s}
+  .dash-showcase>.dash-top-card{animation-delay:.16s}
+}
+@keyframes dash-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+@media (max-width:640px){
+  .dash-activate-card{flex-wrap:wrap}
+  .dash-activate-actions{flex-direction:row;align-items:center;width:100%;justify-content:flex-start}
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Agent ask-bar — "Pregúntale a tu negocio" (ADR-0016, lane W2).
+ * The north star surface: the owner talks to their business. Showcase-grade
+ * craft (docs/strategy/rubro-select-experience.md §1+§9): brand glow, calm
+ * motion, full reduced-motion fallback, visible focus ring, dark-theme native.
+ * Classes are `.agent-*` (disjoint from paul's `.dash-*`). Colors via tokens
+ * so light/dark theme follow `:root` automatically.
+ * ════════════════════════════════════════════════════════════════════════ */
+.agent-ask{
+  position:relative;margin:0 0 22px;padding:20px 22px;border-radius:var(--rb-radius);
+  background:
+    radial-gradient(120% 140% at 0% 0%,var(--rb-brand-soft),transparent 55%),
+    linear-gradient(180deg,var(--rb-surface-2),var(--rb-surface));
+  border:1px solid var(--rb-line);box-shadow:var(--rb-shadow);overflow:hidden}
+.agent-ask::before{ /* thin brand edge — signals "this is the agent, not a table" */
+  content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep))}
+.agent-ask-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+.agent-spark{display:inline-grid;place-items:center;width:38px;height:38px;flex:none;
+  border-radius:11px;color:var(--rb-brand);
+  background:var(--rb-brand-soft);border:1px solid var(--rb-line)}
+.agent-spark svg{width:22px;height:22px}
+.agent-ask-headtext{min-width:0}
+.agent-ask-title{margin:0;font-family:var(--rb-ff-display);font-weight:600;
+  letter-spacing:-.02em;font-size:18px;color:var(--rb-txt)}
+.agent-ask-sub{margin:2px 0 0;font-size:13px;color:var(--rb-txt-2)}
+.agent-ask-sub kbd{font-family:var(--rb-ff-mono);font-size:11px;padding:1px 6px;
+  border-radius:6px;background:var(--rb-raise);border:1px solid var(--rb-line);
+  color:var(--rb-txt-2)}
+.agent-ask-form{display:flex;gap:10px}
+.agent-ask-input{flex:1;min-width:0;padding:13px 15px;border-radius:var(--rb-radius-sm);
+  background:var(--rb-ink);border:1px solid var(--rb-line);color:var(--rb-txt);
+  font-family:var(--rb-ff-sans);font-size:15px;letter-spacing:-.01em;
+  transition:border-color .16s,box-shadow .16s}
+.agent-ask-input::placeholder{color:var(--rb-txt-3)}
+.agent-ask-input:focus-visible,.agent-ask-input:focus{outline:none;
+  border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-ask-send{flex:none;border:none;cursor:pointer;padding:0 18px;
+  border-radius:var(--rb-radius-sm);font-family:var(--rb-ff-sans);font-weight:600;
+  font-size:15px;color:#04130d;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep));
+  transition:transform .14s,filter .14s,opacity .14s}
+.agent-ask-send:hover{filter:brightness(1.06)}
+.agent-ask-send:active{transform:translateY(1px)}
+.agent-ask-send:disabled{opacity:.55;cursor:default;filter:none}
+.agent-ask-send:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-ask-out{margin-top:14px}
+/* suggestion chips (idle + "no entendí") */
+.agent-suggest-lead{margin:0 0 8px;font-size:12px;color:var(--rb-txt-3);
+  text-transform:uppercase;letter-spacing:.06em}
+.agent-chips{display:flex;flex-wrap:wrap;gap:8px}
+.agent-chip{cursor:pointer;padding:7px 12px;border-radius:999px;font-size:13px;
+  font-family:var(--rb-ff-sans);color:var(--rb-txt-2);
+  background:var(--rb-raise);border:1px solid var(--rb-line);
+  transition:color .14s,border-color .14s,background .14s,transform .14s}
+.agent-chip:hover{color:var(--rb-txt);border-color:var(--rb-brand);
+  background:var(--rb-brand-soft)}
+.agent-chip:active{transform:translateY(1px)}
+.agent-chip:focus-visible{outline:none;border-color:var(--rb-brand);
+  box-shadow:0 0 0 3px var(--rb-brand-soft)}
+/* answer bubble */
+.agent-bubble{padding:13px 15px;border-radius:var(--rb-radius-sm);
+  background:var(--rb-ink);border:1px solid var(--rb-line);
+  color:var(--rb-txt);font-size:15px;line-height:1.5;white-space:pre-wrap}
+.agent-bubble-soft{color:var(--rb-txt-2);font-style:italic}
+.agent-bubble-error{border-color:var(--rb-danger);
+  color:var(--rb-danger);background:rgba(255,93,108,.08);margin-bottom:12px}
+.agent-bubble-error+.agent-suggest-lead{margin-top:0}
+/* thinking indicator */
+.agent-thinking{display:flex;align-items:center;gap:10px;padding:13px 15px;
+  border-radius:var(--rb-radius-sm);background:var(--rb-ink);
+  border:1px solid var(--rb-line);color:var(--rb-txt-2);font-size:14px}
+.agent-dots{display:inline-flex;gap:5px}
+.agent-dots i{width:7px;height:7px;border-radius:50%;background:var(--rb-brand);opacity:.5}
+/* action confirmation card — "el agente ACTÚA" (the write the owner must okay) */
+.agent-proposal{padding:15px 16px;border-radius:var(--rb-radius-sm);
+  background:radial-gradient(120% 140% at 0% 0%,color-mix(in srgb,var(--rb-amber) 14%,transparent),transparent 60%),var(--rb-ink);
+  border:1px solid color-mix(in srgb,var(--rb-amber) 42%,var(--rb-line))}
+.agent-proposal-head{display:flex;align-items:flex-start;gap:11px}
+.agent-proposal-icon{display:inline-grid;place-items:center;width:30px;height:30px;flex:none;
+  border-radius:9px;color:var(--rb-amber);
+  background:color-mix(in srgb,var(--rb-amber) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--rb-amber) 35%,transparent)}
+.agent-proposal-icon svg{width:18px;height:18px}
+.agent-proposal-resumen{margin:4px 0 0;font-size:15px;line-height:1.45;color:var(--rb-txt);font-weight:500}
+.agent-proposal-note{margin:10px 0 0 41px;font-size:12px;color:var(--rb-txt-3)}
+.agent-proposal-actions{display:flex;gap:10px;margin:14px 0 0 41px}
+.agent-confirm{flex:none;display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;
+  padding:10px 18px;border-radius:var(--rb-radius-sm);font-family:var(--rb-ff-sans);font-weight:600;
+  font-size:14px;color:#04130d;
+  background:linear-gradient(180deg,var(--rb-brand),var(--rb-brand-deep));
+  transition:transform .14s,filter .14s,opacity .14s}
+.agent-confirm:hover{filter:brightness(1.06)}
+.agent-confirm:active{transform:translateY(1px)}
+.agent-confirm:disabled{opacity:.6;cursor:default;filter:none}
+.agent-confirm:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-cancel{flex:none;cursor:pointer;padding:10px 16px;border-radius:var(--rb-radius-sm);
+  font-family:var(--rb-ff-sans);font-weight:500;font-size:14px;color:var(--rb-txt-2);
+  background:var(--rb-raise);border:1px solid var(--rb-line);transition:color .14s,border-color .14s}
+.agent-cancel:hover{color:var(--rb-txt);border-color:var(--rb-txt-3)}
+.agent-cancel:disabled{opacity:.5;cursor:default}
+.agent-cancel:focus-visible{outline:none;border-color:var(--rb-brand);box-shadow:0 0 0 3px var(--rb-brand-soft)}
+/* action receipt — the write committed */
+.agent-bubble-ok{border-color:color-mix(in srgb,var(--rb-brand) 50%,var(--rb-line));
+  color:var(--rb-txt);background:var(--rb-brand-soft)}
+
+@media (prefers-reduced-motion:no-preference){
+  .agent-ask{animation:agent-rise .42s cubic-bezier(.22,.61,.36,1) both}
+  .agent-dots i{animation:agent-blink 1s ease-in-out infinite}
+  .agent-dots i:nth-child(2){animation-delay:.16s}
+  .agent-dots i:nth-child(3){animation-delay:.32s}
+  .agent-bubble,.agent-bubble-error,.agent-bubble-ok,.agent-proposal{animation:agent-rise .26s ease both}
+}
+@keyframes agent-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes agent-blink{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
+
+/* --- One-time agent intro (coach mark) ----------------------------------- */
+.agent-intro{display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;
+  padding:11px 13px;border-radius:var(--rb-radius-sm);
+  border:1px solid color-mix(in srgb,var(--rb-brand) 35%,var(--rb-line));
+  background:var(--rb-brand-soft)}
+.agent-intro-spark{flex:none;font-size:15px;line-height:1.4}
+.agent-intro-txt{margin:0;font-size:13px;line-height:1.5;color:var(--rb-txt-2)}
+.agent-intro-txt strong{color:var(--rb-txt)}
+.agent-intro-txt em{font-style:normal;color:var(--rb-brand);font-weight:500}
+.agent-intro-close{flex:none;display:inline-grid;place-items:center;width:24px;height:24px;
+  cursor:pointer;border:none;background:transparent;color:var(--rb-txt-3);border-radius:6px}
+.agent-intro-close:hover{color:var(--rb-txt);background:var(--rb-line)}
+.agent-intro-close svg{width:14px;height:14px}
+.agent-intro-close:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+/* --- Proactive agent cards (dashboard) ----------------------------------- */
+.agent-alerts{display:flex;flex-direction:column;gap:10px;margin:0 0 18px}
+.agent-alert{display:flex;align-items:center;gap:13px;padding:13px 15px;
+  border-radius:var(--rb-radius);border:1px solid var(--rb-line);
+  background:var(--rb-surface);border-left-width:3px}
+.agent-alert-danger{border-left-color:var(--rb-danger)}
+.agent-alert-warn{border-left-color:var(--rb-amber)}
+.agent-alert-ico{flex:none;display:inline-grid;place-items:center;width:34px;height:34px;
+  border-radius:9px;background:var(--rb-line)}
+.agent-alert-danger .agent-alert-ico{color:var(--rb-danger);
+  background:color-mix(in srgb,var(--rb-danger) 14%,transparent)}
+.agent-alert-warn .agent-alert-ico{color:var(--rb-amber);
+  background:color-mix(in srgb,var(--rb-amber) 16%,transparent)}
+.agent-alert-text{flex:1;min-width:0}
+.agent-alert-text strong{display:block;font-size:14px;color:var(--rb-txt)}
+.agent-alert-text p{margin:2px 0 0;font-size:13px;color:var(--rb-txt-2);line-height:1.4}
+.agent-alert-actions{flex:none;display:flex;align-items:center;gap:8px}
+.agent-alert-btn{cursor:pointer;border:1px solid var(--rb-line);background:var(--rb-bg);
+  color:var(--rb-txt);font-size:13px;font-weight:500;padding:8px 13px;border-radius:var(--rb-radius-sm)}
+.agent-alert-btn:hover{border-color:var(--rb-brand);color:var(--rb-brand)}
+.agent-alert-btn:active{transform:translateY(1px)}
+.agent-alert-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+.agent-alert-dismiss{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;
+  cursor:pointer;border:none;background:transparent;color:var(--rb-txt-3);border-radius:7px}
+.agent-alert-dismiss:hover{color:var(--rb-txt);background:var(--rb-line)}
+.agent-alert-dismiss svg{width:15px;height:15px}
+.agent-alert-dismiss:focus-visible{outline:none;box-shadow:0 0 0 3px var(--rb-brand-soft)}
+
+@media (prefers-reduced-motion:no-preference){
+  .agent-alert{animation:agent-rise .26s ease both}
+}
+
+@media (max-width:640px){
+  .agent-ask-form{flex-direction:column}
+  .agent-ask-send{padding:12px 18px}
+  .agent-alert{flex-wrap:wrap}
+  .agent-alert-actions{width:100%;justify-content:flex-end}
+}
+
+/* ============================================================================
+ * Configuración HUB (ye, W5) — side-nav + curated cards over the flat scroll.
+ * Reuses the generic tokens (--bg-N/--line/--text/--muted/--accent/--ok) so it
+ * tracks the theme; the legacy .cfg-list/.cfg-row/.cfg-switch/.field rules in
+ * styles.css still style the controls inside each card. Only the NEW hub
+ * chrome lives here (ye owns .cfg-*). Append-only.
+ * ========================================================================== */
+.cfg-hub .view-head{margin-bottom:14px}
+
+/* search */
+.cfg-search-wrap{margin-bottom:16px}
+.cfg-search{width:100%;max-width:520px}
+.cfg-search-hits{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+.cfg-hit-chip{padding:5px 12px;border-radius:var(--radius-pill,999px);
+  border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));
+  background:color-mix(in srgb,var(--accent) 10%,transparent);
+  color:var(--accent);font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:background .12s ease,transform .12s ease}
+.cfg-hit-chip:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);transform:translateY(-1px)}
+.cfg-hit-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cfg-no-hits{font-size:13px}
+
+/* layout: nav rail + panel */
+.cfg-hub-body{display:grid;grid-template-columns:260px 1fr;gap:22px;align-items:start}
+.cfg-nav{display:flex;flex-direction:column;gap:4px;position:sticky;top:8px}
+.cfg-nav-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  padding:11px 13px;border-radius:var(--radius-card,14px);border:1px solid transparent;
+  background:transparent;color:var(--text);cursor:pointer;
+  transition:background .12s ease,border-color .12s ease}
+.cfg-nav-item:hover{background:var(--bg-1)}
+.cfg-nav-item.active{background:color-mix(in srgb,var(--accent) 12%,var(--bg-1));
+  border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.cfg-nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cfg-nav-icon{flex:0 0 auto;width:20px;height:20px;color:var(--muted)}
+.cfg-nav-item.active .cfg-nav-icon{color:var(--accent)}
+.cfg-nav-icon svg{width:20px;height:20px;display:block}
+.cfg-nav-text{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1 1 auto}
+.cfg-nav-label{font-size:14px;font-weight:600;line-height:1.2}
+.cfg-nav-blurb{font-size:11.5px;color:var(--muted);line-height:1.25;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cfg-nav-soon{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--muted);padding:2px 7px;border-radius:var(--radius-pill,999px);
+  border:1px solid var(--line)}
+
+/* panel + section heads + cards */
+.cfg-panel{min-width:0;display:flex;flex-direction:column;gap:18px}
+.cfg-sec-head{display:flex;align-items:flex-start;gap:13px}
+.cfg-sec-icon{flex:0 0 auto;width:30px;height:30px;color:var(--accent);
+  display:grid;place-items:center;border-radius:11px;
+  background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 32%,var(--line))}
+.cfg-sec-icon svg{width:18px;height:18px}
+.cfg-sec-title{margin:0;font-size:18px;letter-spacing:-.3px}
+.cfg-card{border:1px solid var(--line);border-radius:var(--radius-card,16px);
+  background:var(--bg-1);padding:18px 20px}
+.cfg-card-title{margin:0 0 6px;font-size:14.5px;font-weight:650;
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.cfg-card-soon{border-style:dashed;background:transparent}
+.cfg-soon-chip{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);padding:2px 9px;border-radius:var(--radius-pill,999px);border:1px dashed var(--line)}
+
+/* pending save state (the new transition the state machine adds) */
+.cfg-status-pending{color:var(--muted)}
+
+/* CAF folios summary */
+.cfg-caf-summary{display:flex;align-items:baseline;gap:9px;margin-bottom:8px}
+.cfg-caf-big{font-size:30px;font-weight:750;color:var(--accent);letter-spacing:-.5px}
+.cfg-caf-big.low{color:var(--rb-amber,#f5b53d)}
+.cfg-caf-list{margin:0;padding-left:18px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+
+/* licencia */
+.cfg-license-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.cfg-license-status{font-size:14px;font-weight:600;color:var(--text)}
+.cfg-deflist{display:flex;gap:34px;margin:0 0 16px}
+.cfg-deflist dt{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.cfg-deflist dd{margin:2px 0 0;font-size:15px;font-weight:600;color:var(--text)}
+.cfg-feature-list{margin:6px 0 14px;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.cfg-feature-list li{position:relative;padding-left:22px;font-size:13.5px;color:var(--text)}
+.cfg-feature-list li::before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700}
+
+@media (max-width:820px){
+  .cfg-hub-body{grid-template-columns:1fr}
+  .cfg-nav{position:static;flex-direction:row;flex-wrap:wrap}
+  .cfg-nav-item{width:auto;flex:1 1 auto}
+  .cfg-nav-blurb{display:none}
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Design system — produced states + primitives (W5, Pilar C · lane
+ * feat/design-system, bob). The canonical empty/loading/error/button/card
+ * surface (helpers in client/src/views/ui.ts). ADDITIVE: this wave ships the
+ * set + bob's views adopt it; other lanes adopt later. Own ".ui-" namespace,
+ * separate from the ".rb-", ".rubro-", ".dash-", ".agent-" blocks above, ye's
+ * ".cfg-" and paul's ".cmdk-". Themed with the global styles.css tokens
+ * (--bg, --line, --text, --muted, --accent, --danger, --radius) which load
+ * AFTER this sheet, so var() resolves — same proven pattern as the ".rubro-"
+ * and ".dash-" blocks. Append-only.
+ * ════════════════════════════════════════════════════════════════════════ */
+:root{
+  --ui-space-1:6px; --ui-space-2:10px; --ui-space-3:16px; --ui-space-4:24px; --ui-space-5:40px;
+}
+
+/* buttons — primary (brand CTA) · ghost (secondary) · danger (destructive) */
+.ui-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;
+  font-family:var(--rb-ff-sans,system-ui,sans-serif);font-weight:600;font-size:14px;line-height:1;
+  padding:10px 16px;border-radius:var(--radius-field,10px);border:1px solid transparent;
+  transition:filter .15s ease,transform .12s ease,border-color .15s ease,background .15s ease,box-shadow .15s ease}
+.ui-btn:active{transform:translateY(1px)}
+.ui-btn:focus-visible{outline:none;box-shadow:var(--focus-ring,0 0 0 3px var(--accent-glow,rgba(24,209,168,.32)))}
+.ui-btn-primary{color:#04130d;
+  background:linear-gradient(180deg,var(--accent-3,var(--accent)),var(--accent-2,var(--accent)))}
+.ui-btn-primary:hover{filter:brightness(1.06)}
+.ui-btn-ghost{color:var(--text);background:var(--bg-2);border-color:var(--line)}
+.ui-btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.ui-btn-danger{color:#fff;background:var(--danger)}
+.ui-btn-danger:hover{filter:brightness(1.06)}
+
+/* empty state — a soft mark + title + teaching copy + optional CTA */
+.ui-empty{display:flex;flex-direction:column;align-items:center;text-align:center;
+  gap:var(--ui-space-2);padding:var(--ui-space-5) var(--ui-space-4);color:var(--muted)}
+.ui-empty-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:15px;
+  color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line))}
+.ui-empty-mark svg{width:26px;height:26px}
+.ui-empty-title{margin:var(--ui-space-1) 0 0;font-family:var(--rb-ff-display,inherit);
+  font-size:16px;font-weight:600;color:var(--text)}
+.ui-empty-hint{margin:0;max-width:46ch;font-size:13.5px;line-height:1.5;color:var(--muted)}
+.ui-empty-action{margin-top:var(--ui-space-2)}
+
+/* error state — danger-toned, role=alert; optional retry */
+.ui-error{display:flex;align-items:flex-start;gap:var(--ui-space-2);padding:var(--ui-space-3);
+  border-radius:var(--radius-card,14px);background:var(--danger-soft,rgba(255,93,108,.12));
+  border:1px solid color-mix(in srgb,var(--danger) 42%,var(--line))}
+.ui-error-mark{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;
+  color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+.ui-error-mark svg{width:19px;height:19px}
+.ui-error-body{min-width:0;display:flex;flex-direction:column;gap:var(--ui-space-2)}
+.ui-error-msg{margin:0;font-size:14px;line-height:1.5;color:var(--text)}
+.ui-error-retry{align-self:flex-start}
+
+/* loading state — spinner + polite label (non-table loads) */
+.ui-loading{display:flex;align-items:center;gap:var(--ui-space-2);padding:var(--ui-space-3);
+  color:var(--muted);font-size:14px}
+.ui-spinner{flex:none;width:18px;height:18px;border-radius:50%;
+  border:2px solid var(--line);border-top-color:var(--accent);animation:ui-spin .7s linear infinite}
+
+/* skeleton — generic shimmer lines */
+.ui-skeleton{display:block;padding:var(--ui-space-1) 0}
+.ui-sk-line{display:block;height:12px;border-radius:6px;
+  background:linear-gradient(90deg,var(--bg-2),var(--line),var(--bg-2));
+  background-size:200% 100%;animation:ui-sk 1.2s ease-in-out infinite}
+.ui-sk-line+.ui-sk-line{margin-top:10px}
+.ui-sk-line:nth-child(odd){width:90%}
+.ui-sk-line:nth-child(3n){width:70%}
+
+/* card shell */
+.ui-card{background:var(--bg-1);border:1px solid var(--line);
+  border-radius:var(--radius-card,18px);overflow:hidden}
+.ui-card-head{display:flex;align-items:center;justify-content:space-between;
+  gap:var(--ui-space-3);padding:var(--ui-space-3) var(--ui-space-3) 0}
+.ui-card-title{margin:0;font-family:var(--rb-ff-display,inherit);font-size:15px;font-weight:600;color:var(--text)}
+.ui-card-actions{display:flex;align-items:center;gap:8px}
+.ui-card-body{padding:var(--ui-space-3)}
+
+@keyframes ui-spin{to{transform:rotate(360deg)}}
+@keyframes ui-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes ui-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:no-preference){
+  .ui-empty,.ui-error{animation:ui-rise .3s ease both}
+}
+/* motion budget: spinner/shimmer/reveal all stop under reduced-motion (states
+ * still render instantly — the spinner becomes a static ring) */
+@media (prefers-reduced-motion:reduce){
+  .ui-btn{transition:none}
+  .ui-btn:active{transform:none}
+  .ui-spinner{animation:none}
+  .ui-sk-line{animation:none}
+}

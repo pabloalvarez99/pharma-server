@@ -1,0 +1,73 @@
+bind = "0.0.0.0:8080"
+
+[db]
+path = "./data/surreal"
+namespace = "pharma"
+database = "main"
+
+[jwt]
+secret = "change-me-in-production"
+issuer = "pharma-server"
+ttl_seconds = 3600
+
+[otlp]
+endpoint = ""
+service_name = "pharma-api"
+
+[metrics]
+# Empty = /metrics returns 401. Set via PHARMA__METRICS__TOKEN in prod.
+token = ""
+
+[backup]
+# Master switch for the nightly snapshot. true = runs on a sensible default
+# schedule (03:00 daily) unless `schedule` overrides it; false = disabled.
+enabled = true
+# Cron (sec min hour day month weekday, UTC). Empty -> default "0 0 3 * * *".
+schedule = ""
+# Count-based retention: keep the N newest snapshot archives. 0 = keep all.
+retention_count = 14
+# Age-based retention: also prune archives older than N days. 0 = disabled.
+retention_days = 0
+# Keep the N newest backup_log audit rows. 0 = keep all.
+log_retention = 90
+
+[rate_limit]
+# Token-bucket per tenant + per IP (governor). Defaults are production-safe.
+enabled = true
+tenant_per_min = 120
+tenant_burst = 30
+ip_per_min = 60
+ip_burst = 20
+
+[docs]
+# Swagger UI at /swagger-ui + OpenAPI JSON at /api-docs/openapi.json.
+# Flip off on hardened prod (PHARMA__DOCS__ENABLED=false).
+enabled = true
+
+[public_catalog]
+# Opt-in only (ADR-0005). Default 404 to peers.
+enabled = false
+cors_origins = ["https://tu-farmacia.cl"]
+
+[public_orders]
+# HMAC-signed web→ERP order ingest (ADR-0012 pattern 2).
+# Disabled by default; inject hmac_secret via PHARMA__PUBLIC_ORDERS__HMAC_SECRET.
+enabled = false
+hmac_secret = ""
+
+[stock_webhook]
+# ERP→web stock-change push (ADR-0013). Disabled = dispatcher is a no-op.
+# Inject hmac_secret via PHARMA__STOCK_WEBHOOK__HMAC_SECRET, never commit.
+enabled = false
+target_url = ""
+hmac_secret = ""
+
+[crl]
+# License revocation refresh (ADR-0006). Opt-in + offline-first: empty url =
+# disabled (zero network). When set, a job walks the signed CRL diff chain
+# {url}/crl-v{N}.json from the last seen version and degrades any revoked
+# license to Free (never a kill-switch — ADR-0005 §6). Best-effort: network
+# errors are logged and ignored.
+url = ""
+# Cron "sec min hour day month weekday" (UTC). Empty = every 6h.
+schedule = ""

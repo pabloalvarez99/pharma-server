@@ -1,0 +1,29 @@
+[package]
+name = "agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+bs58.workspace = true
+sha2.workspace = true
+hex.workspace = true
+# Relay store-and-forward queue persists to the tenant-scoped `agent_relay`
+# table; the shipped binary uses the workspace kv-surrealkv engine.
+surrealdb.workspace = true
+# Observability spans/events for the relay enqueue/drain/redrive path.
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+# kv-mem only for agent's own test build (relay tests); db crate runs the real
+# migrations into the in-memory engine, mirroring crates/domain's test harness.
+tokio = { workspace = true }
+surrealdb = { workspace = true, features = ["kv-mem"] }
+db = { path = "../db" }

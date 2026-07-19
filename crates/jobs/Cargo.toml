@@ -1,0 +1,27 @@
+[package]
+name = "jobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pharma-core = { path = "../core" }
+tokio.workspace = true
+tokio-cron-scheduler.workspace = true
+async-nats.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+surrealdb.workspace = true
+chrono.workspace = true
+flate2.workspace = true
+tar.workspace = true
+
+[dev-dependencies]
+surrealdb = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+filetime = "0.2"

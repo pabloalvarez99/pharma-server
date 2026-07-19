@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build:
+    name: build + test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: build
+        run: cargo build --workspace --release
+
+      - name: test
+        run: cargo test --workspace
+
+      # Compile + run the Criterion harness once in test mode (no measurement),
+      # so a drift in PosSaleRequest/AppState breaks CI instead of silently
+      # rotting the benchmark. See docs/ops/performance.md.
+      - name: bench smoke
+        run: cargo bench -p api --bench pos_sale -- --test
+
+      - name: upload api binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pharma-api-windows
+          path: target/release/pharma-api.exe
+          if-no-files-found: error

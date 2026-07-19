@@ -1,0 +1,29 @@
+[package]
+name = "service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pharma-service"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-service.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+pharma-telemetry = { package = "pharma-telemetry", path = "../telemetry" }
+api = { path = "../api" }
+pharma-core = { path = "../core" }
+
+[package.metadata.wix]
+name = "pharma-server"
+product-name = "Pharma Server"
+upgrade-guid = "5E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E6F"
+path-guid = "6E3A2C10-3F3E-4B5A-8C5B-1A2B3C4D5E70"
+include = ["../../installer/wix/main.wxs"]
+extensions = ["WixFirewallExtension"]
+no-build = false
