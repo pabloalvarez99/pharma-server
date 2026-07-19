@@ -2,6 +2,10 @@
 import { describe, it, expect } from "vitest";
 import {
   buildNewVariantInput,
+  buildEditVariantInput,
+  validateBarcodeSoft,
+  isEan13ChecksumValid,
+  ean13ChecksumHint,
   variantsListBadgeFromDto,
   preferBarcodeLookup,
   parentWithVariantsError,
@@ -9,6 +13,7 @@ import {
   defaultVariantName,
   shouldOfferVariantsUi,
   matrixComboSuggestions,
+  variantInactiveLabel,
 } from "./variants-ui";
 import { hasVariantsStockFlag, productFromDetail, type ProductDetail } from "../api/catalog";
 
@@ -96,5 +101,40 @@ describe("multi-rubro + matrix honesty", () => {
   });
   it("badge dto empty when no signals", () => {
     expect(variantsListBadgeFromDto({ variant_count: null, variants_stock: null })).toBe("");
+  });
+});
+
+describe("EAN-13 soft + edit model (future PATCH)", () => {
+  it("soft rules reject empty/spaces; allow non-GS1 13-digit internal", () => {
+    expect(validateBarcodeSoft("").ok).toBe(false);
+    expect(validateBarcodeSoft("780 123").ok).toBe(false);
+    expect(validateBarcodeSoft("7804999700013").ok).toBe(true); // may fail GS1 but allowed
+  });
+  it("GS1 checksum helper separate from soft validate", () => {
+    expect(isEan13ChecksumValid("5901234123457")).toBe(true);
+    expect(isEan13ChecksumValid("5901234123450")).toBe(false);
+    expect(ean13ChecksumHint("5901234123450")).toMatch(/verificador|interno/i);
+    expect(ean13ChecksumHint("POL-M")).toBe("");
+  });
+  it("short alphanumeric SKU ok without checksum", () => {
+    expect(validateBarcodeSoft("POL-M-01").ok).toBe(true);
+  });
+  it("buildEditVariantInput money + stock", () => {
+    const r = buildEditVariantInput({
+      name: "Polera M",
+      price: "1.990",
+      stock: "3",
+      attrs: { talla: "M" },
+      active: true,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.price).toBe("1990");
+      expect(r.value.stock).toBe(3);
+      expect(r.value.attrs?.talla).toBe("M");
+    }
+  });
+  it("inactive label Spanish", () => {
+    expect(variantInactiveLabel()).toMatch(/inactiva/i);
   });
 });

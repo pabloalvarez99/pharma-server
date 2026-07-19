@@ -81,8 +81,13 @@ Click padre   → «Polera básica» tiene variantes. Escanea…
 
 ## BLOCKED_API (UI)
 
-- **PATCH/DELETE variante** en panel: no hay comando Tauri fino; hint “por API/CSV”
+- **PATCH/DELETE variante** en panel: no hay comando Tauri fino; hint “por API/CSV”. Modelo puro listo: `buildEditVariantInput`.
 - **Matriz talla×color completa**: helper `matrixComboSuggestions` (thin) solo sugiere combos faltantes; no POST masivo
+
+## Validación barcode
+
+- Obligatoria: no vacío, ≥3 chars, sin espacios (`validateBarcodeSoft`)
+- EAN-13 GS1: solo **aviso** (`ean13ChecksumHint`) — códigos internos de 13 dígitos se permiten
 
 ## Tests
 

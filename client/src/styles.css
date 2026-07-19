@@ -1701,6 +1701,13 @@ button {
 .pd-variants-skel .skel-short {
   width: 55%;
 }
+.pd-variant-table tr.is-inactive {
+  opacity: 0.55;
+}
+.pd-var-inactive {
+  margin-left: 6px;
+  font-size: 10px;
+}
 @keyframes pd-skel {
   0% {
     background-position: 100% 0;

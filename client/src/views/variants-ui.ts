@@ -210,6 +210,112 @@ export function variantFormKeyboardHint(): string {
   return "Enter en el código de barras crea la variante · Esc cierra el formulario.";
 }
 
+/**
+ * Future PATCH body for edit variant (name/price/stock/attrs).
+ * No Tauri command yet — pure validation for when B/C wire update.
+ */
+export interface EditVariantRaw {
+  name?: string;
+  price?: string;
+  costPrice?: string;
+  stock?: string;
+  attrs?: Record<string, string>;
+  active?: boolean;
+}
+
+export type EditVariantBuildResult =
+  | {
+      ok: true;
+      value: {
+        name?: string;
+        price?: string;
+        costPrice?: string;
+        stock?: number;
+        attrs?: Record<string, string>;
+        active?: boolean;
+      };
+    }
+  | { ok: false; error: string };
+
+export function buildEditVariantInput(raw: EditVariantRaw): EditVariantBuildResult {
+  let price: string | undefined;
+  if ((raw.price ?? "").trim() !== "") {
+    const p = parseOptionalMoney(raw.price, "Precio de venta");
+    if (!p.ok) return p;
+    price = p.value;
+  }
+  let costPrice: string | undefined;
+  if ((raw.costPrice ?? "").trim() !== "") {
+    const c = parseOptionalMoney(raw.costPrice, "Costo");
+    if (!c.ok) return c;
+    costPrice = c.value;
+  }
+  let stock: number | undefined;
+  if ((raw.stock ?? "").trim() !== "") {
+    const st = parseOptionalNonNegInt(raw.stock);
+    if (!st.ok) return st;
+    stock = st.value;
+  }
+  const attrs = cleanAttrs(raw.attrs);
+  const name = (raw.name ?? "").trim() || undefined;
+  return {
+    ok: true,
+    value: {
+      name,
+      price,
+      costPrice,
+      stock,
+      attrs: Object.keys(attrs).length > 0 ? attrs : undefined,
+      active: raw.active,
+    },
+  };
+}
+
+/**
+ * Soft barcode rules for create form (required, min length, no spaces).
+ * Internal 13-digit non-EAN codes are allowed — many Chilean SKUs are not GS1.
+ * Use {@link isEan13ChecksumValid} only as optional UI hint, not hard reject.
+ */
+export function validateBarcodeSoft(raw: string): { ok: true } | { ok: false; error: string } {
+  const s = (raw ?? "").trim();
+  if (s === "") {
+    return { ok: false, error: "Ingresa el código de barras de la variante (escáner o teclado)." };
+  }
+  if (s.length < 3) {
+    return { ok: false, error: "El código de barras es demasiado corto (mín. 3 caracteres)." };
+  }
+  if (/\s/.test(s)) {
+    return { ok: false, error: "El código de barras no debe tener espacios." };
+  }
+  return { ok: true };
+}
+
+/** Optional GS1 EAN-13 checksum (hint only — never blocks internal codes). */
+export function isEan13ChecksumValid(raw: string): boolean {
+  const s = (raw ?? "").trim();
+  if (!/^\d{13}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = Number(s[i]);
+    sum += i % 2 === 0 ? d : d * 3;
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return check === Number(s[12]);
+}
+
+/** Operator hint when 13 digits fail GS1 (still allowed to save). */
+export function ean13ChecksumHint(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!/^\d{13}$/.test(s)) return "";
+  if (isEan13ChecksumValid(s)) return "";
+  return "Aviso: este EAN-13 no cuadra el dígito verificador. Si es un código interno, puedes guardarlo igual.";
+}
+
+/** Inactive child row note (when active=false). */
+export function variantInactiveLabel(): string {
+  return "Inactiva";
+}
+
 /** Child row note under the product name in detail. */
 export function variantChildNote(): string {
   return "Variante multi-SKU · vender por su código de barras";
@@ -466,24 +572,8 @@ export type NewVariantBuildResult =
  */
 export function buildNewVariantInput(raw: NewVariantRaw): NewVariantBuildResult {
   const barcode = (raw.barcode ?? "").trim();
-  if (barcode === "") {
-    return {
-      ok: false,
-      error: "Ingresa el código de barras de la variante (escáner o teclado).",
-    };
-  }
-  if (barcode.length < 3) {
-    return {
-      ok: false,
-      error: "El código de barras es demasiado corto (mín. 3 caracteres).",
-    };
-  }
-  if (/\s/.test(barcode)) {
-    return {
-      ok: false,
-      error: "El código de barras no debe tener espacios.",
-    };
-  }
+  const bc = validateBarcodeSoft(barcode);
+  if (!bc.ok) return bc;
 
   let price: string | undefined;
   if ((raw.price ?? "").trim() !== "") {

@@ -83,6 +83,7 @@ import {
   variantFormKeyboardHint,
   matrixComboSuggestions,
   variantsLoadingHtml,
+  ean13ChecksumHint,
 } from "./variants-ui";
 import { bindModalKeys } from "./modal-keys";
 
@@ -778,8 +779,13 @@ async function openProductDetail(
                   stock: row.stock,
                   attrsLabel: lab,
                 });
-                return `<tr data-variant-id="${escapeHtml(v.id)}" aria-label="${escapeHtml(aria)}">
-                  <td><div class="cell-main">${escapeHtml(row.name)}</div>
+                const inactive = !row.active
+                  ? `<span class="pill pill-warn pd-var-inactive">Inactiva</span>`
+                  : "";
+                return `<tr data-variant-id="${escapeHtml(v.id)}" class="${
+                  row.active ? "" : "is-inactive"
+                }" aria-label="${escapeHtml(aria)}">
+                  <td><div class="cell-main">${escapeHtml(row.name)} ${inactive}</div>
                     ${lab && lab !== row.name ? `<div class="cell-sub muted">${escapeHtml(lab)}</div>` : ""}</td>
                   <td class="rb-num">${escapeHtml(row.barcode)}</td>
                   <td class="num">${clp(row.price)}</td>
@@ -943,6 +949,7 @@ async function openProductDetail(
           </label>
         </div>
         ${attrFieldsHtml(vFields, escapeHtml, "vf-attr-")}
+        <p id="vf-ean-hint" class="muted pd-sub" hidden></p>
         <div id="vf-error" class="pos-error" hidden></div>
         <div class="modal-actions">
           <button type="button" id="vf-cancel" class="btn-ghost">Cancelar</button>
@@ -959,12 +966,20 @@ async function openProductDetail(
     const priceEl = host.querySelector<HTMLInputElement>("#vf-price")!;
     const costEl = host.querySelector<HTMLInputElement>("#vf-cost")!;
     const errEl = host.querySelector<HTMLElement>("#vf-error")!;
+    const eanHint = host.querySelector<HTMLElement>("#vf-ean-hint")!;
     const btn = host.querySelector<HTMLButtonElement>("#vf-confirm")!;
     const closeForm = (): void => {
       host.innerHTML = "";
     };
     host.querySelector<HTMLButtonElement>("#vf-cancel")!.addEventListener("click", closeForm);
     barcodeEl.focus();
+
+    const syncEanHint = (): void => {
+      const h = ean13ChecksumHint(barcodeEl.value);
+      eanHint.textContent = h;
+      eanHint.hidden = !h;
+    };
+    barcodeEl.addEventListener("input", syncEanHint);
 
     const submit = async (): Promise<void> => {
       const built = buildNewVariantInput({
