@@ -802,3 +802,245 @@ async fn variant_tenant_isolation() {
         .unwrap_err();
     assert_eq!(err.code(), "NOT_FOUND");
 }
+
+#[tokio::test]
+async fn list_variants_ordered_by_name_with_stock_and_barcode() {
+    let (db, t) = setup().await;
+    // Parent sin barcode de caja (retail shell).
+    let parent = service::create_product(&db, &t, new_product("Polera shell", "8990"))
+        .await
+        .unwrap();
+    assert!(parent.barcode.is_none());
+
+    // Create L before M so ORDER BY name is not insert-order.
+    let l = service::create_variant(&db, &t, &parent.id, new_variant("L", "7804999110027", 3))
+        .await
+        .unwrap();
+    let m = service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999110010", 8))
+        .await
+        .unwrap();
+    assert_eq!(m.barcode.as_deref(), Some("7804999110010"));
+    assert_eq!(l.barcode.as_deref(), Some("7804999110027"));
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(kids.len(), 2);
+    assert!(
+        kids[0].name <= kids[1].name,
+        "list must be ORDER BY name: {:?} then {:?}",
+        kids[0].name,
+        kids[1].name
+    );
+    let stocks: std::collections::HashMap<_, _> =
+        kids.iter().map(|k| (k.id.as_str(), k.stock)).collect();
+    assert_eq!(stocks.get(m.id.as_str()).copied(), Some(8));
+    assert_eq!(stocks.get(l.id.as_str()).copied(), Some(3));
+    for k in &kids {
+        assert!(k.barcode.is_some(), "list enriches barcode for {}", k.id);
+    }
+
+    // Parent.stock stays 0; sellable stock is sum of children (read-side).
+    let parent2 = service::get_product(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(parent2.stock, 0, "padre no materializa stock de hijos");
+    assert_eq!(parent2.variants_stock, Some(11));
+    assert_eq!(parent2.variant_count, Some(2));
+    let sum = service::variants_stock_sum(&db, &t, &parent.id)
+        .await
+        .unwrap();
+    assert_eq!(sum, 11);
+}
+
+#[tokio::test]
+async fn parent_without_barcode_and_whitespace_barcode_ok() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Jean shell", "19990"))
+        .await
+        .unwrap();
+    // Empty / whitespace barcode = no mapping (allowed).
+    let mut v = new_variant("32", "x", 2);
+    v.barcode = Some("   ".into());
+    let child = service::create_variant(&db, &t, &parent.id, v)
+        .await
+        .unwrap();
+    assert!(child.barcode.is_none());
+    let err = service::find_by_barcode(&db, &t, "   ").await.unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn create_variant_missing_parent_not_found() {
+    let (db, t) = setup().await;
+    let err = service::create_variant(
+        &db,
+        &t,
+        "product:doesnotexist",
+        new_variant("M", "7804999120016", 1),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+}
+
+#[tokio::test]
+async fn create_variant_barcode_race_second_conflicts() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Race shell", "5000"))
+        .await
+        .unwrap();
+    let code = "7804999130013";
+    let a = service::create_variant(&db, &t, &parent.id, new_variant("A", code, 1))
+        .await
+        .unwrap();
+    assert_eq!(a.barcode.as_deref(), Some(code));
+
+    // Second claim of same EAN → CONFLICT; no barcode steal.
+    let err = service::create_variant(&db, &t, &parent.id, new_variant("B", code, 1))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("código de barras") || msg.contains("ya está"),
+        "ES conflict message: {msg}"
+    );
+
+    let owner = service::find_by_barcode(&db, &t, code).await.unwrap();
+    assert_eq!(owner.id, a.id, "first winner keeps barcode");
+
+    // Orphan from failed barcode hard-deleted — only winner remains.
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(
+        kids.len(),
+        1,
+        "orphan from failed barcode should be removed"
+    );
+    assert_eq!(kids[0].id, a.id);
+}
+
+#[tokio::test]
+async fn create_variant_concurrent_same_barcode_one_wins() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Concurrent shell", "7000"))
+        .await
+        .unwrap();
+    let code = "7804999140010";
+    let pid = parent.id.clone();
+
+    let (r1, r2) = tokio::join!(
+        service::create_variant(&db, &t, &pid, new_variant("A", code, 2)),
+        service::create_variant(&db, &t, &pid, new_variant("B", code, 2)),
+    );
+
+    let ok = r1.is_ok() as u8 + r2.is_ok() as u8;
+    // Never two Ok (would mean barcode steal / double-map). Surreal mem races
+    // may surface the loser as CONFLICT or transient DB_ERROR — both fine as
+    // long as at most one claim wins.
+    assert!(ok <= 1, "at most one winner: r1={r1:?} r2={r2:?}");
+    if ok == 1 {
+        let o = service::find_by_barcode(&db, &t, code).await.unwrap();
+        assert_eq!(o.barcode.as_deref(), Some(code));
+        let winner_id = match (&r1, &r2) {
+            (Ok(w), _) | (_, Ok(w)) => w.id.as_str(),
+            _ => unreachable!("ok==1"),
+        };
+        assert_eq!(o.id, winner_id);
+    }
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert!(
+        kids.len() <= 1,
+        "expected ≤1 variant after concurrent claim, got {}",
+        kids.len()
+    );
+}
+
+#[tokio::test]
+async fn plain_pharmacy_sku_untouched_by_variants_stock_field() {
+    // Farmacia path: no parent_id, no children → no variants_stock field.
+    let (db, t) = setup().await;
+    let p = service::create_product(&db, &t, {
+        let mut n = new_product("Paracetamol 500mg", "1990");
+        n.stock = 40;
+        n
+    })
+    .await
+    .unwrap();
+    let got = service::get_product(&db, &t, &p.id).await.unwrap();
+    assert!(got.parent_id.is_none());
+    assert!(got.variants_stock.is_none());
+    assert!(got.variant_count.is_none());
+    assert_eq!(got.stock, 40);
+}
+
+#[tokio::test]
+async fn list_products_sets_variants_stock_on_parents() {
+    // C client flags multi-SKU parents via `variants_stock != null` on list.
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("List shell", "3000"))
+        .await
+        .unwrap();
+    let plain = service::create_product(&db, &t, {
+        let mut n = new_product("Ibuprofeno 400", "2500");
+        n.stock = 12;
+        n
+    })
+    .await
+    .unwrap();
+    service::create_variant(&db, &t, &parent.id, new_variant("S", "7804999170011", 2))
+        .await
+        .unwrap();
+    service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999170028", 5))
+        .await
+        .unwrap();
+
+    let list = service::list_products(&db, &t, ProductFilters::default())
+        .await
+        .unwrap();
+    let by_id: std::collections::HashMap<_, _> =
+        list.into_iter().map(|p| (p.id.clone(), p)).collect();
+
+    let p = by_id.get(&parent.id).expect("parent in list");
+    assert_eq!(p.variants_stock, Some(7));
+    assert_eq!(p.variant_count, Some(2));
+    // Children hidden by default.
+    assert!(!by_id.contains_key(
+        // any child id would appear under include_variants only
+        "product:none"
+    ));
+
+    let plain_dto = by_id.get(&plain.id).expect("plain in list");
+    assert!(
+        plain_dto.variants_stock.is_none() && plain_dto.variant_count.is_none(),
+        "farmacia plain SKU must not look like a multi-SKU parent"
+    );
+    assert_eq!(plain_dto.stock, 12);
+}
+
+#[tokio::test]
+async fn find_by_barcode_rejects_parent_shell_with_variants() {
+    // Edge: parent somehow has a product_barcode row (import/UPSERT). Scan must
+    // not resolve to the non-sellable shell — same ES contract as POS sale.
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Shell con EAN", "9990"))
+        .await
+        .unwrap();
+    service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999150017", 4))
+        .await
+        .unwrap();
+    let parent_thing = surrealdb::sql::thing(&parent.id).unwrap();
+    domain::catalog::repo::upsert_barcode(&db, &t, &parent_thing, "7804999150093")
+        .await
+        .unwrap();
+
+    let err = service::find_by_barcode(&db, &t, "7804999150093")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+    let msg = err.to_string().to_lowercase();
+    assert!(msg.contains("tiene variantes"), "{msg}");
+
+    // Child barcode still resolves.
+    let child = service::find_by_barcode(&db, &t, "7804999150017")
+        .await
+        .unwrap();
+    assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+}

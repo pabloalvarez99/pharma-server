@@ -96,6 +96,10 @@ impl From<ProductRow> for ProductDto {
             discount_percent: r.discount_percent,
             attrs: r.attrs,
             parent_id: r.parent_id.map(|p| p.to_string()),
+            // Enriched by service after join to product_barcode / children.
+            barcode: None,
+            variants_stock: None,
+            variant_count: None,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -309,6 +313,9 @@ pub async fn find_id_by_external_id(
 /// otherwise a new mapping row is created. The agent/POS lookups read this
 /// table via `SELECT VALUE product FROM product_barcode WHERE tenant=$t AND
 /// barcode=$b`.
+///
+/// **Do not use for create-variant** — re-pointing would steal a barcode under
+/// race. Prefer [`create_barcode`] there.
 pub async fn upsert_barcode(
     db: &Db,
     tenant: &Thing,
@@ -324,6 +331,206 @@ pub async fn upsert_barcode(
     .bind(("b", barcode.to_string()))
     .await?;
     Ok(())
+}
+
+/// Insert a **new** barcode mapping without re-pointing an existing one.
+/// Unique index `(tenant, barcode)` → [`DomainError::Conflict`] if taken.
+/// Safe under concurrent create-variant of the same EAN.
+pub async fn create_barcode(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    barcode: &str,
+) -> DomainResult<()> {
+    // Fast path: already mapped to this product (retry / idempotent).
+    if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+        if owner == *product {
+            return Ok(());
+        }
+        return Err(DomainError::Conflict(format!(
+            "el código de barras '{barcode}' ya está asignado a {owner}"
+        )));
+    }
+    let res = db
+        .query(
+            "CREATE product_barcode SET tenant = $t, product = $p, barcode = $b \
+             RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .bind(("b", barcode.to_string()))
+        .await;
+    match res {
+        Ok(mut r) => match r.take::<Option<Thing>>((0, "id")) {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(e) => {
+                // Surreal may return Ok with an error payload on unique violation.
+                if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+                    if owner == *product {
+                        return Ok(());
+                    }
+                    return Err(DomainError::Conflict(format!(
+                        "el código de barras '{barcode}' ya está asignado a {owner}"
+                    )));
+                }
+                let es = e.to_string();
+                if es.contains("unique")
+                    || es.contains("already")
+                    || es.contains("index")
+                    || es.contains("conflict")
+                {
+                    return Err(DomainError::Conflict(format!(
+                        "el código de barras '{barcode}' ya está asignado"
+                    )));
+                }
+                return Err(DomainError::Db(Box::new(e)));
+            }
+        },
+        Err(e) => {
+            // Unique race or other DB fault — re-check ownership.
+            if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+                if owner == *product {
+                    return Ok(());
+                }
+                return Err(DomainError::Conflict(format!(
+                    "el código de barras '{barcode}' ya está asignado a {owner}"
+                )));
+            }
+            let es = e.to_string();
+            if es.contains("unique")
+                || es.contains("already")
+                || es.contains("index")
+                || es.contains("conflict")
+            {
+                return Err(DomainError::Conflict(format!(
+                    "el código de barras '{barcode}' ya está asignado"
+                )));
+            }
+            return Err(DomainError::Db(Box::new(e)));
+        }
+    }
+    // CREATE returned 0 rows without Err — treat as conflict if taken.
+    if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+        if owner == *product {
+            return Ok(());
+        }
+        return Err(DomainError::Conflict(format!(
+            "el código de barras '{barcode}' ya está asignado a {owner}"
+        )));
+    }
+    Err(DomainError::Other(anyhow::anyhow!(
+        "create product_barcode returned 0 rows for {barcode}"
+    )))
+}
+
+/// Barcode for a single product (tenant-scoped), if any.
+pub async fn barcode_of_product(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+) -> DomainResult<Option<String>> {
+    let mut r = db
+        .query(
+            "SELECT VALUE barcode FROM product_barcode \
+             WHERE tenant = $t AND product = $p LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .await?;
+    let code: Option<String> = r.take(0)?;
+    Ok(code)
+}
+
+/// Batch barcode lookup for many products (tenant-scoped). Key = product id string.
+pub async fn barcodes_of_products(
+    db: &Db,
+    tenant: &Thing,
+    products: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, String>> {
+    if products.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut r = db
+        .query(
+            "SELECT product, barcode FROM product_barcode \
+             WHERE tenant = $t AND product INSIDE $ps",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ps", products.to_vec()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct Row {
+        product: Thing,
+        barcode: String,
+    }
+    let rows: Vec<Row> = r.take(0).unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.product.to_string(), row.barcode))
+        .collect())
+}
+
+/// Sum of `stock` on active children of `parent` (read-side only).
+pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<i64> {
+    let mut r = db
+        .query(
+            "SELECT math::sum(stock) AS total FROM product \
+             WHERE tenant = $t AND parent_id = $p AND active = true \
+             GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", parent.clone()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct SumRow {
+        total: Option<i64>,
+    }
+    let row: Option<SumRow> = r.take(0)?;
+    Ok(row.and_then(|s| s.total).unwrap_or(0))
+}
+
+/// Batch: parent id → (sum stock, count) of active children. One query for a
+/// list page (client uses field presence as multi-SKU parent flag).
+pub async fn children_agg_by_parents(
+    db: &Db,
+    tenant: &Thing,
+    parents: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, (i64, i64)>> {
+    if parents.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut r = db
+        .query(
+            "SELECT parent_id, stock FROM product \
+             WHERE tenant = $t AND parent_id INSIDE $ps AND active = true",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ps", parents.to_vec()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct Row {
+        parent_id: Thing,
+        stock: i64,
+    }
+    let rows: Vec<Row> = r.take(0).unwrap_or_default();
+    let mut map: std::collections::HashMap<String, (i64, i64)> = std::collections::HashMap::new();
+    for row in rows {
+        let e = map.entry(row.parent_id.to_string()).or_insert((0, 0));
+        e.0 += row.stock;
+        e.1 += 1;
+    }
+    Ok(map)
+}
+
+/// Batch: parent id → sum of active children stock.
+pub async fn children_stock_by_parents(
+    db: &Db,
+    tenant: &Thing,
+    parents: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, i64>> {
+    let agg = children_agg_by_parents(db, tenant, parents).await?;
+    Ok(agg.into_iter().map(|(k, (stock, _))| (k, stock)).collect())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -663,6 +870,16 @@ pub async fn soft_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainR
         .await?;
     let row: Option<Thing> = r.take((0, "id"))?;
     Ok(row.is_some())
+}
+
+/// Hard-delete a product row (tenant-scoped). Used only to roll back a
+/// just-created variant when barcode claim fails — no stock movements yet.
+pub async fn hard_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<()> {
+    db.query("DELETE product WHERE id = $id AND tenant = $t")
+        .bind(("id", id.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    Ok(())
 }
 
 // `set_stock` removed in Fase 3: every stock change MUST go through

@@ -2,8 +2,8 @@
 // The cash-loop MATH is covered in cashier-loop.test.ts; here we assert the
 // VISUAL gate driven by the rubro signal (featuresForRubro().physicalStock):
 // a service rubro (peluquería, oficios) must never show "Stock 0 · agotado" — it
-// sells the item as a servicio — while a physical rubro keeps the stock line and
-// the out-of-stock lock intact.
+// sells the item as a servicio — while a physical rubro keeps the stock line.
+// Out-of-stock physical cards stay clickable (multi-SKU parent shell is often 0).
 import { describe, it, expect } from "vitest";
 import { resultCard, posSearchPlaceholder, friendlyPosError } from "./pos";
 import { devolucionesSubtitle, restockControlHtml } from "./devoluciones";
@@ -30,10 +30,10 @@ describe("POS picker card — physical rubro (trackStock=true)", () => {
     expect(html).not.toContain("Servicio");
   });
 
-  it("marks an out-of-stock item agotado and disables the card", () => {
+  it("marks out-of-stock visually but stays clickable (parent multi-SKU / sin stock)", () => {
     const html = resultCard(product(0), true);
-    expect(html).toContain("agotado");
-    expect(html).toContain("disabled");
+    expect(html).toMatch(/sin stock|variantes/i);
+    expect(html).not.toContain("disabled");
     expect(html).toContain("is-out");
   });
 });
@@ -85,8 +85,8 @@ describe("devoluciones — stock copy gated by rubro", () => {
 
 describe("POS copy — pack vocab + professional errors", () => {
   it("search placeholder uses the pack item word", () => {
-    expect(posSearchPlaceholder("Servicio")).toMatch(/servicio/i);
-    expect(posSearchPlaceholder("Producto")).toMatch(/producto/i);
+    expect(posSearchPlaceholder("Servicio", false)).toMatch(/servicio/i);
+    expect(posSearchPlaceholder("Producto", true)).toMatch(/producto|código de barras/i);
   });
 
   it("service card can show custom item label", () => {

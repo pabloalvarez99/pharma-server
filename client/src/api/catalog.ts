@@ -12,6 +12,15 @@ export interface Product {
   active: boolean;
   laboratory: string | null;
   active_ingredient: string | null;
+  /** Tenant barcode when present (B ProductDto.barcode). */
+  barcode?: string | null;
+  /**
+   * Read-side sum of active children stock when this row is a multi-SKU parent.
+   * Present on list/detail after B contract harden; undefined on older servers.
+   */
+  variants_stock?: number | null;
+  /** Set when this row is a sellable multi-SKU child. */
+  parent_id?: string | null;
 }
 
 /** `/products/stats` payload. `inventory_value` is a STRING (Decimal). */
@@ -65,6 +74,10 @@ export interface ProductDetail {
   attrs?: Record<string, unknown> | null;
   /** Set when this row is a sellable multi-SKU child (migración 0034). */
   parent_id?: string | null;
+  /** Tenant barcode from product_barcode when present. */
+  barcode?: string | null;
+  /** Sum of active children stock when this row is a multi-SKU parent. */
+  variants_stock?: number | null;
 }
 
 /** One product batch / lote (`BatchDto`). `expiry_date` RFC3339; `cost` STRING|null. */
@@ -242,7 +255,21 @@ export function productFromDetail(d: ProductDetail): Product {
     active: d.active,
     laboratory: d.laboratory,
     active_ingredient: d.active_ingredient,
+    barcode: d.barcode ?? null,
+    variants_stock: d.variants_stock ?? null,
+    parent_id: d.parent_id ?? null,
   };
+}
+
+/**
+ * Parent multi-SKU when B sets `variants_stock` (sum of active children units).
+ * Presence of the field (including 0) means the row is a parent shell.
+ * Omitted on plain SKUs and older servers.
+ */
+export function hasVariantsStockFlag(p: {
+  variants_stock?: number | null;
+}): boolean {
+  return p.variants_stock != null && typeof p.variants_stock === "number";
 }
 
 /** POST /api/v1/products/{id}/stock (Bearer, admin+). Pass `set` (absolute) or

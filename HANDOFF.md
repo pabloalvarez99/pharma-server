@@ -1,19 +1,101 @@
 # HANDOFF — Continuar trabajo en RutBusiness (pharma-server)
 
 > **Para Grok Build CLI (o cualquier agente/dev)**: este documento es el punto
-> de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-18
-> (A: babysit PR #319 + sync estado).
+> de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-19
+> (A night: **PR #321** variants UI pro OPEN + CI; no inventar features).
 
-### Estado rápido (2026-07-18)
+### Estado rápido (2026-07-19 — A night)
 
 | Item | Estado |
 |---|---|
-| **P0** | En **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319)** (`feat/p0-erp-global` → `feature/erp-parity`) |
-| Smoke | **18 PASS** |
-| rubro-pack | **200** con release rebuild |
-| Residual dirty | **assist rewrite** (y docs/bitácora locales) — **fuera de PR / no commitear aún** |
-| CI PR #319 | **FAIL** — `cargo fmt --check` en `crates/domain/src/rubro.rs` (dueño: **B**) |
-| **Próximo** | **P1 tienda (B)** + **pack-UX (C)** en curso |
+| **P0 stack** | **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319) MERGED** → `feature/erp-parity` @ **`5da62ce`** |
+| **Variants light (en base)** | `6246109` en `feature/erp-parity` vía #319 |
+| **Variants UI pro** | **[PR #321](https://github.com/pabloalvarez99/pharma-server/pull/321)** OPEN · `feat/variants-ui-pro` → `feature/erp-parity` · tip **`ca4b853`** · MERGEABLE · CI **IN_PROGRESS** ([run](https://github.com/pabloalvarez99/pharma-server/actions/runs/29673372418)) |
+| **A acción** | **WAIT CI #321**. Merge squash **solo** si PASS. No reimplementa UI. No inventa features. |
+| **Promote main** | **[PR #320](https://github.com/pabloalvarez99/pharma-server/pull/320)** `feature/erp-parity` → `main` · CI pending · merge **después** de #321 si se quiere el pro en el promote, o re-promover post-merge |
+| Smoke P0 | **18 PASS** baseline previo |
+| Residual assist (A) | Unstaged local — **nunca stagear** en night |
+| **Policy** | No force-push · no keys · merge solo CI PASS |
+
+### Variants UI pro — branch / log (real)
+
+| Ref | SHA / URL |
+|---|---|
+| Branch | `feat/variants-ui-pro` |
+| Tip | `ca4b853` `feat(client): professional multi-SKU variants UI` |
+| Base | `feature/erp-parity` @ `5da62ce` |
+| PR | https://github.com/pabloalvarez99/pharma-server/pull/321 |
+| Files (code) | `variants-ui.ts` +386, `variants-ui.test.ts` +189, `inventory.ts` +204/−25, `pos.ts` +37/−15, `styles.css` +51, `pos-service.test.ts` tweak |
+| Also in PR | `HANDOFF.md` (docs night) |
+
+**git log (head stack, no inventar):**
+```
+ca4b853 feat(client): professional multi-SKU variants UI
+7bfea5a docs: HANDOFF variants UI pro night run
+5336df9 docs: HANDOFF variants UI pro night run
+40bf7e1 docs: HANDOFF post-merge PR #319 and agent epic next
+… (ancestry pre-merge p0; light variants already on erp-parity: 6246109)
+```
+
+**En scope (solo lo del PR body + código `ca4b853`):**
+1. Detalle producto: tabla variantes + modal **barcode-first** (`createProductVariant`)
+2. Form nuevo producto: toggle **tiene variantes** → stock padre 0 + toast ES
+3. POS: scan barcode → variante; guard padre con hijos; shells stock-0 clickeables
+4. Modelo puro `variants-ui.ts` + vitest denso (34 en PR; suite client 706 pass claim)
+5. Multi-rubro honesty: UI variantes **solo** si `physicalStock`
+
+**Fuera de scope / BLOCKED (explícito en PR — no inventar ni QA-forzar):**
+- Badge de lista con count **sin N+1** (DTO list sin `has_variants` / `variant_count`) — deferred hasta B
+- Editor matriz full talla×color — out of scope
+
+### Checklist QA (manual + auto) — solo features reales del PR
+
+**Auto (CI / local client)**
+- [ ] `gh pr checks 321` → `build + test (windows)` **PASS**
+- [ ] `cd client && npx tsc --noEmit` (claim PR)
+- [ ] `cd client && npm test` — claim PR: 706 passed / 7 todo; **no regresión** cashier/rubro
+- [ ] Vitest `variants-ui.test.ts`: banners, section title, parent error, stock helpers, multi-rubro honesty (`physicalStock`), attr fields pack (sin keys clínicas como dims), `preferBarcodeLookup`, `buildNewVariantInput` (barcode required/spaces/short/money), `parentStockWhenHasVariants`
+
+**Manual demo (5 pasos del PR — tenant demo)**
+| # | Paso | Resultado esperado (copy real del modelo) |
+|---|---|---|
+| 1 | Login `admin@demo.cl` / `demo1234`, rubro **con stock físico** (p.ej. tienda/minimarket, no servicio) | Shell OK; variants UI ofrecida solo si `physicalStock` |
+| 2 | Inventario → **+ Nuevo producto** → marcar *tiene variantes* → crear padre | Stock padre = 0; toast: «creado como padre multi-SKU… agrega variantes» |
+| 3 | Detalle padre → **+ Agregar variante** → barcode + talla/color → 2 hijos | Tabla con filas; empty state previo: «Aún no hay variantes…»; CTA «+ Agregar variante»; modal «Nueva variante · …» |
+| 4 | POS: escanear barcode hijo | Entra al carrito; hint búsqueda menciona barcode |
+| 4b | POS: click/selección del **padre** | Error ES: «tiene variantes. Escanea el código…» |
+| 5 | Cobrar línea de variante | Smoke cobro OK (no regresión caja) |
+
+**Checks de honestidad multi-rubro (del código, no inventados)**
+- [ ] Rubro **sin** `physicalStock` (servicio/belleza): **no** ofrece toggle/UI variantes
+- [ ] Pack farmacia: dims de variante **no** meten keys clínicas (tests `variantAttrFieldsFromPack`)
+- [ ] Stock en variantes: label «En variantes · N u.» suma hijos; hijo note: vender por barcode
+
+**Negativos barcode-first (`buildNewVariantInput`)**
+- [ ] Barcode vacío / con espacios / corto → reject
+- [ ] Money inválido → error ES de campo
+- [ ] Stock no entero ≥0 → «El stock debe ser un entero ≥ 0.»
+
+**No QA de (out of scope)**
+- Matrix talla×color editor
+- Badge count en listado catálogo (BLOCKED_API N+1)
+- Features no listadas en PR #321
+
+### Night ops log (A)
+
+| UTC/local | Evento |
+|---|---|
+| 2026-07-19 02:30 | agent cycle: erp=5da62ce main=b4b7a9c variants=#321 promote=#- merges=[none] |
+| 2026-07-19 02:29 | cycle 5 erp=5da62ce main=b4b7a9c variantsPR=1 merges=[promote #320 → main] |
+| 2026-07-19 02:00 | agent cycle: erp=5da62ce main=b4b7a9c variants=#321 promote=#- merges=[none] |
+| 2026-07-19 01:58 | cycle 4 erp=5da62ce main=a6e6aa5 variantsPR=1 merges=[promote #320 → main] |
+| 2026-07-19 01:30 | agent cycle: erp=5da62ce main=a6e6aa5 variantsPR=#321 promote=#320 merges=[none] |
+| 2026-07-19 01:28 | cycle 3 erp=5da62ce main=a6e6aa5 variantsPR=1 merges=[none] |
+| 2026-07-19 01:00 | agent cycle: erp=5da62ce main=a6e6aa5 #321/321 + #320/320 merges=[none] |
+| 2026-07-19 00:58 | cycle 2 erp=5da62ce main=a6e6aa5 variantsPR=1 merges=[none] |
+| 2026-07-19 ~00:35 | PR **#321** OPEN + CI IN_PROGRESS; tip `ca4b853`; QA checklist from PR only; WAIT merge; promote #320 still pending |
+| 2026-07-19 00:28 | cycle 1 erp=5da62ce main=a6e6aa5 variantsPR=0 merges=[none] |
+| 2026-07-19 ~00:26 | Cycle 1 pre-#321: no PR; residual dirty; HANDOFF |
 
 ---
 
@@ -35,8 +117,8 @@ universal).
 ## 2. Entorno de trabajo (Windows 11, máquina del dueño)
 
 - **Worktree activo**: `D:\Respaldo Proyectos\GitHub\.worktrees\pharma-server\assist-b2`
-  — rama `feat/p0-erp-global` tracking `origin/feat/p0-erp-global` (P0 en PR #319).
-  Residual local (assist rewrite, bitácora, etc.) **fuera de PR / no commitear aún**.
+  — post-merge #319: preferir base `origin/feature/erp-parity` @ `5da62ce`.
+  Residual local assist **fuera del merge / no commitear en p0 dirty**.
 - **DB del worktree**: `data/surreal` dentro del worktree. El server ancla la
   DB relativa a `C:\ProgramData\PharmaServer\data` (install dir) si no hay
   override → **siempre lanzar con `PHARMA__DB__PATH` absoluto** o usar
@@ -165,12 +247,75 @@ cd client && npx tsc --noEmit                        # ✅ PASS
 **No rehacer** (ya estaba): updater plugin/keys, `print_ticket` base, layout
 POS, Preferencias impresora (solo se añadió checkbox cajón), `loadRubroPack`.
 
-**Git / PR (A — 2026-07-18)**:
-- P0 **commiteado y pusheado** en `feat/p0-erp-global` → **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319)** (base `feature/erp-parity`).
+**Git / PR (A — 2026-07-19)**:
+- **[PR #319](https://github.com/pabloalvarez99/pharma-server/pull/319) MERGED** (`feat/p0-erp-global` → `feature/erp-parity`).
+  - Merge commit: **`5da62ce`**. Pre-merge tip: **`ca655d9`**.
+  - CI verde al merge; fixes clave: clippy rubro `36a029a`, firstrun `98d2d7e`, assist `attrs` `c05cbcc`.
 - Smoke **18 PASS**; rubro-pack **200** con release rebuild.
-- Residual dirty (assist rewrite + CLAUDE/bitácora/0016/tauri-smoke/Cargo.lock, etc.): **fuera de PR / no commitear aún**. No stagear `.git.orphaned-pointer` ni `client/keys/*`.
-- CI: FAIL en `cargo fmt --all -- --check` → solo `crates/domain/src/rubro.rs` (struct literals multilínea). **B** debe `rustfmt` + push; A no toca domain/client producto.
-- **Próximo**: P1 tienda (B) + pack-UX (C) en curso. No merge PR hasta CI verde.
+- **En base (B/C):** variants multi-SKU (mig 0034+), catalog-POS pack UX, product.attrs persist.
+- **Épica A agent:** residual §4.1 local unstaged; plan §4.2 listo. Siguiente: **"go agent épica"** → branch nueva desde `origin/feature/erp-parity` @ `5da62ce`.
+- No stagear `.git.orphaned-pointer` ni `client/keys/*`. No force-push.
+
+### 4.1 Residual dirty — inventario + riesgo (A, 2026-07-18)
+
+Worktree único `assist-b2` tiene **tres dueños** en el working tree. A solo opera carril assist/docs; no stagea B/C.
+
+#### Carril A — agent/assist (**fuera de PR / no commitear aún**)
+
+| Path | Δ | Notas |
+|---|---|---|
+| `crates/assist/Cargo.toml` | M | quita `reqwest` |
+| `crates/assist/src/lib.rs` | M | drop mod `llm` |
+| `crates/assist/src/llm.rs` | **D** | elimina proveedor Anthropic/BYO-key (~344 LOC) |
+| `crates/assist/src/provider.rs` | M | `select_provider` siempre Deterministic; warn si llm opt-in |
+| `crates/assist/src/intent.rs` | M | +`CajasAbiertas`/`SaldoCaja`/`VentasPorSucursal`; drop varios intents farmacia-depth |
+| `crates/assist/src/deterministic.rs` | M | handlers caja + redirect honesto ventas-por-sucursal |
+| `crates/assist/src/actions.rs` | M | Wave 3.1 breadth: `ajustar_stock`/`abrir_caja`/`aplicar_descuento`/`registrar_pago_proveedor`; drop otras acciones |
+| `crates/assist/tests/actions.rs` | M | +tests integration Wave 3.1 |
+| `crates/assist/tests/deterministic.rs` | M | +tests reads caja |
+| `crates/api/src/v1/assist.rs` | M | sin `load_assist_config`; no lee settings LLM |
+| `docs/adr/0016-agent-assist-architecture.md` | M | +§ Wave 3.1 |
+| **Stat A** | | **~10 files, +1476 / −2205** (net simplifica + reordena) |
+
+**Riesgo si se commitea en `feat/p0-erp-global` (#319):** **ALTO**
+- Contamina PR P0 multi-rubro con épica agent (scope review/CI explode).
+- `llm.rs` deleted + `reqwest` out = decisión producto/ADR; no “drive-by” en P0.
+- Diff actions/intent reescribe superficie del agente; rompe expectativas de branches viejas (`origin/feat/assist-*`).
+
+**vs branch `feat/agent-assist`:** **no existe** en remote. Cercanas:
+- `origin/feat/assist-mvp-agent`, `feat/assist-actions`, `feat/assist-actions-breadth`, `feat/assist-depth-intents` (históricas; base lejana a `feat/p0-erp-global`).
+- Plan: al **go agent épica**, cortar `feat/agent-assist` (o `feat/assist-wave-3-1`) **desde tip verde post-#319** (o `feature/erp-parity` mergeado), **cherry-pick/apply solo paths A**; no rebase del monstruo P0+B+C dirty.
+
+#### Carril B — variants / domain (en `feature/erp-parity` via #319)
+
+**Merged:** mig 0034+, domain multi-SKU, API variants, firstrun/clippy fixes. A no edita estos paths.
+
+#### Carril C — catalog / POS client (en `feature/erp-parity` via #319)
+
+**Merged:** pack-driven form attrs, POS multi-rubro polish, inventory gating. Residual local C no stagear por A.
+
+#### Ops / ruido (no stagear a ciegas)
+
+| Path | Acción |
+|---|---|
+| `.git.orphaned-pointer` | **Nunca** stagear |
+| `client/keys/*` | gitignored; **nunca** stagear |
+| `CLAUDE.md`, `bitacora.md`, `Cargo.lock`, `docs/ops/cdn-updater.md`, `scripts/qa/tauri-smoke.md` | residual local; no mezclar con agent salvo decisión explícita |
+
+### 4.2 Plan 4 commits — épica agent (propuesta A; **sin codear aún**)
+
+Base: branch nueva desde tip CI-verde de #319 / post-merge. Solo paths §4.1 carril A (+ tests assist). Verificar por commit: `RUSTC_WRAPPER="" cargo test -p assist` y `cargo clippy -p assist -- -D warnings`.
+
+| # | Commit (mensaje propuesto) | Paths | Qué entrega |
+|---|---|---|---|
+| **1** | `refactor(assist): drop in-tree LLM provider; always-deterministic seam` | `llm.rs` delete, `Cargo.toml` (−reqwest), `lib.rs`, `provider.rs`, `api/v1/assist.rs` | Offline-first por defecto; seam ADR-0016 intacta (`AssistConfig` + warn); sin network en build |
+| **2** | `feat(assist): Wave 3.1 write actions (stock, caja, descuento, pago proveedor)` | `actions.rs` + `tests/actions.rs` | Whitelist writes reusando domain existente; parse conservador es-CL; tests propose/confirm/reject |
+| **3** | `feat(assist): read intents cajas_abiertas / saldo_caja + honest redirect sucursal` | `intent.rs`, `deterministic.rs`, `tests/deterministic.rs` | Reads seguros; `VentasPorSucursal` no inventa montos |
+| **4** | `docs(adr): Wave 3.1 assist breadth + gap ventas-por-sucursal` | `docs/adr/0016-agent-assist-architecture.md` | Documenta acciones, candados, gaps datos (branch/vendedor) |
+
+**Fuera de estos 4 (follow-up):** reintroducir LLM opt-in (ADR-0017) en commit aparte; domain service “ventas por sucursal” (B); client ask-bar UX (C/otra lane).
+
+**Gate:** #319 **MERGED** + CI verde. Orquestador: **"go agent épica"**.
 
 ## 5. Convenciones del codebase (respetar)
 
@@ -187,7 +332,9 @@ POS, Preferencias impresora (solo se añadió checkbox cajón), `loadRubroPack`.
 
 ## 6. Roadmap después de P0 (contexto estratégico)
 
-- **Próximo (en curso)**: **P1 tienda (B)** + **pack-UX (C)**. Bloqueo de merge P0: CI fmt en `rubro.rs` (B).
+- **En vuelo ahora**:
+  1. **B/C** — variants + catalog-POS **merged** en `feature/erp-parity` (#319).
+  2. **A** — agent épica **lista** (plan §4.2); residual unstaged → **"go agent épica"**.
 - **P1** (1-2 meses, UN rubro a la vez, validar con cliente real):
   1. Tienda/Retail (variantes+SKU, etiquetas) — rubro más común de Chile.
   2. Café/Restaurant (comandas + BOM).

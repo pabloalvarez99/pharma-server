@@ -69,6 +69,15 @@ pub struct Product {
     pub active: bool,
     pub laboratory: Option<String>,
     pub active_ingredient: Option<String>,
+    /// Tenant barcode when present (`ProductDto.barcode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barcode: Option<String>,
+    /// Sum of active children stock when this row is a multi-SKU parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants_stock: Option<i64>,
+    /// Multi-SKU child → parent id (migración 0034).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
 }
 
 /// Mirrors `crates/domain/src/catalog/model.rs::ProductStats` (the
@@ -502,6 +511,12 @@ pub struct ProductDetail {
     /// Multi-SKU child → parent product id (migración 0034). Absent on planos.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
+    /// Tenant barcode when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barcode: Option<String>,
+    /// Sum of active children stock when this row is a multi-SKU parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants_stock: Option<i64>,
 }
 
 /// One product batch / lote (`domain::inventory::model::BatchDto`). `expiry_date`
