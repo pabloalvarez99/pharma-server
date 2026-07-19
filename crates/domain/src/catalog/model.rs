@@ -151,6 +151,12 @@ pub struct UpdateProduct {
     /// To clear: send `Some(json!({}))` or explicit null object (client choice).
     #[serde(default)]
     pub attrs: Option<serde_json::Value>,
+    /// Optional barcode change for this product (variant or plain SKU).
+    /// - omitted / `null` → leave mapping unchanged
+    /// - non-empty string → reassign tenant-unique EAN (409 if taken by another product)
+    /// - empty string `""` → remove barcode mapping (frees EAN)
+    #[serde(default)]
+    pub barcode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

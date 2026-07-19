@@ -7,7 +7,7 @@ use axum::{
     extract::{Multipart, Path, Query, State},
     http::header,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/v1/products/bulk-price", post(bulk_price))
         .route("/api/v1/products/update-prices", post(update_prices))
         .route("/api/v1/products/{id}/variants", post(create_variant))
+        // Nested delete: static segment `variants` before trailing id (order safe).
+        .route(
+            "/api/v1/products/{id}/variants/{variant_id}",
+            delete(delete_variant),
+        )
         .route(
             "/api/v1/products/{id}",
             axum::routing::patch(update_product).delete(delete_product),
@@ -194,6 +199,38 @@ pub async fn create_variant(
     let db = db_of(&s)?;
     let t = tenant_of(&claims)?;
     Ok(Json(service::create_variant(&db, &t, &id, input).await?))
+}
+
+/// Elimina (soft) una variante multi-SKU. Requiere admin+.
+///
+/// Soft-delete (`active = false`); conserva stock y movimientos (ledger).
+/// Libera el barcode del hijo para reasignación. No borra el padre.
+/// Rechaza si `variant_id` no es hijo de `{id}`.
+///
+/// **Editar variante**: usar `PATCH /api/v1/products/{variant_id}` (nombre,
+/// precio, attrs, `active`, `barcode`). Stock: `POST .../stock`.
+#[utoipa::path(delete, path = "/api/v1/products/{id}/variants/{variant_id}", tag = "Catalog",
+    params(
+        ("id" = String, Path, description = "Id del producto padre"),
+        ("variant_id" = String, Path, description = "Id de la variante (hijo)")
+    ),
+    responses(
+        (status = 200, description = "Variante desactivada", body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn delete_variant(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path((id, variant_id)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    service::delete_variant(&db, &t, &id, &variant_id).await?;
+    Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
 /// Estadísticas de catálogo (totales, sin stock, etc.).
@@ -813,6 +850,7 @@ pub async fn import_products(
                         presentation: presentation.clone(),
                         discount_percent,
                         attrs: None,
+                        barcode: None,
                     };
                     match service::update_product(&db, &t, &existing.to_string(), patch).await {
                         Ok(_) => {
