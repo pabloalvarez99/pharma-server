@@ -240,16 +240,118 @@ pub async fn update_product(
         Some("") => Some(None),
         Some(s) => Some(Some(resolve_category(db, tenant, s).await?)),
     };
-    repo::update_product(db, tenant, &pid, &patch, category).await
+    // Barcode handled after row patch so a conflict leaves product fields
+    // already updated only if barcode succeeds — apply barcode first when set.
+    if let Some(ref raw) = patch.barcode {
+        apply_barcode_patch(db, tenant, &pid, raw).await?;
+    }
+    let mut dto = repo::update_product(db, tenant, &pid, &patch, category).await?;
+    // Re-enrich barcode after optional remapping.
+    if dto.barcode.is_none() {
+        dto.barcode = repo::barcode_of_product(db, tenant, &pid).await?;
+    }
+    Ok(dto)
 }
 
+/// Soft-delete a product. For sellable SKUs (plano o variante) also frees the
+/// `product_barcode` mapping so the EAN can be reassigned. Stock and
+/// `stock_movement` rows stay (ledger invariant + history).
 pub async fn delete_product(db: &Db, tenant: &Thing, id: &str) -> DomainResult<()> {
     let id = parse_thing(id)?;
+    // Refuse soft-delete of a multi-SKU parent while it still has active children
+    // (would orphan live variants under an inactive shell).
+    if repo::has_active_variants(db, tenant, &id).await? {
+        return Err(DomainError::Invalid(
+            "no se puede eliminar un producto con variantes activas; \
+             elimine o desactive las variantes primero"
+                .into(),
+        ));
+    }
     if repo::soft_delete_product(db, tenant, &id).await? {
+        repo::delete_barcodes_of_product(db, tenant, &id).await?;
         Ok(())
     } else {
         Err(DomainError::NotFound)
     }
+}
+
+/// Soft-delete a sellable variant under `parent_id`.
+///
+/// Invariants:
+/// - `variant_id` must be a child of `parent_id` (same tenant)
+/// - soft-delete only (`active = false`); row + stock + movements preserved
+/// - barcode mapping removed so the EAN is free for a new variant
+/// - does **not** invent stock_movements (stock stays on inactive row; not in
+///   `variants_stock` / list because those filter `active = true`)
+pub async fn delete_variant(
+    db: &Db,
+    tenant: &Thing,
+    parent_id: &str,
+    variant_id: &str,
+) -> DomainResult<()> {
+    let parent_thing = parse_thing(parent_id)?;
+    let child_thing = parse_thing(variant_id)?;
+    if parent_thing.tb != "product" || child_thing.tb != "product" {
+        return Err(DomainError::Invalid(
+            "parent_id y variant_id deben ser ids de producto".into(),
+        ));
+    }
+    let _ = repo::get_product(db, tenant, &parent_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let child = repo::get_product(db, tenant, &child_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    match child.parent_id.as_deref() {
+        Some(p) if p == parent_thing.to_string() || p == parent_id => {}
+        Some(_) => {
+            return Err(DomainError::Invalid(
+                "la variante no pertenece a este producto padre".into(),
+            ));
+        }
+        None => {
+            return Err(DomainError::Invalid(
+                "el producto no es una variante (sin parent_id)".into(),
+            ));
+        }
+    }
+    if !child.active {
+        // Idempotent: already soft-deleted — still free any leftover barcode.
+        repo::delete_barcodes_of_product(db, tenant, &child_thing).await?;
+        return Ok(());
+    }
+    if !repo::soft_delete_product(db, tenant, &child_thing).await? {
+        return Err(DomainError::NotFound);
+    }
+    repo::delete_barcodes_of_product(db, tenant, &child_thing).await?;
+    Ok(())
+}
+
+/// Apply barcode remapping for `update_product`. Empty string clears.
+async fn apply_barcode_patch(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    raw: &str,
+) -> DomainResult<()> {
+    let code = raw.trim();
+    if code.is_empty() {
+        repo::delete_barcodes_of_product(db, tenant, product).await?;
+        return Ok(());
+    }
+    if let Some(owner) = repo::product_id_by_barcode(db, tenant, code).await? {
+        if owner != *product {
+            return Err(DomainError::Conflict(format!(
+                "el código de barras '{code}' ya está asignado a {owner}"
+            )));
+        }
+        // Same product already owns this code — no-op.
+        return Ok(());
+    }
+    // Free any previous mapping for this product, then claim the new code.
+    repo::delete_barcodes_of_product(db, tenant, product).await?;
+    repo::create_barcode(db, tenant, product, code).await?;
+    Ok(())
 }
 
 /// Manual adjustment from `POST /products/{id}/stock`. Fase 3 retrofit:
@@ -502,6 +604,8 @@ pub async fn list_variants(
 /// returns [`DomainError::Invalid`] with the same stable ES fragments as the
 /// POS parent-sale guard — the scan path must never hand the cashier a
 /// non-sellable shell (client POS adds by-barcode hits without a second check).
+/// Soft-deleted (`active = false`) products are treated as not found so POS
+/// never sells a deactivated SKU (barcode is also freed on delete).
 pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainResult<ProductDto> {
     let code = barcode.trim();
     if code.is_empty() {
@@ -513,6 +617,9 @@ pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainRe
     let mut p = repo::get_product(db, tenant, &pid)
         .await?
         .ok_or(DomainError::NotFound)?;
+    if !p.active {
+        return Err(DomainError::NotFound);
+    }
     if repo::has_active_variants(db, tenant, &pid).await? {
         return Err(DomainError::Invalid(format!(
             "el producto '{}' tiene variantes; venda por talla/SKU o \

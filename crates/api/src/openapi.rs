@@ -125,6 +125,7 @@ impl Modify for SecurityAddon {
         crate::v1::catalog::get_by_barcode,
         crate::v1::catalog::list_variants,
         crate::v1::catalog::create_variant,
+        crate::v1::catalog::delete_variant,
         crate::v1::catalog::product_stats,
         crate::v1::catalog::etiquetas,
         crate::v1::catalog::export_products,
