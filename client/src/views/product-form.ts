@@ -7,11 +7,25 @@
 //
 // Known attr keys that still live as top-level NewProduct columns
 // (laboratory / active_ingredient / …) are promoted so they persist today;
-// every other key goes into `product.attrs` JSON. When B wires attrs on
-// create/update server-side, the bag already round-trips from the client.
+// every other key goes into `product.attrs` JSON.
 //
-// Variantes multi-SKU (parent_id / N SKU por talla) are NOT modelled here —
-// leave TODO until B documents endpoints; attrs on a single product work now.
+// ## BLOCKED (persist attrs end-to-end) — 2026-07-18
+//
+// **Read path OK:** `ProductDto.attrs` + GET detail return the bag; client
+// `ProductDetail.attrs` deserializes it (variants already write attrs).
+//
+// **Write path BLOCKED on B (domain):**
+// - `NewProduct` has NO `attrs` field → serde drops the key on POST /products.
+// - `UpdateProduct` has NO `attrs` field → PATCH cannot update the bag.
+// - `repo::create_product` SQL does not SET `attrs` (only `create_variant_product` does).
+//
+// Client already POSTs the correct serde key (see {@link productAttrsWireBody}):
+//   `{ "attrs": { "talla": "M", "color": "Negro", "sku": "…" } }`
+// When B adds `attrs: Option<serde_json::Value>` on NewProduct/UpdateProduct and
+// binds it in repo create/update, round-trip works with zero client renames.
+//
+// Variantes multi-SKU (parent_id / N SKU) use a separate API (`NewVariant`);
+// this form is the flat product + attrs path for a single SKU row.
 
 import type { PackAttrField, PackVocab } from "../api/rubro";
 import type { NewProductInput } from "../api/catalog";
@@ -326,8 +340,27 @@ function cssEscape(s: string): string {
   return s.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
 }
 
-// TODO(B+C variants): when multi-SKU endpoints land (parent product + variant
-// rows), extend this model with `parentId` / `variantOf` and a variant matrix
-// UI. Until then attrs are flat per product (one talla/color per SKU row).
 // Offline attr list lives in vertical.ts (`localAttrsForRubro`) so the pack
 // cache and this form share one source without a views↔vertical import cycle.
+
+// --- wire contract (serde field names B must accept) -------------------------
+
+/**
+ * Shape of the JSON body fragment for pack attrs on create/update product.
+ * Single source so Tauri + tests never drift from the domain serde key `attrs`.
+ * Returns `undefined` when empty (omit key — never send `null`/`{}`).
+ */
+export function productAttrsWireBody(
+  attrs: Record<string, string> | null | undefined,
+): { attrs: Record<string, string> } | undefined {
+  if (!attrs) return undefined;
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(attrs)) {
+    const key = k.trim();
+    const val = String(v ?? "").trim();
+    if (!key || val === "") continue;
+    clean[key] = val;
+  }
+  if (Object.keys(clean).length === 0) return undefined;
+  return { attrs: clean };
+}

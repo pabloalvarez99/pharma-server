@@ -9,6 +9,7 @@ import {
   promoteTopLevel,
   stripTopLevel,
   isClinicalAttrKey,
+  productAttrsWireBody,
   type ProductFormOptions,
 } from "./product-form";
 import type { PackAttrField } from "../api/rubro";
@@ -204,5 +205,40 @@ describe("localAttrsForRubro (offline pack mirror)", () => {
   });
   it("unknown → empty", () => {
     expect(localAttrsForRubro("otro")).toEqual([]);
+  });
+});
+
+describe("productAttrsWireBody — serde contract for B NewProduct.attrs", () => {
+  it("locks the HTTP key to `attrs` (not attributes / product_attrs)", () => {
+    const body = productAttrsWireBody({ talla: "M", color: "Negro", sku: "POL-001" });
+    expect(body).toEqual({
+      attrs: { talla: "M", color: "Negro", sku: "POL-001" },
+    });
+    // JSON round-trip shape domain will deserialize as Option<serde_json::Value>
+    expect(JSON.parse(JSON.stringify(body))).toEqual({
+      attrs: { talla: "M", color: "Negro", sku: "POL-001" },
+    });
+  });
+
+  it("omits empty bag (never null / {})", () => {
+    expect(productAttrsWireBody({})).toBeUndefined();
+    expect(productAttrsWireBody({ talla: "  " })).toBeUndefined();
+    expect(productAttrsWireBody(null)).toBeUndefined();
+  });
+
+  it("create payload for tienda SKU matches buildProductInput → wire fragment", () => {
+    const r = buildProductInput(
+      {
+        name: "Polera",
+        price: "9990",
+        attrs: { talla: "L", color: "Azul", sku: "P-L-AZ" },
+      },
+      opts(),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(productAttrsWireBody(r.value.attrs)).toEqual({
+      attrs: { talla: "L", color: "Azul", sku: "P-L-AZ" },
+    });
   });
 });

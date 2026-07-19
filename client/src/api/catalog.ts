@@ -57,7 +57,11 @@ export interface ProductDetail {
   prescription_type: string;
   presentation: string | null;
   discount_percent: number | null;
-  /** Per-rubro flexible bag (P0.2). Absent when the product has no pack extras. */
+  /**
+   * Per-rubro flexible bag (P0.2 / ProductDto.attrs). Present on GET when the
+   * row has attrs (variants already; plain create once B wires NewProduct.attrs).
+   * Wire key is always `attrs` (serde).
+   */
   attrs?: Record<string, unknown> | null;
 }
 
@@ -103,7 +107,12 @@ export interface NewProductInput {
 }
 
 /** POST /api/v1/products (Bearer, admin+). Rejects with a Spanish string
- *  ("Permiso denegado…" on a non-admin 403). Money stays STRING on the wire. */
+ *  ("Permiso denegado…" on a non-admin 403). Money stays STRING on the wire.
+ *
+ *  `attrs` is the pack bag (`{ talla, color, sku, … }`). Wire key is **`attrs`**
+ *  (serde, snake-free). **BLOCKED persist:** until domain `NewProduct.attrs` +
+ *  `repo::create_product` SET attrs, the server ignores this field (no 4xx).
+ *  GET detail already returns attrs when present (variants / future create). */
 export function createProduct(
   serverUrl: string,
   input: NewProductInput,
@@ -117,6 +126,7 @@ export function createProduct(
     laboratory: input.laboratory,
     activeIngredient: input.activeIngredient,
     presentation: input.presentation,
+    // Serde key on the HTTP body is `attrs` (object). Tauri arg name matches.
     attrs: input.attrs,
   });
 }
