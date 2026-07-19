@@ -323,3 +323,150 @@ async fn variants_create_list_barcode_sale_and_isolation() {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(plain_after["stock"], 18);
 }
+
+#[tokio::test]
+async fn parent_not_sellable_duplicate_barcode_list_order_and_parent_shell() {
+    let s = spawn().await;
+
+    // Parent shell without caja barcode.
+    let (st, parent) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products",
+        serde_json::json!({
+            "name": "Chaqueta shell",
+            "price": "25000",
+            "stock": 0
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "parent: {parent}");
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    assert!(parent.get("barcode").is_none() || parent["barcode"].is_null());
+
+    // Create L then M — list must order by name and expose stock+barcode.
+    let (st, l) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 4,
+            "barcode": "7804999800026",
+            "attrs": { "talla": "L" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "L: {l}");
+    assert_eq!(l["barcode"], "7804999800026");
+
+    let (st, m) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 9,
+            "barcode": "7804999800019",
+            "attrs": { "talla": "M" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "M: {m}");
+    let m_id = m["id"].as_str().unwrap().to_string();
+
+    let (st, kids) = get_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let arr = kids.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    let n0 = arr[0]["name"].as_str().unwrap_or("");
+    let n1 = arr[1]["name"].as_str().unwrap_or("");
+    assert!(n0 <= n1, "ORDER BY name: {n0} then {n1}");
+    for k in arr {
+        assert!(k["stock"].as_i64().is_some());
+        assert!(k["barcode"].as_str().is_some(), "list enriches barcode");
+    }
+
+    // Parent GET: stock 0 + variants_stock sum (read-side, no ledger write).
+    let (st, pget) = get_json(&s.app, &s.token, &format!("/api/v1/products/{parent_id}")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(pget["stock"], 0);
+    assert_eq!(pget["variants_stock"], 13);
+
+    // Duplicate barcode → 409 CONFLICT, ES message.
+    let (st, dup) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 1,
+            "barcode": "7804999800019",
+            "attrs": { "talla": "XL" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CONFLICT, "dup: {dup}");
+    assert_eq!(dup["error"]["code"], "CONFLICT");
+    let dmsg = dup["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .to_lowercase();
+    assert!(
+        dmsg.contains("código") || dmsg.contains("codigo") || dmsg.contains("barras"),
+        "ES conflict: {dmsg}"
+    );
+
+    // POS sale of parent → 400 INVALID_INPUT with stable ES fragments.
+    let (st, sale) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/pos/sale",
+        serde_json::json!({
+            "items": [{
+                "product": parent_id,
+                "product_name": "Chaqueta shell",
+                "quantity": 1,
+                "unit_price": "25000"
+            }],
+            "payment_method": "pos_cash",
+            "cash_amount": "25000"
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "parent sale: {sale}");
+    assert_eq!(sale["error"]["code"], "INVALID_INPUT");
+    let smsg = sale["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .to_lowercase();
+    assert!(smsg.contains("tiene variantes"), "stable ES: {smsg}");
+    assert!(
+        smsg.contains("escanee el código") || smsg.contains("escanee el codigo"),
+        "stable ES: {smsg}"
+    );
+
+    // Child still sellable.
+    let (st, sale_ok) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/pos/sale",
+        serde_json::json!({
+            "items": [{
+                "product": m_id,
+                "product_name": "Chaqueta M",
+                "quantity": 1,
+                "unit_price": "25000"
+            }],
+            "payment_method": "pos_cash",
+            "cash_amount": "25000"
+        }),
+    )
+    .await;
+    assert!(
+        st == StatusCode::OK || st == StatusCode::CREATED,
+        "child sale: {st} {sale_ok}"
+    );
+}

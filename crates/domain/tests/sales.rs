@@ -1122,6 +1122,15 @@ async fn sale_rejects_parent_when_has_variants() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "INVALID_INPUT");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("tiene variantes"),
+        "stable ES fragment for POS client: {msg}"
+    );
+    assert!(
+        msg.contains("escanee el código") || msg.contains("escanee el codigo"),
+        "stable ES fragment for POS client: {msg}"
+    );
 }
 
 #[tokio::test]

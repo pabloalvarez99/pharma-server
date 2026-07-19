@@ -186,9 +186,10 @@ pub async fn list_products_with_variants(
 
 pub async fn get_product(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ProductDto> {
     let id = parse_thing(id)?;
-    repo::get_product(db, tenant, &id)
+    let p = repo::get_product(db, tenant, &id)
         .await?
-        .ok_or(DomainError::NotFound)
+        .ok_or(DomainError::NotFound)?;
+    enrich_product_dto(db, tenant, p).await
 }
 
 pub async fn update_product(
@@ -396,7 +397,7 @@ pub async fn create_variant(
     })
     .await?;
 
-    let created = repo::create_variant_product(
+    let mut created = repo::create_variant_product(
         db,
         tenant,
         &parent_thing,
@@ -415,13 +416,21 @@ pub async fn create_variant(
 
     if let Some(code) = barcode {
         let child = parse_thing(&created.id)?;
-        repo::upsert_barcode(db, tenant, &child, &code).await?;
+        // CREATE (not UPSERT): never steal another product's barcode under race.
+        if let Err(e) = repo::create_barcode(db, tenant, &child, &code).await {
+            // Hard-delete just-created orphan (no movements yet) so list/POS
+            // never see a half-claimed variant after a barcode race.
+            let _ = repo::hard_delete_product(db, tenant, &child).await;
+            return Err(e);
+        }
+        created.barcode = Some(code);
     }
 
     Ok(created)
 }
 
 /// List variants of a parent product (empty if the product has none).
+/// Ordered by name; each DTO carries own `stock` and optional `barcode`.
 pub async fn list_variants(
     db: &Db,
     tenant: &Thing,
@@ -432,7 +441,13 @@ pub async fn list_variants(
     let _ = repo::get_product(db, tenant, &parent_thing)
         .await?
         .ok_or(DomainError::NotFound)?;
-    repo::list_variants(db, tenant, &parent_thing).await
+    let mut kids = repo::list_variants(db, tenant, &parent_thing).await?;
+    for kid in &mut kids {
+        if let Ok(pid) = parse_thing(&kid.id) {
+            kid.barcode = repo::barcode_of_product(db, tenant, &pid).await?;
+        }
+    }
+    Ok(kids)
 }
 
 /// Resolve a tenant barcode to the sellable product (variant or plain SKU).
@@ -444,15 +459,45 @@ pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainRe
     let pid = repo::product_id_by_barcode(db, tenant, code)
         .await?
         .ok_or(DomainError::NotFound)?;
-    repo::get_product(db, tenant, &pid)
+    let mut p = repo::get_product(db, tenant, &pid)
         .await?
-        .ok_or(DomainError::NotFound)
+        .ok_or(DomainError::NotFound)?;
+    p.barcode = Some(code.to_string());
+    Ok(p)
 }
 
 /// `true` when the product has at least one active child variant.
 pub async fn has_active_variants(db: &Db, tenant: &Thing, product_id: &str) -> DomainResult<bool> {
     let pid = parse_thing(product_id)?;
     repo::has_active_variants(db, tenant, &pid).await
+}
+
+/// Read-side sum of active children stock. Does **not** write `parent.stock`
+/// (stock ledger + plain farmacia SKUs live on the product row itself).
+pub async fn variants_stock_sum(db: &Db, tenant: &Thing, parent_id: &str) -> DomainResult<i64> {
+    let parent_thing = parse_thing(parent_id)?;
+    let _ = repo::get_product(db, tenant, &parent_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    repo::sum_children_stock(db, tenant, &parent_thing).await
+}
+
+/// Enrich a product DTO with barcode + variants_stock when applicable.
+pub async fn enrich_product_dto(
+    db: &Db,
+    tenant: &Thing,
+    mut p: ProductDto,
+) -> DomainResult<ProductDto> {
+    if let Ok(pid) = parse_thing(&p.id) {
+        if p.barcode.is_none() {
+            p.barcode = repo::barcode_of_product(db, tenant, &pid).await?;
+        }
+        // Only parents (no parent_id) get variants_stock.
+        if p.parent_id.is_none() && repo::has_active_variants(db, tenant, &pid).await? {
+            p.variants_stock = Some(repo::sum_children_stock(db, tenant, &pid).await?);
+        }
+    }
+    Ok(p)
 }
 
 #[cfg(test)]

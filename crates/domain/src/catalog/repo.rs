@@ -96,6 +96,9 @@ impl From<ProductRow> for ProductDto {
             discount_percent: r.discount_percent,
             attrs: r.attrs,
             parent_id: r.parent_id.map(|p| p.to_string()),
+            // Enriched by service after join to product_barcode / children.
+            barcode: None,
+            variants_stock: None,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -309,6 +312,9 @@ pub async fn find_id_by_external_id(
 /// otherwise a new mapping row is created. The agent/POS lookups read this
 /// table via `SELECT VALUE product FROM product_barcode WHERE tenant=$t AND
 /// barcode=$b`.
+///
+/// **Do not use for create-variant** — re-pointing would steal a barcode under
+/// race. Prefer [`create_barcode`] there.
 pub async fn upsert_barcode(
     db: &Db,
     tenant: &Thing,
@@ -324,6 +330,104 @@ pub async fn upsert_barcode(
     .bind(("b", barcode.to_string()))
     .await?;
     Ok(())
+}
+
+/// Insert a **new** barcode mapping without re-pointing an existing one.
+/// Unique index `(tenant, barcode)` → [`DomainError::Conflict`] if taken.
+/// Safe under concurrent create-variant of the same EAN.
+pub async fn create_barcode(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    barcode: &str,
+) -> DomainResult<()> {
+    // Fast path: already mapped to this product (retry / idempotent).
+    if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+        if owner == *product {
+            return Ok(());
+        }
+        return Err(DomainError::Conflict(format!(
+            "el código de barras '{barcode}' ya está asignado a {owner}"
+        )));
+    }
+    let res = db
+        .query(
+            "CREATE product_barcode SET tenant = $t, product = $p, barcode = $b \
+             RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .bind(("b", barcode.to_string()))
+        .await;
+    match res {
+        Ok(mut r) => {
+            let id: Option<Thing> = r.take((0, "id"))?;
+            if id.is_some() {
+                return Ok(());
+            }
+        }
+        Err(e) => {
+            // Unique race or other DB fault — re-check ownership.
+            if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+                if owner == *product {
+                    return Ok(());
+                }
+                return Err(DomainError::Conflict(format!(
+                    "el código de barras '{barcode}' ya está asignado a {owner}"
+                )));
+            }
+            return Err(DomainError::Db(Box::new(e)));
+        }
+    }
+    // CREATE returned 0 rows without Err — treat as conflict if taken.
+    if let Some(owner) = product_id_by_barcode(db, tenant, barcode).await? {
+        if owner == *product {
+            return Ok(());
+        }
+        return Err(DomainError::Conflict(format!(
+            "el código de barras '{barcode}' ya está asignado a {owner}"
+        )));
+    }
+    Err(DomainError::Other(anyhow::anyhow!(
+        "create product_barcode returned 0 rows for {barcode}"
+    )))
+}
+
+/// Barcode for a single product (tenant-scoped), if any.
+pub async fn barcode_of_product(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+) -> DomainResult<Option<String>> {
+    let mut r = db
+        .query(
+            "SELECT VALUE barcode FROM product_barcode \
+             WHERE tenant = $t AND product = $p LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .await?;
+    let code: Option<String> = r.take(0)?;
+    Ok(code)
+}
+
+/// Sum of `stock` on active children of `parent` (read-side only).
+pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<i64> {
+    let mut r = db
+        .query(
+            "SELECT math::sum(stock) AS total FROM product \
+             WHERE tenant = $t AND parent_id = $p AND active = true \
+             GROUP ALL",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", parent.clone()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct SumRow {
+        total: Option<i64>,
+    }
+    let row: Option<SumRow> = r.take(0)?;
+    Ok(row.and_then(|s| s.total).unwrap_or(0))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -663,6 +767,16 @@ pub async fn soft_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainR
         .await?;
     let row: Option<Thing> = r.take((0, "id"))?;
     Ok(row.is_some())
+}
+
+/// Hard-delete a product row (tenant-scoped). Used only to roll back a
+/// just-created variant when barcode claim fails — no stock movements yet.
+pub async fn hard_delete_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<()> {
+    db.query("DELETE product WHERE id = $id AND tenant = $t")
+        .bind(("id", id.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    Ok(())
 }
 
 // `set_stock` removed in Fase 3: every stock change MUST go through

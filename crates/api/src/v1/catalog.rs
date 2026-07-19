@@ -131,10 +131,15 @@ pub async fn get_product(
 }
 
 /// Resuelve un código de barras del tenant al producto vendible (variante o SKU plano).
+/// Nunca devuelve el padre abstracto: el mapping apunta al hijo o SKU plano.
 #[utoipa::path(get, path = "/api/v1/products/by-barcode/{code}", tag = "Catalog",
     params(("code" = String, Path, description = "EAN/UPC u otro barcode del local")),
-    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
-        (status = 404, body = crate::error::ErrorEnvelope)),
+    responses(
+        (status = 200, body = ProductDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)
+    ),
     security(("bearer_jwt" = [])))]
 pub async fn get_by_barcode(
     State(s): State<AppState>,
@@ -147,10 +152,14 @@ pub async fn get_by_barcode(
 }
 
 /// Lista variantes (hijos multi-SKU) de un producto padre.
+/// Orden: `name` ASC. Cada ítem incluye `stock` propio y `barcode` si existe.
 #[utoipa::path(get, path = "/api/v1/products/{id}/variants", tag = "Catalog",
     params(("id" = String, Path, description = "Id del producto padre")),
-    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
-        (status = 404, body = crate::error::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "Hijos multi-SKU (posiblemente vacío)", body = Vec<ProductDto>),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope)
+    ),
     security(("bearer_jwt" = [])))]
 pub async fn list_variants(
     State(s): State<AppState>,
@@ -163,13 +172,18 @@ pub async fn list_variants(
 }
 
 /// Crea una variante vendible bajo el producto padre (stock + barcode propios).
+/// El padre puede no tener barcode de caja. Barcode de variante es tenant-único (409).
 #[utoipa::path(post, path = "/api/v1/products/{id}/variants", tag = "Catalog",
     params(("id" = String, Path, description = "Id del producto padre")),
-    request_body = serde_json::Value,
-    responses((status = 200, body = serde_json::Value), (status = 401, body = crate::error::ErrorEnvelope),
+    request_body = NewVariant,
+    responses(
+        (status = 200, description = "Variante creada", body = ProductDto),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
         (status = 403, body = crate::error::ErrorEnvelope),
         (status = 404, body = crate::error::ErrorEnvelope),
-        (status = 409, body = crate::error::ErrorEnvelope)),
+        (status = 409, description = "Barcode ya asignado", body = crate::error::ErrorEnvelope)
+    ),
     security(("bearer_jwt" = [])))]
 pub async fn create_variant(
     State(s): State<AppState>,

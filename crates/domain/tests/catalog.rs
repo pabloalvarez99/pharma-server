@@ -802,3 +802,115 @@ async fn variant_tenant_isolation() {
         .unwrap_err();
     assert_eq!(err.code(), "NOT_FOUND");
 }
+
+#[tokio::test]
+async fn list_variants_ordered_by_name_with_stock_and_barcode() {
+    let (db, t) = setup().await;
+    // Parent sin barcode de caja (retail shell).
+    let parent = service::create_product(&db, &t, new_product("Polera shell", "8990"))
+        .await
+        .unwrap();
+    assert!(parent.barcode.is_none());
+
+    // Create L before M so ORDER BY name is not insert-order.
+    let l = service::create_variant(&db, &t, &parent.id, new_variant("L", "7804999110027", 3))
+        .await
+        .unwrap();
+    let m = service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999110010", 8))
+        .await
+        .unwrap();
+    assert_eq!(m.barcode.as_deref(), Some("7804999110010"));
+    assert_eq!(l.barcode.as_deref(), Some("7804999110027"));
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(kids.len(), 2);
+    assert!(
+        kids[0].name <= kids[1].name,
+        "list must be ORDER BY name: {:?} then {:?}",
+        kids[0].name,
+        kids[1].name
+    );
+    let stocks: std::collections::HashMap<_, _> =
+        kids.iter().map(|k| (k.id.as_str(), k.stock)).collect();
+    assert_eq!(stocks.get(m.id.as_str()).copied(), Some(8));
+    assert_eq!(stocks.get(l.id.as_str()).copied(), Some(3));
+    for k in &kids {
+        assert!(k.barcode.is_some(), "list enriches barcode for {}", k.id);
+    }
+
+    // Parent.stock stays 0; sellable stock is sum of children (read-side).
+    let parent2 = service::get_product(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(parent2.stock, 0, "padre no materializa stock de hijos");
+    assert_eq!(parent2.variants_stock, Some(11));
+    let sum = service::variants_stock_sum(&db, &t, &parent.id)
+        .await
+        .unwrap();
+    assert_eq!(sum, 11);
+}
+
+#[tokio::test]
+async fn parent_without_barcode_and_whitespace_barcode_ok() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Jean shell", "19990"))
+        .await
+        .unwrap();
+    // Empty / whitespace barcode = no mapping (allowed).
+    let mut v = new_variant("32", "x", 2);
+    v.barcode = Some("   ".into());
+    let child = service::create_variant(&db, &t, &parent.id, v)
+        .await
+        .unwrap();
+    assert!(child.barcode.is_none());
+    let err = service::find_by_barcode(&db, &t, "   ").await.unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn create_variant_missing_parent_not_found() {
+    let (db, t) = setup().await;
+    let err = service::create_variant(
+        &db,
+        &t,
+        "product:doesnotexist",
+        new_variant("M", "7804999120016", 1),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+}
+
+#[tokio::test]
+async fn create_variant_barcode_race_second_conflicts() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Race shell", "5000"))
+        .await
+        .unwrap();
+    let code = "7804999130013";
+    let a = service::create_variant(&db, &t, &parent.id, new_variant("A", code, 1))
+        .await
+        .unwrap();
+    assert_eq!(a.barcode.as_deref(), Some(code));
+
+    // Second claim of same EAN → CONFLICT; no barcode steal.
+    let err = service::create_variant(&db, &t, &parent.id, new_variant("B", code, 1))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("código de barras") || msg.contains("ya está"),
+        "ES conflict message: {msg}"
+    );
+
+    let owner = service::find_by_barcode(&db, &t, code).await.unwrap();
+    assert_eq!(owner.id, a.id, "first winner keeps barcode");
+
+    // Soft-deleted loser must not appear as active sellable sibling with stock.
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(
+        kids.len(),
+        1,
+        "orphan from failed barcode should be soft-deleted"
+    );
+    assert_eq!(kids[0].id, a.id);
+}
