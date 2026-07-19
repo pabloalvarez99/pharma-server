@@ -499,6 +499,9 @@ pub struct ProductDetail {
     /// Per-rubro flexible bag (P0.2). Serde ignores if the server omits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attrs: Option<serde_json::Value>,
+    /// Multi-SKU child → parent product id (migración 0034). Absent on planos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
 }
 
 /// One product batch / lote (`domain::inventory::model::BatchDto`). `expiry_date`

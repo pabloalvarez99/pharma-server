@@ -255,6 +255,115 @@ pub async fn product_detail(
         .map_err(|e| format!("Respuesta de producto inválida del servidor: {e}"))
 }
 
+/// GET `/api/v1/products/by-barcode/{code}` — resolve EAN/barcode to the sellable
+/// product (variant child or plain SKU). Used by POS scan path.
+#[tauri::command]
+pub async fn product_by_barcode(
+    state: State<'_, SessionState>,
+    server_url: String,
+    code: String,
+) -> Result<ProductDetail, String> {
+    let token = token_of(&state)?;
+    let http = client();
+    let base = base(&server_url);
+    let code = code.trim();
+    if code.is_empty() {
+        return Err("Ingresa un código de barras.".into());
+    }
+    // Path-encode so spaces / special chars never break the route (no extra crate).
+    let enc = encode_path_segment(code);
+    let resp = http
+        .get(format!("{base}/api/v1/products/by-barcode/{enc}"))
+        .bearer_auth(token.expose_secret())
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de barcode inválida del servidor: {e}"))
+}
+
+/// GET `/api/v1/products/{id}/variants` — multi-SKU children of a parent.
+#[tauri::command]
+pub async fn list_product_variants(
+    state: State<'_, SessionState>,
+    server_url: String,
+    product_id: String,
+) -> Result<Vec<ProductDetail>, String> {
+    let token = token_of(&state)?;
+    let http = client();
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/products/{product_id}/variants"))
+        .bearer_auth(token.expose_secret())
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de variantes inválida del servidor: {e}"))
+}
+
+/// POST `/api/v1/products/{id}/variants` (admin+) — create a sellable child SKU.
+/// Money strings forwarded verbatim; optional `attrs` bag (talla/color/sku).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_product_variant(
+    state: State<'_, SessionState>,
+    server_url: String,
+    parent_id: String,
+    name: Option<String>,
+    price: Option<String>,
+    cost_price: Option<String>,
+    stock: Option<i64>,
+    barcode: Option<String>,
+    attrs: Option<serde_json::Value>,
+) -> Result<ProductDetail, String> {
+    let token = token_of(&state)?;
+    let http = client();
+    let base = base(&server_url);
+    let mut body = serde_json::json!({});
+    if let Some(v) = name.filter(|s| !s.is_empty()) {
+        body["name"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = price.filter(|s| !s.is_empty()) {
+        body["price"] = serde_json::Value::String(v);
+    }
+    if let Some(v) = cost_price.filter(|s| !s.is_empty()) {
+        body["cost_price"] = serde_json::Value::String(v);
+    }
+    if let Some(n) = stock {
+        body["stock"] = serde_json::Value::from(n);
+    }
+    if let Some(v) = barcode.filter(|s| !s.is_empty()) {
+        body["barcode"] = serde_json::Value::String(v);
+    }
+    if let Some(a) = attrs {
+        if a.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+            body["attrs"] = a;
+        }
+    }
+    let resp = http
+        .post(format!("{base}/api/v1/products/{parent_id}/variants"))
+        .bearer_auth(token.expose_secret())
+        .json(&body)
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de variante inválida del servidor: {e}"))
+}
+
 /// POST `/api/v1/products/{id}/stock` (Bearer, admin+). Body `StockAdjust`:
 /// either `set` (absolute) or `delta` (signed) + optional `reason`. Returns the
 /// updated product.
@@ -404,4 +513,19 @@ pub async fn near_expiry(
     resp.json()
         .await
         .map_err(|e| format!("Respuesta de vencimientos inválida del servidor: {e}"))
+}
+
+/// Percent-encode a single URL path segment (barcode). Unreserved ASCII stays
+/// literal; everything else → `%XX` so the axum route receives the raw code.
+fn encode_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }

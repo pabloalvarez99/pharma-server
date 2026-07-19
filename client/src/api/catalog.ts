@@ -63,6 +63,8 @@ export interface ProductDetail {
    * Wire key is always `attrs` (serde).
    */
   attrs?: Record<string, unknown> | null;
+  /** Set when this row is a sellable multi-SKU child (migración 0034). */
+  parent_id?: string | null;
 }
 
 /** One product batch / lote (`BatchDto`). `expiry_date` RFC3339; `cost` STRING|null. */
@@ -176,6 +178,73 @@ export function productDetail(
   id: string,
 ): Promise<ProductDetail> {
   return invoke<ProductDetail>("product_detail", { serverUrl, id });
+}
+
+// --- multi-SKU variants (API fase 1 / B) ------------------------------------
+// GET by-barcode, GET/POST .../variants. Full matrix UI is out of scope for C;
+// inventory shows a light banner + list; POS scans barcodes to children.
+
+/** GET /api/v1/products/by-barcode/{code} — sellable product (variant or plain). */
+export function productByBarcode(
+  serverUrl: string,
+  code: string,
+): Promise<ProductDetail> {
+  return invoke<ProductDetail>("product_by_barcode", { serverUrl, code });
+}
+
+/** GET /api/v1/products/{id}/variants — children of a parent (empty if none). */
+export function listProductVariants(
+  serverUrl: string,
+  productId: string,
+): Promise<ProductDetail[]> {
+  return invoke<ProductDetail[]>("list_product_variants", {
+    serverUrl,
+    productId,
+  });
+}
+
+/** Body for POST /api/v1/products/{id}/variants. Money strings; attrs bag. */
+export interface NewVariantInput {
+  name?: string;
+  price?: string;
+  costPrice?: string;
+  stock?: number;
+  barcode?: string;
+  attrs?: Record<string, string>;
+}
+
+/**
+ * POST /api/v1/products/{id}/variants (admin+).
+ * Wired for when inventory grows a thin "agregar variante" form — matrix UI TODO.
+ */
+export function createProductVariant(
+  serverUrl: string,
+  parentId: string,
+  input: NewVariantInput,
+): Promise<ProductDetail> {
+  return invoke<ProductDetail>("create_product_variant", {
+    serverUrl,
+    parentId,
+    name: input.name,
+    price: input.price,
+    costPrice: input.costPrice,
+    stock: input.stock,
+    barcode: input.barcode,
+    attrs: input.attrs,
+  });
+}
+
+/** Map detail → POS list Product projection. */
+export function productFromDetail(d: ProductDetail): Product {
+  return {
+    id: d.id,
+    name: d.name,
+    price: d.price,
+    stock: d.stock,
+    active: d.active,
+    laboratory: d.laboratory,
+    active_ingredient: d.active_ingredient,
+  };
 }
 
 /** POST /api/v1/products/{id}/stock (Bearer, admin+). Pass `set` (absolute) or
