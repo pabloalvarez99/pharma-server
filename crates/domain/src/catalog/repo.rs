@@ -441,6 +441,35 @@ pub async fn barcode_of_product(
     Ok(code)
 }
 
+/// Batch barcode lookup for many products (tenant-scoped). Key = product id string.
+pub async fn barcodes_of_products(
+    db: &Db,
+    tenant: &Thing,
+    products: &[Thing],
+) -> DomainResult<std::collections::HashMap<String, String>> {
+    if products.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let mut r = db
+        .query(
+            "SELECT product, barcode FROM product_barcode \
+             WHERE tenant = $t AND product INSIDE $ps",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ps", products.to_vec()))
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct Row {
+        product: Thing,
+        barcode: String,
+    }
+    let rows: Vec<Row> = r.take(0).unwrap_or_default();
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.product.to_string(), row.barcode))
+        .collect())
+}
+
 /// Sum of `stock` on active children of `parent` (read-side only).
 pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<i64> {
     let mut r = db

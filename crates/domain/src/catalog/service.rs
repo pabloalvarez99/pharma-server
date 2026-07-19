@@ -453,9 +453,14 @@ pub async fn list_variants(
         .await?
         .ok_or(DomainError::NotFound)?;
     let mut kids = repo::list_variants(db, tenant, &parent_thing).await?;
+    let pids: Vec<Thing> = kids
+        .iter()
+        .filter_map(|k| parse_thing(&k.id).ok())
+        .collect();
+    let map = repo::barcodes_of_products(db, tenant, &pids).await?;
     for kid in &mut kids {
-        if let Ok(pid) = parse_thing(&kid.id) {
-            kid.barcode = repo::barcode_of_product(db, tenant, &pid).await?;
+        if let Some(code) = map.get(&kid.id) {
+            kid.barcode = Some(code.clone());
         }
     }
     Ok(kids)
