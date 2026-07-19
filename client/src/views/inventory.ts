@@ -20,6 +20,7 @@ import {
   nearExpiry,
   stockRotation,
   listProductVariants,
+  createProductVariant,
   type Product,
   type ProductDetail,
   type Batch,
@@ -58,7 +59,24 @@ import {
   buildProductInput,
   type ProductFormOptions,
 } from "./product-form";
-import { variantsParentBanner, variantAttrsLabel } from "./variants-ui";
+import {
+  variantsParentBanner,
+  variantsSectionTitle,
+  parentStockLabel,
+  shouldOfferVariantsUi,
+  variantFormAttrFields,
+  addVariantButtonLabel,
+  addVariantModalTitle,
+  hasVariantsToggleLabel,
+  hasVariantsToggleHint,
+  parentCreatedOpenVariantsToast,
+  variantsEmptyHint,
+  variantChildNote,
+  buildNewVariantInput,
+  toVariantTableRow,
+  parentStockWhenHasVariants,
+  variantsStockListBadge,
+} from "./variants-ui";
 
 const PAGE_LIMIT = 60;
 // Single-page cap the server enforces on `/products` (`limit.min(500)`). The
@@ -231,8 +249,12 @@ export function renderInventory(host: HTMLElement, serverUrl: string): void {
   );
 
   newBtn.addEventListener("click", () =>
-    openNewProduct(modalHost, serverUrl, (created) => {
-      toast(`${itemLabel} creado: ${created.name}`);
+    openNewProduct(modalHost, serverUrl, (created, meta) => {
+      toast(
+        meta?.hasVariants
+          ? parentCreatedOpenVariantsToast(created.name)
+          : `${itemLabel} creado: ${created.name}`,
+      );
       refreshProductos();
     }),
   );
@@ -394,13 +416,23 @@ function downloadExport(filename: string, mime: string, content: string): void {
 
 function productRow(p: Product, physicalStock = true): string {
   const sub = p.laboratory || p.active_ingredient || "";
-  // Min-stock signal: only meaningful when the rubro tracks physical stock.
+  const isParent =
+    physicalStock && p.variants_stock != null && typeof p.variants_stock === "number";
+  const badge = isParent
+    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(
+        variantsStockListBadge(Number(p.variants_stock)),
+      )}</span>`
+    : "";
+  // Min-stock signal: only for plain physical rows (parent shell stock is not sellable).
   const reorder =
-    physicalStock && stockLevel(p.stock) !== "ok"
+    physicalStock && !isParent && stockLevel(p.stock) !== "ok"
       ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
       : "";
   const stockCells = physicalStock
-    ? `<td class="num">${num(p.stock)}</td>
+    ? isParent
+      ? `<td class="num">${num(Number(p.variants_stock))} <span class="muted">var.</span></td>
+      <td>${badge}</td>`
+      : `<td class="num">${num(p.stock)}</td>
       <td>${stockPill(p.stock)}${reorder}</td>`
     : `<td><span class="pill pill-ok">Servicio</span></td>`;
   return `
@@ -408,6 +440,7 @@ function productRow(p: Product, physicalStock = true): string {
       <td>
         <div class="cell-main">${escapeHtml(p.name)}</div>
         ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
+        ${isParent ? `<div class="cell-sub muted">Vender por código de barras del hijo</div>` : ""}
       </td>
       <td class="num">${clp(p.price)}</td>
       ${stockCells}
@@ -420,7 +453,7 @@ function productRow(p: Product, physicalStock = true): string {
 function openNewProduct(
   modalHost: HTMLElement,
   serverUrl: string,
-  onDone: (created: ProductDetail) => void,
+  onDone: (created: ProductDetail, meta?: { hasVariants?: boolean }) => void,
 ): void {
   const pack = cachedPack();
   const features = activeFeatures();
@@ -442,8 +475,9 @@ function openNewProduct(
   // Presentación is universal (size / format) and NOT a pack attr for most
   // rubros — keep a single optional field. Clinical keys come from pack attrs
   // when clinical (farmacia), so we don't double-render lab/ingredient.
+  const offerVariants = shouldOfferVariantsUi(features.physicalStock);
   const stockBlock = features.physicalStock
-    ? `<label class="field modal-field">
+    ? `<label class="field modal-field" id="np-stock-wrap">
           <span class="modal-label">${escapeHtml(labels.stockLabel)}</span>
           <input id="np-stock" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
         </label>`
@@ -451,6 +485,15 @@ function openNewProduct(
           <span class="modal-label">${escapeHtml(labels.stockLabel)}</span>
           <p class="muted inv-service-hint">${escapeHtml(labels.stockHint ?? "")}</p>
         </div>`;
+  const variantsToggle = offerVariants
+    ? `<label class="field modal-field np-has-variants">
+          <span class="modal-check-row">
+            <input id="np-has-variants" type="checkbox" />
+            <span class="modal-label">${escapeHtml(hasVariantsToggleLabel())}</span>
+          </span>
+          <p class="muted inv-service-hint" id="np-has-variants-hint" hidden>${escapeHtml(hasVariantsToggleHint())}</p>
+        </label>`
+    : "";
 
   modalHost.innerHTML = `
     <div class="modal-backdrop">
@@ -477,6 +520,7 @@ function openNewProduct(
             <input id="np-presentation" type="text" autocomplete="off" placeholder="opcional" />
           </label>
         </div>
+        ${variantsToggle}
         ${attrFieldsHtml(attrFields, escapeHtml)}
         <div id="np-error" class="pos-error" hidden></div>
         <div class="modal-actions">
@@ -497,9 +541,23 @@ function openNewProduct(
   const priceEl = modalHost.querySelector<HTMLInputElement>("#np-price")!;
   const costEl = modalHost.querySelector<HTMLInputElement>("#np-cost")!;
   const stockEl = modalHost.querySelector<HTMLInputElement>("#np-stock");
+  const stockWrap = modalHost.querySelector<HTMLElement>("#np-stock-wrap");
+  const hasVarEl = modalHost.querySelector<HTMLInputElement>("#np-has-variants");
+  const hasVarHint = modalHost.querySelector<HTMLElement>("#np-has-variants-hint");
   const presEl = modalHost.querySelector<HTMLInputElement>("#np-presentation")!;
   const errEl = modalHost.querySelector<HTMLElement>("#np-error")!;
   const confirmBtn = modalHost.querySelector<HTMLButtonElement>("#np-confirm")!;
+
+  const syncHasVariantsUi = (): void => {
+    const on = Boolean(hasVarEl?.checked);
+    if (hasVarHint) hasVarHint.hidden = !on;
+    if (stockEl) {
+      stockEl.disabled = on;
+      if (on) stockEl.value = "0";
+    }
+    if (stockWrap) stockWrap.classList.toggle("is-muted", on);
+  };
+  hasVarEl?.addEventListener("change", syncHasVariantsUi);
 
   modalHost.querySelector<HTMLElement>(".modal-backdrop")!.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) close();
@@ -518,12 +576,19 @@ function openNewProduct(
   }
 
   confirmBtn.addEventListener("click", async () => {
+    const hasVariants = Boolean(hasVarEl?.checked);
+    const stockForParent = parentStockWhenHasVariants(
+      hasVariants,
+      features.physicalStock,
+      stockEl?.value,
+    );
     const built = buildProductInput(
       {
         name: nameEl.value,
         price: priceEl.value,
         costPrice: costEl.value,
-        stock: stockEl?.value,
+        // When has-variants: force "0" so pure model also validates cleanly.
+        stock: hasVariants ? "0" : stockEl?.value,
         presentation: presEl.value,
         attrs: readAttrValues(modalHost, attrFields),
       },
@@ -533,12 +598,16 @@ function openNewProduct(
       showErr(errEl, built.error);
       return;
     }
+    // Belt-and-suspenders: parent shell stock is 0 when multi-SKU.
+    if (hasVariants && features.physicalStock) {
+      built.value.stock = stockForParent ?? 0;
+    }
     errEl.hidden = true;
     busy(confirmBtn, true);
     try {
       const created = await createProduct(serverUrl, built.value);
       close();
-      onDone(created);
+      onDone(created, { hasVariants });
     } catch (err) {
       showErr(errEl, asMessage(err));
       busy(confirmBtn, false);
@@ -614,42 +683,60 @@ async function openProductDetail(
     const sub = [...clinicalBits.filter(Boolean), ...attrBits].join(" · ");
     const isChild = Boolean(p.parent_id);
     const isParent = kids.length > 0;
+    // Physical rubro + not a child: offer multi-SKU panel (empty or with rows).
+    const offerVariants =
+      shouldOfferVariantsUi(packOpts.physicalStock) && !isChild && !p.parent_id;
     // Parent multi-SKU: stock lives on children — hide adjust on the shell product.
     const showStockOps = packOpts.physicalStock && !isParent;
     const stockStat = !packOpts.physicalStock
       ? pdStat("Tipo", "Servicio")
       : isParent
-        ? pdStat("Stock", "En variantes")
+        ? pdStat("Stock", parentStockLabel(kids))
         : pdStat("Stock", `${num(p.stock)} ${stockPill(p.stock)}`);
     const childNote = isChild
-      ? `<p class="muted pd-sub">Variante multi-SKU · vender por su código de barras</p>`
+      ? `<p class="muted pd-sub">${escapeHtml(variantChildNote())}</p>`
       : "";
-    const variantsSection =
-      isParent
-        ? `
+    const variantsSection = offerVariants
+      ? `
       <div class="pd-section pd-variants">
-        <div class="pd-section-head"><h4>Variantes (multi-SKU)</h4></div>
-        <p class="pd-variants-banner" role="status">${escapeHtml(variantsParentBanner(kids.length))}</p>
+        <div class="pd-section-head">
+          <h4>${escapeHtml(variantsSectionTitle(kids.length))}</h4>
+          <button type="button" id="pd-add-variant" class="btn-ghost pd-add-variant">${escapeHtml(addVariantButtonLabel())}</button>
+        </div>
+        ${
+          kids.length > 0
+            ? `<p class="pd-variants-banner" role="status">${escapeHtml(variantsParentBanner(kids.length))}</p>
         <table class="data-table pd-variant-table">
-          <thead><tr><th>Variante</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
+          <thead><tr><th>Variante</th><th>Cód. barras</th><th class="num">Precio</th><th class="num">Stock</th></tr></thead>
           <tbody>
             ${kids
               .map((v) => {
-                const lab = variantAttrsLabel(v.attrs as Record<string, unknown> | null) || v.name;
-                return `<tr>
-                  <td><div class="cell-main">${escapeHtml(v.name)}</div>
-                    ${lab && lab !== v.name ? `<div class="cell-sub muted">${escapeHtml(lab)}</div>` : ""}</td>
-                  <td class="num">${clp(v.price)}</td>
-                  <td class="num">${num(v.stock)}</td>
+                const row = toVariantTableRow({
+                  id: v.id,
+                  name: v.name,
+                  price: v.price,
+                  stock: v.stock,
+                  active: v.active,
+                  attrs: v.attrs as Record<string, unknown> | null,
+                  barcode: v.barcode,
+                });
+                const lab = row.attrsLabel;
+                return `<tr data-variant-id="${escapeHtml(v.id)}">
+                  <td><div class="cell-main">${escapeHtml(row.name)}</div>
+                    ${lab && lab !== row.name ? `<div class="cell-sub muted">${escapeHtml(lab)}</div>` : ""}</td>
+                  <td class="rb-num">${escapeHtml(row.barcode)}</td>
+                  <td class="num">${clp(row.price)}</td>
+                  <td class="num">${num(row.stock)}</td>
                 </tr>`;
               })
               .join("")}
           </tbody>
-        </table>
-        <!-- TODO(C): thin "agregar variante" form via createProductVariant — no full matrix yet. -->
-        <p class="muted pd-variants-todo">Alta de tallas/colores: por API o CSV. Matriz completa próximamente.</p>
+        </table>`
+            : `<p class="muted pd-variants-empty" role="status">${escapeHtml(variantsEmptyHint())}</p>`
+        }
+        <div id="pd-variant-form"></div>
       </div>`
-        : "";
+      : "";
     const adjustSection = showStockOps
       ? `
       <div class="pd-section">
@@ -703,12 +790,117 @@ async function openProductDetail(
       ${lotesSection}
     `;
     if (showStockOps) wireAdjust();
+    if (offerVariants) {
+      bodyEl
+        .querySelector<HTMLButtonElement>("#pd-add-variant")!
+        .addEventListener("click", () => toggleVariantForm());
+    }
     if (packOpts.lotes && !isParent) {
       bodyEl
         .querySelector<HTMLButtonElement>("#pd-add-lote")!
         .addEventListener("click", toggleLoteForm);
       void loadLotes();
     }
+  }
+
+  function toggleVariantForm(): void {
+    const host = bodyEl.querySelector<HTMLElement>("#pd-variant-form");
+    if (!host) return;
+    if (host.innerHTML !== "") {
+      host.innerHTML = "";
+      return;
+    }
+    const pack = cachedPack();
+    const rawAttrs =
+      pack?.attrs?.length
+        ? pack.attrs
+        : localAttrsForRubro(pack?.rubro ?? null);
+    const vFields = variantFormAttrFields(rawAttrs);
+    host.innerHTML = `
+      <div class="pd-variant-form-inner" role="form" aria-label="${escapeHtml(addVariantModalTitle(p.name))}">
+        <h4 class="pd-variant-form-title">${escapeHtml(addVariantModalTitle(p.name))}</h4>
+        <p class="muted pd-sub">Código de barras primero — el POS vende escaneando este SKU.</p>
+        <label class="field modal-field">
+          <span class="modal-label">Código de barras *</span>
+          <input id="vf-barcode" type="text" autocomplete="off" inputmode="text" placeholder="Escanear o escribir EAN/SKU" />
+        </label>
+        <div class="inv-form-row">
+          <label class="field modal-field">
+            <span class="modal-label">Nombre (opcional)</span>
+            <input id="vf-name" type="text" autocomplete="off" placeholder="Vacío = padre + talla/color" />
+          </label>
+          <label class="field modal-field">
+            <span class="modal-label">Stock inicial</span>
+            <input id="vf-stock" type="text" inputmode="numeric" placeholder="0" autocomplete="off" />
+          </label>
+        </div>
+        <div class="inv-form-row">
+          <label class="field modal-field">
+            <span class="modal-label">Precio (opcional)</span>
+            <input id="vf-price" type="text" inputmode="numeric" placeholder="hereda del padre" autocomplete="off" />
+          </label>
+          <label class="field modal-field">
+            <span class="modal-label">Costo (opcional)</span>
+            <input id="vf-cost" type="text" inputmode="numeric" placeholder="opcional" autocomplete="off" />
+          </label>
+        </div>
+        ${attrFieldsHtml(vFields, escapeHtml, "vf-attr-")}
+        <div id="vf-error" class="pos-error" hidden></div>
+        <div class="modal-actions">
+          <button type="button" id="vf-cancel" class="btn-ghost">Cancelar</button>
+          <button type="button" id="vf-confirm" class="btn-primary modal-confirm">
+            <span class="btn-label">Crear variante</span>
+            <span class="btn-pulse"></span>
+          </button>
+        </div>
+      </div>
+    `;
+    const barcodeEl = host.querySelector<HTMLInputElement>("#vf-barcode")!;
+    const nameEl = host.querySelector<HTMLInputElement>("#vf-name")!;
+    const stockEl = host.querySelector<HTMLInputElement>("#vf-stock")!;
+    const priceEl = host.querySelector<HTMLInputElement>("#vf-price")!;
+    const costEl = host.querySelector<HTMLInputElement>("#vf-cost")!;
+    const errEl = host.querySelector<HTMLElement>("#vf-error")!;
+    const btn = host.querySelector<HTMLButtonElement>("#vf-confirm")!;
+    host.querySelector<HTMLButtonElement>("#vf-cancel")!.addEventListener("click", () => {
+      host.innerHTML = "";
+    });
+    barcodeEl.focus();
+
+    btn.addEventListener("click", async () => {
+      const built = buildNewVariantInput({
+        barcode: barcodeEl.value,
+        name: nameEl.value,
+        stock: stockEl.value,
+        price: priceEl.value,
+        costPrice: costEl.value,
+        attrs: readAttrValues(host, vFields, "vf-attr-"),
+      });
+      if (!built.ok) {
+        showErr(errEl, built.error);
+        return;
+      }
+      errEl.hidden = true;
+      busy(btn, true);
+      try {
+        const created = await createProductVariant(serverUrl, id, built.value);
+        variants = [...variants, created];
+        toast(`Variante creada: ${created.name}`);
+        onChanged();
+        paintDetail();
+      } catch (err) {
+        showErr(errEl, asMessage(err));
+        busy(btn, false);
+      }
+    });
+
+    // Enter on barcode submits (scan gun dumps code + Enter).
+    barcodeEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        btn.click();
+      }
+    });
   }
 
   /** Flatten product.attrs into short subline tokens (talla M · color Azul). */

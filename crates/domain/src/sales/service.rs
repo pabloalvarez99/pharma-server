@@ -246,6 +246,8 @@ pub async fn post_sale(
                 // Retail multi-SKU: the parent is not sellable when it has
                 // active children — POS must scan the variant barcode / id
                 // so stock decrements at variant level (migración 0034).
+                // Stable ES contract for client matchers (`tiene variantes`,
+                // `escanee el código`) — code remains INVALID_INPUT.
                 if crate::catalog::repo::has_active_variants(db, tenant, pthing).await? {
                     return Err(DomainError::Invalid(format!(
                         "el producto '{}' tiene variantes; venda por talla/SKU o \

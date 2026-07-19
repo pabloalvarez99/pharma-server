@@ -1609,6 +1609,67 @@ button {
   margin-top: 4px;
 }
 
+/* Multi-SKU variants (inventory detail + alta toggle) */
+.np-has-variants .modal-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.np-has-variants .modal-check-row .modal-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 0;
+  color: var(--text);
+}
+.np-has-variants input[type="checkbox"] {
+  margin-top: 3px;
+  width: auto;
+  accent-color: var(--accent);
+}
+#np-stock-wrap.is-muted {
+  opacity: 0.55;
+}
+.pd-variants-banner {
+  font-size: 13px;
+  color: var(--muted-strong);
+  margin: 0 0 10px;
+}
+.pd-variants-empty {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+.pd-variant-form-inner {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(10, 13, 18, 0.45);
+}
+.pd-variant-form-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.pd-variant-table .rb-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.inv-var-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+.pill-info {
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+}
+
 .modal-confirm {
   width: auto;
   margin-top: 0;

@@ -234,7 +234,12 @@ impl Modify for SecurityAddon {
         crate::v1::dte::upload_cert,
         crate::v1::dte::upload_caf,
     ),
-    components(schemas(ErrorEnvelope, ErrorBody)),
+    components(schemas(
+        ErrorEnvelope,
+        ErrorBody,
+        domain::catalog::model::ProductDto,
+        domain::catalog::model::NewVariant,
+    )),
     modifiers(&SecurityAddon),
 )]
 pub struct ApiDoc;

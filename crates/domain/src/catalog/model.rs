@@ -58,6 +58,19 @@ pub struct ProductDto {
     /// Opción A). `None` = product plano o padre de matriz de tallas.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
+    /// Tenant barcode from `product_barcode` when present (enriched on read /
+    /// create-variant). Plain products and parents often omit it (caja en hijos).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub barcode: Option<String>,
+    /// Read-side sum of **active** children stock when this row is a multi-SKU
+    /// parent. Never written to `product.stock` (ledger invariant + farmacia
+    /// plain SKUs keep stock on the product itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants_stock: Option<i64>,
+    /// Count of active children (list badge without N+1). Present iff parent
+    /// has ≥1 active variant — same keying as `variants_stock`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_count: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
