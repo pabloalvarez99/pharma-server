@@ -75,6 +75,7 @@ import {
   buildNewVariantInput,
   toVariantTableRow,
   parentStockWhenHasVariants,
+  variantsStockListBadge,
 } from "./variants-ui";
 
 const PAGE_LIMIT = 60;
@@ -415,13 +416,23 @@ function downloadExport(filename: string, mime: string, content: string): void {
 
 function productRow(p: Product, physicalStock = true): string {
   const sub = p.laboratory || p.active_ingredient || "";
-  // Min-stock signal: only meaningful when the rubro tracks physical stock.
+  const isParent =
+    physicalStock && p.variants_stock != null && typeof p.variants_stock === "number";
+  const badge = isParent
+    ? `<span class="pill pill-info inv-var-badge">${escapeHtml(
+        variantsStockListBadge(Number(p.variants_stock)),
+      )}</span>`
+    : "";
+  // Min-stock signal: only for plain physical rows (parent shell stock is not sellable).
   const reorder =
-    physicalStock && stockLevel(p.stock) !== "ok"
+    physicalStock && !isParent && stockLevel(p.stock) !== "ok"
       ? `<div class="cell-sub inv-reorder">Reponer ${num(reorderSuggestion(p.stock))} u.</div>`
       : "";
   const stockCells = physicalStock
-    ? `<td class="num">${num(p.stock)}</td>
+    ? isParent
+      ? `<td class="num">${num(Number(p.variants_stock))} <span class="muted">var.</span></td>
+      <td>${badge}</td>`
+      : `<td class="num">${num(p.stock)}</td>
       <td>${stockPill(p.stock)}${reorder}</td>`
     : `<td><span class="pill pill-ok">Servicio</span></td>`;
   return `
@@ -429,6 +440,7 @@ function productRow(p: Product, physicalStock = true): string {
       <td>
         <div class="cell-main">${escapeHtml(p.name)}</div>
         ${sub ? `<div class="cell-sub muted">${escapeHtml(sub)}</div>` : ""}
+        ${isParent ? `<div class="cell-sub muted">Vender por código de barras del hijo</div>` : ""}
       </td>
       <td class="num">${clp(p.price)}</td>
       ${stockCells}
@@ -706,6 +718,7 @@ async function openProductDetail(
                   stock: v.stock,
                   active: v.active,
                   attrs: v.attrs as Record<string, unknown> | null,
+                  barcode: v.barcode,
                 });
                 const lab = row.attrsLabel;
                 return `<tr data-variant-id="${escapeHtml(v.id)}">

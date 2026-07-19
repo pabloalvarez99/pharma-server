@@ -59,11 +59,20 @@ export function sumVariantStock(kids: readonly { stock?: number }[]): number {
   return n;
 }
 
-/** Compact badge for list/card when variant count is known. */
+/** Compact badge for list/card when variant **count** is known. */
 export function variantsListBadge(count: number): string {
   const n = Math.max(0, Math.trunc(count));
   if (n <= 0) return "";
   return n === 1 ? "1 variante" : `${n} variantes`;
+}
+
+/**
+ * List-row badge from B `variants_stock` (sum of children units, not child count).
+ * Prefer this on catalog list — no N+1 GET /variants.
+ */
+export function variantsStockListBadge(variantsStock: number): string {
+  const n = Math.max(0, Math.trunc(variantsStock));
+  return `Multi-SKU · ${n} u.`;
 }
 
 /** Child row note under the product name in detail. */

@@ -267,23 +267,28 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   /** Session cache: product id → has active variants (avoid GET on every click). */
   const variantsCache = new Map<string, boolean>();
 
-  async function productHasVariants(id: string): Promise<boolean> {
-    if (variantsCache.has(id)) return variantsCache.get(id)!;
+  async function productHasVariants(p: Product): Promise<boolean> {
+    // Fast path: B list/detail exposes variants_stock on multi-SKU parents.
+    if (p.variants_stock != null && typeof p.variants_stock === "number") {
+      variantsCache.set(p.id, true);
+      return true;
+    }
+    if (variantsCache.has(p.id)) return variantsCache.get(p.id)!;
     try {
-      const kids = await listProductVariants(serverUrl, id);
+      const kids = await listProductVariants(serverUrl, p.id);
       const has = kids.length > 0;
-      variantsCache.set(id, has);
+      variantsCache.set(p.id, has);
       return has;
     } catch {
       // Old server without variants route — treat as plain SKU (no block).
-      variantsCache.set(id, false);
+      variantsCache.set(p.id, false);
       return false;
     }
   }
 
   async function tryAddSellable(p: Product): Promise<boolean> {
     // Parent multi-SKU first (even if shell stock is 0 / looks "agotado").
-    if (await productHasVariants(p.id)) {
+    if (await productHasVariants(p)) {
       showError(parentWithVariantsError(p.name));
       beep(false);
       return false;
@@ -1299,10 +1304,22 @@ export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servici
     </button>
   `;
   }
+  const isParent = p.variants_stock != null && typeof p.variants_stock === "number";
+  if (isParent) {
+    const sum = Number(p.variants_stock);
+    return `
+    <button type="button" class="pos-result is-parent-variants">
+      <div class="pos-result-info">
+        <div class="cell-main">${escapeHtml(p.name)}</div>
+        <div class="cell-sub muted">Multi-SKU · stock en variantes: <span class="rb-num">${num(sum)}</span> · escanear barcode hijo</div>
+      </div>
+      <div class="pos-result-price num rb-num">${clp(p.price)}</div>
+    </button>
+  `;
+  }
   const out = p.stock <= 0;
-  // Never `disabled` on stock=0: multi-SKU parents often have 0 on the shell
-  // and must still surface «tiene variantes · escanea el hijo». Plain OOS
-  // products get Spanish copy from tryAddSellable instead of a dead button.
+  // Never `disabled` on stock=0: multi-SKU parents without variants_stock flag
+  // (old server) still need click → GET /variants. Plain OOS gets Spanish copy.
   return `
     <button type="button" class="pos-result ${out ? "is-out" : ""}">
       <div class="pos-result-info">

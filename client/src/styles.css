@@ -1659,6 +1659,16 @@ button {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
+.inv-var-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+.pill-info {
+  background: rgba(56, 189, 248, 0.14);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+}
 
 .modal-confirm {
   width: auto;

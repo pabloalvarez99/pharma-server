@@ -9,6 +9,7 @@ import {
   parentStockLabel,
   sumVariantStock,
   variantsListBadge,
+  variantsStockListBadge,
   variantChildNote,
   addVariantButtonLabel,
   addVariantModalTitle,
@@ -130,6 +131,10 @@ describe("stock helpers", () => {
     expect(variantsListBadge(0)).toBe("");
     expect(variantsListBadge(1)).toBe("1 variante");
     expect(variantsListBadge(4)).toBe("4 variantes");
+  });
+  it("variantsStockListBadge uses units not child count", () => {
+    expect(variantsStockListBadge(12)).toMatch(/Multi-SKU/);
+    expect(variantsStockListBadge(12)).toMatch(/12 u/);
   });
 });
 
