@@ -65,6 +65,10 @@ struct ProductRow {
     /// 0033 (or any select missing the column) decode as `None`.
     #[serde(default)]
     attrs: Option<Value>,
+    /// Parent product when this row is a variant (migration 0034). Pre-0034
+    /// rows decode as `None`.
+    #[serde(default)]
+    parent_id: Option<Thing>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -91,6 +95,7 @@ impl From<ProductRow> for ProductDto {
             presentation: r.presentation,
             discount_percent: r.discount_percent,
             attrs: r.attrs,
+            parent_id: r.parent_id.map(|p| p.to_string()),
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -324,6 +329,100 @@ pub async fn create_product(
     row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
+/// Create a sellable variant child under `parent`. Caller already validated
+/// tenant ownership, single-level depth, and slug uniqueness.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_variant_product(
+    db: &Db,
+    tenant: &Thing,
+    parent: &Thing,
+    slug: &str,
+    name: &str,
+    price: Decimal,
+    cost_price: Option<Decimal>,
+    stock: i64,
+    attrs: Option<Value>,
+    external_id: Option<String>,
+    image_url: Option<String>,
+    category: Option<Thing>,
+    physical_stock: bool,
+) -> DomainResult<ProductDto> {
+    let mut r = db
+        .query(
+            "CREATE product SET tenant = $t, name = $name, slug = $slug, \
+             price = $price, cost_price = $cost_price, stock = $stock, \
+             category = $category, image_url = $image_url, \
+             external_id = $external_id, parent_id = $parent, attrs = $attrs, \
+             physical_stock = $physical_stock, prescription_type = 'direct' \
+             RETURN AFTER",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("name", name.to_string()))
+        .bind(("slug", slug.to_string()))
+        .bind(("price", dec_val(price)))
+        .bind(("cost_price", dec_opt(cost_price)))
+        .bind(("stock", stock))
+        .bind(("category", category))
+        .bind(("image_url", image_url))
+        .bind(("external_id", external_id))
+        .bind(("parent", parent.clone()))
+        .bind(("attrs", attrs))
+        .bind(("physical_stock", physical_stock))
+        .await?;
+    let row: Option<ProductRow> = r.take(0)?;
+    row.map(Into::into).ok_or(DomainError::NotFound)
+}
+
+/// Active (and inactive) variants of a parent, tenant-scoped.
+pub async fn list_variants(
+    db: &Db,
+    tenant: &Thing,
+    parent: &Thing,
+) -> DomainResult<Vec<ProductDto>> {
+    let mut r = db
+        .query(
+            "SELECT * FROM product WHERE tenant = $t AND parent_id = $p \
+             ORDER BY name",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", parent.clone()))
+        .await?;
+    let rows: Vec<ProductRow> = r.take(0)?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// `true` if the product has at least one active child variant.
+pub async fn has_active_variants(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<bool> {
+    let mut r = db
+        .query(
+            "SELECT id FROM product WHERE tenant = $t AND parent_id = $p \
+             AND active = true LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("p", parent.clone()))
+        .await?;
+    let row: Option<Thing> = r.take((0, "id"))?;
+    Ok(row.is_some())
+}
+
+/// Resolve tenant-scoped barcode → product id (variant or plain SKU).
+pub async fn product_id_by_barcode(
+    db: &Db,
+    tenant: &Thing,
+    barcode: &str,
+) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query(
+            "SELECT VALUE product FROM product_barcode \
+             WHERE tenant = $t AND barcode = $b LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("b", barcode.to_string()))
+        .await?;
+    let id: Option<Thing> = r.take(0)?;
+    Ok(id)
+}
+
 /// Set `product.physical_stock` (tenant-scoped). `false` marks an item as a
 /// service: the sale path then skips its stock check + FEFO plan (migración
 /// 0031). Used by the demo seed for the servicios vertical; `create_product`
@@ -348,6 +447,18 @@ pub async fn list_products(
     tenant: &Thing,
     f: &ProductFilters,
 ) -> DomainResult<Vec<ProductDto>> {
+    list_products_opts(db, tenant, f, false).await
+}
+
+/// Like [`list_products`], with explicit control over whether child variants
+/// (`parent_id` set) appear in the result. Default list paths hide them so the
+/// retail catalog shows padres + SKUs planos; `GET .../variants` lists children.
+pub async fn list_products_opts(
+    db: &Db,
+    tenant: &Thing,
+    f: &ProductFilters,
+    include_variants: bool,
+) -> DomainResult<Vec<ProductDto>> {
     let mut conds = vec!["tenant = $t".to_string()];
     if f.search.is_some() {
         conds.push(
@@ -367,6 +478,11 @@ pub async fn list_products(
         // Servicios (physical_stock = false) no tienen inventario → nunca son
         // "stock bajo"; se excluyen de la alerta.
         conds.push("stock <= $low AND physical_stock = true".to_string());
+    }
+    // Default: only top-level (padres + SKUs planos). Variantes viven bajo
+    // GET /products/{id}/variants; no ensuciar el catálogo retail.
+    if !include_variants {
+        conds.push("parent_id = NONE".to_string());
     }
     let limit = f.limit.unwrap_or(100).min(500);
     let offset = f.offset.unwrap_or(0);

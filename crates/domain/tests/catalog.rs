@@ -638,3 +638,117 @@ async fn stats_perf_50k_view_vs_scan() {
     assert_eq!(v.total, sc.total);
     assert_eq!(v.inventory_value, sc.inventory_value);
 }
+
+// ---------------------------------------------------------------------------
+// Variantes multi-SKU (migración 0034 / Opción A)
+// ---------------------------------------------------------------------------
+
+fn new_variant(talla: &str, barcode: &str, stock: i64) -> NewVariant {
+    NewVariant {
+        name: None,
+        slug: None,
+        price: None,
+        cost_price: None,
+        stock,
+        barcode: Some(barcode.into()),
+        attrs: Some(serde_json::json!({"talla": talla})),
+        external_id: None,
+        image_url: None,
+    }
+}
+
+#[tokio::test]
+async fn create_and_list_variants_with_own_barcode_and_stock() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Polera basica", "9990"))
+        .await
+        .unwrap();
+    assert!(parent.parent_id.is_none());
+
+    let m = service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999100011", 10))
+        .await
+        .unwrap();
+    let l = service::create_variant(&db, &t, &parent.id, new_variant("L", "7804999100028", 5))
+        .await
+        .unwrap();
+
+    assert_eq!(m.parent_id.as_deref(), Some(parent.id.as_str()));
+    assert_eq!(l.parent_id.as_deref(), Some(parent.id.as_str()));
+    assert_eq!(m.stock, 10);
+    assert_eq!(l.stock, 5);
+    assert_eq!(m.price, dec("9990"), "inherits parent price");
+    assert!(m.name.contains("M"));
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(kids.len(), 2);
+
+    let by_m = service::find_by_barcode(&db, &t, "7804999100011")
+        .await
+        .unwrap();
+    assert_eq!(by_m.id, m.id);
+
+    // Default list hides variants
+    let top = service::list_products(&db, &t, ProductFilters::default())
+        .await
+        .unwrap();
+    assert_eq!(top.len(), 1);
+    assert_eq!(top[0].id, parent.id);
+
+    let all = service::list_products_with_variants(&db, &t, ProductFilters::default(), true)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 3);
+}
+
+#[tokio::test]
+async fn variant_rejects_nested_and_duplicate_barcode() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Jean", "15000"))
+        .await
+        .unwrap();
+    let child = service::create_variant(&db, &t, &parent.id, new_variant("32", "7804999200018", 3))
+        .await
+        .unwrap();
+
+    let err = service::create_variant(
+        &db,
+        &t,
+        &child.id,
+        new_variant("nested", "7804999200094", 1),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    let err = service::create_variant(&db, &t, &parent.id, new_variant("34", "7804999200018", 1))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
+}
+
+#[tokio::test]
+async fn variant_tenant_isolation() {
+    let (db, t1) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Shop2', slug = 'shop2' RETURN id")
+        .await
+        .unwrap();
+    let t2: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+
+    let parent = service::create_product(&db, &t1, new_product("Camisa", "12000"))
+        .await
+        .unwrap();
+    service::create_variant(&db, &t1, &parent.id, new_variant("S", "7804999300015", 4))
+        .await
+        .unwrap();
+
+    let err = service::list_variants(&db, &t2, &parent.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+
+    let err = service::find_by_barcode(&db, &t2, "7804999300015")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+}

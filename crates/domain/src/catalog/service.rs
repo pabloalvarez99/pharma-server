@@ -170,7 +170,18 @@ pub async fn list_products(
     tenant: &Thing,
     filters: ProductFilters,
 ) -> DomainResult<Vec<ProductDto>> {
+    // Hides child variants by default (retail padres + SKUs planos).
     repo::list_products(db, tenant, &filters).await
+}
+
+/// Same as [`list_products`] but can include variant children (`parent_id` set).
+pub async fn list_products_with_variants(
+    db: &Db,
+    tenant: &Thing,
+    filters: ProductFilters,
+    include_variants: bool,
+) -> DomainResult<Vec<ProductDto>> {
+    repo::list_products_opts(db, tenant, &filters, include_variants).await
 }
 
 pub async fn get_product(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ProductDto> {
@@ -289,6 +300,161 @@ pub async fn etiquetas(db: &Db, tenant: &Thing, q: &str) -> DomainResult<Etiquet
     repo::etiquetas(db, tenant, q).await
 }
 
+// --- variants (multi-SKU retail, migración 0034 / Opción A) -----------------
+
+/// Build a display name from parent + attrs when the caller omits `name`.
+fn variant_display_name(parent_name: &str, attrs: &Option<serde_json::Value>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(serde_json::Value::Object(map)) = attrs {
+        for key in ["talla", "color", "sku"] {
+            if let Some(serde_json::Value::String(s)) = map.get(key) {
+                let t = s.trim();
+                if !t.is_empty() {
+                    parts.push(t.to_string());
+                }
+            }
+        }
+    }
+    if parts.is_empty() {
+        format!("{parent_name} (variante)")
+    } else {
+        format!("{parent_name} — {}", parts.join(" / "))
+    }
+}
+
+/// Create a sellable variant under `parent_id`. The child is a full `product`
+/// row (own stock, own barcode, own price) so POS/FEFO/compras reuse the
+/// existing product path. Nested variants are rejected.
+pub async fn create_variant(
+    db: &Db,
+    tenant: &Thing,
+    parent_id: &str,
+    input: NewVariant,
+) -> DomainResult<ProductDto> {
+    let parent_thing = parse_thing(parent_id)?;
+    if parent_thing.tb != "product" {
+        return Err(DomainError::Invalid(
+            "parent_id debe ser un id de producto".into(),
+        ));
+    }
+    let parent = repo::get_product(db, tenant, &parent_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if parent.parent_id.is_some() {
+        return Err(DomainError::Invalid(
+            "no se pueden anidar variantes (el padre ya es una variante)".into(),
+        ));
+    }
+    if input.stock < 0 {
+        return Err(DomainError::Invalid(
+            "stock de variante no puede ser negativo".into(),
+        ));
+    }
+    if let Some(p) = input.price {
+        if p < Decimal::ZERO {
+            return Err(DomainError::Invalid("precio no puede ser negativo".into()));
+        }
+    }
+    let barcode = input
+        .barcode
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    if let Some(ref code) = barcode {
+        if let Some(existing) = repo::product_id_by_barcode(db, tenant, code).await? {
+            return Err(DomainError::Conflict(format!(
+                "el código de barras '{code}' ya está asignado a {}",
+                existing
+            )));
+        }
+    }
+
+    let name = input
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| variant_display_name(&parent.name, &input.attrs));
+    let price = input.price.unwrap_or(parent.price);
+    let cost_price = input.cost_price.or(parent.cost_price);
+    let category = parent
+        .category
+        .as_deref()
+        .and_then(|s| surrealdb::sql::thing(s).ok());
+
+    let base = input
+        .slug
+        .as_deref()
+        .map(slugify)
+        .unwrap_or_else(|| slugify(&name));
+    let slug = unique_slug(&base, |s| {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        async move { repo::product_slug_exists(&db, &tenant, &s).await }
+    })
+    .await?;
+
+    let created = repo::create_variant_product(
+        db,
+        tenant,
+        &parent_thing,
+        &slug,
+        &name,
+        price,
+        cost_price,
+        input.stock,
+        input.attrs,
+        input.external_id,
+        input.image_url,
+        category,
+        parent.physical_stock,
+    )
+    .await?;
+
+    if let Some(code) = barcode {
+        let child = parse_thing(&created.id)?;
+        repo::upsert_barcode(db, tenant, &child, &code).await?;
+    }
+
+    Ok(created)
+}
+
+/// List variants of a parent product (empty if the product has none).
+pub async fn list_variants(
+    db: &Db,
+    tenant: &Thing,
+    parent_id: &str,
+) -> DomainResult<Vec<ProductDto>> {
+    let parent_thing = parse_thing(parent_id)?;
+    // 404 if parent not in tenant (don't leak existence across tenants).
+    let _ = repo::get_product(db, tenant, &parent_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    repo::list_variants(db, tenant, &parent_thing).await
+}
+
+/// Resolve a tenant barcode to the sellable product (variant or plain SKU).
+pub async fn find_by_barcode(db: &Db, tenant: &Thing, barcode: &str) -> DomainResult<ProductDto> {
+    let code = barcode.trim();
+    if code.is_empty() {
+        return Err(DomainError::Invalid("código de barras vacío".into()));
+    }
+    let pid = repo::product_id_by_barcode(db, tenant, code)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    repo::get_product(db, tenant, &pid)
+        .await?
+        .ok_or(DomainError::NotFound)
+}
+
+/// `true` when the product has at least one active child variant.
+pub async fn has_active_variants(db: &Db, tenant: &Thing, product_id: &str) -> DomainResult<bool> {
+    let pid = parse_thing(product_id)?;
+    repo::has_active_variants(db, tenant, &pid).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +466,18 @@ mod tests {
         assert_eq!(slugify("Ácido Acetilsalicílico"), "acido-acetilsalicilico");
         assert_eq!(slugify("Niño/Ñandú"), "nino-nandu");
         assert_eq!(slugify("***"), "item");
+    }
+
+    #[test]
+    fn variant_name_from_attrs() {
+        let attrs = Some(serde_json::json!({"talla": "M", "color": "Negro"}));
+        assert_eq!(
+            variant_display_name("Polera básica", &attrs),
+            "Polera básica — M / Negro"
+        );
+        assert_eq!(
+            variant_display_name("Polera básica", &None),
+            "Polera básica (variante)"
+        );
     }
 }

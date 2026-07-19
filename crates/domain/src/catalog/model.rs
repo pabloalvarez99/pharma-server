@@ -51,9 +51,13 @@ pub struct ProductDto {
     pub discount_percent: Option<i64>,
     /// Per-rubro flexible attributes (migration 0033): keys declared by the
     /// rubro pack (`GET /api/v1/rubro-pack`), e.g. `talla`, `duracion_min`.
-    /// Absent for products with no rubro extras.
+    /// Absent for products with no rubro extras. On variants: talla/color/sku.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attrs: Option<serde_json::Value>,
+    /// Parent product when this row is a sellable variant (migration 0034,
+    /// Opción A). `None` = product plano o padre de matriz de tallas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -189,4 +193,30 @@ pub struct ProductFilters {
     pub low_stock: Option<i64>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+/// Input to create a sellable variant under a parent product (migración 0034).
+/// Stock and barcode live on the child; `attrs` carries talla/color/sku.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct NewVariant {
+    /// Display name; defaults to `{parent.name} — {talla/color/sku}` when omitted.
+    pub name: Option<String>,
+    /// Optional; auto-generated tenant-unique slug if omitted.
+    pub slug: Option<String>,
+    /// Unit price; inherits parent when omitted.
+    #[serde(default, with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = Option<String>)]
+    pub price: Option<Decimal>,
+    #[serde(default, with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = Option<String>)]
+    pub cost_price: Option<Decimal>,
+    #[serde(default)]
+    pub stock: i64,
+    /// EAN / barcode of this SKU (tenant-unique). POS scan resolves here.
+    pub barcode: Option<String>,
+    /// Variant discriminators (talla, color, sku, …). Keys from rubro pack.
+    #[serde(default)]
+    pub attrs: Option<serde_json::Value>,
+    pub external_id: Option<String>,
+    pub image_url: Option<String>,
 }
