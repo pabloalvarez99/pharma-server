@@ -85,6 +85,7 @@ ca4b853 feat(client): professional multi-SKU variants UI
 
 | UTC/local | Evento |
 |---|---|
+| 2026-07-19 01:58 | cycle 4 erp=5da62ce main=a6e6aa5 variantsPR=1 merges=[promote #320 → main] |
 | 2026-07-19 01:30 | agent cycle: erp=5da62ce main=a6e6aa5 variantsPR=#321 promote=#320 merges=[none] |
 | 2026-07-19 01:28 | cycle 3 erp=5da62ce main=a6e6aa5 variantsPR=1 merges=[none] |
 | 2026-07-19 01:00 | agent cycle: erp=5da62ce main=a6e6aa5 #321/321 + #320/320 merges=[none] |
