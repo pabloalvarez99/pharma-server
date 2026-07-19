@@ -167,6 +167,50 @@ async fn get_json(app: &axum::Router, token: &str, uri: &str) -> (StatusCode, se
     (status, json_body(res).await)
 }
 
+async fn delete_json(
+    app: &axum::Router,
+    token: &str,
+    uri: &str,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    (status, json_body(res).await)
+}
+
+async fn patch_json(
+    app: &axum::Router,
+    token: &str,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    (status, json_body(res).await)
+}
+
 #[tokio::test]
 async fn variants_create_list_barcode_sale_and_isolation() {
     let s = spawn().await;
@@ -390,11 +434,12 @@ async fn parent_not_sellable_duplicate_barcode_list_order_and_parent_shell() {
         assert!(k["barcode"].as_str().is_some(), "list enriches barcode");
     }
 
-    // Parent GET: stock 0 + variants_stock sum (read-side, no ledger write).
+    // Parent GET: stock 0 + variants_stock sum + variant_count (read-side).
     let (st, pget) = get_json(&s.app, &s.token, &format!("/api/v1/products/{parent_id}")).await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(pget["stock"], 0);
     assert_eq!(pget["variants_stock"], 13);
+    assert_eq!(pget["variant_count"], 2);
 
     // Duplicate barcode → 409 CONFLICT, ES message.
     let (st, dup) = post_json(
@@ -634,4 +679,113 @@ async fn by_barcode_parent_shell_rejected_child_ok() {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(hit["id"], child_id);
     assert_eq!(hit["barcode"], "7804999160014");
+}
+
+#[tokio::test]
+async fn delete_variant_and_patch_update_barcode() {
+    let s = spawn().await;
+    let (st, parent) = post_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products",
+        serde_json::json!({"name": "Polera API del", "price": "9990", "stock": 0}),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{parent}");
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+
+    let (st, m) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 5,
+            "barcode": "7804999701010",
+            "attrs": { "talla": "M" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{m}");
+    let m_id = m["id"].as_str().unwrap().to_string();
+
+    let (st, l) = post_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+        serde_json::json!({
+            "stock": 2,
+            "barcode": "7804999701027",
+            "attrs": { "talla": "L" }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{l}");
+
+    // PATCH edit: name + price + attrs + barcode (edit completo via product path).
+    let (st, patched) = patch_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{m_id}"),
+        serde_json::json!({
+            "name": "Polera — M Negro",
+            "price": "10990",
+            "attrs": { "talla": "M", "color": "Negro" },
+            "barcode": "7804999701096"
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "patch: {patched}");
+    assert_eq!(patched["name"], "Polera — M Negro");
+    assert_eq!(patched["price"], "10990");
+    assert_eq!(patched["barcode"], "7804999701096");
+
+    let (st, by) = get_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products/by-barcode/7804999701096",
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(by["id"], m_id);
+
+    // DELETE nested path soft-deletes and frees barcode.
+    let (st, del) = delete_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants/{m_id}"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "delete: {del}");
+    assert_eq!(del["deleted"], true);
+
+    let (st, kids) = get_json(
+        &s.app,
+        &s.token,
+        &format!("/api/v1/products/{parent_id}/variants"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(kids.as_array().unwrap().len(), 1);
+
+    let (st, miss) = get_json(
+        &s.app,
+        &s.token,
+        "/api/v1/products/by-barcode/7804999701096",
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "freed barcode: {miss}");
+
+    // Parent with active child cannot be deleted.
+    let (st, pdel) = delete_json(&s.app, &s.token, &format!("/api/v1/products/{parent_id}")).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "parent delete: {pdel}");
+    assert_eq!(pdel["error"]["code"], "INVALID_INPUT");
+
+    // Tenant isolation: t2 cannot delete t1 variant.
+    let (st, iso) = delete_json(
+        &s.app,
+        &s.token_t2,
+        &format!("/api/v1/products/{parent_id}/variants/{m_id}"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "iso: {iso}");
 }

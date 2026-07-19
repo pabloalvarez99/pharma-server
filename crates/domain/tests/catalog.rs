@@ -287,6 +287,7 @@ fn empty_update() -> UpdateProduct {
         presentation: None,
         discount_percent: None,
         attrs: None,
+        barcode: None,
     }
 }
 
@@ -1043,4 +1044,129 @@ async fn find_by_barcode_rejects_parent_shell_with_variants() {
         .await
         .unwrap();
     assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
+}
+
+#[tokio::test]
+async fn delete_variant_soft_frees_barcode_and_drops_from_list() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Polera del", "9990"))
+        .await
+        .unwrap();
+    let m = service::create_variant(&db, &t, &parent.id, new_variant("M", "7804999600016", 7))
+        .await
+        .unwrap();
+    let l = service::create_variant(&db, &t, &parent.id, new_variant("L", "7804999600023", 3))
+        .await
+        .unwrap();
+
+    service::delete_variant(&db, &t, &parent.id, &m.id)
+        .await
+        .unwrap();
+
+    let kids = service::list_variants(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(kids.len(), 1);
+    assert_eq!(kids[0].id, l.id);
+
+    // Soft-deleted row still exists, inactive; stock preserved (no phantom movement).
+    let gone = service::get_product(&db, &t, &m.id).await.unwrap();
+    assert!(!gone.active);
+    assert_eq!(gone.stock, 7);
+
+    // Barcode freed → not found for POS; can recreate same EAN.
+    let err = service::find_by_barcode(&db, &t, "7804999600016")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+
+    let reused =
+        service::create_variant(&db, &t, &parent.id, new_variant("M2", "7804999600016", 1))
+            .await
+            .unwrap();
+    assert_eq!(reused.barcode.as_deref(), Some("7804999600016"));
+
+    // Parent GET variants_stock excludes deleted M (7) — only L(3)+M2(1).
+    let p = service::get_product(&db, &t, &parent.id).await.unwrap();
+    assert_eq!(p.variants_stock, Some(4));
+    assert_eq!(p.variant_count, Some(2));
+}
+
+#[tokio::test]
+async fn delete_variant_rejects_wrong_parent_and_plain_sku() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Padre A", "1000"))
+        .await
+        .unwrap();
+    let other = service::create_product(&db, &t, new_product("Padre B", "1000"))
+        .await
+        .unwrap();
+    let child = service::create_variant(&db, &t, &parent.id, new_variant("S", "7804999610015", 1))
+        .await
+        .unwrap();
+    let plain = service::create_product(&db, &t, new_product("Plano", "500"))
+        .await
+        .unwrap();
+
+    let err = service::delete_variant(&db, &t, &other.id, &child.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    let err = service::delete_variant(&db, &t, &parent.id, &plain.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    // Parent with active children cannot be deleted.
+    let err = service::delete_product(&db, &t, &parent.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INVALID_INPUT");
+}
+
+#[tokio::test]
+async fn update_product_barcode_and_attrs_on_variant() {
+    let (db, t) = setup().await;
+    let parent = service::create_product(&db, &t, new_product("Jean", "15000"))
+        .await
+        .unwrap();
+    let child = service::create_variant(&db, &t, &parent.id, new_variant("32", "7804999620014", 2))
+        .await
+        .unwrap();
+
+    let mut patch = empty_update();
+    patch.name = Some("Jean — 32 Azul".into());
+    patch.price = Some(dec("15990"));
+    patch.attrs = Some(serde_json::json!({"talla": "32", "color": "Azul"}));
+    patch.barcode = Some("7804999620090".into());
+    let updated = service::update_product(&db, &t, &child.id, patch)
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "Jean — 32 Azul");
+    assert_eq!(updated.price, dec("15990"));
+    assert_eq!(updated.barcode.as_deref(), Some("7804999620090"));
+    assert_eq!(
+        updated.attrs.as_ref().unwrap()["color"],
+        serde_json::json!("Azul")
+    );
+
+    // Old barcode gone; new resolves.
+    let err = service::find_by_barcode(&db, &t, "7804999620014")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+    let by = service::find_by_barcode(&db, &t, "7804999620090")
+        .await
+        .unwrap();
+    assert_eq!(by.id, child.id);
+
+    // Conflict when stealing another product's barcode.
+    let other = service::create_variant(&db, &t, &parent.id, new_variant("34", "7804999620083", 1))
+        .await
+        .unwrap();
+    let mut steal = empty_update();
+    steal.barcode = Some("7804999620090".into());
+    let err = service::update_product(&db, &t, &other.id, steal)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONFLICT");
 }

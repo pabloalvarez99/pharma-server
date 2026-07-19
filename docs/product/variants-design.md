@@ -56,13 +56,45 @@ Reglas de dominio:
 | Método | Path | Rol | Notas |
 |---|---|---|---|
 | `POST` | `/api/v1/products/{id}/variants` | admin+ | crea hijo + barcode opcional; 409 si EAN tomado |
-| `GET` | `/api/v1/products/{id}/variants` | auth | lista hijos `ORDER BY name`; `stock` + `barcode` |
-| `GET` | `/api/v1/products/by-barcode/{code}` | auth | resuelve barcode → product (variante o plano); **400** si el EAN apunta a un padre con variantes activas |
+| `GET` | `/api/v1/products/{id}/variants` | auth | lista **hijos activos** `ORDER BY name`; `stock` + `barcode` |
+| `DELETE` | `/api/v1/products/{id}/variants/{variant_id}` | admin+ | soft-delete variante; libera barcode; stock/movimientos se conservan |
+| `PATCH` | `/api/v1/products/{variant_id}` | admin+ | **edit completo** del hijo (name/price/attrs/`active`/`barcode`); stock vía `POST .../stock` |
+| `GET` | `/api/v1/products/by-barcode/{code}` | auth | resuelve barcode → product activo (variante o plano); **400** si padre con variantes; **404** si soft-deleted |
 | `GET` | `/api/v1/products?include_variants=true` | auth | por defecto **oculta** hijos |
 | `GET` | `/api/v1/products` | auth | padres multi-SKU: `variants_stock` = Σ stock hijos activos (batch; flag client) |
 | `GET` | `/api/v1/products/{id}` | auth | padre con hijos: `variants_stock` = Σ stock hijos activos |
 
 Money = STRING. Errores en español. Bearer JWT.
+
+### Delete / update — invariantes
+
+1. **Soft-delete** (`active = false`): no hard-delete. Ventas y `stock_movement`
+   siguen apuntando al `product` id; el ledger no se reescribe.
+2. **Barcode liberado** al eliminar (DELETE variante o DELETE producto): el EAN
+   puede reutilizarse en otra variante.
+3. **List / `variants_stock` / `variant_count`** solo cuentan hijos `active = true`.
+4. **No borrar padre** con variantes activas (`400 INVALID_INPUT`); borrar hijos primero.
+5. **No borrar** si `variant_id` no es hijo del `{id}` del path (`400`).
+6. **Edit**: no hay `PATCH .../variants/{id}` dedicado — el hijo es un `product`;
+   `PATCH /products/{variant_id}` + campo opcional `barcode` cubre el panel.
+
+### curl (admin Bearer)
+
+```bash
+# Crear variante
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"stock":5,"barcode":"7804999701010","attrs":{"talla":"M"}}' \
+  "$BASE/api/v1/products/$PARENT_ID/variants"
+
+# Editar variante (precio + barcode + attrs)
+curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"price":"10990","barcode":"7804999701096","attrs":{"talla":"M","color":"Negro"}}' \
+  "$BASE/api/v1/products/$VARIANT_ID"
+
+# Eliminar variante
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/v1/products/$PARENT_ID/variants/$VARIANT_ID"
+```
 
 ## Fuera de alcance (fase 1)
 

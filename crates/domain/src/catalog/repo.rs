@@ -623,7 +623,7 @@ pub async fn create_variant_product(
     row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
-/// Active (and inactive) variants of a parent, tenant-scoped.
+/// Active variants of a parent, tenant-scoped (soft-deleted hijos excluded).
 pub async fn list_variants(
     db: &Db,
     tenant: &Thing,
@@ -632,13 +632,27 @@ pub async fn list_variants(
     let mut r = db
         .query(
             "SELECT * FROM product WHERE tenant = $t AND parent_id = $p \
-             ORDER BY name",
+             AND active = true ORDER BY name",
         )
         .bind(("t", tenant.clone()))
         .bind(("p", parent.clone()))
         .await?;
     let rows: Vec<ProductRow> = r.take(0)?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Drop all `product_barcode` rows for a product (tenant-scoped). Frees the EAN
+/// so a soft-deleted variant can be recreated with the same code.
+pub async fn delete_barcodes_of_product(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+) -> DomainResult<()> {
+    db.query("DELETE product_barcode WHERE tenant = $t AND product = $p")
+        .bind(("t", tenant.clone()))
+        .bind(("p", product.clone()))
+        .await?;
+    Ok(())
 }
 
 /// `true` if the product has at least one active child variant.
