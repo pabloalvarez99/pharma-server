@@ -57,7 +57,7 @@ Reglas de dominio:
 |---|---|---|---|
 | `POST` | `/api/v1/products/{id}/variants` | admin+ | crea hijo + barcode opcional; 409 si EAN tomado |
 | `GET` | `/api/v1/products/{id}/variants` | auth | lista hijos `ORDER BY name`; `stock` + `barcode` |
-| `GET` | `/api/v1/products/by-barcode/{code}` | auth | resuelve barcode → product (variante o plano) |
+| `GET` | `/api/v1/products/by-barcode/{code}` | auth | resuelve barcode → product (variante o plano); **400** si el EAN apunta a un padre con variantes activas |
 | `GET` | `/api/v1/products?include_variants=true` | auth | por defecto **oculta** hijos |
 | `GET` | `/api/v1/products/{id}` | auth | padre con hijos: `variants_stock` = Σ stock hijos activos |
 
