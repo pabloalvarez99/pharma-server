@@ -56,6 +56,8 @@ import {
   parentWithVariantsError,
   preferBarcodeLookup,
   isParentHasVariantsMessage,
+  plainOutOfStockError,
+  posVariantsSearchHint,
 } from "./variants-ui";
 
 interface PickedCustomer {
@@ -113,7 +115,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         <!-- left: product picker -->
         <div class="pos-pick">
           <div class="view-search">
-            <input id="pos-search" type="search" placeholder="${escapeHtml(posSearchPlaceholder(itemWord))}" autocomplete="off" />
+            <input id="pos-search" type="search" placeholder="${escapeHtml(posSearchPlaceholder(itemWord, trackStock))}" autocomplete="off" />
           </div>
           <div id="pos-results" class="pos-results">${tableSkeleton(6)}</div>
         </div>
@@ -280,8 +282,14 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   }
 
   async function tryAddSellable(p: Product): Promise<boolean> {
+    // Parent multi-SKU first (even if shell stock is 0 / looks "agotado").
     if (await productHasVariants(p.id)) {
       showError(parentWithVariantsError(p.name));
+      beep(false);
+      return false;
+    }
+    if (trackStock && p.stock <= 0) {
+      showError(plainOutOfStockError(p.name));
       beep(false);
       return false;
     }
@@ -291,7 +299,9 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
 
   async function handleScanEnter(code: string): Promise<void> {
     if (!code) {
-      const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+      // Prefer in-stock, but still try first row so parent@0 surfaces variants error.
+      const first =
+        (trackStock ? currentResults.find((p) => p.stock > 0) : undefined) ?? currentResults[0];
       if (first) void tryAddSellable(first);
       return;
     }
@@ -300,16 +310,20 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       try {
         const hit = await productByBarcode(serverUrl, code);
         // by-barcode returns the sellable row (child or plano) — never the bare parent.
-        addToCart(productFromDetail(hit));
-        searchEl.value = "";
-        runSearch("");
+        // Still guard: if API ever returns a parent shell, block with Spanish copy.
+        const ok = await tryAddSellable(productFromDetail(hit));
+        if (ok) {
+          searchEl.value = "";
+          runSearch("");
+        }
         return;
       } catch {
         // Not a registered barcode — fall through to name search hit.
       }
     }
-    // 2) First sellable search result (name match), with parent-variants guard.
-    const first = trackStock ? currentResults.find((p) => p.stock > 0) : currentResults[0];
+    // 2) First search result (name match), with parent-variants + stock guards.
+    // Do not skip stock=0 parents — tryAddSellable explains "tiene variantes".
+    const first = currentResults[0];
     if (first) {
       const ok = await tryAddSellable(first);
       if (ok) {
@@ -322,9 +336,11 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
     // (short internal codes) before declaring a miss.
     try {
       const hit = await productByBarcode(serverUrl, code);
-      addToCart(productFromDetail(hit));
-      searchEl.value = "";
-      runSearch("");
+      const ok = await tryAddSellable(productFromDetail(hit));
+      if (ok) {
+        searchEl.value = "";
+        runSearch("");
+      }
       return;
     } catch {
       scanMiss(code);
@@ -337,7 +353,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   // hydrate finished (C4 race).
   void Promise.all([loadFeatures(serverUrl), loadBusinessName(serverUrl)]).then(([f, name]) => {
     itemWord = activeVocab().item || "Producto";
-    searchEl.placeholder = posSearchPlaceholder(itemWord);
+    searchEl.placeholder = posSearchPlaceholder(itemWord, trackStock);
     businessName = name;
     const nextTrack = f.physicalStock;
     if (nextTrack !== trackStock) {
@@ -362,8 +378,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       }
       resultsEl.innerHTML = rows.map((p) => resultCard(p, trackStock, itemWord)).join("");
       resultsEl.querySelectorAll<HTMLButtonElement>(".pos-result").forEach((b, i) => {
+        // Always clickable: stock=0 may be a multi-SKU parent (variants error)
+        // or a plain out-of-stock SKU (Spanish sin stock). Never dead-end the card.
         b.addEventListener("click", () => {
-          if (!trackStock || rows[i].stock > 0) void tryAddSellable(rows[i]);
+          void tryAddSellable(rows[i]);
         });
       });
     } catch (err) {
@@ -1282,11 +1300,14 @@ export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servici
   `;
   }
   const out = p.stock <= 0;
+  // Never `disabled` on stock=0: multi-SKU parents often have 0 on the shell
+  // and must still surface «tiene variantes · escanea el hijo». Plain OOS
+  // products get Spanish copy from tryAddSellable instead of a dead button.
   return `
-    <button type="button" class="pos-result ${out ? "is-out" : ""}" ${out ? "disabled" : ""}>
+    <button type="button" class="pos-result ${out ? "is-out" : ""}">
       <div class="pos-result-info">
         <div class="cell-main">${escapeHtml(p.name)}</div>
-        <div class="cell-sub muted">Stock: <span class="rb-num">${num(p.stock)}</span>${out ? " · agotado" : ""}</div>
+        <div class="cell-sub muted">Stock: <span class="rb-num">${num(p.stock)}</span>${out ? " · sin stock / ¿variantes?" : ""}</div>
       </div>
       <div class="pos-result-price num rb-num">${clp(p.price)}</div>
     </button>
@@ -1294,7 +1315,8 @@ export function resultCard(p: Product, trackStock: boolean, itemLabel = "Servici
 }
 
 /** Search box placeholder — pack vocab so a peluquería never reads "producto". */
-export function posSearchPlaceholder(itemWord: string): string {
+export function posSearchPlaceholder(itemWord: string, physicalStock = true): string {
+  if (physicalStock) return posVariantsSearchHint(itemWord);
   const w = (itemWord || "producto").toLowerCase();
   return `Buscar ${w} (Enter agrega el primero)…`;
 }
