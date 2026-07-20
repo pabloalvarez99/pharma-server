@@ -95,3 +95,4 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0017](./0017-byo-ai-provider.md) | BYO-AI-provider (LLM opt-in con key del dueño, default OFF) | Accepted | agente, IA |
 | [0018](./0018-cloud-multitenant-saas.md) | Tier cloud multi-tenant (web zero-install) + signup por RUT | Proposed | cloud, distribución |
 | [0019](./0019-product-surface-taxonomy.md) | Taxonomía de superficies (núcleo + operador + storefront), genérica para todo cliente | Accepted | producto, arquitectura, naming |
+| [0020](./0020-free-web-as-core.md) | Web gratis como core (1 storefront público en el tier Free) | Accepted | producto, freemium, storefront |

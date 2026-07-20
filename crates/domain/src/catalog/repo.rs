@@ -840,6 +840,21 @@ pub async fn update_product(
     if patch.attrs.is_some() {
         sets.push("attrs = $attrs");
     }
+    if patch.online_visible.is_some() {
+        sets.push("online_visible = $online_visible");
+    }
+    if patch.online_title.is_some() {
+        sets.push("online_title = $online_title");
+    }
+    if patch.online_description.is_some() {
+        sets.push("online_description = $online_description");
+    }
+    if patch.online_price.is_some() {
+        sets.push("online_price = $online_price");
+    }
+    if patch.online_sort.is_some() {
+        sets.push("online_sort = $online_sort");
+    }
     if category.is_some() {
         sets.push("category = $category");
     }
@@ -870,6 +885,11 @@ pub async fn update_product(
         .bind(("presentation", patch.presentation.clone()))
         .bind(("discount_percent", patch.discount_percent))
         .bind(("attrs", attrs_bind(&patch.attrs)))
+        .bind(("online_visible", patch.online_visible))
+        .bind(("online_title", patch.online_title.clone()))
+        .bind(("online_description", patch.online_description.clone()))
+        .bind(("online_price", dec_opt(patch.online_price)))
+        .bind(("online_sort", patch.online_sort))
         .bind(("category", category.flatten()))
         .await?;
     let row: Option<ProductRow> = r.take(0)?;
@@ -1150,6 +1170,167 @@ pub async fn etiquetas(db: &Db, tenant: &Thing, q: &str) -> DomainResult<Etiquet
         active_ingredients: distinct(db, tenant, TagField::ActiveIngredient, q).await?,
         therapeutic_actions: distinct(db, tenant, TagField::TherapeuticAction, q).await?,
     })
+}
+
+// --- public storefront (Free Web PR1, ADR-0020) ----------------------------
+// Rows for the unauthenticated `/api/v1/public/{slug}` projection. The SELECT
+// column list is the safety boundary: cost_price / stock counts are never
+// projected, so they cannot leak even if the DTO grows careless later.
+
+#[derive(Debug, Deserialize)]
+struct PublicTenantRow {
+    id: Thing,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublicProductRow {
+    id: Thing,
+    slug: String,
+    name: String,
+    #[serde(default)]
+    online_title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    online_description: Option<String>,
+    price: Decimal,
+    #[serde(default)]
+    online_price: Option<Decimal>,
+    #[serde(default)]
+    image_url: Option<String>,
+    #[serde(default)]
+    category_slug: Option<String>,
+    stock: i64,
+    /// Units held by web pickup reservations (PR3): sellable = stock - reserved.
+    #[serde(default)]
+    stock_reserved: i64,
+}
+
+impl PublicProductRow {
+    fn into_dto(self, low_threshold: i64) -> PublicProductDto {
+        PublicProductDto {
+            id: self.id.to_string(),
+            slug: self.slug,
+            name: self.online_title.unwrap_or(self.name),
+            description_short: self.online_description.or(self.description),
+            price_clp: self.online_price.unwrap_or(self.price),
+            image_url: self.image_url,
+            category_slug: self.category_slug,
+            availability: public_availability(self.stock - self.stock_reserved, low_threshold),
+        }
+    }
+}
+
+fn public_availability(stock: i64, low_threshold: i64) -> PublicAvailability {
+    if stock <= 0 {
+        PublicAvailability::OutOfStock
+    } else if stock <= low_threshold {
+        PublicAvailability::Low
+    } else {
+        PublicAvailability::InStock
+    }
+}
+
+/// Columns safe for public projection. `category.slug` is a record traversal
+/// (NONE when the product has no category).
+const PUBLIC_PRODUCT_FIELDS: &str = "id, slug, name, online_title, description, \
+     online_description, price, online_price, image_url, \
+     category.slug AS category_slug, stock, stock_reserved, online_sort";
+
+/// Base filter for everything the public catalog may show: tenant-scoped,
+/// active, operator opted the SKU in, and over-the-counter only ('direct' —
+/// prescription products never reach the public web).
+const PUBLIC_PRODUCT_COND: &str =
+    "tenant = $t AND active = true AND online_visible = true AND prescription_type = 'direct'";
+
+pub async fn tenant_by_slug(db: &Db, slug: &str) -> DomainResult<Option<Thing>> {
+    let mut r = db
+        .query("SELECT id, name FROM tenant WHERE slug = $slug LIMIT 1")
+        .bind(("slug", slug.to_string()))
+        .await?;
+    let row: Option<PublicTenantRow> = r.take(0)?;
+    Ok(row.map(|t| t.id))
+}
+
+pub async fn tenant_name(db: &Db, tenant: &Thing) -> DomainResult<Option<String>> {
+    let mut r = db
+        .query("SELECT id, name FROM tenant WHERE id = $id LIMIT 1")
+        .bind(("id", tenant.clone()))
+        .await?;
+    let row: Option<PublicTenantRow> = r.take(0)?;
+    Ok(row.and_then(|t| t.name))
+}
+
+pub async fn list_public_products(
+    db: &Db,
+    tenant: &Thing,
+    filters: &PublicCatalogFilters,
+    limit: u32,
+    offset: u32,
+    low_threshold: i64,
+) -> DomainResult<Vec<PublicProductDto>> {
+    let search = filters
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase);
+    let category = filters
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    // Conditions are compile-time literals; user input only travels via binds.
+    // `limit`/`offset` are clamped u32 — numeric interpolation is safe.
+    let mut cond = String::from(PUBLIC_PRODUCT_COND);
+    if search.is_some() {
+        cond.push_str(
+            " AND (string::lowercase(name) CONTAINS $q \
+               OR string::lowercase(online_title ?? '') CONTAINS $q \
+               OR string::lowercase(active_ingredient ?? '') CONTAINS $q)",
+        );
+    }
+    if category.is_some() {
+        cond.push_str(" AND category.slug = $cat");
+    }
+    let sql = format!(
+        "SELECT {PUBLIC_PRODUCT_FIELDS} FROM product WHERE {cond} \
+         ORDER BY online_sort, name LIMIT {limit} START {offset}"
+    );
+    let mut r = db
+        .query(sql)
+        .bind(("t", tenant.clone()))
+        .bind(("q", search.unwrap_or_default()))
+        .bind(("cat", category.unwrap_or_default()))
+        .await?;
+    let rows: Vec<PublicProductRow> = r.take(0)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| row.into_dto(low_threshold))
+        .collect())
+}
+
+pub async fn get_public_product(
+    db: &Db,
+    tenant: &Thing,
+    product_slug: &str,
+    low_threshold: i64,
+) -> DomainResult<Option<PublicProductDto>> {
+    let sql = format!(
+        "SELECT {PUBLIC_PRODUCT_FIELDS} FROM product \
+         WHERE {PUBLIC_PRODUCT_COND} AND slug = $slug LIMIT 1"
+    );
+    let mut r = db
+        .query(sql)
+        .bind(("t", tenant.clone()))
+        .bind(("slug", product_slug.to_string()))
+        .await?;
+    let row: Option<PublicProductRow> = r.take(0)?;
+    Ok(row.map(|p| p.into_dto(low_threshold)))
 }
 
 #[cfg(test)]

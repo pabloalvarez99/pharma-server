@@ -234,6 +234,13 @@ pub async fn update_product(
             return Err(DomainError::Invalid("precio no puede ser negativo".into()));
         }
     }
+    if let Some(p) = patch.online_price {
+        if p < Decimal::ZERO {
+            return Err(DomainError::Invalid(
+                "precio online no puede ser negativo".into(),
+            ));
+        }
+    }
     // tri-state category: absent skip, "" clear, id set+validate.
     let category: Option<Option<Thing>> = match patch.category.as_deref() {
         None => None,
@@ -670,6 +677,101 @@ pub async fn enrich_product_dto(
         }
     }
     Ok(p)
+}
+
+// --- public storefront (Free Web PR1, ADR-0020) ----------------------------
+// Unauthenticated read path. Every entry point resolves the tenant through
+// `resolve_published_tenant` — `web.published != "true"` means uniform
+// NotFound (404 darkness: probes cannot tell "unknown slug" from "not
+// published").
+
+const WEB_PUBLISHED_KEY: &str = "web.published";
+const WEB_STORE_NAME_KEY: &str = "web.store_name";
+const WEB_WHATSAPP_KEY: &str = "web.whatsapp_e164";
+const WEB_HOURS_KEY: &str = "web.hours_label";
+const WEB_ADDRESS_KEY: &str = "web.address_line";
+const WEB_PICKUP_INSTRUCTIONS_KEY: &str = "web.pickup_instructions";
+const LOW_STOCK_THRESHOLD_KEY: &str = "low_stock_threshold";
+
+async fn web_setting(db: &Db, tenant: &Thing, key: &str) -> DomainResult<Option<String>> {
+    Ok(crate::sales::repo::get_setting(db, tenant, key)
+        .await?
+        .map(|s| s.value))
+}
+
+/// Per-tenant low-stock threshold for the public `availability` bucket;
+/// falls back to [`LOW_STOCK_DEFAULT`] when unset or unparsable.
+async fn low_stock_threshold(db: &Db, tenant: &Thing) -> DomainResult<i64> {
+    Ok(web_setting(db, tenant, LOW_STOCK_THRESHOLD_KEY)
+        .await?
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(LOW_STOCK_DEFAULT))
+}
+
+/// Resolve a tenant slug for the public web. `NotFound` unless the tenant
+/// exists AND opted in with `web.published == "true"`.
+pub async fn resolve_published_tenant(db: &Db, slug: &str) -> DomainResult<Thing> {
+    let tenant = repo::tenant_by_slug(db, slug)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    let published = web_setting(db, &tenant, WEB_PUBLISHED_KEY).await?;
+    if published.as_deref() == Some("true") {
+        Ok(tenant)
+    } else {
+        Err(DomainError::NotFound)
+    }
+}
+
+pub async fn public_store(db: &Db, tenant: &Thing, slug: &str) -> DomainResult<PublicStoreDto> {
+    let name = match web_setting(db, tenant, WEB_STORE_NAME_KEY).await? {
+        Some(n) if !n.trim().is_empty() => n,
+        _ => repo::tenant_name(db, tenant)
+            .await?
+            .unwrap_or_else(|| slug.to_string()),
+    };
+    Ok(PublicStoreDto {
+        name,
+        slug: slug.to_string(),
+        currency: "CLP".to_string(),
+        whatsapp_e164: web_setting(db, tenant, WEB_WHATSAPP_KEY).await?,
+        address_line: web_setting(db, tenant, WEB_ADDRESS_KEY).await?,
+        hours_label: web_setting(db, tenant, WEB_HOURS_KEY).await?,
+        pickup_enabled: true,
+        pickup_instructions: web_setting(db, tenant, WEB_PICKUP_INSTRUCTIONS_KEY).await?,
+    })
+}
+
+pub async fn list_public_catalog(
+    db: &Db,
+    tenant: &Thing,
+    slug: &str,
+    filters: PublicCatalogFilters,
+) -> DomainResult<PublicCatalogPage> {
+    let limit = filters.limit.unwrap_or(50).clamp(1, 100);
+    let offset = filters.offset.unwrap_or(0);
+    let low = low_stock_threshold(db, tenant).await?;
+    let store = public_store(db, tenant, slug).await?;
+    let items = repo::list_public_products(db, tenant, &filters, limit, offset, low).await?;
+    let next_offset = (items.len() as u32 == limit).then(|| offset + limit);
+    Ok(PublicCatalogPage {
+        store,
+        items,
+        next_offset,
+    })
+}
+
+/// `NotFound` when the slug doesn't exist for this tenant OR the product is
+/// hidden (`!active || !online_visible || prescription != 'direct'`) — the
+/// public web never distinguishes those cases.
+pub async fn get_public_product(
+    db: &Db,
+    tenant: &Thing,
+    product_slug: &str,
+) -> DomainResult<PublicProductDto> {
+    let low = low_stock_threshold(db, tenant).await?;
+    repo::get_public_product(db, tenant, product_slug, low)
+        .await?
+        .ok_or(DomainError::NotFound)
 }
 
 #[cfg(test)]

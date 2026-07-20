@@ -288,6 +288,7 @@ fn empty_update() -> UpdateProduct {
         discount_percent: None,
         attrs: None,
         barcode: None,
+        ..Default::default()
     }
 }
 

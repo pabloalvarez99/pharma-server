@@ -20,7 +20,7 @@ pub mod setup;
 pub mod stock_webhook;
 mod v1;
 
-pub use middleware::{audit, rate_limit, role};
+pub use middleware::{audit, public_auth, rate_limit, role};
 
 #[derive(Clone)]
 pub struct AppState {

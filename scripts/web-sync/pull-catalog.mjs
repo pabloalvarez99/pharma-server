@@ -1,37 +1,41 @@
 #!/usr/bin/env node
-// pull-catalog.mjs — Patrón A (Pull) de ADR-0012.
+// pull-catalog.mjs — cliente del seam Free Web (ADR-0020).
 //
-// Corre en el ENTORNO DEL WEB (no en pharma-server). Pull del endpoint público
-// /api/v1/public/catalog del pharma-server, transforma cada item al shape de la
-// tabla `products` del Cloud SQL del web, y emite un archivo SQL con UPSERTs
-// idempotentes que el web aplica vía `psql` o equivalente.
+// Consume el catálogo público integrado del pharma-server:
+//   GET /api/v1/public/{slug}/store
+//   GET /api/v1/public/{slug}/catalog?limit&offset   (pagina hasta next_offset null)
 //
-// Sin dependencias externas. Sólo `node:*`. Node >= 20 (fetch + AbortController
-// built-in, top-level await).
+// Sin API key: las rutas de lectura son públicas cuando el tenant publicó su
+// web (`web.published = "true"`). Si no está publicada, TODO responde 404
+// uniforme (404-oscuridad, ADR-0005/0020) — este script lo reporta como tal.
+//
+// Sin dependencias externas. Sólo `node:*`. Node >= 20.
 //
 // Uso:
-//   PHARMA_SERVER_URL=https://farmacia-acme.trycloudflare.com \
-//   PHARMA_TENANT_SLUG=coquimbo-centro \
-//   PHARMA_PUBLIC_READ_KEY=pk_live_xxxx \
-//   OUTPUT_SQL_FILE=./out/catalog_upsert.sql \
-//   node scripts/web-sync/pull-catalog.mjs
+//   ERP_ORIGIN=http://127.0.0.1:8080 RB_SLUG=demo node scripts/web-sync/pull-catalog.mjs
+//
+// Env:
+//   ERP_ORIGIN  opcional, default http://127.0.0.1:8080 (sin trailing slash).
+//   RB_SLUG     requerido. Slug del tenant (segmento {slug} de la URL).
+//   OUTPUT_JSON opcional, default ./catalog.json.
+//
+// Salida:
+//   - Tabla (name, price_clp, availability) por stdout.
+//   - catalog.json con { store, items, pulled_at }.
 //
 // Exit codes:
-//   0  OK, SQL generado.
-//   1  Error de configuración (env vars faltantes/inválidas).
-//   2  Error de red / HTTP (con detalle en stderr).
-//   3  Respuesta del server con shape inesperado.
+//   0 OK · 1 config · 2 red/HTTP (incluye 404 no-publicada) · 3 shape inesperado.
+//
+// NOTA: no confundir con pull-catalog-sql.mjs (seam Tu Farmacia, ADR-0012,
+// emite SQL para Cloud SQL). Este script es del storefront Free Web.
 
-import { writeFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { argv, env, exit, stderr, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 
-const REQUIRED_ENV = ["PHARMA_SERVER_URL", "PHARMA_TENANT_SLUG", "PHARMA_PUBLIC_READ_KEY"];
-const DEFAULT_OUTPUT = "./out/catalog_upsert.sql";
-const PAGE_LIMIT = 200;
+const PAGE_LIMIT = 100;
 const HTTP_TIMEOUT_MS = 15_000;
-const SCHEMA_VERSION_SUPPORTED = "1.0";
 
 function die(code, msg) {
   stderr.write(`[pull-catalog] ${msg}\n`);
@@ -42,41 +46,27 @@ function log(msg) {
   stdout.write(`[pull-catalog] ${msg}\n`);
 }
 
-function loadConfig() {
-  const missing = REQUIRED_ENV.filter((k) => !env[k] || env[k].trim() === "");
-  if (missing.length > 0) {
-    die(1, `Missing required env vars: ${missing.join(", ")}`);
+export function loadConfig(environment = env) {
+  const origin = (environment.ERP_ORIGIN || "http://127.0.0.1:8080").replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(origin)) {
+    die(1, `ERP_ORIGIN must start with http:// or https:// — got: ${origin}`);
   }
-  const baseUrl = env.PHARMA_SERVER_URL.replace(/\/+$/, "");
-  if (!/^https?:\/\//.test(baseUrl)) {
-    die(1, `PHARMA_SERVER_URL must start with http:// or https:// — got: ${baseUrl}`);
-  }
+  const slug = (environment.RB_SLUG || "").trim();
+  if (!slug) die(1, "Missing required env var: RB_SLUG");
   return {
-    baseUrl,
-    tenant: env.PHARMA_TENANT_SLUG.trim(),
-    apiKey: env.PHARMA_PUBLIC_READ_KEY.trim(),
-    outputFile: resolve(env.OUTPUT_SQL_FILE || DEFAULT_OUTPUT),
-    dryRun: argv.includes("--dry-run"),
+    origin,
+    slug,
+    outputFile: resolve(environment.OUTPUT_JSON || "./catalog.json"),
   };
 }
 
-async function fetchPage({ baseUrl, tenant, apiKey }, cursor) {
-  const url = new URL(`${baseUrl}/api/v1/public/catalog`);
-  url.searchParams.set("tenant", tenant);
-  url.searchParams.set("limit", String(PAGE_LIMIT));
-  if (cursor) url.searchParams.set("cursor", cursor);
-
+async function getJson(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
-
   let res;
   try {
     res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-        "User-Agent": "pharma-web-sync/1.0",
-      },
+      headers: { Accept: "application/json", "User-Agent": "rb-web-sync/1.0" },
       signal: ctrl.signal,
     });
   } catch (err) {
@@ -84,179 +74,76 @@ async function fetchPage({ baseUrl, tenant, apiKey }, cursor) {
   } finally {
     clearTimeout(timer);
   }
-
+  if (res.status === 404) {
+    die(
+      2,
+      `HTTP 404 from ${url} — tenant desconocido O web no publicada ` +
+        `(PUT /api/v1/settings/web.published {"value":"true"} con JWT admin).`,
+    );
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     die(2, `HTTP ${res.status} from ${url}\n${body.slice(0, 500)}`);
   }
-
-  let payload;
   try {
-    payload = await res.json();
+    return await res.json();
   } catch (err) {
     die(3, `Response is not valid JSON: ${err?.message ?? err}`);
   }
-  return payload;
 }
 
-function validatePayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    die(3, "Payload is not an object");
-  }
-  if (payload.schema_version !== SCHEMA_VERSION_SUPPORTED) {
-    die(
-      3,
-      `Unsupported schema_version: ${payload.schema_version} ` +
-        `(this script supports ${SCHEMA_VERSION_SUPPORTED})`,
-    );
-  }
-  if (!Array.isArray(payload.items)) {
-    die(3, "Payload.items is not an array");
-  }
-}
-
-// SQL-escape a string literal for Postgres. Doubles single quotes; rejects NUL.
-export function sqlString(value) {
-  if (value === null || value === undefined) return "NULL";
-  const s = String(value);
-  if (s.includes("\0")) {
-    die(3, "Value contains NUL byte — refusing to emit unsafe SQL");
-  }
-  return `'${s.replace(/'/g, "''")}'`;
-}
-
-export function sqlInt(value) {
-  if (value === null || value === undefined) return "NULL";
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    die(3, `Expected integer, got: ${JSON.stringify(value)}`);
-  }
-  return String(n);
-}
-
-// Transform pharma-server catalog item -> SQL upsert row for the web's
-// `products` table. Shape assumed by the web side (documented in
-// docs/strategy/web-interop.md §Patrón A step 4):
-//   products(sku TEXT PK, name TEXT, price_clp INT, category TEXT,
-//            image_url TEXT, stock_status TEXT, source_tenant TEXT,
-//            updated_at TIMESTAMPTZ DEFAULT now())
-export function itemToUpsert(item, tenant) {
-  const required = ["sku", "name", "price_clp"];
-  for (const k of required) {
-    if (item[k] === undefined || item[k] === null) {
-      die(3, `Item missing required field '${k}': ${JSON.stringify(item)}`);
-    }
-  }
-  const stockStatus = item.stock_status ?? "unknown";
-  const allowedStatus = ["in_stock", "low_stock", "out_of_stock", "unknown"];
-  if (!allowedStatus.includes(stockStatus)) {
-    die(3, `Invalid stock_status '${stockStatus}' for sku ${item.sku}`);
-  }
-  return (
-    `(${sqlString(item.sku)}, ${sqlString(item.name)}, ${sqlInt(item.price_clp)}, ` +
-    `${sqlString(item.category ?? null)}, ${sqlString(item.image_url ?? null)}, ` +
-    `${sqlString(stockStatus)}, ${sqlString(tenant)})`
+// Render rows as a fixed-width table: name · price_clp · availability.
+export function renderTable(items) {
+  const headers = ["name", "price_clp", "availability"];
+  const rows = items.map((it) => [
+    String(it.name ?? ""),
+    String(it.price_clp ?? ""),
+    String(it.availability ?? ""),
+  ]);
+  const widths = headers.map((h, i) =>
+    Math.max(h.length, ...rows.map((r) => r[i].length)),
   );
-}
-
-// Build the catalog upsert SQL.
-//
-// `items` is the original structured array from the server (used to derive the
-// tombstone NOT IN list — we MUST NOT parse skus back out of the already-
-// rendered `valueRows` because skus can contain commas, which breaks regex
-// extraction and silently degrades the tombstone clause to a no-op).
-export function buildSql(items, valueRows, tenant, generatedAt) {
-  const header = [
-    `-- catalog_upsert.sql`,
-    `-- Generated by scripts/web-sync/pull-catalog.mjs at ${new Date().toISOString()}`,
-    `-- Source tenant: ${tenant}`,
-    `-- Source generated_at: ${generatedAt}`,
-    `-- Rows: ${valueRows.length}`,
-    `-- Apply with: psql "$DATABASE_URL" -f out/catalog_upsert.sql`,
-    ``,
-    `BEGIN;`,
-    ``,
-  ];
-
-  if (valueRows.length === 0) {
-    header.push(
-      `-- No items returned from pharma-server. No-op transaction.`,
-      ``,
-      `COMMIT;`,
-      ``,
-    );
-    return header.join("\n");
-  }
-
-  // Tombstone list: build directly from the typed sku field of each item.
-  // skuLiterals is the list of already-SQL-escaped sku string literals.
-  const skuLiterals = items.map((it) => sqlString(it.sku));
-
-  const body = [
-    `INSERT INTO products (sku, name, price_clp, category, image_url, stock_status, source_tenant) VALUES`,
-    valueRows.map((r, i) => `  ${r}${i === valueRows.length - 1 ? "" : ","}`).join("\n"),
-    `ON CONFLICT (sku) DO UPDATE SET`,
-    `  name          = EXCLUDED.name,`,
-    `  price_clp     = EXCLUDED.price_clp,`,
-    `  category      = EXCLUDED.category,`,
-    `  image_url     = EXCLUDED.image_url,`,
-    `  stock_status  = EXCLUDED.stock_status,`,
-    `  source_tenant = EXCLUDED.source_tenant,`,
-    `  updated_at    = now();`,
-    ``,
-    `-- Tombstone any SKU that disappeared from the source tenant. Cheap soft-delete:`,
-    `-- mark as out_of_stock instead of DELETE so links/SEO don't 404.`,
-    `UPDATE products`,
-    `   SET stock_status = 'out_of_stock', updated_at = now()`,
-    ` WHERE source_tenant = ${sqlString(tenant)}`,
-    `   AND sku NOT IN (`,
-    `     ${skuLiterals.join(", ")}`,
-    `   );`,
-    ``,
-    `COMMIT;`,
-    ``,
-  ];
-
-  return header.concat(body).join("\n");
+  const line = (cols) => cols.map((c, i) => c.padEnd(widths[i])).join("  ");
+  return [line(headers), line(widths.map((w) => "-".repeat(w))), ...rows.map(line)].join(
+    "\n",
+  );
 }
 
 async function main() {
   const cfg = loadConfig();
-  log(`Source: ${cfg.baseUrl} (tenant=${cfg.tenant})`);
-  log(`Output: ${cfg.dryRun ? "(dry-run, no file)" : cfg.outputFile}`);
+  log(`Source: ${cfg.origin}/api/v1/public/${cfg.slug}`);
 
-  const allItems = [];
-  let cursor = null;
-  let firstGeneratedAt = null;
+  const store = await getJson(`${cfg.origin}/api/v1/public/${cfg.slug}/store`);
+  if (!store || typeof store.name !== "string") {
+    die(3, `Unexpected /store shape: ${JSON.stringify(store).slice(0, 300)}`);
+  }
+  log(`Store: ${store.name} (currency=${store.currency})`);
+
+  const items = [];
+  let offset = 0;
   let page = 0;
-
-  do {
+  for (;;) {
     page += 1;
-    const payload = await fetchPage(cfg, cursor);
-    validatePayload(payload);
-    if (page === 1) firstGeneratedAt = payload.generated_at ?? new Date().toISOString();
-    allItems.push(...payload.items);
-    cursor = payload.pagination?.next_cursor ?? null;
-    log(`Page ${page}: +${payload.items.length} items (total=${allItems.length})`);
-  } while (cursor);
-
-  const rows = allItems.map((it) => itemToUpsert(it, cfg.tenant));
-  const sql = buildSql(allItems, rows, cfg.tenant, firstGeneratedAt);
-
-  if (cfg.dryRun) {
-    stdout.write(sql);
-    log(`Dry-run complete. ${rows.length} rows would be written.`);
-    return;
+    const url = new URL(`${cfg.origin}/api/v1/public/${cfg.slug}/catalog`);
+    url.searchParams.set("limit", String(PAGE_LIMIT));
+    url.searchParams.set("offset", String(offset));
+    const payload = await getJson(url);
+    if (!Array.isArray(payload.items)) {
+      die(3, `Payload.items is not an array (page ${page})`);
+    }
+    items.push(...payload.items);
+    log(`Page ${page}: +${payload.items.length} items (total=${items.length})`);
+    if (payload.next_offset === null || payload.next_offset === undefined) break;
+    offset = payload.next_offset;
   }
 
-  await mkdir(dirname(cfg.outputFile), { recursive: true });
-  await writeFile(cfg.outputFile, sql, "utf8");
-  log(`Wrote ${rows.length} upserts to ${cfg.outputFile}`);
+  stdout.write(`\n${renderTable(items)}\n\n`);
+
+  const out = { store, items, pulled_at: new Date().toISOString() };
+  await writeFile(cfg.outputFile, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+  log(`Wrote ${items.length} items to ${cfg.outputFile}`);
 }
 
-// Only execute main when run as the entry point. Allows the file to be
-// imported by tests (or via stdin/REPL where argv[1] is undefined) without
-// performing IO at import time.
 if (argv[1] && import.meta.url === pathToFileURL(argv[1]).href) {
   await main();
 }
