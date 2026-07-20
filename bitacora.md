@@ -4624,3 +4624,13 @@ GATE (verde): `cd client && npm run build` ✓ · `npm test` ✓ (30 files, **65
 + CAF folio gates + libro-ventas + assist actions, ambos verticales). Branch
 `feat/ui-adopt-compliance-e2e` vs feature/erp-parity. Diff = 1 archivo de test cliente;
 sin cambios de server/Rust.
+
+## 2026-07-20 — Free Web lane MERGEADO (loop cerrado)
+
+- 2026-07-20: Free Web lane mergeado a erp-parity (PR #329, merge commit `3429075`) +
+  web.* pagas mergeadas en pharma-license-server (PR #1 Fase 11b Webpay + PR #3
+  `feat/web-paid-features`, main `48a52a0`, deploy Vercel production Ready en
+  https://pharma-license-server.vercel.app). Storefront ya vivía en master (`7e49a0f`).
+  GATE workspace post-merge verde sobre `3429075`: fmt ✓ · clippy -D warnings ✓ ·
+  `cargo test --workspace` ✓ (0 failed en todos los suites). Loop cerrado — worktree
+  free-web y branches del lane eliminados.
