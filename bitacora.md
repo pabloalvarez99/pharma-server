@@ -148,6 +148,10 @@ NO acá.
 
 ---
 
+## 2026-07-20 — Free Web PR1–PR8 completo (hito)
+
+- 2026-07-20: Free Web PR1–PR8 completo — catálogo público, keys, pedidos retiro, storefront Next. Lane feature/free-web-shopify-parity. Demo end-to-end verificada contra server local (publish → catálogo → pedido RET-FPEV con replay idempotente → transición admin → 404 al despublicar): outputs reales en `docs/strategy/free-web-shopify-parity.md` § "Demo verificada (2026-07-20)". PR7 = keys pagas `web.*` en repo `pharma-license-server` (branch `feat/web-paid-features`). PR8 storefront: sitemap/robots/JSON-LD/OG + craft móvil (repo `rutbusiness-storefront` `7e49a0f`).
+
 ## 2026-07-20 — PR0 Free Web: ADR-0020 + estrategia shopify-parity
 
 - 2026-07-20: PR0 Free Web — ADR-0020 (free web core; el prompt asumía 0016, ya tomado) + strategy doc `docs/strategy/free-web-shopify-parity.md`. Lane feature/free-web-shopify-parity.
