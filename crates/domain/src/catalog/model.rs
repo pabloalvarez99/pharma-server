@@ -222,6 +222,71 @@ pub struct ProductFilters {
     pub offset: Option<u32>,
 }
 
+// --- public storefront (Free Web PR1, ADR-0020) ----------------------------
+// Unauthenticated projection served under `/api/v1/public/{slug}/…`. Safety
+// contract: NEVER add cost/margin/stock-count fields here — this JSON leaves
+// the building without a JWT.
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PublicStoreDto {
+    pub name: String,
+    /// Tenant slug (the `{slug}` path segment).
+    pub slug: String,
+    /// Always "CLP" for now.
+    pub currency: String,
+    pub whatsapp_e164: Option<String>,
+    pub address_line: Option<String>,
+    pub hours_label: Option<String>,
+    /// `true` in PR1 (pickup is the only fulfillment until PR3).
+    pub pickup_enabled: bool,
+    pub pickup_instructions: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PublicProductDto {
+    /// Record id (`product:xyz`).
+    pub id: String,
+    pub slug: String,
+    /// `online_title ?? name`.
+    pub name: String,
+    /// `online_description ?? description`.
+    pub description_short: Option<String>,
+    /// `online_price ?? price`.
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub price_clp: Decimal,
+    pub image_url: Option<String>,
+    pub category_slug: Option<String>,
+    /// Coarse availability from `stock` — never the integer count.
+    pub availability: PublicAvailability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicAvailability {
+    InStock,
+    Low,
+    OutOfStock,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+pub struct PublicCatalogFilters {
+    pub q: Option<String>,
+    /// Category slug.
+    pub category: Option<String>,
+    /// Default 50, clamped to `[1, 100]`.
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PublicCatalogPage {
+    pub store: PublicStoreDto,
+    pub items: Vec<PublicProductDto>,
+    /// `Some` when a full page was returned (there may be more rows).
+    pub next_offset: Option<u32>,
+}
+
 /// Input to create a sellable variant under a parent product (migración 0034).
 /// Stock and barcode live on the child; `attrs` carries talla/color/sku.
 #[derive(Debug, Clone, Deserialize, ToSchema)]

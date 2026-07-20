@@ -92,6 +92,9 @@ impl Modify for SecurityAddon {
         (name = "Backup", description = "Backup on-demand del data dir (SurrealKv + agent.key)."),
         (name = "ConfigCenter", description = "Sucursales + cajas: CRUD admin para multi-sucursal / multi-caja."),
         (name = "License", description = "Hot-reload + status de licencia activa. Admin only."),
+        (name = "PublicWeb", description = "Storefront público del tier Free (ADR-0020). \
+            Sin JWT; 404 uniforme salvo que el tenant haya publicado (`web.published`). \
+            Nunca expone costos ni stock numérico."),
     ),
     paths(
         // Sales
@@ -193,6 +196,10 @@ impl Modify for SecurityAddon {
         crate::v1::purchasing::create_po_payment,
         crate::v1::purchasing::cancel_purchase_order,
         crate::v1::purchasing::import_prices,
+        // Public web storefront (Free Web PR1, ADR-0020)
+        crate::v1::public_web::get_store,
+        crate::v1::public_web::list_catalog,
+        crate::v1::public_web::get_product,
         // Agent federation (PR #64)
         crate::v1::agent::did,
         crate::v1::agent::inbox,
@@ -240,6 +247,10 @@ impl Modify for SecurityAddon {
         ErrorBody,
         domain::catalog::model::ProductDto,
         domain::catalog::model::NewVariant,
+        domain::catalog::model::PublicStoreDto,
+        domain::catalog::model::PublicProductDto,
+        domain::catalog::model::PublicAvailability,
+        domain::catalog::model::PublicCatalogPage,
     )),
     modifiers(&SecurityAddon),
 )]
