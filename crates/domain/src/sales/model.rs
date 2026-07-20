@@ -47,6 +47,17 @@ pub struct OrderDto {
     pub sold_by_name: Option<String>,
     pub notes: Option<String>,
     pub external_ref: Option<String>,
+    /// Provenance (`pos`/`web`/`agent`); NONE on legacy counter rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pickup_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fulfillment_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -146,10 +157,72 @@ pub struct OrderFilters {
     pub status: Option<String>,
     pub payment_method: Option<String>,
     pub customer: Option<String>,
+    /// Provenance channel (`pos` | `web` | `agent`). Legacy counter rows carry
+    /// NONE, so filtering by `pos` does NOT return pre-0019 orders.
+    pub channel: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+}
+
+// --- web pickup orders (Free Web PR3, ADR-0020) ------------------------------
+
+/// Web pickup order caps: cart size and per-line quantity.
+pub const WEB_ORDER_MAX_ITEMS: usize = 50;
+pub const WEB_ORDER_MAX_QTY: i64 = 999;
+
+/// Pickup-code alphabet: no 0/O/1/I/L (unambiguous over the counter/phone).
+pub const PICKUP_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/// Hours a web reservation holds stock before it can be expired.
+pub const WEB_ORDER_RESERVE_HOURS: i64 = 24;
+
+/// `POST /api/v1/public/{slug}/orders/web` body. Serialize is required for
+/// the idempotency body fingerprint (same canonical-bytes scheme as
+/// [`PosSaleRequest`]). Distinct from the legacy push-ingest
+/// `sales::web_order::WebOrderRequest` (different seam, different contract).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebPickupOrderRequest {
+    pub customer: WebPickupCustomer,
+    #[serde(default)]
+    pub fulfillment: Option<WebPickupFulfillment>,
+    pub items: Vec<WebPickupItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebPickupCustomer {
+    pub name: String,
+    pub phone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebPickupFulfillment {
+    /// Only `pickup` is accepted in PR3 (`delivery` reserved for later).
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebPickupItem {
+    /// Product record id (`product:xxx`) as exposed by the public catalog.
+    pub product_id: String,
+    pub qty: i64,
+}
+
+/// 201 body — PR4 (storefront scripts) and PR5 (proxy) depend on these exact
+/// field names.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct WebPickupOrderResponse {
+    pub order_id: String,
+    pub pickup_code: String,
+    pub status: String,
+    pub currency: String,
+    /// Total CLP as decimal string (server-computed; client prices ignored).
+    pub total: String,
+    pub expires_at: DateTime<Utc>,
 }
 
 // --- POST /pos/sale request -----------------------------------------------

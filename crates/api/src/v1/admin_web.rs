@@ -1,11 +1,13 @@
-//! Free Web admin — storefront API keys CRUD (PR2, ADR-0020). JWT + role
-//! admin/owner.
+//! Free Web admin — storefront API keys CRUD (PR2) + web order transitions
+//! (PR3), ADR-0020. Keys: JWT + role admin/owner. Transitions: cashier+
+//! (counter staff moves pickups through the flow).
 //!
 //! ```text
 //! POST   /api/v1/admin/web/keys              → 201 plaintext key + hmac_secret (ONCE)
 //! GET    /api/v1/admin/web/keys              → listing (never hash nor secret)
 //! POST   /api/v1/admin/web/keys/{id}/rotate  → 200 fresh plaintext (old key dead)
 //! DELETE /api/v1/admin/web/keys/{id}         → 204 (active = false)
+//! POST   /api/v1/admin/orders/{id}/transition → 200 OrderDto (web pickup lifecycle)
 //! ```
 //!
 //! The plaintext key and HMAC secret exist only in the create/rotate response
@@ -27,9 +29,10 @@ use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
-use crate::role::admin_plus;
+use crate::role::{admin_plus, cashier_plus};
 use crate::AppState;
 
+use domain::sales::{model::OrderDto, service as sales_service};
 use domain::web_keys::{self, NewKeyMaterial, WebKeyDto};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
@@ -104,11 +107,51 @@ impl CreatedKeyResponse {
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
-    Router::new()
+    let keys = Router::new()
         .route("/api/v1/admin/web/keys", post(create_key).get(list_keys))
         .route("/api/v1/admin/web/keys/{id}/rotate", post(rotate_key))
         .route("/api/v1/admin/web/keys/{id}", delete(revoke_key))
-        .route_layer(crate::role::layer(state, admin_plus()))
+        .route_layer(crate::role::layer(state.clone(), admin_plus()));
+    let orders = Router::new()
+        .route(
+            "/api/v1/admin/orders/{id}/transition",
+            post(transition_order),
+        )
+        .route_layer(crate::role::layer(state, cashier_plus()));
+    keys.merge(orders)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TransitionRequest {
+    /// `preparing` | `ready_for_pickup` | `completed` | `cancelled`.
+    pub to: String,
+}
+
+/// Transicionar un pedido web de retiro. Flujo permitido:
+/// reserved → preparing → ready_for_pickup → completed; cualquier estado
+/// previo a completed puede pasar a cancelled. Cancelar libera la reserva;
+/// completar la libera Y descuenta stock (misma tx).
+#[utoipa::path(post, path = "/api/v1/admin/orders/{id}/transition", tag = "AdminWeb",
+    params(("id" = String, Path, description = "Order record id (`order:xxx`)")),
+    request_body = TransitionRequest,
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 400, body = crate::error::ErrorEnvelope),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope),
+        (status = 404, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn transition_order(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<TransitionRequest>,
+) -> Result<Json<OrderDto>, ApiError> {
+    let db = db_of(&s)?;
+    let tenant = tenant_of(&claims)?;
+    let order = sales_service::transition_web_order(&db, &tenant, &id, &body.to).await?;
+    Ok(Json(order))
 }
 
 /// Crear clave de storefront. El plaintext y el secreto HMAC se muestran UNA

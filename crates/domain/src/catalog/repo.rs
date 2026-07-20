@@ -1183,6 +1183,9 @@ struct PublicProductRow {
     #[serde(default)]
     category_slug: Option<String>,
     stock: i64,
+    /// Units held by web pickup reservations (PR3): sellable = stock - reserved.
+    #[serde(default)]
+    stock_reserved: i64,
 }
 
 impl PublicProductRow {
@@ -1195,7 +1198,7 @@ impl PublicProductRow {
             price_clp: self.online_price.unwrap_or(self.price),
             image_url: self.image_url,
             category_slug: self.category_slug,
-            availability: public_availability(self.stock, low_threshold),
+            availability: public_availability(self.stock - self.stock_reserved, low_threshold),
         }
     }
 }
@@ -1214,7 +1217,7 @@ fn public_availability(stock: i64, low_threshold: i64) -> PublicAvailability {
 /// (NONE when the product has no category).
 const PUBLIC_PRODUCT_FIELDS: &str = "id, slug, name, online_title, description, \
      online_description, price, online_price, image_url, \
-     category.slug AS category_slug, stock, online_sort";
+     category.slug AS category_slug, stock, stock_reserved, online_sort";
 
 /// Base filter for everything the public catalog may show: tenant-scoped,
 /// active, operator opted the SKU in, and over-the-counter only ('direct' —

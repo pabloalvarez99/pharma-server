@@ -453,6 +453,262 @@ pub async fn list_orders(db: &Db, tenant: &Thing, f: OrderFilters) -> DomainResu
     repo::list_orders(db, tenant, &f).await
 }
 
+// --- web pickup orders (Free Web PR3, ADR-0020) ------------------------------
+
+/// Marker prefix for "product exists but cannot be sold on the web" — the api
+/// layer intercepts it (same scheme as `IDEMPOTENCY_CACHED`) and answers 422
+/// `PRODUCT_NOT_AVAILABLE` instead of a generic 400.
+pub const PRODUCT_NOT_AVAILABLE_MARKER: &str = "PRODUCT_NOT_AVAILABLE";
+
+/// Derive a `RET-XXXX` pickup code from fresh UUID bytes over the unambiguous
+/// alphabet (no 0/O/1/I/L).
+fn mint_pickup_code() -> String {
+    let bytes = *uuid::Uuid::new_v4().as_bytes();
+    let mut code = String::from("RET-");
+    for b in &bytes[..4] {
+        code.push(PICKUP_CODE_ALPHABET[*b as usize % PICKUP_CODE_ALPHABET.len()] as char);
+    }
+    code
+}
+
+/// Create a web pickup order: availability check (`active && online_visible
+/// && prescription 'direct'`), oversell guard on `stock - stock_reserved`,
+/// reservation + order + items in ONE tx (per-tenant serialized, same lock as
+/// POS sales). Prices come from the product row (`online_price ?? price`) —
+/// client-supplied money is never trusted.
+///
+/// Idempotency mirrors `post_sale`: keys are namespaced `web:` so storefront
+/// retries can never collide with POS keys; a replay surfaces as
+/// `DomainError::Conflict("IDEMPOTENCY_CACHED:<json>")` for the handler to
+/// unwrap into a 200.
+pub async fn create_web_order(
+    db: &Db,
+    tenant: &Thing,
+    idempotency_key: Option<&str>,
+    req: WebPickupOrderRequest,
+) -> DomainResult<WebPickupOrderResponse> {
+    if req.customer.name.trim().is_empty() || req.customer.phone.trim().is_empty() {
+        return Err(DomainError::Invalid("datos de cliente inválidos".into()));
+    }
+    if req.items.is_empty() || req.items.len() > WEB_ORDER_MAX_ITEMS {
+        return Err(DomainError::Invalid(format!(
+            "items debe tener entre 1 y {WEB_ORDER_MAX_ITEMS} líneas"
+        )));
+    }
+    for it in &req.items {
+        if it.qty < 1 || it.qty > WEB_ORDER_MAX_QTY {
+            return Err(DomainError::Invalid(format!(
+                "cantidad inválida para {}: {}",
+                it.product_id, it.qty
+            )));
+        }
+    }
+    if let Some(f) = &req.fulfillment {
+        if let Some(kind) = f.kind.as_deref() {
+            if kind != "pickup" {
+                return Err(DomainError::Invalid(
+                    "solo retiro en tienda (pickup) está disponible".into(),
+                ));
+            }
+        }
+    }
+
+    // Namespaced idempotency: web keys never collide with POS keys.
+    let web_key = idempotency_key.map(|k| format!("web:{k}"));
+    let body_fp = if web_key.is_some() {
+        Some(
+            serde_json::to_string(&req)
+                .map_err(|e| DomainError::Other(anyhow::anyhow!("body fingerprint: {e}")))?,
+        )
+    } else {
+        None
+    };
+    if let (Some(key), Some(fp)) = (web_key.as_deref(), body_fp.as_deref()) {
+        match repo::lookup_idempotency(db, tenant, key, fp).await? {
+            repo::IdempotencyHit::Replay { response_json, .. } => {
+                return Err(DomainError::Conflict(format!(
+                    "IDEMPOTENCY_CACHED:{response_json}"
+                )));
+            }
+            repo::IdempotencyHit::Conflict => {
+                return Err(DomainError::Conflict(
+                    "IDEMPOTENCY_KEY_REUSE_CONFLICT: la misma Idempotency-Key \
+                     se reutilizó con un body distinto"
+                        .to_string(),
+                ));
+            }
+            repo::IdempotencyHit::None => {}
+        }
+    }
+
+    let product_things: Vec<Thing> = req
+        .items
+        .iter()
+        .map(|i| parse_tenant_thing(&i.product_id, "product"))
+        .collect::<DomainResult<Vec<_>>>()?;
+
+    // === Serialized critical section (same tenant lock as POS sales) ===
+    // Availability + oversell check re-runs each retry so a losing MVCC
+    // conflict against a concurrent writer re-reads fresh counters.
+    let order = {
+        let sale_lock = tenant_sale_lock(tenant);
+        let _guard = sale_lock.lock().await;
+        let mut attempt = 0usize;
+        loop {
+            let loaded = repo::load_products_for_web_order(db, tenant, &product_things).await?;
+            let by_id: HashMap<String, &repo::WebOrderProductRow> =
+                loaded.iter().map(|p| (p.id.to_string(), p)).collect();
+
+            let mut lines: Vec<repo::WebOrderLine> = Vec::with_capacity(req.items.len());
+            let mut subtotal = Decimal::ZERO;
+            for (it, pthing) in req.items.iter().zip(product_things.iter()) {
+                // Missing, inactive, hidden and prescription-only are all the
+                // same "not available" — the write seam never enumerates.
+                let p = by_id.get(&pthing.to_string()).copied().ok_or_else(|| {
+                    DomainError::Invalid(format!(
+                        "{PRODUCT_NOT_AVAILABLE_MARKER}:{}",
+                        it.product_id
+                    ))
+                })?;
+                let direct = p.prescription_type.as_deref().unwrap_or("direct") == "direct";
+                if !p.active || !p.online_visible || !direct {
+                    return Err(DomainError::Invalid(format!(
+                        "{PRODUCT_NOT_AVAILABLE_MARKER}:{}",
+                        it.product_id
+                    )));
+                }
+                if p.physical_stock && p.stock - p.stock_reserved < it.qty {
+                    return Err(DomainError::InsufficientStock);
+                }
+                let unit_price = p.online_price.unwrap_or(p.price);
+                let line_sub = crate::invariants::line_total(unit_price, it.qty);
+                subtotal += line_sub;
+                lines.push(repo::WebOrderLine {
+                    product: pthing.clone(),
+                    product_name: p.name.clone(),
+                    quantity: it.qty,
+                    unit_price,
+                    subtotal: line_sub,
+                });
+            }
+
+            let notes = req
+                .fulfillment
+                .as_ref()
+                .and_then(|f| f.notes.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let expires_at = chrono::Utc::now() + chrono::Duration::hours(WEB_ORDER_RESERVE_HOURS);
+
+            match repo::apply_web_order(
+                db,
+                tenant,
+                &lines,
+                req.customer.name.trim(),
+                req.customer.phone.trim(),
+                notes,
+                &mint_pickup_code(),
+                expires_at,
+                subtotal,
+                subtotal,
+            )
+            .await
+            {
+                Ok(order) => break order,
+                Err(e) if attempt < MAX_SALE_COMMIT_RETRIES && is_retryable_conflict(&e) => {
+                    attempt += 1;
+                    conflict_backoff(attempt).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
+
+    let resp = WebPickupOrderResponse {
+        order_id: order.id.clone(),
+        pickup_code: order.pickup_code.clone().unwrap_or_default(),
+        status: order.status.clone(),
+        currency: "CLP".to_string(),
+        total: order.total.to_string(),
+        expires_at: order.expires_at.unwrap_or_default(),
+    };
+
+    if let (Some(key), Some(fp)) = (web_key.as_deref(), body_fp.as_deref()) {
+        let json = serde_json::to_string(&resp).map_err(|e| DomainError::Other(e.into()))?;
+        repo::store_idempotency(db, tenant, key, fp, &json, 201).await?;
+    }
+
+    Ok(resp)
+}
+
+/// Web pickup lifecycle: `reserved → preparing → ready_for_pickup →
+/// completed`; anything pre-completed may go to `cancelled`. Cancel releases
+/// the reservation; complete releases it AND decrements `stock` in the same
+/// tx (simple decrement — the POS-paid handoff refines this later).
+pub async fn transition_web_order(
+    db: &Db,
+    tenant: &Thing,
+    order_id: &str,
+    to: &str,
+) -> DomainResult<OrderDto> {
+    let order_thing = parse_tenant_thing(order_id, "order")?;
+
+    let allowed = |from: &str, to: &str| -> bool {
+        matches!(
+            (from, to),
+            ("reserved", "preparing")
+                | ("preparing", "ready_for_pickup")
+                | ("ready_for_pickup", "completed")
+                | ("reserved", "cancelled")
+                | ("preparing", "cancelled")
+                | ("ready_for_pickup", "cancelled")
+        )
+    };
+
+    // Same per-tenant lock as sales/refunds: the release/decrement UPDATE must
+    // never race a concurrent stock writer.
+    let sale_lock = tenant_sale_lock(tenant);
+    let _guard = sale_lock.lock().await;
+
+    let (order, items) = repo::get_web_order(db, tenant, &order_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if !allowed(&order.status, to) {
+        return Err(DomainError::Invalid(format!(
+            "transición inválida de '{}' a '{to}'",
+            order.status
+        )));
+    }
+    let release = to == "cancelled" || to == "completed";
+    let decrement = to == "completed";
+    let set_ready = to == "ready_for_pickup";
+
+    let mut attempt = 0usize;
+    loop {
+        match repo::apply_web_transition(
+            db,
+            tenant,
+            &order_thing,
+            to,
+            &items,
+            release,
+            decrement,
+            set_ready,
+        )
+        .await
+        {
+            Ok(updated) => return Ok(updated),
+            Err(e) if attempt < MAX_SALE_COMMIT_RETRIES && is_retryable_conflict(&e) => {
+                attempt += 1;
+                conflict_backoff(attempt).await;
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 pub async fn get_order(
     db: &Db,
     tenant: &Thing,
