@@ -95,6 +95,9 @@ impl Modify for SecurityAddon {
         (name = "PublicWeb", description = "Storefront público del tier Free (ADR-0020). \
             Sin JWT; 404 uniforme salvo que el tenant haya publicado (`web.published`). \
             Nunca expone costos ni stock numérico."),
+        (name = "AdminWeb", description = "Claves de storefront (Free Web PR2): CRUD admin. \
+            El plaintext y el secreto HMAC se muestran una sola vez al crear/rotar; \
+            la DB guarda solo SHA-256."),
     ),
     paths(
         // Sales
@@ -200,6 +203,11 @@ impl Modify for SecurityAddon {
         crate::v1::public_web::get_store,
         crate::v1::public_web::list_catalog,
         crate::v1::public_web::get_product,
+        // Admin storefront keys (Free Web PR2)
+        crate::v1::admin_web::create_key,
+        crate::v1::admin_web::list_keys,
+        crate::v1::admin_web::rotate_key,
+        crate::v1::admin_web::revoke_key,
         // Agent federation (PR #64)
         crate::v1::agent::did,
         crate::v1::agent::inbox,
@@ -251,6 +259,9 @@ impl Modify for SecurityAddon {
         domain::catalog::model::PublicProductDto,
         domain::catalog::model::PublicAvailability,
         domain::catalog::model::PublicCatalogPage,
+        domain::web_keys::WebKeyDto,
+        crate::v1::admin_web::CreateKeyRequest,
+        crate::v1::admin_web::CreatedKeyResponse,
     )),
     modifiers(&SecurityAddon),
 )]

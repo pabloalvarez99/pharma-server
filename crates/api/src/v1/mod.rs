@@ -2,6 +2,7 @@
 //! submodule that exposes `router()`. `api` orchestrates only: extract
 //! claims/tenant, call `domain::*::service`, map `DomainError` → envelope.
 
+pub mod admin_web;
 pub mod agent;
 pub mod agent_orders;
 pub mod assist;
@@ -56,5 +57,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(public_catalog::router(state.clone()))
         .merge(public_orders::router(state.clone()))
         .merge(public_web::router(state.clone()))
+        .merge(admin_web::router(state.clone()))
         .merge(agent::router(state))
 }

@@ -19,6 +19,7 @@ pub mod rubro;
 pub mod sales;
 pub mod seed;
 pub mod settings;
+pub mod web_keys;
 
 pub mod errors;
 pub mod invariants;
