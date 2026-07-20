@@ -840,6 +840,21 @@ pub async fn update_product(
     if patch.attrs.is_some() {
         sets.push("attrs = $attrs");
     }
+    if patch.online_visible.is_some() {
+        sets.push("online_visible = $online_visible");
+    }
+    if patch.online_title.is_some() {
+        sets.push("online_title = $online_title");
+    }
+    if patch.online_description.is_some() {
+        sets.push("online_description = $online_description");
+    }
+    if patch.online_price.is_some() {
+        sets.push("online_price = $online_price");
+    }
+    if patch.online_sort.is_some() {
+        sets.push("online_sort = $online_sort");
+    }
     if category.is_some() {
         sets.push("category = $category");
     }
@@ -870,6 +885,11 @@ pub async fn update_product(
         .bind(("presentation", patch.presentation.clone()))
         .bind(("discount_percent", patch.discount_percent))
         .bind(("attrs", attrs_bind(&patch.attrs)))
+        .bind(("online_visible", patch.online_visible))
+        .bind(("online_title", patch.online_title.clone()))
+        .bind(("online_description", patch.online_description.clone()))
+        .bind(("online_price", dec_opt(patch.online_price)))
+        .bind(("online_sort", patch.online_sort))
         .bind(("category", category.flatten()))
         .await?;
     let row: Option<ProductRow> = r.take(0)?;

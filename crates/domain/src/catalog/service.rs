@@ -234,6 +234,13 @@ pub async fn update_product(
             return Err(DomainError::Invalid("precio no puede ser negativo".into()));
         }
     }
+    if let Some(p) = patch.online_price {
+        if p < Decimal::ZERO {
+            return Err(DomainError::Invalid(
+                "precio online no puede ser negativo".into(),
+            ));
+        }
+    }
     // tri-state category: absent skip, "" clear, id set+validate.
     let category: Option<Option<Thing>> = match patch.category.as_deref() {
         None => None,

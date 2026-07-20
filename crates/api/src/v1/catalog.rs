@@ -851,6 +851,7 @@ pub async fn import_products(
                         discount_percent,
                         attrs: None,
                         barcode: None,
+                        ..Default::default()
                     };
                     match service::update_product(&db, &t, &existing.to_string(), patch).await {
                         Ok(_) => {

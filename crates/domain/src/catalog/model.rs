@@ -157,6 +157,14 @@ pub struct UpdateProduct {
     /// - empty string `""` → remove barcode mapping (frees EAN)
     #[serde(default)]
     pub barcode: Option<String>,
+    /// Free Web storefront opt-in per SKU (migration 0036, ADR-0020).
+    pub online_visible: Option<bool>,
+    pub online_title: Option<String>,
+    pub online_description: Option<String>,
+    #[serde(default, with = "rust_decimal::serde::str_option")]
+    #[schema(value_type = Option<String>)]
+    pub online_price: Option<Decimal>,
+    pub online_sort: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
