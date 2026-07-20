@@ -1,8 +1,8 @@
 ---
 title: Interop web ↔ pharma-server — Guía del operador
-status: Draft — 2026-05-24
+status: Draft — 2026-05-24 · § Free Web agregada 2026-07-20
 owners: pabloalvarez99
-adr: ADR-0012, ADR-0013
+adr: ADR-0012, ADR-0013, ADR-0020
 ---
 
 # Conectar tu web/storefront a pharma-server
@@ -31,6 +31,89 @@ necesités otra cosa:
 
 Patrón **A** se puede activar hoy con el catálogo público. **B** y **C** son
 roadmap (endpoints aún no existen — esta guía los documenta para fijar el contrato).
+
+> **¿No tenés web propia?** El pharma-server trae un storefront integrado
+> ([ADR-0020](../adr/0020-free-web-as-core.md)): catálogo público + pedidos de
+> retiro bajo `/api/v1/public/{slug}/…`. Para exponerlo a internet ver la
+> sección siguiente — no necesitás nada de los patrones A/B/C.
+
+---
+
+## Free Web (ADR-0020) — exponer el storefront con Cloudflare Tunnel
+
+El seam Free Web vive en `/api/v1/public/{slug}/…`: lectura de catálogo sin
+key (gated por el setting `web.published`) y `POST …/orders/web` con clave
+`rb_live_…` + firma HMAC. Para que un cliente lo vea desde internet alcanza un
+Cloudflare Tunnel **restringido al prefijo `/api/v1/public/`** — cinco pasos:
+
+### 1. Instalá cloudflared
+
+En la máquina que corre pharma-server (Windows):
+
+```powershell
+winget install Cloudflare.cloudflared
+cloudflared tunnel login   # abre el browser; elegí tu zona DNS
+```
+
+### 2. Creá el tunnel
+
+```powershell
+cloudflared tunnel create rb-<slug>       # ej: rb-demo
+# → guarda credenciales en %USERPROFILE%\.cloudflared\<TUNNEL_UUID>.json
+```
+
+### 3. Ruteá el DNS
+
+```powershell
+cloudflared tunnel route dns rb-<slug> tienda.<tu-dominio>.cl
+```
+
+### 4. Ingress SOLO hacia `/api/v1/public/`
+
+`%USERPROFILE%\.cloudflared\config.yml`:
+
+```yaml
+tunnel: <TUNNEL_UUID>
+credentials-file: C:\Users\<usuario>\.cloudflared\<TUNNEL_UUID>.json
+
+ingress:
+  # Sólo el seam público del storefront pasa por el tunnel.
+  - hostname: tienda.<tu-dominio>.cl
+    path: ^/api/v1/public/.*
+    service: http://127.0.0.1:8080
+  # Todo lo demás (admin, POS, login, settings, swagger) muere acá.
+  - service: http_status:404
+```
+
+### 5. Corrélo como servicio
+
+```powershell
+cloudflared service install
+sc start cloudflared
+# smoke test:
+curl https://tienda.<tu-dominio>.cl/api/v1/public/<slug>/store
+```
+
+### Troubleshooting
+
+| Síntoma | Causa | Fix |
+|---|---|---|
+| `404` en todas las rutas públicas | Web no publicada (o slug mal escrito) — 404-oscuridad es intencional. | `PUT /api/v1/settings/web.published {"value":"true"}` con JWT admin (desde LAN, no por el tunnel). |
+| `401 INVALID_API_KEY` | Clave `rb_live_…` mala/revocada/rotada. | Mint o rotate en `/api/v1/admin/web/keys`; actualizá `RB_API_KEY`. |
+| `401 SIGNATURE_INVALID` | Secreto HMAC equivocado o canonical mal armado. | El secreto es POR CLAVE (`whsec_…` de la respuesta del mint). Canonical: `{ts}.POST.{path}.{sha256_hex(body)}` con el path completo `/api/v1/public/{slug}/orders/web`. |
+| `401 TIMESTAMP_SKEW` | Reloj del cliente/server corrido > ±300s. | Sincronizá NTP (`w32tm /resync`) o revisá timezone del ts (debe ser unix **UTC** en segundos). |
+| `403 SCOPE_DENIED` | Clave sin scope `orders:write` o de otro tenant. | Mint con scopes default (`catalog:read`, `orders:write`). |
+
+### Nota de amenaza
+
+- **Nunca** apuntes el ingress a `/` ni agregues rutas admin/POS: el único
+  prefijo expuesto es `/api/v1/public/`, que sirve una proyección sin
+  costos/márgenes/stock numérico y exige firma para escribir. Login, settings,
+  keys y swagger quedan sólo en LAN.
+- La regla catch-all `http_status:404` es obligatoria: sin ella cloudflared
+  enruta cualquier path al service anterior.
+- Despublicar (`web.published = "false"`) apaga el seam completo al instante
+  (404 uniforme), aún con el tunnel arriba — kill-switch del operador.
 
 ---
 
