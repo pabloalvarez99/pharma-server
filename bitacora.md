@@ -148,6 +148,10 @@ NO acá.
 
 ---
 
+## 2026-07-20 — PR0 Free Web: ADR-0020 + estrategia shopify-parity
+
+- 2026-07-20: PR0 Free Web — ADR-0020 (free web core; el prompt asumía 0016, ya tomado) + strategy doc `docs/strategy/free-web-shopify-parity.md`. Lane feature/free-web-shopify-parity.
+
 ## 2026-06-13 — BUG-003/004: POS sale path concurrency-safe (PR #158)
 
 - **Qué** — el hot path de venta (`domain::sales::service::post_sale` → `repo::apply_sale`) no era concurrency-safe: bajo contención SurrealKv (kv-surrealkv) aborta las txns perdedoras con un conflicto MVCC *reintentable* (`read or write conflict`) y filtra escrituras parciales de la txn abortada, corrompiendo el contador `product.stock` (observado 199 tras 2 commits desde 100). ~59/60 ventas concurrentes terminaban en `DB_ERROR` 500.
