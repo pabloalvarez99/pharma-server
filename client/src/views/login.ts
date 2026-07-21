@@ -110,12 +110,40 @@ const FIELDS: Record<"tenant" | "email" | "password" | "server", FieldId> = {
   password: { input: "f-password", err: "e-password" },
 };
 
+/** Prefill from the URL query, used by the web signup hand-off (SP4): after
+ *  provisioning a tenant, the license-server redirects here with
+ *  `?server=&tenant=&email=` so the operator lands with everything but the
+ *  password filled. Only reads the query in a browser with a real `location`;
+ *  desktop (Tauri) has no meaningful query and falls through to the defaults.
+ *  The server URL is also persisted so a later reload keeps pointing at it. */
+function queryPrefill(): { server?: string; tenant?: string; email?: string } {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const server = q.get("server")?.trim() || undefined;
+    if (server) {
+      const store = browserStore();
+      if (store) saveStoredServer(store, server);
+    }
+    return {
+      server,
+      tenant: q.get("tenant")?.trim() || undefined,
+      email: q.get("email")?.trim() || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function renderLogin(
   root: HTMLElement,
   onSuccess: (session: SessionInfo, serverUrl: string) => void,
 ): void {
-  const initialServer = resolveServer();
-  const initialTenant = storedTenant();
+  const prefill = queryPrefill();
+  const initialServer = prefill.server
+    ? { value: prefill.server, firstLaunch: false }
+    : resolveServer();
+  const initialTenant = prefill.tenant ?? storedTenant();
+  const initialEmail = prefill.email ?? DEFAULT_EMAIL;
   root.innerHTML = `
     <div class="login-stage" role="main">
       <div class="login-bg" aria-hidden="true">
@@ -188,7 +216,7 @@ export function renderLogin(
                 autocomplete="username"
                 spellcheck="false"
                 placeholder="usuario@minegocio.cl"
-                value="${DEFAULT_EMAIL}"
+                value="${escapeAttr(initialEmail)}"
                 aria-describedby="${FIELDS.email.err}"
                 required
               />
