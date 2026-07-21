@@ -798,6 +798,7 @@ fn build_cors_layer(origins: &[String]) -> tower_http::cors::CorsLayer {
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PUT,
             Method::PATCH,
             Method::DELETE,
             Method::OPTIONS,
