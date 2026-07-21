@@ -1,5 +1,18 @@
 # pharma-server — Project Context
 
+> ## 🏗️ ETAPA REAL: ~1% COMPLETO — CONSTRUIR PROFUNDIDAD, NO PULIR SUPERFICIE (founder, 2026-07-21)
+> **El proyecto recién lleva ~1%.** La meta ahora NO es infra, dominios ni pulido de
+> puerta de entrada, sino **hacer el producto MUCHO más completo y profundo**: features
+> reales de ERP con hondura de producto vendible (no MVPs superficiales). El **dominio /
+> link público NO es prioridad** (diferido; `nip.io` + `vercel.app` bastan por ahora —
+> no invertir tiempo en `rutbusiness.cl`/DNS/branding-de-URL). Cada lane debe SUMAR
+> capacidad y profundidad de negocio real (inventario, POS, compras, caja, recetas, SII,
+> reportes, multi-sucursal, fiado, agente…), cubriendo casos reales de dueños chilenos de
+> punta a punta, no dejar módulos a medias. Regla de decisión: ante "¿pulo lo que hay o
+> construyo lo que falta?", **construir lo que falta** hasta que el ERP sea completo. La
+> vara de calidad UX/producto sigue vigente para lo que se construye, pero el driver es
+> **completitud y profundidad**, no acabado cosmético de la superficie actual.
+
 > ## 🎯 GOAL DEL PROYECTO — RUTBUSINESS (norte, fijado 2026-06-16 por founder)
 > **Dar a CADA negocio chileno —cualquier rubro, identificado por su RUT— un ERP
 > gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
