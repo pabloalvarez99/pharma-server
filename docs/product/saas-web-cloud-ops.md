@@ -192,7 +192,10 @@ sudo systemctl start pharma-api
   para que el cron `gsutil cp` funcione hay que recrear la VM con
   `--scopes storage-rw` o darle un SA dedicado. Mientras tanto los snapshots GCE
   diarios son el backup efectivo.
-- **Provisioning key** (`PHARMA__PROVISIONING__KEY`): llega con SP2; agregar a
-  `/etc/pharma/env` cuando exista el endpoint.
+- **Provisioning key** (`PHARMA__PROVISIONING__KEY`): **ACTIVA en la VM desde SP2
+  (2026-07-21)** — habilita `POST /admin/v1/tenants` (crea tenant + admin desde el
+  license-server; header `X-Provisioning-Key`). El valor vive SOLO en
+  `/etc/pharma/env` (root 640) y en el license-server; rotar = editar env +
+  `systemctl restart pharma-api`. Sin la variable el endpoint responde 404.
 - **us-central1 sin capacidad e2-micro** (2026-07-21): si algún día conviene volver
   (latencia), recrear ahí con snapshot.
