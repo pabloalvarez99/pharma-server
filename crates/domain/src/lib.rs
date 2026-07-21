@@ -13,6 +13,7 @@ pub mod finance;
 pub mod inventory;
 pub mod operations;
 pub mod prescriptions;
+pub mod provisioning;
 pub mod purchasing;
 pub mod reports;
 pub mod rubro;

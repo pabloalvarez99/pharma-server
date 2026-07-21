@@ -233,6 +233,7 @@ pub fn state_free(db: Arc<db::Db>) -> api::AppState {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(api::stock_webhook::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 
@@ -269,6 +270,7 @@ pub fn state_pro(db: Arc<db::Db>, features: &[&str]) -> api::AppState {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(api::stock_webhook::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 
