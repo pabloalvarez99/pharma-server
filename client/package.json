@@ -6,10 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --mode web",
     "build": "tsc --noEmit && vite build",
+    "build:web": "tsc --noEmit && vite build --mode web",
     "test": "vitest run",
     "e2e": "node e2e/run.mjs",
-    "gate": "npm run build && npm run test && npm run e2e",
+    "gate": "npm run build && npm run test && npm run build:web && npm run e2e",
     "preview": "vite preview",
     "tauri": "tauri"
   },
