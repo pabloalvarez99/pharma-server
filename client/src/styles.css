@@ -617,6 +617,9 @@ button {
   display: flex;
   flex-direction: column;
   padding: 22px 16px;
+  /* Viewports bajos (web/tablet): el nav interno scrollea, la marca y el
+     logout quedan fijos. */
+  min-height: 0;
 }
 
 .sidebar-brand {
@@ -647,6 +650,11 @@ button {
   flex-direction: column;
   gap: 6px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .nav-item {
