@@ -1,0 +1,12 @@
+# Caddyfile template — /etc/caddy/Caddyfile en la VM GCE
+#
+# Reemplazar <SITE> por:
+#   - dominio real cuando exista (ej. api.rutbusiness.cl apuntando a la IP estática), o
+#   - <IP-ESTATICA>.nip.io mientras no haya dominio (TLS provisional Let's Encrypt).
+#
+# pharma-api escucha SOLO loopback (PHARMA__BIND=127.0.0.1:8080); Caddy termina TLS.
+
+<SITE> {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+}
