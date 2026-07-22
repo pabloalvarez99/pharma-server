@@ -705,3 +705,22 @@ pub struct IvaSummary {
     pub ventas_neto: String,
     pub compras_neto: String,
 }
+
+/// Mirrors `credit/model.rs::DebtorRow` — un cliente con deuda vigente.
+#[derive(Serialize, Deserialize)]
+pub struct DebtorRow {
+    pub customer: String,
+    pub name: String,
+    #[serde(default)]
+    pub phone: Option<String>,
+    pub balance: String,
+    pub last_movement: String,
+}
+
+/// Mirrors `credit/model.rs::DebtorsReport` — "¿cuánto me deben?".
+#[derive(Serialize, Deserialize)]
+pub struct DebtorsReport {
+    pub total_por_cobrar: String,
+    pub debtor_count: usize,
+    pub rows: Vec<DebtorRow>,
+}

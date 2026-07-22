@@ -72,3 +72,27 @@ pub async fn record_abono(
         .await
         .map_err(|e| format!("Respuesta de abono inválida del servidor: {e}"))
 }
+
+/// GET `/api/v1/reports/por-cobrar` (Bearer, cashier+) — total por cobrar del
+/// negocio + deudores ordenados por saldo (mayor primero).
+#[tauri::command]
+pub async fn debtors_report(
+    state: State<'_, SessionState>,
+    server_url: String,
+) -> Result<crate::types::DebtorsReport, String> {
+    let token = token_of(&state)?;
+    let http = client();
+    let base = base(&server_url);
+    let resp = http
+        .get(format!("{base}/api/v1/reports/por-cobrar"))
+        .bearer_auth(token.expose_secret())
+        .send()
+        .await
+        .map_err(conn_error)?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp).await);
+    }
+    resp.json()
+        .await
+        .map_err(|e| format!("Respuesta de cuentas por cobrar inválida del servidor: {e}"))
+}

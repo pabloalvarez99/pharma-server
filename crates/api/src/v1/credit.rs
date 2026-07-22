@@ -43,9 +43,21 @@ fn customer_thing(id: &str) -> Result<Thing, ApiError> {
 
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
+        .route("/api/v1/reports/por-cobrar", get(get_debtors))
         .route("/api/v1/customers/{id}/cuenta", get(get_account))
         .route("/api/v1/customers/{id}/abono", post(post_abono))
         .route_layer(crate::role::layer(state, cashier_plus()))
+}
+
+/// GET `/api/v1/reports/por-cobrar` (cashier+) — "¿cuánto me deben?": total por
+/// cobrar + los deudores ordenados por saldo. Sólo aparecen clientes con deuda.
+async fn get_debtors(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<DebtorsReport>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(domain::credit::repo::debtors(&db, &t).await?))
 }
 
 /// GET `/api/v1/customers/{id}/cuenta` (cashier+) — estado de cuenta corriente:

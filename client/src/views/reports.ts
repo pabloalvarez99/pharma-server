@@ -20,6 +20,8 @@ import {
   listProducts,
   ivaSummary,
   libroCompras,
+  debtorsReport,
+  type DebtorRow,
   type PurchaseBookRow,
   type DailySalesRow,
   type TopProductRow,
@@ -96,6 +98,11 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
         </div>
       </div>
 
+      <div class="table-card rb-card">
+        <h3 class="section-title rb-display">Por cobrar (fiado)</h3>
+        <div id="rep-cobrar">${tableSkeleton(4)}</div>
+      </div>
+
       <h3 class="section-title rb-display">IVA del mes (F29)</h3>
       <div id="rep-iva" class="kpi-grid">${kpiSkeleton(4)}</div>
 
@@ -151,8 +158,48 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
   void loadTop(host, serverUrl, loaded);
   void loadInventory(host.querySelector<HTMLElement>("#rep-inv")!, serverUrl, loaded);
   void loadRotation(host, serverUrl, loaded);
+  void loadDebtors(host.querySelector<HTMLElement>("#rep-cobrar")!, serverUrl);
   void loadIva(host.querySelector<HTMLElement>("#rep-iva")!, serverUrl);
   void loadLibroCompras(host, serverUrl, loaded);
+}
+
+/** "¿Cuánto me deben?" — total por cobrar + quién debe, mayor primero. Es la
+ *  pregunta diaria del dueño que fía; hasta ahora sólo se veía cliente por
+ *  cliente en su ficha. */
+async function loadDebtors(el: HTMLElement, serverUrl: string): Promise<void> {
+  try {
+    const rep = await debtorsReport(serverUrl);
+    if (rep.rows.length === 0) {
+      el.innerHTML = emptyState({
+        title: "Nadie te debe",
+        hint: "Cuando fíes una venta el saldo del cliente aparece acá.",
+      });
+      return;
+    }
+    el.innerHTML = `
+      <div class="kpi-grid kpi-grid-tight rep-cobrar-kpis">
+        <div class="kpi"><span class="kpi-label">Total por cobrar</span><strong class="rb-num">${clp(rep.total_por_cobrar)}</strong></div>
+        <div class="kpi"><span class="kpi-label">Clientes con deuda</span><strong class="rb-num">${num(rep.debtor_count)}</strong></div>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Cliente</th><th>Teléfono</th><th>Último mov.</th><th class="num">Debe</th></tr></thead>
+        <tbody>${rep.rows.map(debtorRow).join("")}</tbody>
+      </table>
+    `;
+  } catch (err) {
+    el.innerHTML = errorState(asMessage(err));
+  }
+}
+
+function debtorRow(d: DebtorRow): string {
+  return `
+    <tr>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${d.phone ? escapeHtml(d.phone) : "<span class=\"muted\">—</span>"}</td>
+      <td>${escapeHtml(fecha(d.last_movement))}</td>
+      <td class="num rb-num">${clp(d.balance)}</td>
+    </tr>
+  `;
 }
 
 /** Resumen IVA del mes: débito (ventas) − crédito (compras) = a pagar. Panel
@@ -224,7 +271,7 @@ async function loadLibroCompras(
 function libroRow(r: PurchaseBookRow): string {
   return `
     <tr>
-      <td>${fecha(r.date)}</td>
+      <td>${escapeHtml(fecha(r.date))}</td>
       <td>${escapeHtml(r.supplier_name)}${
         r.supplier_rut ? `<span class="cell-sub muted">${escapeHtml(r.supplier_rut)}</span>` : ""
       }</td>

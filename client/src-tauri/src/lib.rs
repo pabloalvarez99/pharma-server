@@ -62,6 +62,7 @@ pub fn run() {
             compliance::libro_compras,
             compliance::iva_summary,
             compliance::set_po_invoice,
+            credit::debtors_report,
             credit::customer_account,
             credit::record_abono,
             customers::customer_search,

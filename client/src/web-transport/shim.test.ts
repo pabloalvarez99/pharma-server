@@ -205,6 +205,19 @@ describe("fiado / cuenta corriente (credit)", () => {
   });
 });
 
+describe("por cobrar / deudores (credit)", () => {
+  it("debtors_report pega a /reports/por-cobrar con Bearer", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ total_por_cobrar: "14000", debtor_count: 2, rows: [] }),
+    );
+    const rep = await invoke<{ debtor_count: number }>("debtors_report", { serverUrl: "http://s" });
+    expect(rep.debtor_count).toBe(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://s/api/v1/reports/por-cobrar");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer jwt-x");
+  });
+});
+
 describe("libro de compras / IVA (compliance)", () => {
   it("libro_compras manda el período como query y omite vacío", async () => {
     storeToken("jwt-x");

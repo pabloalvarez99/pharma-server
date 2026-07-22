@@ -45,3 +45,26 @@ export function recordAbono(
     note: opts.note,
   });
 }
+
+/** Un cliente con deuda vigente. `balance` STRING (Decimal). */
+export interface DebtorRow {
+  customer: string;
+  name: string;
+  phone?: string | null;
+  balance: string;
+  /** Último movimiento (fiado o abono) — si la deuda está viva o dormida. */
+  last_movement: string;
+}
+
+/** "¿Cuánto me deben?" — cuentas por cobrar del negocio. */
+export interface DebtorsReport {
+  total_por_cobrar: string;
+  debtor_count: number;
+  /** Deudores ordenados por saldo, mayor primero. */
+  rows: DebtorRow[];
+}
+
+/** GET /api/v1/reports/por-cobrar (cashier+). */
+export function debtorsReport(serverUrl: string): Promise<DebtorsReport> {
+  return invoke<DebtorsReport>("debtors_report", { serverUrl });
+}

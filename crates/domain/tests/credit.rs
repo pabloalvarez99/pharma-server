@@ -134,3 +134,47 @@ async fn balances_are_isolated_per_customer() {
     assert_eq!(repo::balance(&db, &t, &a).await.unwrap(), d("4000"));
     assert_eq!(repo::balance(&db, &t, &b).await.unwrap(), d("0"));
 }
+
+#[tokio::test]
+async fn debtors_report_ranks_and_totals_open_balances() {
+    let (db, t) = setup().await;
+    let a = seed_customer(&db, &t, "Ana").await;
+    let b = seed_customer(&db, &t, "Beto").await;
+    let c = seed_customer(&db, &t, "Carla").await;
+
+    let oa = seed_order(&db, &t, 5000.0).await;
+    let ob = seed_order(&db, &t, 9000.0).await;
+    let oc = seed_order(&db, &t, 2000.0).await;
+    repo::post_cargo(&db, &t, &a, &oa, d("5000"), None)
+        .await
+        .unwrap();
+    repo::post_cargo(&db, &t, &b, &ob, d("9000"), None)
+        .await
+        .unwrap();
+    repo::post_cargo(&db, &t, &c, &oc, d("2000"), None)
+        .await
+        .unwrap();
+    // Carla paga todo → deja de ser deudora.
+    service::record_abono(&db, &t, &c, d("2000"), None, None, None)
+        .await
+        .unwrap();
+
+    let rep = repo::debtors(&db, &t).await.unwrap();
+    assert_eq!(rep.debtor_count, 2, "Carla ya pagó, no es deudora");
+    assert_eq!(rep.total_por_cobrar, d("14000"));
+    // Ordenado por saldo desc: Beto (9000) antes que Ana (5000).
+    assert_eq!(rep.rows[0].name, "Beto");
+    assert_eq!(rep.rows[0].balance, d("9000"));
+    assert_eq!(rep.rows[1].name, "Ana");
+    assert_eq!(rep.rows[1].balance, d("5000"));
+}
+
+#[tokio::test]
+async fn debtors_report_empty_when_nobody_owes() {
+    let (db, t) = setup().await;
+    seed_customer(&db, &t, "Nadie").await;
+    let rep = repo::debtors(&db, &t).await.unwrap();
+    assert_eq!(rep.debtor_count, 0);
+    assert_eq!(rep.total_por_cobrar, d("0"));
+    assert!(rep.rows.is_empty());
+}

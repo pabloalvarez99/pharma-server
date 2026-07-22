@@ -108,7 +108,15 @@ async function recordAbono(a: CommandArgs): Promise<unknown> {
   return parseJson(resp, "Respuesta de abono inválida del servidor");
 }
 
+async function debtorsReport(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const resp = await doFetch(`${b}/api/v1/reports/por-cobrar`, { headers: authHeaders() });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de cuentas por cobrar inválida del servidor");
+}
+
 export const customerCommands: Record<string, CommandHandler> = {
+  debtors_report: debtorsReport,
   customer_account: customerAccount,
   record_abono: recordAbono,
   customer_search: customerSearch,
