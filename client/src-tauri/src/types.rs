@@ -635,3 +635,31 @@ pub struct AssistAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal: Option<AgentProposal>,
 }
+
+// --- fiado / cuenta corriente ----------------------------------------------
+
+/// Mirrors `crates/domain/src/credit/model.rs::LedgerEntryDto`. Money crosses
+/// the wire as a STRING (`amount`).
+#[derive(Serialize, Deserialize)]
+pub struct LedgerEntry {
+    pub id: String,
+    /// `cargo` (el cliente debe) | `abono` (pagó).
+    pub kind: String,
+    pub amount: String,
+    #[serde(default)]
+    pub order: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+/// Mirrors `credit/model.rs::CustomerAccountDto` — estado de cuenta del cliente.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerAccount {
+    pub customer: String,
+    /// `total_charged - total_paid`. Positivo = el cliente debe.
+    pub balance: String,
+    pub total_charged: String,
+    pub total_paid: String,
+    pub entries: Vec<LedgerEntry>,
+}

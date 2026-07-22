@@ -83,7 +83,34 @@ async function customerHistory(a: CommandArgs): Promise<unknown> {
   return parseJson(resp, "Respuesta de historial inválida del servidor");
 }
 
+// --- fiado / cuenta corriente (credit.rs) ----------------------------------
+
+async function customerAccount(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const resp = await doFetch(`${b}/api/v1/customers/${a.id}/cuenta`, {
+    headers: authHeaders(),
+  });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de cuenta corriente inválida del servidor");
+}
+
+async function recordAbono(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const body: Record<string, unknown> = { amount: a.amount };
+  putStr(body, "cash_session", a.cashSession);
+  putStr(body, "note", a.note);
+  const resp = await doFetch(`${b}/api/v1/customers/${a.id}/abono`, {
+    method: "POST",
+    headers: authHeaders(JSON_HEADERS),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de abono inválida del servidor");
+}
+
 export const customerCommands: Record<string, CommandHandler> = {
+  customer_account: customerAccount,
+  record_abono: recordAbono,
   customer_search: customerSearch,
   customer_detail: customerDetail,
   create_customer: createCustomer,

@@ -2085,6 +2085,41 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Cuenta corriente (fiado): el saldo adeudado se destaca — es el número que el
+   dueño busca al abrir la ficha. */
+.cli-stat strong.is-debt {
+  color: var(--danger, #ff5d6c);
+}
+
+.cli-cuenta-title {
+  margin-top: 16px;
+}
+
+.cli-abono-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0 6px;
+}
+
+.cli-abono-form input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.cli-abono-msg {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cli-abono-msg.is-err {
+  color: var(--danger, #ff5d6c);
+}
+
+.cli-abono-msg.is-ok {
+  color: var(--ok, #19d39a);
+}
+
 .cli-hist-title {
   margin-top: 16px;
 }

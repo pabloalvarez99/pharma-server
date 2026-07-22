@@ -13,7 +13,14 @@ export interface PosItem {
 /** POS payment methods the server accepts on the counter. `pos_mixed` is a
  *  split tender (cash + card) — for it `posSale` sends both `cashAmount` and
  *  `cardAmount` and the server only requires their sum to cover the total. */
-export type PaymentMethod = "pos_cash" | "pos_debit" | "pos_credit" | "pos_mixed";
+/** `pos_fiado` = venta a cuenta corriente (fiado): exige `customer`, NO mueve
+ *  caja y genera un cargo en el ledger del cliente (server-side). */
+export type PaymentMethod =
+  | "pos_cash"
+  | "pos_debit"
+  | "pos_credit"
+  | "pos_mixed"
+  | "pos_fiado";
 
 /** A POS sale error surfaced from the Tauri layer as `"CODE|message"`. */
 export interface SaleError {

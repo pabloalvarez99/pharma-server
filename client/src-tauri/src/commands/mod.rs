@@ -8,6 +8,7 @@ pub mod audit;
 pub mod auth;
 pub mod cash;
 pub mod catalog;
+pub mod credit;
 pub mod customers;
 pub mod dte;
 pub mod expenses;

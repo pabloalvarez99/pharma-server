@@ -151,6 +151,60 @@ describe("customer_search (customers)", () => {
   });
 });
 
+describe("fiado / cuenta corriente (credit)", () => {
+  it("customer_account pega a /cuenta con Bearer", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        customer: "customer:1",
+        balance: "3000",
+        total_charged: "5000",
+        total_paid: "2000",
+        entries: [],
+      }),
+    );
+    const acct = await invoke<{ balance: string }>("customer_account", {
+      serverUrl: "http://s",
+      id: "customer:1",
+    });
+    expect(acct.balance).toBe("3000");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://s/api/v1/customers/customer:1/cuenta");
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer jwt-x");
+  });
+
+  it("record_abono manda amount + snake_case cash_session y omite vacíos", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: "l:1", kind: "abono", amount: "2000" }));
+    await invoke("record_abono", {
+      serverUrl: "http://s",
+      id: "customer:1",
+      amount: "2000",
+      cashSession: "cash_register_session:9",
+      note: "",
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://s/api/v1/customers/customer:1/abono");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      amount: "2000",
+      cash_session: "cash_register_session:9",
+    });
+  });
+
+  it("propaga el mensaje del servidor cuando el abono supera la deuda", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        { error: { code: "INVALID_INPUT", message: "el abono (1500) supera la deuda pendiente (1000)" } },
+        400,
+      ),
+    );
+    await expect(
+      invoke("record_abono", { serverUrl: "http://s", id: "customer:1", amount: "1500" }),
+    ).rejects.toBe("el abono (1500) supera la deuda pendiente (1000)");
+  });
+});
+
 describe("desktop-only degradation", () => {
   it("print_ticket and unknown commands reject with the controlled copy", async () => {
     await expect(invoke("print_ticket", { printer: "X" })).rejects.toBe(
