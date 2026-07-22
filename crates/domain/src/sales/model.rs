@@ -8,8 +8,16 @@ use utoipa::ToSchema;
 
 use super::interactions::InteractionDetail;
 
-/// POS payment methods accepted on counter.
-pub const POS_METHODS: &[&str] = &["pos_cash", "pos_debit", "pos_credit", "pos_mixed"];
+/// POS payment methods accepted on counter. `pos_fiado` = venta a cuenta
+/// corriente (el cliente queda debiendo): NO mueve caja, exige `customer`, y
+/// genera un cargo en el ledger de fiado (migración 0039 / `crate::credit`).
+pub const POS_METHODS: &[&str] = &[
+    "pos_cash",
+    "pos_debit",
+    "pos_credit",
+    "pos_mixed",
+    "pos_fiado",
+];
 
 /// Default loyalty rule: 1 point per $1000 CLP (overridable via
 /// `admin_setting.loyalty_points_per_clp`).

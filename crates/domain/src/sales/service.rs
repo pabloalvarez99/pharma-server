@@ -208,6 +208,13 @@ pub async fn post_sale(
         .map(|s| parse_tenant_thing(s, "customer"))
         .transpose()?;
 
+    // Fiado (venta a cuenta) exige cliente: sin cliente no hay a quién cobrarle.
+    if req.payment_method == "pos_fiado" && customer.is_none() {
+        return Err(DomainError::Invalid(
+            "para fiar debes elegir el cliente".into(),
+        ));
+    }
+
     // === Serialized, retry-on-conflict critical section (BUG-003/004) ===
     // The per-tenant lock removes the sale-vs-sale SurrealKv write-write
     // conflict (and the partial-write corruption of `product.stock` it
@@ -310,6 +317,15 @@ pub async fn post_sale(
             }
         }
     };
+
+    // Fiado: la venta a cuenta genera un CARGO en el ledger del cliente (deuda).
+    // Idempotente por orden (post_cargo verifica). NO toca caja (no es efectivo).
+    if req.payment_method == "pos_fiado" {
+        if let Some(c) = customer.as_ref() {
+            let order_thing = parse_tenant_thing(&applied.order.id, "order")?;
+            crate::credit::repo::post_cargo(db, tenant, c, &order_thing, total, sold_by).await?;
+        }
+    }
 
     // Loyalty: if customer set, award points based on total + setting.
     let mut loyalty_awarded = 0_i64;
