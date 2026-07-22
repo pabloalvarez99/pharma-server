@@ -21,7 +21,8 @@ mod types;
 use tauri::Manager;
 
 use commands::{
-    assist, audit, auth, cash, catalog, credit, customers, dte, expenses, license, pos, prescriptions,
+    assist, audit, auth, cash, catalog, compliance, credit, customers, dte, expenses, license, pos,
+    prescriptions,
     print, purchases, reports, rubro, seed, settings,
 };
 
@@ -58,6 +59,9 @@ pub fn run() {
             cash::close_cash_session,
             settings::get_setting,
             settings::set_setting,
+            compliance::libro_compras,
+            compliance::iva_summary,
+            compliance::set_po_invoice,
             credit::customer_account,
             credit::record_abono,
             customers::customer_search,

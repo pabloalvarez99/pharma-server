@@ -14,6 +14,7 @@ import {
   JSON_HEADERS,
   parseJson,
   parseText,
+  putDef,
   putStr,
   qs,
 } from "../core";
@@ -62,6 +63,44 @@ async function dashboardReport(a: CommandArgs): Promise<unknown> {
   const resp = await doFetch(`${b}/api/v1/reports/dashboard`, { headers: authHeaders() });
   if (!resp.ok) throw await errorMessage(resp);
   return parseJson(resp, "Respuesta del panel inválida del servidor");
+}
+
+// --- compliance.rs (libro de compras + IVA F29) -----------------------------
+
+async function libroCompras(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const resp = await doFetch(`${b}/api/v1/reports/libro-compras${qs({ period: a.period })}`, {
+    headers: authHeaders(),
+  });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de libro de compras inválida del servidor");
+}
+
+async function ivaSummary(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const resp = await doFetch(`${b}/api/v1/reports/iva${qs({ period: a.period })}`, {
+    headers: authHeaders(),
+  });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de IVA inválida del servidor");
+}
+
+async function setPoInvoice(a: CommandArgs): Promise<unknown> {
+  const b = base(a.serverUrl as string);
+  const body: Record<string, unknown> = {};
+  putStr(body, "folio", a.folio);
+  putStr(body, "date", a.date);
+  putDef(body, "tipo", a.tipo);
+  putStr(body, "neto", a.neto);
+  putStr(body, "iva", a.iva);
+  putStr(body, "total", a.total);
+  const resp = await doFetch(`${b}/api/v1/purchase-orders/${a.id}/factura`, {
+    method: "PATCH",
+    headers: authHeaders(JSON_HEADERS),
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await errorMessage(resp);
+  return parseJson(resp, "Respuesta de factura inválida del servidor");
 }
 
 // --- expenses.rs ------------------------------------------------------------
@@ -255,6 +294,9 @@ async function assistAct(a: CommandArgs): Promise<unknown> {
 }
 
 export const miscCommands: Record<string, CommandHandler> = {
+  libro_compras: libroCompras,
+  iva_summary: ivaSummary,
+  set_po_invoice: setPoInvoice,
   sales_daily: salesDaily,
   top_products: topProducts,
   margins_daily: marginsDaily,

@@ -12,6 +12,7 @@ export * from "./cash";
 export * from "./settings";
 export * from "./customers";
 export * from "./credit";
+export * from "./compliance";
 export * from "./purchases";
 export * from "./expenses";
 export * from "./prescriptions";

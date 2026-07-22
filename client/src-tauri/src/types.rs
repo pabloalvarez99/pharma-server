@@ -663,3 +663,45 @@ pub struct CustomerAccount {
     pub total_paid: String,
     pub entries: Vec<LedgerEntry>,
 }
+
+// --- libro de compras / IVA (compliance V3) ---------------------------------
+
+/// Mirrors `domain/compliance/model.rs::PurchaseBookRow`. Money as STRING.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseBookRow {
+    pub purchase_order: String,
+    pub tipo: i32,
+    #[serde(default)]
+    pub folio: Option<String>,
+    pub supplier_name: String,
+    #[serde(default)]
+    pub supplier_rut: Option<String>,
+    pub date: String,
+    pub neto: String,
+    pub iva: String,
+    pub total: String,
+    /// `false` = neto/IVA derivados del total (falta capturar la factura real).
+    pub declared: bool,
+}
+
+/// Mirrors `compliance/model.rs::PurchaseBook`.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseBook {
+    pub period: String,
+    pub rows: Vec<PurchaseBookRow>,
+    pub total_neto: String,
+    pub total_iva: String,
+    pub total: String,
+    pub pending_declaration: usize,
+}
+
+/// Mirrors `compliance/model.rs::IvaSummary` — la cifra que va al F29.
+#[derive(Serialize, Deserialize)]
+pub struct IvaSummary {
+    pub period: String,
+    pub iva_debito: String,
+    pub iva_credito: String,
+    pub iva_a_pagar: String,
+    pub ventas_neto: String,
+    pub compras_neto: String,
+}

@@ -205,6 +205,60 @@ describe("fiado / cuenta corriente (credit)", () => {
   });
 });
 
+describe("libro de compras / IVA (compliance)", () => {
+  it("libro_compras manda el período como query y omite vacío", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ period: "2026-07", rows: [], total_neto: "0", total_iva: "0", total: "0", pending_declaration: 0 }),
+    );
+    await invoke("libro_compras", { serverUrl: "http://s", period: "2026-07" });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://s/api/v1/reports/libro-compras?period=2026-07");
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ period: "2026-07", rows: [], total_neto: "0", total_iva: "0", total: "0", pending_declaration: 0 }),
+    );
+    await invoke("libro_compras", { serverUrl: "http://s", period: "" });
+    expect(fetchMock.mock.calls[1][0]).toBe("http://s/api/v1/reports/libro-compras");
+  });
+
+  it("set_po_invoice hace PATCH con los campos declarados", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ period: "2026-07", rows: [], total_neto: "0", total_iva: "0", total: "0", pending_declaration: 0 }),
+    );
+    await invoke("set_po_invoice", {
+      serverUrl: "http://s",
+      id: "purchase_order:1",
+      folio: "A-9912",
+      tipo: 33,
+      neto: "10000",
+      iva: "1900",
+      total: "11900",
+      date: "",
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://s/api/v1/purchase-orders/purchase_order:1/factura");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({
+      folio: "A-9912",
+      tipo: 33,
+      neto: "10000",
+      iva: "1900",
+      total: "11900",
+    });
+  });
+
+  it("iva_summary propaga el error del servidor", async () => {
+    storeToken("jwt-x");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: { code: "INVALID_INPUT", message: "período inválido: 2026-99 (usa YYYY-MM)" } }, 400),
+    );
+    await expect(invoke("iva_summary", { serverUrl: "http://s", period: "2026-99" })).rejects.toBe(
+      "período inválido: 2026-99 (usa YYYY-MM)",
+    );
+  });
+});
+
 describe("desktop-only degradation", () => {
   it("print_ticket and unknown commands reject with the controlled copy", async () => {
     await expect(invoke("print_ticket", { printer: "X" })).rejects.toBe(
