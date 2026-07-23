@@ -4,6 +4,9 @@ Cargo.lock.bak
 *.pdb
 .env
 .env.local
+# Config local del operador/dev (regla #8: JWT secret, CORS de dev, rutas de DB).
+# `config/default.toml` SÍ se commitea; local.toml NUNCA.
+config/local.toml
 data/
 *.db
 *.log
