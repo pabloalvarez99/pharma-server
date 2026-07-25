@@ -1,5 +1,22 @@
 # pharma-server — Project Context
 
+> ## 🌟 META GENERAL DEL PROYECTO (founder, 2026-07-23) — leer SIEMPRE, aplica a TODO el trabajo
+> **Un ERP de nivel de gran empresa, tan profesional y completo como el de las grandes,
+> pero accesible para CUALQUIER microempresa chilena** — la que hoy se maneja con
+> cuaderno, desde el celular, con internet. **El agente IA es la interfaz principal**: en
+> vez de tener que hacer las cosas ella misma, la dueña le HABLA al agente y le pide que
+> haga todo (vender, fiar, cobrar, reponer, sacar el IVA, ver quién le debe, etc.). El
+> ERP es la infraestructura invisible detrás del agente.
+> **Superficies objetivo — TODAS de primera clase**: web/PWA · desktop Windows nativo ·
+> **app nativa Android + iOS** (el celular es el dispositivo primario del usuario real).
+> El cliente ya es Tauri 2 → mismo frontend a móvil nativo; construir pensando en móvil
+> (táctil, pantalla chica, una mano) desde el diseño, no como afterthought.
+> **Vara de calidad = las grandes empresas** (Defontana, Bsale, Nubox…): muy profesional,
+> muy completo, cero dead-ends, confiable con plata real. Pero **gratis / freemium** y
+> **hablándole al agente**, no navegando menús. Cada cosa que se construya se mide contra:
+> "¿una microempresaria en su celular, sin manual, le pide esto al agente y funciona como
+> en un ERP caro?". Esta meta NO caduca — enmarca toda decisión de producto y técnica.
+
 > ## 🏗️ ETAPA REAL: ~1% COMPLETO — CONSTRUIR PROFUNDIDAD, NO PULIR SUPERFICIE (founder, 2026-07-21)
 > **El proyecto recién lleva ~1%.** La meta ahora NO es infra, dominios ni pulido de
 > puerta de entrada, sino **hacer el producto MUCHO más completo y profundo**: features
