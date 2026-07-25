@@ -1087,7 +1087,8 @@ fn ayuda(intent: &Intent) -> Answer {
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea el proveedor Farmaltda», «crea un producto Aspirina a \
          $1000», «cambia el precio de paracetamol a $1500», «repón 40 de paracetamol», \
-         «abre la caja con $50.000», «cierra la caja con $50.000», «registra una receta a \
+         «abre la caja con $50.000», «cierra la caja con $50.000», «abónale 5000 a doña \
+         Ana» (o «doña Ana me pagó 5000») para registrar un pago del fiado, «registra una receta a \
          Juan Pérez rut 12.345.678-9 de paracetamol», «crea una orden de compra de 10 \
          paracetamol a Farmaltda a $500», «recibe la orden de compra» o «cancela la orden \
          de compra».",
