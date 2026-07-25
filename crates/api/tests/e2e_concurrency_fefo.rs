@@ -137,6 +137,7 @@ async fn seed_sale_raw(
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     };
     domain::sales::service::post_sale(db, tenant, None, None, None, req).await
 }

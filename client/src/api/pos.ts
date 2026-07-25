@@ -61,8 +61,10 @@ export interface PosSaleResult {
 
 /** POST /api/v1/pos/sale (Bearer + fresh Idempotency-Key minted in Rust).
  *  `customer` is an optional record id — when present the server links the sale
- *  and awards loyalty points. Rejects with a `"CODE|message"` string — use
- *  {@link parseSaleError}. */
+ *  and awards loyalty points. `branch` es la sucursal activa: el stock se
+ *  descuenta de ESE local (V2); ausente = el server usa la sucursal de la caja
+ *  abierta y, si no hay, la casa matriz. Rejects with a `"CODE|message"` string
+ *  — use {@link parseSaleError}. */
 export async function posSale(
   serverUrl: string,
   items: PosItem[],
@@ -71,6 +73,7 @@ export async function posSale(
   cardAmount?: string,
   customer?: string,
   discount?: string,
+  branch?: string,
 ): Promise<PosSaleResult> {
   const res = await invoke<RawSaleResponse>("pos_sale", {
     serverUrl,
@@ -80,6 +83,7 @@ export async function posSale(
     cardAmount,
     customer,
     discount,
+    branch,
   });
   return {
     orderId: res?.order?.id ?? "",

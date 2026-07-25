@@ -31,6 +31,7 @@ import {
   type Receipt,
   type Dte,
   type LowStockAlert,
+  sucursalParaVenta,
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
@@ -976,6 +977,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         card,
         selectedCustomer?.id,
         discountArg,
+        sucursalParaVenta(),
       );
       const count = cart.reduce((n, l) => n + l.qty, 0);
       cart.length = 0;

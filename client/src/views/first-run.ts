@@ -242,6 +242,7 @@ export const ALL_MODULES = [
   "pos",
   "devoluciones",
   "inventory",
+  "sucursales",
   "importar",
   "caja",
   "clientes",
@@ -264,6 +265,7 @@ export const MODULE_LABELS: Readonly<Record<ModuleId, string>> = {
   pos: "Punto de venta",
   devoluciones: "Devoluciones",
   inventory: "Inventario",
+  sucursales: "Sucursales",
   importar: "Importar",
   caja: "Caja",
   clientes: "Clientes",
@@ -289,7 +291,9 @@ export function visibleModules(vertical: Vertical): ModuleId[] {
 export function visibleModulesForFeatures(f: RubroFeatures): ModuleId[] {
   return ALL_MODULES.filter((m) => {
     if (m === "recetas") return f.recetas;
-    if (m === "inventory" || m === "compras") return f.physicalStock;
+    // Sucursales mueve inventario físico entre locales: un rubro de servicios
+    // (sin stock) no tiene nada que transferir, igual que Inventario/Compras.
+    if (m === "inventory" || m === "compras" || m === "sucursales") return f.physicalStock;
     return true;
   });
 }

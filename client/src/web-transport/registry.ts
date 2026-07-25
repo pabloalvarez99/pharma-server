@@ -11,6 +11,7 @@ import { customerCommands } from "./commands/customers";
 import { purchaseCommands } from "./commands/purchases";
 import { dteCommands } from "./commands/dte";
 import { miscCommands } from "./commands/misc";
+import { sucursalCommands } from "./commands/sucursales";
 
 /** Error for commands with no pure-HTTP equivalent (ESC/POS printing, cash
  *  drawer, updater). Views already catch it and fall back (e.g. POS printing
@@ -29,6 +30,7 @@ export const registry: Record<string, CommandHandler> = {
   ...customerCommands,
   ...purchaseCommands,
   ...dteCommands,
+  ...sucursalCommands,
   ...miscCommands,
   // Desktop-only surface (commands/print.rs → escpos.rs spooling RAW to a
   // Windows printer; no browser equivalent).

@@ -32,7 +32,7 @@
 //! Public stable signatures so api router compiles today.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use rust_decimal::Decimal;
 use surrealdb::sql::{thing, Thing};
@@ -69,16 +69,13 @@ fn parse_tenant_thing(s: &str, table: &str) -> DomainResult<Thing> {
 /// assignment. Different tenants never share a lock, so multi-tenant
 /// throughput is unaffected; within a tenant the POS demand (a few cashiers)
 /// is orders of magnitude below the serialized ceiling.
-static SALE_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
-    OnceLock::new();
-
+///
+/// El lock vive en [`crate::locks`] porque desde V2 (stock por sucursal) NO es
+/// exclusivo de la venta: la transferencia entre sucursales escribe las mismas
+/// filas (`product`, `stock_movement`, `product_branch_stock`) y debe
+/// serializarse contra la venta, no en paralelo a ella.
 fn tenant_sale_lock(tenant: &Thing) -> Arc<AsyncMutex<()>> {
-    let locks = SALE_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    let mut guard = locks.lock().expect("SALE_LOCKS mutex poisoned");
-    guard
-        .entry(tenant.to_string())
-        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-        .clone()
+    crate::locks::tenant_stock_lock(tenant)
 }
 
 /// Max commit retries on a retryable MVCC conflict before surfacing the DB
@@ -215,6 +212,23 @@ pub async fn post_sale(
         ));
     }
 
+    // Sucursal de la venta (V2, migración 0041). Precedencia:
+    //   1. `req.branch` — el POS manda la sucursal activa del selector, y el
+    //      agente puede decir "vendé en el local 2".
+    //   2. la sesión de caja abierta del cajero — "la venta descuenta de la
+    //      sucursal de la caja" sin que el cliente tenga que mandar nada.
+    //   3. casa matriz (`None`) — negocio de un solo local: se comporta igual
+    //      que antes de V2, que es lo que hace este cambio compatible hacia
+    //      atrás con todo instalado hoy.
+    let branch = match req.branch.as_deref() {
+        Some(b) => crate::stock::service::parse_branch(Some(b))?,
+        None => match sold_by {
+            Some(u) => crate::cash_register::service::open_session_branch(db, tenant, u).await?,
+            None => None,
+        },
+    };
+    crate::stock::service::ensure_branch(db, tenant, branch.as_ref(), "la sucursal").await?;
+
     // === Serialized, retry-on-conflict critical section (BUG-003/004) ===
     // The per-tenant lock removes the sale-vs-sale SurrealKv write-write
     // conflict (and the partial-write corruption of `product.stock` it
@@ -244,6 +258,20 @@ pub async fn post_sale(
                 .iter()
                 .map(|p| (p.id.to_string(), (p.stock, p.physical_stock)))
                 .collect();
+            // On-hand del BUCKET de la sucursal donde se vende (migración 0041),
+            // en una sola query para no pagar N round-trips en el hot path. Un
+            // producto sin fila cuenta como 0: esa sucursal nunca recibió nada.
+            // Se re-lee en cada intento, igual que el stock global.
+            let branch_stock = crate::stock::repo::branch_stock_qty_many(
+                db,
+                tenant,
+                &product_things,
+                branch.as_ref(),
+            )
+            .await?;
+            // Acumulador por producto: una venta puede traer el mismo SKU en
+            // dos líneas y la suma no puede pasarse del saldo de la sucursal.
+            let mut taken: HashMap<String, i64> = HashMap::new();
             let mut physical: Vec<bool> = Vec::with_capacity(req.items.len());
             for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
                 let (stock, is_physical) = by_id
@@ -264,6 +292,19 @@ pub async fn post_sale(
                 }
                 if is_physical && stock < req_item.quantity {
                     return Err(DomainError::InsufficientStock);
+                }
+                // Aislamiento por sucursal: el stock global puede alcanzar y aun
+                // así NO se puede vender, porque las unidades están en otro
+                // local. Sin este chequeo el bucket de la sucursal quedaría
+                // negativo y "vender en A" consumiría lo de B.
+                if is_physical {
+                    let key = pthing.to_string();
+                    let here = branch_stock.get(&key).copied().unwrap_or(0);
+                    let acc = taken.entry(key).or_insert(0);
+                    *acc += req_item.quantity;
+                    if here < *acc {
+                        return Err(DomainError::InsufficientStock);
+                    }
                 }
                 physical.push(is_physical);
             }
@@ -298,6 +339,7 @@ pub async fn post_sale(
                 sold_by,
                 sold_by_name,
                 customer.as_ref(),
+                branch.as_ref(),
                 &req,
                 &fefo_plans,
                 &physical,
@@ -699,6 +741,9 @@ pub async fn transition_web_order(
     let release = to == "cancelled" || to == "completed";
     let decrement = to == "completed";
     let set_ready = to == "ready_for_pickup";
+    // El retiro descuenta del local donde se preparó el pedido: la sucursal
+    // quedó estampada en la orden al reservarla. `None` = casa matriz.
+    let branch = crate::stock::service::parse_branch(order.branch.as_deref())?;
 
     let mut attempt = 0usize;
     loop {
@@ -708,6 +753,7 @@ pub async fn transition_web_order(
             &order_thing,
             to,
             &items,
+            branch.as_ref(),
             release,
             decrement,
             set_ready,
@@ -861,6 +907,11 @@ pub async fn create_refund(
     let mut restock_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
         vec![None; req.items.len()];
 
+    // Sucursal a la que vuelve la mercadería: la de la venta original. Una
+    // devolución suelta (sin orden) repone en la casa matriz. Se resuelve dentro
+    // del bloque de la orden más abajo.
+    let mut refund_branch: Option<Thing> = None;
+
     // === Serialized, per-tenant critical section (refund integrity) ===
     // The cumulative over-refund guard below is a check-then-act TOCTOU: it
     // reads what was already refunded for this order (`sum_prior_refunds`) and
@@ -878,9 +929,12 @@ pub async fn create_refund(
     let _refund_guard = sale_lock.lock().await;
 
     if let Some(ord) = order_thing.as_ref() {
-        let (_order, sold_items) = repo::get_order(db, tenant, ord)
+        let (order_row, sold_items) = repo::get_order(db, tenant, ord)
             .await?
             .ok_or(DomainError::NotFound)?;
+        // La devolución repone EN LA SUCURSAL DONDE SE VENDIÓ: devolver en el
+        // local A no puede inflar el stock del local B.
+        refund_branch = crate::stock::service::parse_branch(order_row.branch.as_deref())?;
         let mut sold: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
         // Consumed FEFO lots per product (earliest-expiry first, as recorded by
         // the sale), used to plan where returned units go back.
@@ -980,6 +1034,7 @@ pub async fn create_refund(
         tenant,
         processed_by,
         order_thing.as_ref(),
+        refund_branch.as_ref(),
         &req,
         &restock_plans,
         total,

@@ -16,6 +16,7 @@ import {
   closeCashSession,
   type CashSession,
   type CashCloseSummary,
+  sucursalParaVenta,
 } from "../api";
 import { clp, toNumber } from "../format";
 import { kpiSkeleton, asMessage, escapeHtml } from "./view-blocks";
@@ -220,7 +221,16 @@ function openModal(
     confirmBtn.classList.add("loading");
     try {
       // Send the amount as a plain integer string — server parses Decimal.
-      await openCashSession(serverUrl, name, String(Math.trunc(n)));
+      // La caja se abre EN la sucursal activa del shell (V2): desde ahí la venta
+      // sabe de qué local descontar sin que el POS mande nada.
+      await openCashSession(
+        serverUrl,
+        name,
+        String(Math.trunc(n)),
+        undefined,
+        undefined,
+        sucursalParaVenta(),
+      );
       close();
       await onDone();
     } catch (err) {

@@ -84,6 +84,7 @@ fn cash_sale(product_id: &str, name: &str, price: &str, qty: i64) -> smodel::Pos
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     }
 }
 
@@ -188,6 +189,8 @@ async fn caja_actual_reports_expected_drawer() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },

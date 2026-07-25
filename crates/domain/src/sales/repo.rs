@@ -65,6 +65,10 @@ struct OrderRow {
     expires_at: Option<DateTime<Utc>>,
     #[serde(default)]
     ready_at: Option<DateTime<Utc>>,
+    /// Sucursal de la venta (migración 0041). `default` porque las órdenes
+    /// anteriores a la migración no tienen el campo.
+    #[serde(default)]
+    branch: Option<Thing>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -92,6 +96,7 @@ impl From<OrderRow> for OrderDto {
             fulfillment_type: r.fulfillment_type,
             expires_at: r.expires_at,
             ready_at: r.ready_at,
+            branch: r.branch.map(|t| t.to_string()),
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -248,6 +253,12 @@ pub struct AppliedSale {
 /// siempre); `false` = servicio (`product.physical_stock = false`) → la línea
 /// crea sólo su `order_item`, sin tocar inventario ni emitir movimiento. Un
 /// servicio nunca trae `fefo_plan`, así que el bloque FEFO no se ve afectado.
+///
+/// `branch` (migración 0041) es la sucursal donde se vende: se estampa en la
+/// `order` (reportes por local) y en CADA `stock_movement`, que es lo que hace
+/// que el evento `product_branch_stock_maint` descuente del bucket correcto.
+/// `None` = casa matriz / sitio único. El caller ya validó que la sucursal
+/// existe y que tiene stock suficiente EN ESE BUCKET.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_sale(
     db: &Db,
@@ -255,6 +266,7 @@ pub async fn apply_sale(
     sold_by: Option<&Thing>,
     sold_by_name: Option<&str>,
     customer: Option<&Thing>,
+    branch: Option<&Thing>,
     req: &PosSaleRequest,
     fefo_plans: &[Option<Vec<FefoAllocation>>],
     physical: &[bool],
@@ -276,8 +288,8 @@ pub async fn apply_sale(
             payment_method=$pm, subtotal=$sub, discount=$disc, total=$tot, \
             cash_amount=$cash, card_amount=$card, customer=$cust, \
             customer_name=$cname, customer_phone=$cphone, sold_by=$sb, \
-            sold_by_name=$sbname, notes=$notes, external_ref=$ext \
-            RETURN AFTER; ",
+            sold_by_name=$sbname, notes=$notes, external_ref=$ext, \
+            branch=$br RETURN AFTER; ",
     );
     // Per item we always emit the `order_item` CREATE; a *physical* line also
     // emits the `product.stock` UPDATE + `stock_movement` CREATE. A service line
@@ -305,7 +317,7 @@ pub async fn apply_sale(
             q.push_str(&format!(
                 "CREATE stock_movement SET tenant=$t, product=$p{i}, \
                     delta = 0 - $qty{i}, reason='sale', \
-                    admin=$sb, ref=$ref RETURN AFTER; ",
+                    admin=$sb, ref=$ref, branch=$br RETURN AFTER; ",
             ));
             stmt_idx += 1;
             Some(mov_slot)
@@ -346,6 +358,7 @@ pub async fn apply_sale(
         .bind(("sbname", sold_by_name.map(str::to_string)))
         .bind(("notes", req.notes.clone()))
         .bind(("ext", req.external_ref.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("ref", order_thing.to_string()));
     for (i, item) in req.items.iter().enumerate() {
         let pid = surrealdb::sql::thing(&item.product)
@@ -526,12 +539,20 @@ pub struct AppliedRefund {
 /// originating product is not batch-tracked) → `product.stock` bump only,
 /// legacy behavior. The batch increments are grouped at the tail so the
 /// per-item result indices stay fixed.
+///
+/// `branch` (migración 0041) es la sucursal a la que vuelve la mercadería: la
+/// de la venta original cuando la devolución referencia una orden, y la casa
+/// matriz cuando es una devolución suelta. Va estampada en cada
+/// `stock_movement(reason='return')`, así el evento
+/// `product_branch_stock_maint` repone en el local correcto — devolver en el
+/// local A no puede inflar el stock del local B.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_refund(
     db: &Db,
     tenant: &Thing,
     processed_by: Option<&Thing>,
     order: Option<&Thing>,
+    branch: Option<&Thing>,
     req: &NewDevolucion,
     restock_plans: &[Option<Vec<FefoAllocation>>],
     total: Decimal,
@@ -568,8 +589,8 @@ pub async fn apply_refund(
             stmt += 1;
             q.push_str(&format!(
                 "CREATE stock_movement SET tenant=$t, product=$p{i}, \
-                    delta=$qty{i}, reason='return', admin=$by, ref=$devref \
-                    RETURN AFTER; ",
+                    delta=$qty{i}, reason='return', admin=$by, ref=$devref, \
+                    branch=$br RETURN AFTER; ",
             ));
             mov_idx.push(Some(stmt));
             stmt += 1;
@@ -607,6 +628,7 @@ pub async fn apply_refund(
         .bind(("tot", dec_val(total)))
         .bind(("mr", req.metodo_reembolso.clone()))
         .bind(("by", processed_by.cloned()))
+        .bind(("br", branch.cloned()))
         .bind(("dev", dev_thing.clone()))
         .bind(("devref", dev_thing.to_string()));
     for (i, it) in req.items.iter().enumerate() {
@@ -1222,6 +1244,13 @@ pub async fn get_web_order(
 /// reserved units (`stock_reserved -= qty`, floored at 0); `decrement`
 /// additionally consumes `stock` (the `completed` pickup). `set_ready`
 /// stamps `ready_at` (the `ready_for_pickup` transition).
+///
+/// El retiro (`decrement`) emite además un `stock_movement(reason='web_pickup')`
+/// por línea, con la `branch` de la orden. Antes bajaba `product.stock` sin fila
+/// de auditoría: eso rompía el invariante raíz
+/// `product.stock = Σ stock_movement.delta` (agujero de auditoría preexistente)
+/// y, desde la migración 0041, habría desincronizado
+/// `Σ product_branch_stock == product.stock`.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_web_transition(
     db: &Db,
@@ -1229,6 +1258,7 @@ pub async fn apply_web_transition(
     order: &Thing,
     to: &str,
     items: &[(Thing, i64)],
+    branch: Option<&Thing>,
     release: bool,
     decrement: bool,
     set_ready: bool,
@@ -1246,7 +1276,10 @@ pub async fn apply_web_transition(
                 q.push_str(&format!(
                     "UPDATE $p{i} SET \
                         stock_reserved = math::max([stock_reserved - $q{i}, 0]), \
-                        stock = stock - $q{i} WHERE tenant = $t; ",
+                        stock = stock - $q{i} WHERE tenant = $t; \
+                     CREATE stock_movement SET tenant=$t, product=$p{i}, \
+                        delta = 0 - $q{i}, reason='web_pickup', ref=$oref, \
+                        branch=$br; ",
                 ));
             } else {
                 q.push_str(&format!(
@@ -1263,6 +1296,8 @@ pub async fn apply_web_transition(
         .query(q)
         .bind(("t", tenant.clone()))
         .bind(("ord", order.clone()))
+        .bind(("oref", order.to_string()))
+        .bind(("br", branch.cloned()))
         .bind(("to", to.to_string()));
     if release {
         for (i, (p, qty)) in items.iter().enumerate() {

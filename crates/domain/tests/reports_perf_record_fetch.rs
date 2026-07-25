@@ -92,6 +92,7 @@ async fn sell(db: &Db, tenant: &Thing, product_id: &str, name: &str, qty: i64) {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(db, tenant, None, None, None, req)
         .await

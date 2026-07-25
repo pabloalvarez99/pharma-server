@@ -2470,6 +2470,8 @@ pub async fn execute(
                 user,
                 OpenSessionInput {
                     register_name: "caja-1".into(),
+                    register: None,
+                    branch: None,
                     opening_cash,
                     notes: Some("Apertura registrada por el agente".into()),
                 },
