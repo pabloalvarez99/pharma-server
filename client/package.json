@@ -13,7 +13,12 @@
     "e2e": "node e2e/run.mjs",
     "gate": "npm run build && npm run test && npm run build:web && npm run e2e",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "android:init": "tauri android init",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build --apk",
+    "ios:init": "tauri ios init",
+    "ios:dev": "tauri ios dev"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
