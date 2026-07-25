@@ -29,6 +29,10 @@ async function openCashSession(a: CommandArgs): Promise<unknown> {
     opening_cash: a.openingCash,
   };
   putStr(body, "notes", a.notes);
+  // La caja se abre EN un local (V2): `register` manda (la caja física ya sabe
+  // en qué sucursal está); `branch` es el fallback de la caja suelta.
+  putStr(body, "register", a.register);
+  if (a.branch && a.branch !== "none") body.branch = a.branch;
   const resp = await doFetch(`${b}/api/v1/cash-sessions`, {
     method: "POST",
     headers: authHeaders(JSON_HEADERS),

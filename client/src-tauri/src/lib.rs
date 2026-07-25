@@ -23,7 +23,7 @@ use tauri::Manager;
 use commands::{
     assist, audit, auth, cash, catalog, compliance, credit, customers, dte, expenses, license, pos,
     prescriptions,
-    print, purchases, reports, rubro, seed, settings,
+    print, purchases, reports, rubro, seed, settings, sucursales,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,6 +57,11 @@ pub fn run() {
             cash::open_cash_session,
             cash::cash_arqueo,
             cash::close_cash_session,
+            sucursales::sucursales,
+            sucursales::cajas,
+            sucursales::stock_por_sucursal,
+            sucursales::stock_por_sucursal_reporte,
+            sucursales::transferir_stock,
             settings::get_setting,
             settings::set_setting,
             compliance::libro_compras,

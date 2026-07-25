@@ -203,6 +203,12 @@ pub struct CashSession {
     pub id: String,
     pub user: String,
     pub register_name: String,
+    /// Caja física y sucursal de la sesión (V2, migración 0041). Ausentes en
+    /// sesiones abiertas antes de la migración y en cajas sueltas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub opening_cash: String,
     pub opening_notes: Option<String>,
     pub closing_cash_counted: Option<String>,

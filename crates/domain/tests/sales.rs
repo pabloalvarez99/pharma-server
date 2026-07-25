@@ -90,6 +90,7 @@ async fn pos_sale_atomic_decrements_stock_and_creates_movement() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -130,6 +131,7 @@ async fn pos_sale_rejects_insufficient_stock() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -164,6 +166,7 @@ async fn pos_sale_rejects_invalid_payment_method() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -225,6 +228,7 @@ async fn pos_sale_awards_loyalty_when_customer_set() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -276,6 +280,7 @@ async fn pos_sale_loyalty_rate_setting_overrides_default() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -316,6 +321,7 @@ async fn pos_sale_tenant_isolation() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &t2, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -382,6 +388,7 @@ async fn pos_sale_batch_tracked_fefo_decrements_earliest_expiry() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -456,6 +463,7 @@ async fn pos_sale_batch_tracked_rejects_when_only_expired_lots_remain() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -494,6 +502,7 @@ async fn pos_sale_non_batch_tracked_falls_back_to_product_stock() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -533,6 +542,7 @@ async fn sell_one(
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(db, tenant, Some(admin_t), Some("admin"), None, req)
         .await
@@ -621,6 +631,7 @@ async fn pos_sale_with_prescription_persists_receta_linked_to_customer() {
         customer_phone: None,
         notes: None,
         external_ref: None,
+        branch: None,
         prescriptions: vec![PosPrescriptionInput {
             product: Some(p.id.clone()),
             patient_name: "Juan".into(),
@@ -662,6 +673,7 @@ async fn pos_sale_controlled_prescription_requires_doctor_data() {
         customer_phone: None,
         notes: None,
         external_ref: None,
+        branch: None,
         prescriptions: vec![PosPrescriptionInput {
             product: Some(p.id.clone()),
             patient_name: "Ana".into(),
@@ -1009,6 +1021,7 @@ async fn sale_of_variant_decrements_only_that_variant() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -1066,6 +1079,7 @@ async fn sale_rejects_insufficient_stock_on_variant() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -1117,6 +1131,7 @@ async fn sale_rejects_parent_when_has_variants() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let err = sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await
@@ -1158,6 +1173,7 @@ async fn plain_product_without_variants_still_sells() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&admin_t), Some("admin"), None, req)
         .await

@@ -9,6 +9,7 @@ export * from "./reports";
 export * from "./rubro";
 export * from "./pos";
 export * from "./cash";
+export * from "./sucursales";
 export * from "./settings";
 export * from "./customers";
 export * from "./credit";

@@ -22,10 +22,12 @@ pub mod rubro;
 pub mod sales;
 pub mod seed;
 pub mod settings;
+pub mod stock;
 pub mod web_keys;
 
 pub mod errors;
 pub mod invariants;
+pub mod locks;
 pub mod money;
 
 pub use errors::{DomainError, DomainResult};

@@ -159,6 +159,7 @@ pub async fn seed_sale(
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     };
     domain::sales::service::post_sale(db, tenant, sold_by, None, None, req)
         .await
@@ -176,6 +177,8 @@ pub async fn seed_cash_session(
     use domain::cash_register::model::OpenSessionInput;
     let input = OpenSessionInput {
         register_name: register_name.to_string(),
+        register: None,
+        branch: None,
         opening_cash: opening.parse::<Decimal>().expect("opening"),
         notes: None,
     };

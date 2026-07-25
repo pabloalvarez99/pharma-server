@@ -23,6 +23,7 @@ pub async fn pos_sale(
     card_amount: Option<String>,
     customer: Option<String>,
     discount: Option<String>,
+    branch: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if items.is_empty() {
         return Err("|El carrito está vacío.".to_string());
@@ -49,6 +50,12 @@ pub async fn pos_sale(
     // Attach the customer record id so the server awards loyalty for the sale.
     if let Some(c) = customer.filter(|s| !s.is_empty()) {
         body["customer"] = serde_json::Value::String(c);
+    }
+    // Sucursal activa del shell: el stock se descuenta del bucket de ESE local
+    // (V2). Sin esto el server cae a la sucursal de la caja abierta y, si no hay,
+    // a la casa matriz — que es el comportamiento correcto en un solo local.
+    if let Some(b) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(b);
     }
 
     let key = uuid::Uuid::new_v4().to_string();

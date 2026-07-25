@@ -67,6 +67,8 @@ async fn open_then_close_with_sales_and_movements_computes_expected_and_discrepa
         &user,
         OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -98,6 +100,7 @@ async fn open_then_close_with_sales_and_movements_computes_expected_and_discrepa
             notes: None,
             external_ref: None,
             prescriptions: vec![],
+            branch: None,
         };
         sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
             .await
@@ -167,6 +170,8 @@ async fn cannot_open_second_session_for_same_user() {
         &user,
         OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -179,6 +184,8 @@ async fn cannot_open_second_session_for_same_user() {
         &user,
         OpenSessionInput {
             register_name: "caja-2".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -209,6 +216,8 @@ async fn concurrent_open_same_user_yields_single_session() {
                 &user,
                 OpenSessionInput {
                     register_name: format!("caja-{i}"),
+                    register: None,
+                    branch: None,
                     opening_cash: dec("5000"),
                     notes: None,
                 },
@@ -255,6 +264,8 @@ async fn movement_on_closed_session_rejected() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -297,6 +308,8 @@ async fn close_already_closed_is_conflict() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -342,6 +355,8 @@ async fn concurrent_close_same_session_closes_once() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -399,6 +414,8 @@ async fn concurrent_movement_and_close_keep_drawer_consistent() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -475,6 +492,8 @@ async fn invalid_movement_type_or_amount_rejected() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -529,6 +548,7 @@ fn cash_sale(product_id: &str, name: &str, price: &str) -> PosSaleRequest {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     }
 }
 
@@ -544,6 +564,8 @@ async fn cash_sales_running_matches_scan_after_refund() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -638,6 +660,8 @@ async fn cash_sales_running_is_tenant_isolated() {
         &user_b,
         OpenSessionInput {
             register_name: "cb".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -650,6 +674,8 @@ async fn cash_sales_running_is_tenant_isolated() {
         &user_a,
         OpenSessionInput {
             register_name: "ca".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -703,6 +729,8 @@ async fn cross_tenant_isolation_for_sessions() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },

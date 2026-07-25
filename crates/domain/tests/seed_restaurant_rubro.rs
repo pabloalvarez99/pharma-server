@@ -179,6 +179,7 @@ async fn restaurant_sells_plato_and_insumo_end_to_end() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin), Some("admin"), None, req)
         .await

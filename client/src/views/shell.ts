@@ -7,11 +7,17 @@ import {
   licenseStatus,
   serverHealth,
   logout,
+  listSucursales,
+  sucursalActiva,
+  setSucursalActiva,
+  CASA_MATRIZ,
   type SessionInfo,
   type LicenseSummary,
   type HealthInfo,
+  type Sucursal,
 } from "../api";
 import { renderInventory } from "./inventory";
+import { renderSucursales } from "./sucursales";
 import { renderPos } from "./pos";
 import { renderReports } from "./reports";
 import { renderDashboard } from "./dashboard";
@@ -40,6 +46,7 @@ const NAV = [
   { id: "pos", label: "POS", hint: "Punto de venta" },
   { id: "devoluciones", label: "Devoluciones", hint: "Reembolsos de ventas" },
   { id: "inventory", label: "Inventario", hint: "Stock y lotes" },
+  { id: "sucursales", label: "Sucursales", hint: "Stock por local y traspasos" },
   { id: "importar", label: "Importar", hint: "Importar/exportar CSV" },
   { id: "caja", label: "Caja", hint: "Apertura y arqueo" },
   { id: "clientes", label: "Clientes", hint: "Búsqueda y fidelidad" },
@@ -105,6 +112,9 @@ function dispatchNav(host: HTMLElement, id: NavId, serverUrl: string): void {
       break;
     case "inventory":
       renderInventory(host, serverUrl);
+      break;
+    case "sucursales":
+      renderSucursales(host, serverUrl);
       break;
     case "caja":
       renderCaja(host, serverUrl);
@@ -181,10 +191,16 @@ export function renderShell(
       <main class="content">
         <header class="topbar">
           <div class="topbar-id">
-            <span class="muted">Sucursal</span>
+            <span class="muted">Negocio</span>
             <strong>${prettyTenant(session.tenant_id)}</strong>
           </div>
           <div class="topbar-meta">
+            <label class="branch-switch" id="branch-switch" hidden>
+              <span class="muted">Estás en</span>
+              <select id="branch-select" aria-label="Sucursal en la que estás trabajando">
+                <option value="${CASA_MATRIZ}">Casa matriz</option>
+              </select>
+            </label>
             <span class="muted topbar-user">${session.user_id}</span>
             <span id="tier-badge" class="badge tier-free">…</span>
             <span id="health" class="health">${healthDot(null)}</span>
@@ -217,11 +233,20 @@ export function renderShell(
     onLogout();
   });
 
+  // Cambiar de sucursal re-renderiza la vista actual: el stock, el POS y los
+  // reportes son distintos en cada local, así que quedarse con lo de la anterior
+  // sería mentirle al operador.
+  window.addEventListener("sucursal-cambiada", () => {
+    const active = root.querySelector<HTMLButtonElement>(".nav-item.active");
+    if (active) dispatchNav(host, active.dataset.nav as NavId, serverUrl);
+  });
+
   // Initial view + topbar hydration.
   dispatchNav(host, LANDING, serverUrl);
   void hydrateLicense(root, serverUrl);
   void hydrateHealth(root, serverUrl);
   void hydrateBranding(root, serverUrl);
+  void hydrateSucursales(root, serverUrl);
   installAskShortcut();
   installCommandPalette(); // global Ctrl/Cmd+K palette + `?` cheatsheet (idempotent)
 }
@@ -281,6 +306,48 @@ async function hydrateBranding(root: HTMLElement, serverUrl: string): Promise<vo
     const id = btn.dataset.nav;
     if (id && !visible.has(id)) btn.remove();
   });
+}
+
+// Selector "Estás en <sucursal>" del topbar. Sólo aparece si el negocio tiene
+// al menos una sucursal creada: un local único no necesita elegir nada y no debe
+// ver un control que no le sirve (cero dead-ends). La sucursal elegida manda el
+// stock que ve el POS y de dónde descuenta la venta.
+async function hydrateSucursales(root: HTMLElement, serverUrl: string): Promise<void> {
+  const wrap = root.querySelector<HTMLLabelElement>("#branch-switch");
+  const select = root.querySelector<HTMLSelectElement>("#branch-select");
+  if (!wrap || !select) return;
+
+  let sucursales: Sucursal[] = [];
+  try {
+    sucursales = await listSucursales(serverUrl, true);
+  } catch {
+    return; // servidor viejo o sin permiso: el shell sigue igual que siempre
+  }
+  if (sucursales.length === 0) return;
+
+  select.innerHTML =
+    `<option value="${CASA_MATRIZ}">Casa matriz</option>` +
+    sucursales
+      .map((s) => `<option value="${s.id}">${escapeAttr(s.name)}</option>`)
+      .join("");
+
+  // Si la sucursal guardada ya no existe (la archivaron), volver a casa matriz
+  // en vez de dejar el selector en un valor fantasma.
+  const saved = sucursalActiva();
+  const known = saved === CASA_MATRIZ || sucursales.some((s) => s.id === saved);
+  select.value = known ? saved : CASA_MATRIZ;
+  if (!known) setSucursalActiva(CASA_MATRIZ);
+
+  select.addEventListener("change", () => setSucursalActiva(select.value));
+  wrap.hidden = false;
+}
+
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function hydrateLicense(root: HTMLElement, serverUrl: string): Promise<void> {

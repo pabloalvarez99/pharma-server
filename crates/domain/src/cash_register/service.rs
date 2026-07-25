@@ -85,6 +85,12 @@ struct SessionRow {
     id: Thing,
     user: Thing,
     register_name: String,
+    /// `default` porque las sesiones abiertas antes de la migración 0041 no
+    /// tienen estos campos.
+    #[serde(default)]
+    register: Option<Thing>,
+    #[serde(default)]
+    branch: Option<Thing>,
     opening_cash: Decimal,
     opening_notes: Option<String>,
     closing_cash_counted: Option<Decimal>,
@@ -102,6 +108,8 @@ impl From<SessionRow> for CashSessionDto {
             id: r.id.to_string(),
             user: r.user.to_string(),
             register_name: r.register_name,
+            register: r.register.map(|t| t.to_string()),
+            branch: r.branch.map(|t| t.to_string()),
             opening_cash: r.opening_cash,
             opening_notes: r.opening_notes,
             closing_cash_counted: r.closing_cash_counted,
@@ -151,15 +159,46 @@ pub async fn open_session(
             "el usuario ya tiene una caja abierta".into(),
         ));
     }
+    // Sucursal de la caja (V2, migración 0041). La caja física manda: si el
+    // cajero elige un `register`, la sesión hereda la sucursal DONDE ESA CAJA
+    // ESTÁ, y el nombre de la caja se toma del record (no del texto libre) para
+    // que el arqueo diga lo mismo que la configuración. Sin `register`, se
+    // acepta una sucursal explícita. Sin ninguno de los dos: casa matriz, que es
+    // el comportamiento de todo negocio de un solo local.
+    let (register, branch, register_name) = match input.register.as_deref() {
+        Some(rid) => {
+            let rt =
+                thing(rid).map_err(|_| DomainError::Invalid(format!("caja inválida: {rid}")))?;
+            let reg = crate::branches::repo::get_register(db, tenant, &rt)
+                .await?
+                .ok_or_else(|| DomainError::Invalid("la caja elegida no existe".into()))?;
+            if !reg.active {
+                return Err(DomainError::Invalid(
+                    "la caja elegida está desactivada".into(),
+                ));
+            }
+            let b = crate::stock::service::parse_branch(reg.branch.as_deref())?;
+            (Some(rt), b, reg.name)
+        }
+        None => {
+            let b = crate::stock::service::parse_branch(input.branch.as_deref())?;
+            crate::stock::service::ensure_branch(db, tenant, b.as_ref(), "la sucursal").await?;
+            (None, b, input.register_name)
+        }
+    };
+
     let mut r = db
         .query(
             "CREATE cash_register_session SET tenant=$t, user=$u, \
-             register_name=$rn, opening_cash=$oc, opening_notes=$nt, \
+             register_name=$rn, register=$rg, branch=$br, \
+             opening_cash=$oc, opening_notes=$nt, \
              status='open' RETURN AFTER",
         )
         .bind(("t", tenant.clone()))
         .bind(("u", user.clone()))
-        .bind(("rn", input.register_name))
+        .bind(("rn", register_name))
+        .bind(("rg", register))
+        .bind(("br", branch))
         .bind(("oc", dec_val(input.opening_cash)))
         .bind(("nt", input.notes))
         .await?
@@ -167,6 +206,37 @@ pub async fn open_session(
     let row: Option<SessionRow> = r.take(0)?;
     row.map(Into::into)
         .ok_or_else(|| DomainError::Other(anyhow::anyhow!("open session returned 0 rows")))
+}
+
+/// Sucursal de la sesión de caja ABIERTA de un cajero, si tiene una.
+///
+/// Es la fuente #2 de la sucursal de una venta (después del `branch` explícito
+/// del request): con esto "la venta descuenta de la sucursal de la caja" sale
+/// solo, sin que el POS tenga que mandar nada. `Ok(None)` tanto si el cajero no
+/// tiene caja abierta como si la tiene en la casa matriz — en ambos casos la
+/// venta cae al bucket casa matriz, que es lo correcto.
+pub async fn open_session_branch(
+    db: &Db,
+    tenant: &Thing,
+    user: &Thing,
+) -> DomainResult<Option<Thing>> {
+    #[derive(Deserialize)]
+    struct Row {
+        #[serde(default)]
+        branch: Option<Thing>,
+    }
+    let mut r = db
+        .query(
+            "SELECT branch FROM cash_register_session \
+             WHERE tenant=$t AND user=$u AND status='open' \
+             ORDER BY opened_at DESC LIMIT 1",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("u", user.clone()))
+        .await?
+        .check()?;
+    let row: Option<Row> = r.take(0)?;
+    Ok(row.and_then(|r| r.branch))
 }
 
 pub async fn list_sessions(

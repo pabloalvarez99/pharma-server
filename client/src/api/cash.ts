@@ -16,6 +16,10 @@ export interface CashSession {
   opened_at: string;
   closed_at: string | null;
   status: string; // "open" | "closed"
+  /** Caja física y sucursal donde se abrió (V2). Ausentes en sesiones previas
+   *  a la migración 0041 y en cajas sueltas de un negocio de un solo local. */
+  register?: string | null;
+  branch?: string | null;
 }
 
 /** Close summary / arqueo payload (`CloseSummary`). Money fields are STRINGS. */
@@ -35,18 +39,25 @@ export function cashSessions(
   return invoke<CashSession[]>("cash_sessions", { serverUrl, status, limit });
 }
 
-/** POST /api/v1/cash-sessions (Bearer) — open a register. `openingCash` STRING. */
+/** POST /api/v1/cash-sessions (Bearer) — open a register. `openingCash` STRING.
+ *  `register` (caja física, `register:<key>`) manda sobre `branch`: la caja ya
+ *  sabe en qué local está. `branch` es el fallback de la caja suelta. De acá sale
+ *  la sucursal que hereda la venta. */
 export function openCashSession(
   serverUrl: string,
   registerName: string,
   openingCash: string,
   notes?: string,
+  register?: string,
+  branch?: string,
 ): Promise<CashSession> {
   return invoke<CashSession>("open_cash_session", {
     serverUrl,
     registerName,
     openingCash,
     notes,
+    register,
+    branch,
   });
 }
 

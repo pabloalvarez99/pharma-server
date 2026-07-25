@@ -22,3 +22,4 @@ pub mod reports;
 pub mod rubro;
 pub mod seed;
 pub mod settings;
+pub mod sucursales;

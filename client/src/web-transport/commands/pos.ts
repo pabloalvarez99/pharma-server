@@ -28,6 +28,8 @@ async function posSale(a: CommandArgs): Promise<unknown> {
   putStr(body, "card_amount", a.cardAmount);
   putStr(body, "discount", a.discount);
   putStr(body, "customer", a.customer);
+  // Sucursal activa del shell (V2): descuenta del stock de ESE local.
+  if (a.branch && a.branch !== "none") body.branch = a.branch;
   const resp = await doFetchCoded(`${b}/api/v1/pos/sale`, {
     method: "POST",
     headers: authHeadersCoded({ ...JSON_HEADERS, "Idempotency-Key": crypto.randomUUID() }),

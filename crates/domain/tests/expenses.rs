@@ -119,6 +119,8 @@ async fn cash_expense_with_open_session_posts_retiro_reflected_in_arqueo() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -183,6 +185,8 @@ async fn cash_expense_without_session_does_not_move_a_drawer() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -230,6 +234,8 @@ async fn cash_expense_racing_close_never_creates_phantom_faltante() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -390,6 +396,7 @@ async fn sales_daily_aggregates_orders_per_utc_date_excluding_refunded() {
             notes: None,
             external_ref: None,
             prescriptions: vec![],
+            branch: None,
         };
         sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
             .await
@@ -603,6 +610,7 @@ async fn margins_daily_revenue_cost_margin_and_unknown_cost() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
@@ -684,6 +692,7 @@ async fn top_products_ranking_abc_and_limit() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
@@ -792,6 +801,7 @@ async fn stock_rotation_turnover_days_and_oos() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
