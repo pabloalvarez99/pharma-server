@@ -32,10 +32,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-# Signed auto-updates (P0.1): without this every fix means a manual reinstall
-# on every node. Pubkey lives in tauri.conf.json; the private key stays OFF
-# this machine's repo (client/keys/, gitignored).
-tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # rustls-tls: no OpenSSL / no system C toolchain dependency on Windows. Matches
@@ -49,6 +45,19 @@ uuid = { version = "1", features = ["v4"] }
 # debug-printed (`secrecy::SecretString` wraps both the session token and the
 # password/passphrase command arguments).
 secrecy = { version = "0.10", features = ["serde"] }
+
+# Signed auto-updates (P0.1): without this every fix means a manual reinstall
+# on every node. Pubkey lives in tauri.conf.json; the private key stays OFF
+# this machine's repo (client/keys/, gitignored).
+#
+# DESKTOP-ONLY on purpose: `tauri-plugin-updater` declares android/ios support
+# level "none" (see its Cargo.toml `package.metadata.platforms.support`), so it
+# must not enter the dependency graph of an Android/iOS build. The mobile store
+# is the update channel there. Registration is `#[cfg(desktop)]` gated in
+# `lib.rs`; this cfg is the Cargo-level equivalent (Cargo target tables can't
+# use tauri's custom `desktop` cfg, only real target cfgs).
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"
 
 # RAW spooler access for ESC/POS thermal printers (P0.4). Windows-only target:
 # the same 0.61 line Tauri already pulls, so no new dependency tree.

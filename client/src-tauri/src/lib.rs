@@ -28,9 +28,16 @@ use commands::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+
+    // Auto-updater is desktop-only (the crate declares android/ios support
+    // "none"; on mobile the store is the update channel). The dependency itself
+    // is gated per-target in Cargo.toml, so this block must stay `cfg(desktop)`
+    // or the mobile build won't even resolve the path.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .manage(state::SessionState::default())
         .setup(|app| {
             // Touch the state so `Manager` import is used even if commands are
