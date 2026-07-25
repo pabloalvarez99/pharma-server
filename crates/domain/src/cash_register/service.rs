@@ -227,7 +227,9 @@ pub async fn open_session_branch(
     }
     let mut r = db
         .query(
-            "SELECT branch FROM cash_register_session \
+            // `opened_at` va en la proyección a propósito: SurrealDB exige que el
+            // campo del ORDER BY esté seleccionado ("Missing order idiom").
+            "SELECT branch, opened_at FROM cash_register_session \
              WHERE tenant=$t AND user=$u AND status='open' \
              ORDER BY opened_at DESC LIMIT 1",
         )

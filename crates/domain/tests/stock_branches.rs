@@ -841,7 +841,7 @@ async fn devolucion_repone_en_la_sucursal_de_la_venta() {
         Some(&admin),
         smodel::NewDevolucion {
             order: Some(venta.order.id.clone()),
-            tipo: "parcial".into(),
+            tipo: "venta".into(),
             motivo: "cliente se arrepintió".into(),
             notas: None,
             metodo_reembolso: Some("efectivo".into()),
