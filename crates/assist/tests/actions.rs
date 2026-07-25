@@ -9,7 +9,8 @@ use std::str::FromStr;
 use assist::{build, execute, parse_action, Action, ActionParse, ActionStore, BuildOutcome};
 use domain::catalog::model::{NewProduct, ProductFilters};
 use domain::catalog::service as catalog;
-use domain::customers::model::CustomerFilters;
+use domain::credit::repo as credit_repo;
+use domain::customers::model::{CustomerFilters, NewCustomer};
 use domain::customers::service as customers;
 use domain::expenses::model::ExpenseFilters;
 use domain::expenses::service as expenses;
@@ -370,5 +371,124 @@ async fn ajustar_precio_unknown_product_is_rejected_without_token() {
     match build(&db, &tenant, parsed).await.unwrap() {
         BuildOutcome::Reject(msg) => assert!(msg.to_lowercase().contains("producto")),
         _ => panic!("unknown product must be rejected, no token issued"),
+    }
+}
+
+// ---- registrar_abono end-to-end ---------------------------------------------
+
+/// Create a customer and (optionally) fiar them `debt` pesos via a ledger
+/// `cargo`, the same row the POS writes for a `pos_fiado` sale. Returns the
+/// customer record id.
+async fn seed_customer_with_debt(db: &Db, tenant: &Thing, name: &str, debt: &str) -> Thing {
+    let c = customers::create_customer(
+        db,
+        tenant,
+        NewCustomer {
+            name: name.into(),
+            rut: None,
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+    let cid = surrealdb::sql::thing(&c.id).unwrap();
+    if !debt.is_empty() {
+        // Unique `order` per seed: `post_cargo` is idempotent by order id.
+        let order = Thing::from(("order", name));
+        credit_repo::post_cargo(db, tenant, &cid, &order, dec(debt), None)
+            .await
+            .unwrap();
+    }
+    cid
+}
+
+#[tokio::test]
+async fn abono_resolves_customer_and_records_payment() {
+    let (db, tenant, user) = setup().await;
+    let store = ActionStore::new();
+    let cid = seed_customer_with_debt(&db, &tenant, "Ana Perez", "12000").await;
+
+    let parsed = parse_action("abónale 5000 a doña Ana Perez");
+    let action = match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Ready(a) => a,
+        other => panic!(
+            "expected Ready, got {}",
+            match other {
+                BuildOutcome::Reject(m) => m,
+                _ => "NotAnAction".into(),
+            }
+        ),
+    };
+    match &action {
+        Action::RegistrarAbono {
+            customer_name,
+            amount,
+            debt_before,
+            ..
+        } => {
+            assert_eq!(customer_name, "Ana Perez");
+            assert_eq!(*amount, dec("5000"));
+            assert_eq!(*debt_before, dec("12000"));
+        }
+        _ => panic!("expected RegistrarAbono"),
+    }
+    let proposal = store.propose(action, &tenant);
+
+    // Propose must not touch the ledger.
+    assert_eq!(
+        credit_repo::balance(&db, &tenant, &cid).await.unwrap(),
+        dec("12000"),
+        "propose must not record the abono"
+    );
+    assert_eq!(audit_action_count(&db, &tenant).await, 0);
+
+    let action = store.consume(&proposal.confirm_token, &tenant).unwrap();
+    let outcome = execute(&db, &tenant, Some(&user), action).await.unwrap();
+    assert_eq!(outcome.action, "registrar_abono");
+
+    assert_eq!(
+        credit_repo::balance(&db, &tenant, &cid).await.unwrap(),
+        dec("7000"),
+        "confirm applies the abono"
+    );
+    assert_eq!(audit_action_count(&db, &tenant).await, 1);
+}
+
+#[tokio::test]
+async fn abono_without_debt_is_rejected_without_token() {
+    let (db, tenant, _user) = setup().await;
+    seed_customer_with_debt(&db, &tenant, "Ana Perez", "").await;
+    let parsed = parse_action("abónale 5000 a Ana Perez");
+    match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Reject(msg) => assert!(
+            msg.to_lowercase().contains("deuda"),
+            "expected a no-debt reject, got {msg}"
+        ),
+        _ => panic!("a customer with no debt must be rejected, no token issued"),
+    }
+}
+
+#[tokio::test]
+async fn abono_over_debt_is_rejected_without_token() {
+    let (db, tenant, _user) = setup().await;
+    seed_customer_with_debt(&db, &tenant, "Ana Perez", "3000").await;
+    let parsed = parse_action("abónale 5000 a Ana Perez");
+    match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Reject(msg) => assert!(
+            msg.to_lowercase().contains("supera"),
+            "expected an over-debt reject, got {msg}"
+        ),
+        _ => panic!("an abono over the debt must be rejected, no token issued"),
+    }
+}
+
+#[tokio::test]
+async fn abono_unknown_customer_is_rejected_without_token() {
+    let (db, tenant, _user) = setup().await;
+    let parsed = parse_action("abónale 5000 a inexistente");
+    match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Reject(msg) => assert!(msg.to_lowercase().contains("cliente")),
+        _ => panic!("unknown customer must be rejected, no token issued"),
     }
 }
