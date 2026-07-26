@@ -2,7 +2,8 @@
 //!
 //! A pure-logic pass that finds product batches (lotes) on hand that expire
 //! within `within_days`, grouped per tenant, and emits a structured `WARN`
-//! tracing digest per tenant. This is the *digest backend* only: real
+//! tracing digest per tenant **and sucursal** (migración 0042: el lote tiene
+//! domicilio). This is the *digest backend* only: real
 //! notification channels (Telegram/email) are layered on later — here we just
 //! compute the alerts and log them.
 //!
@@ -39,6 +40,11 @@ pub struct NearExpiryAlert {
     pub sku: String,
     /// Batch code (lot number).
     pub lot: String,
+    /// Sucursal donde está físicamente el lote (migración 0042), en forma de
+    /// string (`branch:<key>`). `None` = casa matriz. El job no resuelve el
+    /// nombre: es un cron desatendido, el nombre bonito lo pone el reporte de
+    /// API que ya hace lookup batcheado.
+    pub branch: Option<String>,
     /// Expiry date (UTC).
     pub expiry_date: DateTime<Utc>,
     /// Whole days from today (UTC) until expiry. Negative = already expired.
@@ -50,7 +56,8 @@ pub struct NearExpiryAlert {
 /// Scan every tenant for batches expiring within `within_days` and return the
 /// alerts sorted by `days_to_expiry` ascending (most urgent first; already
 /// expired lots — negative days — come first). Emits one `tracing::warn!`
-/// digest line per tenant that has at least one alert.
+/// digest line per (tenant, sucursal) that has at least one alert — la alerta
+/// dice a QUÉ LOCAL hay que ir.
 ///
 /// Semantics mirror the API near-expiry report exactly:
 /// `active = true AND stock > 0 AND expiry_date <= now + within_days`,
@@ -71,6 +78,8 @@ pub async fn run_near_expiry_scan<C: Connection>(
     struct Row {
         tenant: Thing,
         product: Thing,
+        #[serde(default)]
+        branch: Option<Thing>,
         batch_code: String,
         expiry_date: DateTime<Utc>,
         stock: i64,
@@ -78,9 +87,12 @@ pub async fn run_near_expiry_scan<C: Connection>(
 
     // Same WHERE shape as `domain::expenses::service::near_expiry`, minus the
     // per-tenant `tenant = $t` clause (this is an all-tenants nightly sweep).
+    // `branch` (migración 0042) viaja en la proyección porque el digest agrupa
+    // por local — y porque en SurrealDB el campo del ORDER BY tiene que estar
+    // seleccionado, así que la proyección y el orden se mantienen juntos.
     let rows: Vec<Row> = db
         .query(
-            "SELECT tenant, product, batch_code, expiry_date, stock \
+            "SELECT tenant, product, branch, batch_code, expiry_date, stock \
              FROM product_batch \
              WHERE active = true AND stock > 0 AND expiry_date <= $c \
              ORDER BY expiry_date ASC",
@@ -99,6 +111,7 @@ pub async fn run_near_expiry_scan<C: Connection>(
                 tenant: r.tenant.to_string(),
                 sku: r.product.to_string(),
                 lot: r.batch_code,
+                branch: r.branch.map(|t| t.to_string()),
                 expiry_date: r.expiry_date,
                 days_to_expiry,
                 stock: r.stock,
@@ -115,22 +128,31 @@ pub async fn run_near_expiry_scan<C: Connection>(
     Ok(alerts)
 }
 
-/// Emit one `WARN` digest per tenant. Grouped via `BTreeMap` for deterministic,
-/// tenant-sorted log output.
+/// Emit one `WARN` digest per **(tenant, sucursal)**. Agrupado así y no sólo por
+/// tenant porque la acción es física y local: el dueño de dos locales necesita
+/// saber a cuál ir a sacar el lote, y un digest mezclado lo obliga a filtrar a
+/// mano. `BTreeMap` para salida determinística y ordenada.
 fn emit_digest(alerts: &[NearExpiryAlert], within_days: i64) {
-    let mut by_tenant: BTreeMap<&str, (usize, i64)> = BTreeMap::new();
+    let mut by_local: BTreeMap<(&str, Option<&str>), (usize, i64)> = BTreeMap::new();
     for a in alerts {
-        let e = by_tenant.entry(a.tenant.as_str()).or_insert((0, i64::MAX));
+        let e = by_local
+            .entry((a.tenant.as_str(), a.branch.as_deref()))
+            .or_insert((0, i64::MAX));
         e.0 += 1;
         e.1 = e.1.min(a.days_to_expiry);
     }
-    for (tenant, (count, soonest)) in by_tenant {
+    for ((tenant, branch), (count, soonest)) in by_local {
+        // `branch = NONE` es casa matriz (bucket de la migración 0041/0042):
+        // se rotula en castellano, no como `NONE`, porque este log lo lee un
+        // humano en soporte.
+        let local = branch.unwrap_or("casa matriz");
         tracing::warn!(
             tenant,
+            local,
             lotes = count,
             within_days,
             soonest_days = soonest,
-            "{count} lotes por vencer en ≤{within_days}días"
+            "{count} lotes por vencer en ≤{within_days}días en {local}"
         );
     }
 }

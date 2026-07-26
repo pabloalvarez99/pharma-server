@@ -47,6 +47,8 @@ pub async fn open_cash_session(
     register_name: String,
     opening_cash: String,
     notes: Option<String>,
+    register: Option<String>,
+    branch: Option<String>,
 ) -> Result<CashSession, String> {
     let token = token_of(&state)?;
     let http = client();
@@ -57,6 +59,14 @@ pub async fn open_cash_session(
     });
     if let Some(n) = notes.filter(|s| !s.is_empty()) {
         body["notes"] = serde_json::Value::String(n);
+    }
+    // La caja se abre EN un local: con `register` el server toma la sucursal de
+    // esa caja física; `branch` es el fallback cuando se abre una caja suelta.
+    if let Some(r) = register.filter(|s| !s.is_empty()) {
+        body["register"] = serde_json::Value::String(r);
+    }
+    if let Some(b) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(b);
     }
     let resp = http
         .post(format!("{base}/api/v1/cash-sessions"))

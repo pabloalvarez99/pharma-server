@@ -1,0 +1,27 @@
+# systemd unit — RutBusiness pharma-api (SaaS web, GCE VM)
+# Instalar en /etc/systemd/system/pharma-api.service
+# Requiere: usuario de sistema `pharma`, env file /etc/pharma/env (root:pharma 640),
+# binario /opt/pharma/bin/pharma-api, data dir /var/lib/pharma/data (pharma:pharma).
+
+[Unit]
+Description=RutBusiness pharma-api (multi-tenant ERP API)
+After=network.target
+
+[Service]
+User=pharma
+Group=pharma
+EnvironmentFile=/etc/pharma/env
+WorkingDirectory=/var/lib/pharma
+ExecStart=/opt/pharma/bin/pharma-api
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pharma
+
+[Install]
+WantedBy=multi-user.target

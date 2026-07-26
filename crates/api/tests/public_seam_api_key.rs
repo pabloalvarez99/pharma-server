@@ -112,6 +112,7 @@ fn state(db: Arc<db::Db>, require_api_key: bool) -> api::AppState {
         },
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(pharma_core::config::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 

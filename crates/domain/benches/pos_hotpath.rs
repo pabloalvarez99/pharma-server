@@ -220,6 +220,8 @@ async fn build_harness() -> Harness {
         &admin,
         OpenSessionInput {
             register_name: "caja-bench".into(),
+            register: None,
+            branch: None,
             opening_cash: Decimal::from(50_000),
             notes: None,
         },
@@ -284,6 +286,7 @@ fn single_item_sale(product_id: &str) -> PosSaleRequest {
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     }
 }
 

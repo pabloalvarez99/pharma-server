@@ -398,16 +398,11 @@ async fn main() -> anyhow::Result<()> {
             let cfg = pharma_core::config::AppConfig::load()?;
             let db_handle = db::connect(&cfg.db).await?;
 
-            let mut res = db_handle
-                .query("CREATE tenant SET name = $name, slug = $slug RETURN AFTER")
-                .bind(("name", name.clone()))
-                .bind(("slug", slug.clone()))
+            let id = domain::provisioning::create_tenant(&db_handle, &name, &slug)
                 .await
-                .context("CREATE tenant query")?;
-            let row: Option<TenantRow> = res.take(0)?;
-            let row = row.ok_or_else(|| anyhow!("tenant create returned no row"))?;
-            println!("tenant created: id={} slug={}", row.id, row.slug);
-            tracing::info!(tenant_id = %row.id, %slug, "tenant created");
+                .context("CREATE tenant")?;
+            println!("tenant created: id={id} slug={slug}");
+            tracing::info!(tenant_id = %id, %slug, "tenant created");
         }
         Cmd::UserCreate {
             tenant,
@@ -448,24 +443,20 @@ async fn main() -> anyhow::Result<()> {
             let tenant_row =
                 tenant_row.ok_or_else(|| anyhow!("tenant with slug '{tenant}' not found"))?;
 
-            let mut res = db_handle
-                .query(
-                    "CREATE user SET tenant = $tenant, email = $email, \
-                     password = $password, roles = $roles RETURN AFTER",
-                )
-                .bind(("tenant", tenant_row.id.clone()))
-                .bind(("email", email.clone()))
-                .bind(("password", hash))
-                .bind(("roles", roles_vec.clone()))
-                .await
-                .context("CREATE user query")?;
-            let row: Option<UserRow> = res.take(0)?;
-            let row = row.ok_or_else(|| anyhow!("user create returned no row"))?;
+            let uid = domain::provisioning::create_user(
+                &db_handle,
+                &tenant_row.id,
+                &email,
+                &hash,
+                &roles_vec,
+            )
+            .await
+            .context("CREATE user")?;
             println!(
                 "user created: id={} email={} tenant={} roles={:?}",
-                row.id, row.email, row.tenant, row.roles
+                uid, email, tenant_row.id, roles_vec
             );
-            tracing::info!(user_id = %row.id, tenant = %tenant, %email, "user created");
+            tracing::info!(user_id = %uid, tenant = %tenant, %email, "user created");
         }
         Cmd::TenantList { json } => {
             let cfg = pharma_core::config::AppConfig::load()?;

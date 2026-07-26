@@ -87,6 +87,7 @@ pub async fn seed_batch(
     use domain::inventory::model::NewBatch;
     let input = NewBatch {
         product: product_id.to_string(),
+        branch: None,
         batch_code: code.to_string(),
         expiry_date: chrono::DateTime::parse_from_rfc3339(expiry_rfc3339)
             .expect("expiry rfc3339")
@@ -159,6 +160,7 @@ pub async fn seed_sale(
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     };
     domain::sales::service::post_sale(db, tenant, sold_by, None, None, req)
         .await
@@ -176,6 +178,8 @@ pub async fn seed_cash_session(
     use domain::cash_register::model::OpenSessionInput;
     let input = OpenSessionInput {
         register_name: register_name.to_string(),
+        register: None,
+        branch: None,
         opening_cash: opening.parse::<Decimal>().expect("opening"),
         notes: None,
     };
@@ -233,6 +237,7 @@ pub fn state_free(db: Arc<db::Db>) -> api::AppState {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(api::stock_webhook::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 
@@ -269,6 +274,7 @@ pub fn state_pro(db: Arc<db::Db>, features: &[&str]) -> api::AppState {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(api::stock_webhook::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 

@@ -52,6 +52,7 @@ fn req(pid: &str, qty: i64) -> PosSaleRequest {
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     }
 }
 

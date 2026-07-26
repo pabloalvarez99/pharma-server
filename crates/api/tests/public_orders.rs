@@ -108,6 +108,7 @@ fn state(db: Arc<db::Db>, enabled: bool, secret: &str) -> api::AppState {
             require_api_key: false,
         },
         stock_webhook: std::sync::Arc::new(pharma_core::config::StockWebhookConfig::default()),
+        provisioning_key: None,
     }
 }
 

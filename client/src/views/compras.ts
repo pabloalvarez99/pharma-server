@@ -19,6 +19,9 @@ import {
   getPoPayments,
   createPoPayment,
   cashSessions,
+  listSucursales,
+  sucursalActiva,
+  type Sucursal,
   type PurchaseOrder,
   type PurchaseOrderDetail,
   type NewPurchaseOrderItem,
@@ -376,8 +379,10 @@ function openPoCreateModal(
   const body = modalHost.querySelector<HTMLElement>("#po-c-body")!;
   void (async () => {
     let suppliers: Supplier[];
+    let locales: Sucursal[] = [];
     try {
       suppliers = await listSuppliers(serverUrl, undefined, 200);
+      locales = await sucursalesSafe(serverUrl);
     } catch (err) {
       body.innerHTML = `${renderError(err)}<div class="modal-actions"><button type="button" class="btn-ghost" id="po-c-cancel">Cerrar</button></div>`;
       body.querySelector<HTMLButtonElement>("#po-c-cancel")!.addEventListener("click", close);
@@ -400,6 +405,23 @@ function openPoCreateModal(
             .join("")}
         </select>
       </div>
+      ${
+        locales.length === 0
+          ? ""
+          : `<div class="modal-field">
+        <label class="modal-label" for="po-c-branch">Entra a</label>
+        <select id="po-c-branch" class="view-select">
+          <option value="none">Casa matriz</option>
+          ${locales
+            .map(
+              (b) =>
+                `<option value="${escapeHtml(b.id)}"${b.id === sucursalActiva() ? " selected" : ""}>${escapeHtml(b.name)}</option>`,
+            )
+            .join("")}
+        </select>
+        <p class="field-hint muted">Los lotes de esta compra nacen en ese local y el stock sube ahí.</p>
+      </div>`
+      }
       <div class="modal-field">
         <label class="modal-label">Ítems</label>
         <div class="po-line-head">
@@ -477,6 +499,7 @@ function openPoCreateModal(
           undefined,
           notesEl.value.trim() || undefined,
           refEl.value.trim() || undefined,
+          body.querySelector<HTMLSelectElement>("#po-c-branch")?.value,
         );
         close();
         onSaved();
@@ -774,6 +797,16 @@ function renderPoDetail(po: PurchaseOrderDetail): string {
   `;
 }
 
+/** Sucursales del negocio, o `[]` si falla / el server es viejo: la compra sigue
+ *  funcionando igual, entrando a casa matriz (V2.1). */
+async function sucursalesSafe(serverUrl: string): Promise<Sucursal[]> {
+  try {
+    return await listSucursales(serverUrl);
+  } catch {
+    return [];
+  }
+}
+
 // --- receive (goods receipt) modal -----------------------------------------
 
 /** Goods-receipt form: one quantity input per line with a pending balance,
@@ -787,6 +820,18 @@ function openReceiveModal(
 ): void {
   const close = () => (modalHost.innerHTML = "");
   const pending = po.items.filter((it) => it.quantity - it.qty_received > 0);
+  // El local NO se elige acá: viene fijado desde la OC (V2.1), así que dos
+  // recepciones parciales no pueden contradecirse de sucursal. Se muestra sólo
+  // para que el que recibe sepa a qué bodega va la mercadería.
+  const pintarLocal = async (): Promise<void> => {
+    if (!po.branch) return;
+    const el = modalHost.querySelector<HTMLElement>("#po-r-local");
+    if (!el) return;
+    const nombre =
+      (await sucursalesSafe(serverUrl)).find((b) => b.id === po.branch)?.name ?? po.branch;
+    el.innerHTML = `Entra a <strong>${escapeHtml(nombre)}</strong> — el local se fijó al crear la OC.`;
+    el.hidden = false;
+  };
   const lineInputs = pending
     .map((it) => {
       const remaining = it.quantity - it.qty_received;
@@ -806,6 +851,7 @@ function openReceiveModal(
       <div class="modal modal-wide">
         <div class="modal-title">Recibir mercadería</div>
         <p class="muted">Ajusta las cantidades recibidas. El stock y el costo promedio se actualizan al confirmar.</p>
+        <p class="muted po-r-local" id="po-r-local" hidden></p>
         <div class="po-lines">${lineInputs}</div>
         <div class="modal-field">
           <label class="modal-label" for="po-r-notes">Notas (opcional)</label>
@@ -828,6 +874,7 @@ function openReceiveModal(
   const errEl = modalHost.querySelector<HTMLElement>("#po-r-error")!;
   const notesEl = modalHost.querySelector<HTMLInputElement>("#po-r-notes")!;
   const saveBtn = modalHost.querySelector<HTMLButtonElement>("#po-r-save")!;
+  void pintarLocal();
   modalHost.querySelector<HTMLButtonElement>("#po-r-cancel")!.addEventListener("click", close);
 
   saveBtn.addEventListener("click", async () => {

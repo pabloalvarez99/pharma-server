@@ -4,9 +4,16 @@ dist/
 # package-lock.json IS committed — `npm ci` (build-client.ps1 + CI) needs it for
 # reproducible installs. Do not re-ignore it.
 src-tauri/target/
-src-tauri/gen/
-# tauri icon also emits mobile platform icons; this app targets Windows desktop
-# only (mobile not set up — src-tauri/gen is ignored), so they're byproducts.
-src-tauri/icons/android/
-src-tauri/icons/ios/
+# `gen/schemas` is regenerated on every build. The mobile projects (gen/android,
+# gen/apple) are SCAFFOLDING and are meant to be committed once `tauri android
+# init` / `tauri ios init` has run — Tauri writes its own .gitignore inside them
+# for the build artifacts, so don't re-ignore the whole `gen/` tree.
+src-tauri/gen/schemas/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/local.properties
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/Externals/
 keys/
+dist-web/

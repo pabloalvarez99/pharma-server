@@ -51,6 +51,10 @@ pub enum Intent {
     MargenProducto(String),
     /// Month-to-date expenses (total + breakdown by category).
     GastosMes,
+    /// Fiado — cuánto le deben al negocio y quién (cuentas por cobrar).
+    PorCobrar,
+    /// IVA del mes: débito (ventas) − crédito (compras) = a pagar (F29).
+    IvaMes,
     /// Products at/below their low-stock threshold (reorder hints).
     StockBajo,
     /// Inventory headline figures (SKUs, value, low/out of stock).
@@ -97,6 +101,8 @@ impl Intent {
             Intent::MargenMes => "margen_mes",
             Intent::MargenProducto(_) => "margen_producto",
             Intent::GastosMes => "gastos_mes",
+            Intent::PorCobrar => "por_cobrar",
+            Intent::IvaMes => "iva_mes",
             Intent::StockBajo => "stock_bajo",
             Intent::ResumenInventario => "resumen_inventario",
             Intent::ResumenDia => "resumen_dia",
@@ -282,6 +288,35 @@ pub fn parse(question: &str) -> Intent {
     }
 
     // Expenses — "gastos del mes", "cuánto gasté". Distinct vocabulary from
+    // Fiado / cuentas por cobrar — "¿cuánto me deben?" es la pregunta diaria del
+    // que fía. Va antes que gastos/ventas: "me deben" no colisiona con esas.
+    if contains_any(
+        &q,
+        &[
+            "fiado",
+            "fie ",
+            "fian",
+            "me deben",
+            "quien debe",
+            "quien me debe",
+            "por cobrar",
+            "deudor",
+            "deuda",
+        ],
+    ) {
+        return Intent::PorCobrar;
+    }
+
+    // IVA / F29. OJO: "iva" como substring aparece dentro de palabras comunes
+    // ("activa", "motiva"), así que se exige límite de palabra (espacio previo o
+    // inicio de la pregunta) en vez de un `contains` pelado.
+    if q == "iva"
+        || q.starts_with("iva ")
+        || contains_any(&q, &[" iva", "f29", "impuesto", "formulario 29"])
+    {
+        return Intent::IvaMes;
+    }
+
     // sales; safe to test early.
     if contains_any(
         &q,
@@ -609,6 +644,44 @@ fn capture_price_product(q: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn por_cobrar_synonyms() {
+        for q in [
+            "cuanto me deben",
+            "¿cuánto me deben?",
+            "quien me debe",
+            "cuentas por cobrar",
+            "cuanto fiado tengo",
+            "deudores",
+            "quien tiene deuda",
+        ] {
+            assert_eq!(parse(q), Intent::PorCobrar, "q={q}");
+        }
+    }
+
+    #[test]
+    fn iva_synonyms() {
+        for q in [
+            "iva",
+            "iva del mes",
+            "cuanto iva pago",
+            "cuanto impuesto pago este mes",
+            "f29",
+            "formulario 29",
+        ] {
+            assert_eq!(parse(q), Intent::IvaMes, "q={q}");
+        }
+    }
+
+    /// "iva" vive dentro de palabras comunes ("activa", "motiva"): el matcher
+    /// exige límite de palabra, así que estas NO deben caer en IvaMes.
+    #[test]
+    fn iva_does_not_match_words_containing_iva() {
+        for q in ["cuantos clientes activa tengo", "promocion motiva"] {
+            assert_ne!(parse(q), Intent::IvaMes, "q={q}");
+        }
+    }
 
     #[test]
     fn ventas_hoy_synonyms() {

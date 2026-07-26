@@ -88,6 +88,8 @@ export interface ProductDetail {
 export interface Batch {
   id: string;
   product: string;
+  /** Sucursal donde está el lote físico (V2.1). `null`/ausente = casa matriz. */
+  branch?: string | null;
   batch_code: string;
   expiry_date: string;
   stock: number;
@@ -105,6 +107,10 @@ export interface NearExpiryRow {
   product_name: string;
   batch_id: string;
   batch_code: string;
+  /** Local donde está el lote y su nombre ya resuelto (V2.1). Ausentes en casa
+   *  matriz. Es lo que hace accionable la alerta: a qué local hay que ir. */
+  branch?: string | null;
+  branch_name?: string | null;
   expiry_date: string;
   stock: number;
   days_to_expiry: number;
@@ -297,14 +303,17 @@ export function adjustProductStock(
   });
 }
 
-/** GET /api/v1/batches (Bearer). Optional `product` + `expiringWithinDays`
- *  + `onlyAvailable` filters. */
+/** GET /api/v1/batches (Bearer). Optional `product` + `branch` +
+ *  `expiringWithinDays` + `onlyAvailable` filters. `branch` sigue la misma
+ *  gramática que el resto de V2: `"none"` = casa matriz, ausente = todos los
+ *  locales. */
 export function listBatches(
   serverUrl: string,
   product?: string,
   expiringWithinDays?: number,
   onlyAvailable?: boolean,
   limit?: number,
+  branch?: string,
 ): Promise<Batch[]> {
   return invoke<Batch[]>("list_batches", {
     serverUrl,
@@ -312,6 +321,7 @@ export function listBatches(
     expiringWithinDays,
     onlyAvailable,
     limit,
+    branch,
   });
 }
 
@@ -322,7 +332,7 @@ export function createBatch(
   product: string,
   batchCode: string,
   expiryDate: string,
-  opts: { stock?: number; cost?: string; notes?: string } = {},
+  opts: { stock?: number; cost?: string; notes?: string; branch?: string } = {},
 ): Promise<Batch> {
   return invoke<Batch>("create_batch", {
     serverUrl,
@@ -332,13 +342,17 @@ export function createBatch(
     stock: opts.stock,
     cost: opts.cost,
     notes: opts.notes,
+    branch: opts.branch,
   });
 }
 
-/** GET /api/v1/reports/near-expiry?days=N (Bearer). Core/free, not gated. */
+/** GET /api/v1/reports/near-expiry?days=N&branch=X (Bearer). Core/free, not
+ *  gated. `branch` acota al local (`"none"` = casa matriz); sin él la alerta
+ *  cubre el negocio entero, con el local en cada fila. */
 export function nearExpiry(
   serverUrl: string,
   days?: number,
+  branch?: string,
 ): Promise<NearExpiryRow[]> {
-  return invoke<NearExpiryRow[]>("near_expiry", { serverUrl, days });
+  return invoke<NearExpiryRow[]>("near_expiry", { serverUrl, days, branch });
 }

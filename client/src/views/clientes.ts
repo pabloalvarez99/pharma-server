@@ -16,10 +16,14 @@ import {
   customerHistory,
   createCustomer,
   updateCustomer,
+  customerAccount,
+  recordAbono,
   CUSTOMERS_MODULE_MISSING,
   type Customer,
   type CustomerDetail,
   type CustomerOrder,
+  type CustomerAccount,
+  type LedgerEntry,
 } from "../api";
 import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml, attachRutAdvisory } from "./view-blocks";
@@ -114,6 +118,41 @@ export function renderClientes(host: HTMLElement, serverUrl: string): void {
       detailEl.innerHTML = tableSkeleton(5);
       void loadDetail(detailEl, serverUrl, c.id);
     });
+  });
+
+  // Abono (fiado): el panel de cuenta corriente rinde un form con el id del
+  // cliente. Delegado acá para que sobreviva los re-render del detalle. En éxito
+  // recarga la ficha (saldo + movimientos al día).
+  detailEl.addEventListener("submit", (e) => {
+    const form = (e.target as HTMLElement).closest<HTMLFormElement>(".cli-abono-form");
+    if (!form) return;
+    e.preventDefault();
+    const id = form.dataset.id ?? "";
+    const input = form.querySelector<HTMLInputElement>('input[name="amount"]');
+    const msg = detailEl.querySelector<HTMLElement>(".cli-abono-msg");
+    const raw = (input?.value ?? "").replace(/[^\d]/g, "");
+    const showMsg = (text: string, ok: boolean): void => {
+      if (!msg) return;
+      msg.textContent = text;
+      msg.className = `cli-abono-msg ${ok ? "is-ok" : "is-err"}`;
+      msg.hidden = false;
+    };
+    if (!raw || Number(raw) <= 0) {
+      showMsg("Ingresa un monto mayor a cero.", false);
+      input?.focus();
+      return;
+    }
+    const btn = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    void recordAbono(serverUrl, id, raw)
+      .then(() => {
+        detailEl.innerHTML = tableSkeleton(5);
+        return loadDetail(detailEl, serverUrl, id);
+      })
+      .catch((err) => {
+        if (btn) btn.disabled = false;
+        showMsg(asMessage(err), false);
+      });
   });
 }
 
@@ -263,7 +302,7 @@ async function loadDetail(
   id: string,
 ): Promise<void> {
   try {
-    const [detail, history] = await Promise.all([
+    const [detail, history, account] = await Promise.all([
       customerDetail(serverUrl, id),
       customerHistory(serverUrl, id, HISTORY_LIMIT).catch((err) => {
         // History is secondary — a missing module sentinel here would already
@@ -271,14 +310,77 @@ async function loadDetail(
         if (err === CUSTOMERS_MODULE_MISSING) throw err;
         return [] as CustomerOrder[];
       }),
+      // Cuenta corriente (fiado). Secundaria: un server sin la migración 0039
+      // simplemente no muestra el bloque en vez de romper la ficha.
+      customerAccount(serverUrl, id).catch(() => null),
     ]);
-    detailEl.innerHTML = renderDetail(detail, history);
+    detailEl.innerHTML = renderDetail(detail, history, account);
   } catch (err) {
     detailEl.innerHTML = renderError(err);
   }
 }
 
-function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
+/** Cuenta corriente (fiado): saldo + abonar + movimientos. `null` cuando el
+ *  server no expone el módulo (no rompe la ficha del cliente). Todo lo
+ *  interpolado pasa por `escapeHtml`/`clp` como el resto de la vista. */
+function renderAccount(c: CustomerDetail, account: CustomerAccount | null): string {
+  if (!account) return "";
+  const debt = Number(account.balance);
+  const owes = Number.isFinite(debt) && debt > 0;
+
+  const abonoForm = owes
+    ? `
+      <form class="cli-abono-form" data-id="${escapeHtml(c.id)}">
+        <label class="sr-only" for="cli-abono">Monto del abono</label>
+        <input id="cli-abono" name="amount" type="text" inputmode="numeric"
+               placeholder="Monto del abono" autocomplete="off" required />
+        <button type="submit" class="btn-primary">Registrar abono</button>
+      </form>
+      <p class="cli-abono-msg" role="status" hidden></p>`
+    : `<p class="empty">Sin deuda pendiente.</p>`;
+
+  const rows =
+    account.entries.length === 0
+      ? ""
+      : `
+        <table class="data-table">
+          <thead><tr><th>Fecha</th><th>Movimiento</th><th class="num">Monto</th></tr></thead>
+          <tbody>${account.entries.map(ledgerRow).join("")}</tbody>
+        </table>`;
+
+  return `
+    <h3 class="section-title cli-cuenta-title">Cuenta corriente</h3>
+    <div class="cli-stats">
+      <div class="cli-stat">
+        <span class="kpi-label">Saldo (debe)</span>
+        <strong class="rb-num ${owes ? "is-debt" : ""}">${clp(account.balance)}</strong>
+      </div>
+      <div class="cli-stat"><span class="kpi-label">Total fiado</span><strong class="rb-num">${clp(account.total_charged)}</strong></div>
+      <div class="cli-stat"><span class="kpi-label">Total abonado</span><strong class="rb-num">${clp(account.total_paid)}</strong></div>
+    </div>
+    ${abonoForm}
+    ${rows}
+  `;
+}
+
+function ledgerRow(e: LedgerEntry): string {
+  const isCargo = e.kind === "cargo";
+  return `
+    <tr>
+      <td>${fmtDate(e.created_at)}</td>
+      <td><span class="pill ${isCargo ? "pill-warn" : "pill-ok"}">${isCargo ? "Fiado" : "Abono"}</span>${
+        e.note ? ` <span class="cell-sub muted">${escapeHtml(e.note)}</span>` : ""
+      }</td>
+      <td class="num rb-num">${isCargo ? "" : "−"}${clp(e.amount)}</td>
+    </tr>
+  `;
+}
+
+function renderDetail(
+  c: CustomerDetail,
+  history: CustomerOrder[],
+  account: CustomerAccount | null = null,
+): string {
   const contact = [
     c.rut ? `RUT <span class="rb-num">${escapeHtml(c.rut)}</span>` : "",
     c.phone ? escapeHtml(c.phone) : "",
@@ -324,7 +426,7 @@ function renderDetail(c: CustomerDetail, history: CustomerOrder[]): string {
         </table>
       `;
 
-  return `${head}<h3 class="section-title cli-hist-title">Historial de compras</h3>${hist}`;
+  return `${head}${renderAccount(c, account)}<h3 class="section-title cli-hist-title">Historial de compras</h3>${hist}`;
 }
 
 function historyRow(o: CustomerOrder): string {

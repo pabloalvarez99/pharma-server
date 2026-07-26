@@ -179,6 +179,10 @@ pub struct PurchaseOrderItemDto {
 pub struct PurchaseOrderDto {
     pub id: String,
     pub supplier: String,
+    /// Sucursal que recibe la mercadería. `None` = casa matriz (migración
+    /// 0042): los lotes creados al recibir nacen ahí y el stock sube en ese
+    /// bucket.
+    pub branch: Option<String>,
     pub status: String,
     pub currency: String,
     #[serde(with = "rust_decimal::serde::str")]
@@ -208,6 +212,11 @@ pub struct NewPurchaseOrderItem {
 pub struct NewPurchaseOrder {
     /// Supplier record id (`supplier:xxx`).
     pub supplier: String,
+    /// Sucursal a la que entra la compra. Ausente / `""` / `"none"` = casa
+    /// matriz. Se fija al crear la OC porque el comprador ya sabe para qué
+    /// local compra, y así dos recepciones parciales no pueden contradecirse.
+    #[serde(default)]
+    pub branch: Option<String>,
     pub currency: Option<String>,
     pub notes: Option<String>,
     pub external_ref: Option<String>,

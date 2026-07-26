@@ -31,6 +31,7 @@ import {
   type Receipt,
   type Dte,
   type LowStockAlert,
+  sucursalParaVenta,
 } from "../api";
 import { clp, toNumber, num, parseCash, effectiveTender, vuelto, quickCashAmounts } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
@@ -74,6 +75,9 @@ const METHODS: { id: PaymentMethod; label: string }[] = [
   { id: "pos_debit", label: "Débito" },
   { id: "pos_credit", label: "Crédito" },
   { id: "pos_mixed", label: "Mixto" },
+  // Fiado: venta a cuenta corriente. No mueve caja; exige cliente elegido y
+  // deja el cargo en su cuenta (ledger inmutable, migración 0039).
+  { id: "pos_fiado", label: "Fiar" },
 ];
 
 const METHOD_LABEL: Record<string, string> = {
@@ -81,6 +85,7 @@ const METHOD_LABEL: Record<string, string> = {
   pos_debit: "Débito",
   pos_credit: "Crédito",
   pos_mixed: "Mixto",
+  pos_fiado: "Fiado",
 };
 
 export function renderPos(host: HTMLElement, serverUrl: string): void {
@@ -528,6 +533,8 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
   function chargeEnabled(): boolean {
     if (cart.length === 0) return false;
     if (method === "pos_mixed") return currentSplit().ok;
+    // Fiar exige cliente: sin cliente no hay a quién cobrarle después.
+    if (method === "pos_fiado") return selectedCustomer !== null;
     return true;
   }
   function syncChargeBtn(): void {
@@ -970,6 +977,7 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
         card,
         selectedCustomer?.id,
         discountArg,
+        sucursalParaVenta(),
       );
       const count = cart.reduce((n, l) => n + l.qty, 0);
       cart.length = 0;

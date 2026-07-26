@@ -8,8 +8,16 @@ use utoipa::ToSchema;
 
 use super::interactions::InteractionDetail;
 
-/// POS payment methods accepted on counter.
-pub const POS_METHODS: &[&str] = &["pos_cash", "pos_debit", "pos_credit", "pos_mixed"];
+/// POS payment methods accepted on counter. `pos_fiado` = venta a cuenta
+/// corriente (el cliente queda debiendo): NO mueve caja, exige `customer`, y
+/// genera un cargo en el ledger de fiado (migración 0039 / `crate::credit`).
+pub const POS_METHODS: &[&str] = &[
+    "pos_cash",
+    "pos_debit",
+    "pos_credit",
+    "pos_mixed",
+    "pos_fiado",
+];
 
 /// Default loyalty rule: 1 point per $1000 CLP (overridable via
 /// `admin_setting.loyalty_points_per_clp`).
@@ -58,6 +66,10 @@ pub struct OrderDto {
     pub expires_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ready_at: Option<DateTime<Utc>>,
+    /// Sucursal donde se vendió (`branch:<key>`); NONE = casa matriz / sitio
+    /// único. De acá salen los reportes de venta por local.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -248,6 +260,13 @@ pub struct PosSaleRequest {
     pub external_ref: Option<String>,
     #[serde(default)]
     pub prescriptions: Vec<PosPrescriptionInput>,
+    /// Sucursal donde se vende (`branch:<key>`). Ausente = el server la deduce
+    /// de la sesión de caja abierta del cajero; si tampoco hay, la venta
+    /// descuenta de la casa matriz. El stock se descuenta del bucket de ESTA
+    /// sucursal (migración 0041), así que una venta en el local A no puede
+    /// consumir lo que está en el local B.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

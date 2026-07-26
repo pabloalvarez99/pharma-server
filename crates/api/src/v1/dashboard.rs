@@ -116,7 +116,16 @@ async fn dashboard(
                 limit: Some(5),
             },
         ),
-        reports::near_expiry(db.as_ref(), &tenant, NearExpiryFilters { days: Some(30) }),
+        reports::near_expiry(
+            db.as_ref(),
+            &tenant,
+            NearExpiryFilters {
+                days: Some(30),
+                // Global a propósito: el dashboard es la foto del negocio entero;
+                // el filtro por local vive en Inventario.
+                branch: None,
+            }
+        ),
     )?;
 
     // `sales_daily` buckets by UTC day; fold the (1 today / ~31 month) rows.

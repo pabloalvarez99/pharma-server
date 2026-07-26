@@ -136,6 +136,7 @@ async fn sells_a_service_end_to_end_and_emits_boleta() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     let resp = sales::post_sale(&db, &tenant, Some(&admin), Some("admin"), None, req)
         .await

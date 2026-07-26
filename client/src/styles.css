@@ -617,6 +617,9 @@ button {
   display: flex;
   flex-direction: column;
   padding: 22px 16px;
+  /* Viewports bajos (web/tablet): el nav interno scrollea, la marca y el
+     logout quedan fijos. */
+  min-height: 0;
 }
 
 .sidebar-brand {
@@ -647,6 +650,11 @@ button {
   flex-direction: column;
   gap: 6px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .nav-item {
@@ -2077,6 +2085,41 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Cuenta corriente (fiado): el saldo adeudado se destaca — es el número que el
+   dueño busca al abrir la ficha. */
+.cli-stat strong.is-debt {
+  color: var(--danger, #ff5d6c);
+}
+
+.cli-cuenta-title {
+  margin-top: 16px;
+}
+
+.cli-abono-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0 6px;
+}
+
+.cli-abono-form input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.cli-abono-msg {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cli-abono-msg.is-err {
+  color: var(--danger, #ff5d6c);
+}
+
+.cli-abono-msg.is-ok {
+  color: var(--ok, #19d39a);
+}
+
 .cli-hist-title {
   margin-top: 16px;
 }
@@ -2993,4 +3036,80 @@ button {
 @keyframes insight-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* --- Multi-sucursal (V2): selector del topbar + vista Sucursales ---------- */
+
+/* "Estás en <local>" — el control que le dice al operador de qué stock está
+   vendiendo. Oculto (hidden) mientras el negocio tenga un solo local. */
+.branch-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.branch-switch select {
+  padding: 6px 10px;
+  background: rgba(10, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  /* Objetivo táctil cómodo en tablet sin engordar el topbar en desktop. */
+  min-height: 34px;
+}
+.branch-switch select:focus-visible {
+  border-color: var(--accent, #6ea8fe);
+}
+
+.suc-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.suc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* La tabla pivote crece a lo ancho con cada local: scrollea DENTRO de su
+   tarjeta para que la página nunca scrollee horizontal en el celular. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.suc-table th.num,
+.suc-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+/* La columna del local donde estás parado, resaltada: es la que manda en el POS. */
+.suc-table .suc-col-activa {
+  background: rgba(110, 168, 254, 0.08);
+}
+
+.tr-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tr-row .field {
+  flex: 1 1 140px;
+}
+
+@media (max-width: 720px) {
+  .branch-switch span.muted {
+    display: none; /* en celular manda el valor, no la etiqueta */
+  }
+  .suc-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }

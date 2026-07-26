@@ -189,8 +189,13 @@ pub async fn stock_rotation(
     ))
 }
 
-/// Lotes próximos a vencer (ventana configurable en días).
+/// Lotes próximos a vencer (ventana configurable en días), opcionalmente
+/// acotados a una sucursal.
 #[utoipa::path(get, path = "/api/v1/reports/near-expiry", tag = "Expenses",
+    params(
+        ("days"   = Option<i64>,    Query, description = "Ventana en días (default 30)"),
+        ("branch" = Option<String>, Query, description = "Sucursal del lote: ausente = todos los locales, `none` = casa matriz, `branch:<key>` = ese local"),
+    ),
     responses(
         (status = 200, description = "Lotes próximos a vencer", body = serde_json::Value),
         (status = 401, body = crate::error::ErrorEnvelope),

@@ -12,7 +12,9 @@ pub use backup::{backup_now, prune_backups, BackupReport};
 pub mod branches;
 pub mod cash_register;
 pub mod catalog;
+pub mod compliance;
 pub mod config;
+pub mod credit;
 pub mod customers;
 pub mod dashboard;
 pub mod dte;
@@ -27,6 +29,7 @@ pub mod purchasing;
 pub mod rubro;
 pub mod sales;
 pub mod seed;
+pub mod stock;
 pub mod stock_movements;
 
 use axum::Router;
@@ -37,7 +40,10 @@ pub fn router(state: AppState) -> Router<AppState> {
     catalog::router(state.clone())
         .merge(inventory::router(state.clone()))
         .merge(stock_movements::router(state.clone()))
+        .merge(stock::router(state.clone()))
         .merge(customers::router(state.clone()))
+        .merge(credit::router(state.clone()))
+        .merge(compliance::router(state.clone()))
         .merge(config::router(state.clone()))
         .merge(prescriptions::router(state.clone()))
         .merge(purchasing::router(state.clone()))

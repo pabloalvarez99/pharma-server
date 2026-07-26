@@ -84,6 +84,7 @@ fn cash_sale(product_id: &str, name: &str, price: &str, qty: i64) -> smodel::Pos
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     }
 }
 
@@ -188,6 +189,8 @@ async fn caja_actual_reports_expected_drawer() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -225,6 +228,7 @@ async fn por_vencer_lists_near_expiry_batches() {
         &tenant,
         imodel::NewBatch {
             product: para.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: Utc::now() + Duration::days(10),
             stock: 20,
@@ -424,6 +428,7 @@ async fn por_vencer_semana_uses_seven_day_window() {
         &tenant,
         imodel::NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: Utc::now() + Duration::days(20),
             stock: 10,
