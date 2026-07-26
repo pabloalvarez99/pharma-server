@@ -7,6 +7,9 @@ import { invoke } from "@tauri-apps/api/core";
 export interface PurchaseOrder {
   id: string;
   supplier: string;
+  /** Local al que entra la mercadería (V2.1). `null` = casa matriz. Los lotes
+   *  creados al recibir nacen en esta sucursal. */
+  branch?: string | null;
   status: string; // "draft" | "sent" | "received" | "partial" | "cancelled"
   currency: string;
   total: string;
@@ -43,6 +46,8 @@ export interface PurchaseOrderItem {
 export interface PurchaseOrderDetail {
   id: string;
   supplier: string;
+  /** Local al que entra la mercadería (V2.1). `null` = casa matriz. */
+  branch?: string | null;
   status: string;
   currency: string;
   total: string;
@@ -85,6 +90,7 @@ export function createPurchaseOrder(
   currency?: string,
   notes?: string,
   externalRef?: string,
+  branch?: string,
 ): Promise<PurchaseOrder> {
   return invoke<PurchaseOrder>("create_purchase_order", {
     serverUrl,
@@ -93,6 +99,7 @@ export function createPurchaseOrder(
     currency,
     notes,
     externalRef,
+    branch,
   });
 }
 

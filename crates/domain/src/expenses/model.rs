@@ -151,6 +151,10 @@ pub struct NearExpiryFilters {
     /// Lookahead window in days (default 30). Batches expiring on or before
     /// `now + days` — including already-expired ones — are returned.
     pub days: Option<i64>,
+    /// Sucursal donde está el lote (migración 0042). Misma gramática que
+    /// `BatchFilters::branch`: ausente = todos los locales (el dueño mira el
+    /// negocio entero), `"none"` = sólo casa matriz, `branch:<key>` = ese local.
+    pub branch: Option<String>,
 }
 
 /// One soon-to-expire (or already-expired) product batch with on-hand stock.
@@ -161,6 +165,13 @@ pub struct NearExpiryRow {
     pub product_name: String,
     pub batch_id: String,
     pub batch_code: String,
+    /// Sucursal donde está FÍSICAMENTE el lote (migración 0042). `None` = casa
+    /// matriz. Es el dato que hace accionable la alerta: dice a qué local hay
+    /// que ir a sacar el frasco.
+    pub branch: Option<String>,
+    /// Nombre de la sucursal, resuelto para que la UI no tenga que cruzar.
+    /// `None` en casa matriz.
+    pub branch_name: Option<String>,
     /// Expiry date (UTC).
     pub expiry_date: DateTime<Utc>,
     pub stock: i64,

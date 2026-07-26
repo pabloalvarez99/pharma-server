@@ -295,6 +295,9 @@ pub struct CustomerOrder {
 pub struct PurchaseOrder {
     pub id: String,
     pub supplier: String,
+    /// Local que recibe la mercadería (V2.1). Ausente = casa matriz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub status: String,
     pub currency: String,
     pub total: String,
@@ -537,6 +540,10 @@ pub struct ProductDetail {
 pub struct Batch {
     pub id: String,
     pub product: String,
+    /// Sucursal donde está el lote físico (migración 0042). Ausente = casa
+    /// matriz / negocio de un solo local.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub batch_code: String,
     pub expiry_date: String,
     pub stock: i64,
@@ -555,6 +562,12 @@ pub struct NearExpiryRow {
     pub product_name: String,
     pub batch_id: String,
     pub batch_code: String,
+    /// Local donde está el lote y su nombre resuelto (migración 0042). Ausentes
+    /// en casa matriz: la alerta dice a qué local ir.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
     pub expiry_date: String,
     pub stock: i64,
     pub days_to_expiry: i64,

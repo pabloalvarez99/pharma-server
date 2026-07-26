@@ -21,10 +21,14 @@ import {
   stockRotation,
   listProductVariants,
   createProductVariant,
+  listSucursales,
+  sucursalActiva,
+  CASA_MATRIZ,
   type Product,
   type ProductDetail,
   type Batch,
   type NearExpiryRow,
+  type Sucursal,
 } from "../api";
 import { clp, num, fecha } from "../format";
 import {
@@ -1100,15 +1104,23 @@ async function openProductDetail(
   async function loadLotes(): Promise<void> {
     const host = bodyEl.querySelector<HTMLElement>("#pd-lotes")!;
     try {
-      const lotes = await listBatches(serverUrl, id, undefined, false);
+      // Sin filtro de sucursal: en la ficha del producto el dueño quiere ver
+      // TODOS sus lotes; la columna "Local" (sólo si hay más de uno) dice dónde
+      // está cada uno.
+      const [lotes, locales] = await Promise.all([
+        listBatches(serverUrl, id, undefined, false),
+        sucursalesSafe(serverUrl),
+      ]);
       if (lotes.length === 0) {
         host.innerHTML = `<p class="empty pd-empty">Sin lotes registrados para este producto.</p>`;
         return;
       }
+      const multi = locales.length > 0;
+      const nombres = nombresDeSucursal(locales);
       host.innerHTML = `
         <table class="data-table pd-lote-table">
-          <thead><tr><th>Lote</th><th>Vence</th><th class="num">Stock</th><th>Estado</th></tr></thead>
-          <tbody>${lotes.map(loteRow).join("")}</tbody>
+          <thead><tr><th>Lote</th>${multi ? "<th>Local</th>" : ""}<th>Vence</th><th class="num">Stock</th><th>Estado</th></tr></thead>
+          <tbody>${lotes.map((b) => loteRow(b, multi ? nombreLocal(b.branch, nombres) : null)).join("")}</tbody>
         </table>
       `;
     } catch (err) {
@@ -1183,10 +1195,14 @@ async function openProductDetail(
         // Noon-UTC anchor: a midnight anchor renders one day early in CL's TZ
         // (es-CL `toLocaleDateString`) — a real expiry-date slip. `date` is
         // validated non-empty just above, so the helper never returns undefined.
+        // El lote nace donde está parado el operador (V2.1): si el negocio
+        // tiene un solo local, `sucursalActiva()` es casa matriz y el server lo
+        // deja en el mismo bucket de siempre.
         await createBatch(serverUrl, id, code, toRfc3339Noon(date)!, {
           stock: intOrUndef(stockEl.value),
           cost: intStrOrUndef(costEl.value),
           notes: trimOrUndef(notesEl.value),
+          branch: sucursalActiva(),
         });
         toast(`Lote ${code} agregado`);
         // An initial batch stock emits a movement → product stock changed.
@@ -1207,17 +1223,40 @@ async function openProductDetail(
   paintDetail();
 }
 
-function loteRow(b: Batch): string {
+function loteRow(b: Batch, local: string | null): string {
   return `
     <tr>
       <td>${escapeHtml(b.batch_code)}${
         b.notes ? `<div class="cell-sub muted">${escapeHtml(b.notes)}</div>` : ""
       }</td>
+      ${local === null ? "" : `<td>${escapeHtml(local)}</td>`}
       <td>${fecha(b.expiry_date)}</td>
       <td class="num">${num(b.stock)}</td>
       <td>${expiryPill(b.expiry_date)}</td>
     </tr>
   `;
+}
+
+// --- sucursales (V2.1) ------------------------------------------------------
+
+/** Sucursales del negocio, o `[]` si el server es viejo / la llamada falla.
+ *  Nunca revienta la vista: sin locales el inventario se ve igual que antes. */
+async function sucursalesSafe(serverUrl: string): Promise<Sucursal[]> {
+  try {
+    return await listSucursales(serverUrl);
+  } catch {
+    return [];
+  }
+}
+
+function nombresDeSucursal(locales: Sucursal[]): Map<string, string> {
+  return new Map(locales.map((s) => [s.id, s.name]));
+}
+
+/** Etiqueta del local de un lote. Sin `branch` = casa matriz. */
+function nombreLocal(branch: string | null | undefined, nombres: Map<string, string>): string {
+  if (!branch) return "Casa matriz";
+  return nombres.get(branch) ?? branch;
 }
 
 // --- "Próximos a vencer" tab ------------------------------------------------
@@ -1235,18 +1274,32 @@ function renderVencimientos(
         <button class="inv-chip" data-days="60" aria-pressed="false">60 días</button>
         <button class="inv-chip" data-days="90" aria-pressed="false">90 días</button>
       </div>
+      <label class="field inv-venc-local" id="venc-local-wrap" hidden>
+        <span class="muted">Local:</span>
+        <select id="venc-local" aria-label="Local de los lotes por vencer">
+          <option value="">Todos los locales</option>
+        </select>
+      </label>
     </div>
     <div class="table-card"><div id="inv-venc-table">${tableSkeleton()}</div></div>
   `;
   const tableHost = panel.querySelector<HTMLElement>("#inv-venc-table")!;
   let days = 30;
+  // `""` = todos los locales; `"none"` = casa matriz; `branch:<key>` = ese local.
+  // Arranca en la sucursal donde está parado el operador: la acción de un lote
+  // por vencer es física (ir a la góndola de ESE local).
+  let local = "";
+  let nombres = new Map<string, string>();
 
   const load = async (): Promise<void> => {
     tableHost.innerHTML = tableSkeleton();
     try {
-      const raw = await nearExpiry(serverUrl, days);
+      const raw = await nearExpiry(serverUrl, days, local || undefined);
       if (raw.length === 0) {
-        tableHost.innerHTML = `<p class="empty">Sin lotes próximos a vencer en ${days} días. 👍</p>`;
+        // El empty-state nombra el local: decir "no hay nada" cuando sí hay en
+        // el otro local sería mentirle al operador.
+        const donde = local === "" ? "" : ` en ${nombreLocal(local === CASA_MATRIZ ? null : local, nombres)}`;
+        tableHost.innerHTML = `<p class="empty">Sin lotes próximos a vencer en ${days} días${donde}. 👍</p>`;
         return;
       }
       // FEFO surface order: the operator must see the most urgent lote first
@@ -1256,13 +1309,18 @@ function renderVencimientos(
       // Top-N after FEFO ordering = exactly the lotes the operator must act on.
       const ordered = nearExpiryView(raw);
       const { rows, total, truncated } = capRows(ordered);
+      // La columna "Local" sólo aparece cuando la tabla mezcla locales: con el
+      // filtro puesto en uno, el título ya lo dice y la columna sería ruido.
+      const conLocal = local === "" && nombres.size > 0;
       tableHost.innerHTML = `
         <table class="data-table inv-venc">
           <thead><tr>
-            <th>Producto</th><th>Lote</th><th>Vence</th>
+            <th>Producto</th><th>Lote</th>${conLocal ? "<th>Local</th>" : ""}<th>Vence</th>
             <th class="num">Stock</th><th class="num">Días</th><th>Estado</th>
           </tr></thead>
-          <tbody>${rows.map(nearRow).join("")}</tbody>
+          <tbody>${rows
+            .map((r) => nearRow(r, conLocal ? r.branch_name ?? "Casa matriz" : null))
+            .join("")}</tbody>
         </table>
         <p class="table-foot muted">${
           truncated
@@ -1287,14 +1345,55 @@ function renderVencimientos(
       void load();
     }),
   );
-  void load();
+
+  // Selector de local: sólo existe si el negocio TIENE locales creados (misma
+  // regla que el "Estás en <local>" del topbar — un local único no ve un
+  // control que no le sirve).
+  void (async () => {
+    const locales = await sucursalesSafe(serverUrl);
+    if (locales.length === 0) {
+      void load();
+      return;
+    }
+    nombres = nombresDeSucursal(locales);
+    const wrap = panel.querySelector<HTMLElement>("#venc-local-wrap")!;
+    const sel = panel.querySelector<HTMLSelectElement>("#venc-local")!;
+    sel.insertAdjacentHTML(
+      "beforeend",
+      `<option value="${CASA_MATRIZ}">Casa matriz</option>` +
+        locales
+          .map((b) => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`)
+          .join(""),
+    );
+    // Default = el local donde está parado el operador. Si nunca eligió uno
+    // (`sucursalActiva()` = casa matriz), arranca en "todos": mostrarle la casa
+    // matriz vacía mientras sus lotes vencen en Local A sería un dead-end.
+    local = sucursalActiva() === CASA_MATRIZ ? "" : sucursalActiva();
+    sel.value = local;
+    // Si la sucursal guardada ya no existe (la borraron), caer a "todos" en vez
+    // de dejar un select en blanco filtrando por un id fantasma.
+    if (sel.value !== local) {
+      local = "";
+      sel.value = "";
+    }
+    wrap.hidden = false;
+    sel.addEventListener("change", () => {
+      local = sel.value;
+      void load();
+    });
+    void load();
+  })();
 }
 
-function nearRow(r: NearExpiryRow & { tone: "danger" | "warn" | "ok"; label: string }): string {
+function nearRow(
+  r: NearExpiryRow & { tone: "danger" | "warn" | "ok"; label: string },
+  local: string | null,
+): string {
   return `
     <tr data-id="${escapeHtml(r.product_id)}" class="inv-row" tabindex="0">
       <td>${escapeHtml(r.product_name)}</td>
       <td>${escapeHtml(r.batch_code)}</td>
+      ${local === null ? "" : `<td>${escapeHtml(local)}</td>`}
       <td>${fecha(r.expiry_date)}</td>
       <td class="num">${num(r.stock)}</td>
       <td class="num">${r.days_to_expiry}</td>
