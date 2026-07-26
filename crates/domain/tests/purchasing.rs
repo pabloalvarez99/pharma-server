@@ -298,6 +298,7 @@ async fn po_create_persists_header_lines_and_total_then_get_roundtrips() {
 
     let input = NewPurchaseOrder {
         supplier: s.id.clone(),
+        branch: None,
         currency: None,
         notes: Some("reposición mensual".into()),
         external_ref: Some("OC-001".into()),
@@ -340,6 +341,7 @@ async fn po_create_rejects_empty_items_bad_qty_and_negative_cost() {
 
     let empty = NewPurchaseOrder {
         supplier: s.id.clone(),
+        branch: None,
         currency: None,
         notes: None,
         external_ref: None,
@@ -355,6 +357,7 @@ async fn po_create_rejects_empty_items_bad_qty_and_negative_cost() {
 
     let bad_qty = NewPurchaseOrder {
         supplier: s.id.clone(),
+        branch: None,
         currency: None,
         notes: None,
         external_ref: None,
@@ -370,6 +373,7 @@ async fn po_create_rejects_empty_items_bad_qty_and_negative_cost() {
 
     let neg_cost = NewPurchaseOrder {
         supplier: s.id,
+        branch: None,
         currency: None,
         notes: None,
         external_ref: None,
@@ -398,6 +402,7 @@ async fn po_create_rejects_supplier_from_other_tenant() {
 
     let input = NewPurchaseOrder {
         supplier: foreign.id,
+        branch: None,
         currency: None,
         notes: None,
         external_ref: None,
@@ -430,6 +435,7 @@ async fn po_list_filters_by_status_and_is_tenant_scoped() {
         &t1,
         NewPurchaseOrder {
             supplier: s.id.clone(),
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -498,6 +504,7 @@ async fn po_receive_bumps_stock_recomputes_wac_logs_movement_and_marks_received(
         &t,
         NewPurchaseOrder {
             supplier: s.id.clone(),
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -559,6 +566,7 @@ async fn po_receive_rounds_wac_to_whole_clp() {
         &t,
         NewPurchaseOrder {
             supplier: s.id.clone(),
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -596,6 +604,7 @@ async fn po_receive_first_receipt_seeds_cost_price_without_diluting_to_zero() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -641,6 +650,7 @@ async fn po_receive_skips_free_text_lines() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -699,6 +709,7 @@ async fn po_receive_lines_keeps_stock_in_sync_with_batches_for_lot_tracked_produ
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -775,6 +786,7 @@ async fn po_receive_lines_all_lotted_stays_in_sync_and_fefo_satisfies_full_stock
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -822,7 +834,9 @@ async fn po_receive_lines_all_lotted_stays_in_sync_and_fefo_satisfies_full_stock
     assert_eq!(stock, batch_sum, "product.stock == Σ batch.stock");
 
     // FEFO can satisfy the full on-hand: 5 from L-A (earlier expiry) + 10 L-B.
-    let plan = domain::inventory::service::plan_fefo_optional(&db, &t, &prod.id, 15)
+    // Casa matriz: la OC de este test no lleva sucursal, así que sus lotes
+    // nacieron en el bucket NONE y el plan se acota a ese mismo local.
+    let plan = domain::inventory::service::plan_fefo_optional(&db, &t, &prod.id, 15, None)
         .await
         .unwrap()
         .expect("product is batch-tracked");
@@ -844,6 +858,7 @@ async fn po_receive_refuses_when_not_draft() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -875,6 +890,7 @@ async fn po_send_moves_draft_to_sent_and_enables_line_receive() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -922,6 +938,7 @@ async fn po_send_refuses_non_draft() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -949,6 +966,7 @@ async fn seed_po_with_total(db: &Db, t: &Thing, total: &str) -> String {
         t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -1223,6 +1241,7 @@ async fn po_cancel_refuses_when_already_received_or_cancelled() {
         &t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,
@@ -1310,6 +1329,7 @@ async fn seed_receivable_po(
         t,
         NewPurchaseOrder {
             supplier: s.id,
+            branch: None,
             currency: None,
             notes: None,
             external_ref: None,

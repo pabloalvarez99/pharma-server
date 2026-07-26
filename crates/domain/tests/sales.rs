@@ -344,6 +344,7 @@ async fn pos_sale_batch_tracked_fefo_decrements_earliest_expiry() {
         &tenant,
         inv_model::NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "A-001".into(),
             expiry_date: Utc::now() + Duration::days(30),
             stock: 4,
@@ -359,6 +360,7 @@ async fn pos_sale_batch_tracked_fefo_decrements_earliest_expiry() {
         &tenant,
         inv_model::NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "B-001".into(),
             expiry_date: Utc::now() + Duration::days(120),
             stock: 10,
@@ -435,6 +437,7 @@ async fn pos_sale_batch_tracked_rejects_when_only_expired_lots_remain() {
         &tenant,
         inv_model::NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "OLD".into(),
             expiry_date: Utc::now() - Duration::days(1),
             stock: 10,

@@ -325,6 +325,7 @@ pub async fn post_sale(
                             tenant,
                             &it.product,
                             it.quantity,
+                            branch.as_ref(),
                         )
                         .await?,
                     );

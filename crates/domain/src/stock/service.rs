@@ -151,6 +151,39 @@ pub async fn transfer(
         return Err(DomainError::InsufficientStock);
     }
 
+    // Plan de lotes (migración 0042). Si el producto lleva lotes EN EL ORIGEN,
+    // la transferencia mueve lote por lote, eligiendo por FEFO: lo que se manda
+    // al otro local es lo que vence primero, que es lo que un dueño quiere
+    // rotar. Un producto sin lotes en el origen mueve sólo cantidad (camino
+    // legacy, idéntico a V2).
+    let mut lot_moves: Vec<repo::TransferLotMove> = Vec::new();
+    if crate::inventory::repo::count_active_batches(db, tenant, &pid, from.as_ref()).await? > 0 {
+        // Reusa el mismo planner que la venta: misma definición de "lote
+        // elegible" (activo, con stock, no vencido) y mismo orden.
+        let plan =
+            crate::inventory::repo::plan_fefo(db, tenant, &pid, input.qty, from.as_ref()).await?;
+        for a in plan {
+            let from_batch = parse_thing(&a.batch)?;
+            let lot = crate::inventory::repo::get_batch(db, tenant, &from_batch)
+                .await?
+                .ok_or(DomainError::NotFound)?;
+            // Espejo en el destino: mismo `batch_code` del proveedor. Si ya
+            // existe se acumula ahí en vez de abrir una segunda fila del mismo
+            // lote físico en el mismo local.
+            let to_batch =
+                crate::purchasing::repo::find_batch(db, tenant, &pid, to.as_ref(), &lot.batch_code)
+                    .await?;
+            lot_moves.push(repo::TransferLotMove {
+                from_batch,
+                to_batch,
+                batch_code: lot.batch_code,
+                expiry_date: lot.expiry_date,
+                cost: lot.cost,
+                qty: a.qty,
+            });
+        }
+    }
+
     let movements = repo::apply_transfer(
         db,
         tenant,
@@ -160,6 +193,7 @@ pub async fn transfer(
         input.qty,
         admin_thing.as_ref(),
         input.notes.as_deref(),
+        &lot_moves,
     )
     .await?;
 

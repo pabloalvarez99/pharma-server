@@ -78,6 +78,8 @@ impl From<MovementRow> for StockMovementDto {
 struct BatchRow {
     id: Thing,
     product: Thing,
+    #[serde(default)]
+    branch: Option<Thing>,
     batch_code: String,
     expiry_date: DateTime<Utc>,
     stock: i64,
@@ -93,6 +95,7 @@ impl From<BatchRow> for BatchDto {
         Self {
             id: r.id.to_string(),
             product: r.product.to_string(),
+            branch: r.branch.map(|t| t.to_string()),
             batch_code: r.batch_code,
             expiry_date: r.expiry_date,
             stock: r.stock,
@@ -305,27 +308,48 @@ pub async fn list_movements(
 
 // --- product_batch ---------------------------------------------------------
 
+/// Condición SurrealQL para acotar a una sucursal. La casa matriz se compara
+/// contra el literal `NONE` en vez de contra un bind: un `Option::None` bindeado
+/// llega como NONE igual, pero el literal deja la intención explícita en el SQL
+/// y es el mismo patrón que usa `stock::repo` (migración 0041).
+fn branch_cond(branch: Option<&Thing>) -> &'static str {
+    if branch.is_some() {
+        "branch = $br"
+    } else {
+        "branch = NONE"
+    }
+}
+
 /// Create a batch + (if `initial_stock > 0`) emit the matching `+delta`
 /// `stock_movement` and update `product.stock` — all in one transaction.
+///
+/// `branch` (migración 0042) es la sucursal donde queda el lote físico. Se
+/// estampa en el lote **y** en el `stock_movement`, así el evento
+/// `product_branch_stock_maint` sube el bucket del mismo local que va a poder
+/// consumirlo por FEFO. Estampar sólo uno de los dos rompería
+/// `Σ product_batch.stock[X] == product_branch_stock[X]`.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_batch_atomic(
     db: &Db,
     tenant: &Thing,
     product: &Thing,
+    branch: Option<&Thing>,
     input: &NewBatch,
     admin: Option<Thing>,
 ) -> DomainResult<(BatchDto, Option<ProductDto>)> {
     let initial = input.stock;
     let mut sql = String::from(
         "BEGIN; \
-         CREATE product_batch SET tenant = $t, product = $p, batch_code = $code, \
-             expiry_date = $exp, stock = $stock, cost = $cost, notes = $notes \
+         CREATE product_batch SET tenant = $t, product = $p, branch = $br, \
+             batch_code = $code, expiry_date = $exp, stock = $stock, cost = $cost, \
+             notes = $notes \
              RETURN AFTER;",
     );
     if initial > 0 {
         sql.push_str(
             " CREATE stock_movement SET tenant = $t, product = $p, delta = $stock, \
-              reason = 'batch_received', admin = $admin, ref = $code RETURN AFTER;\
+              reason = 'batch_received', admin = $admin, ref = $code, branch = $br \
+              RETURN AFTER;\
               UPDATE product SET stock = stock + $stock \
               WHERE id = $p AND tenant = $t RETURN AFTER;",
         );
@@ -335,6 +359,7 @@ pub async fn create_batch_atomic(
         .query(sql)
         .bind(("t", tenant.clone()))
         .bind(("p", product.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("code", input.batch_code.clone()))
         .bind(("exp", dt_val(input.expiry_date)))
         .bind(("stock", initial))
@@ -362,6 +387,20 @@ pub async fn list_batches(
     if f.product.is_some() {
         conds.push("product = $p".to_string());
     }
+    // Sucursal: tri-estado. Ausente = todas (el dueño mira el negocio entero);
+    // `"none"` = sólo casa matriz; un `branch:<key>` = ese local.
+    let branch_thing = match f.branch.as_deref() {
+        Some("none") | Some("") | None => None,
+        Some(s) => Some(
+            surrealdb::sql::thing(s)
+                .map_err(|_| DomainError::Invalid(format!("sucursal inválida: {s}")))?,
+        ),
+    };
+    if matches!(f.branch.as_deref(), Some("none") | Some("")) {
+        conds.push("branch = NONE".to_string());
+    } else if branch_thing.is_some() {
+        conds.push("branch = $br".to_string());
+    }
     if f.only_available.unwrap_or(false) {
         conds.push("active = true AND stock > 0 AND expiry_date >= time::now()".to_string());
     }
@@ -385,6 +424,7 @@ pub async fn list_batches(
         .query(q)
         .bind(("t", tenant.clone()))
         .bind(("p", p))
+        .bind(("br", branch_thing))
         .bind(("days", f.expiring_within_days.unwrap_or(0)))
         .await?;
     let rows: Vec<BatchRow> = r.take(0)?;
@@ -463,45 +503,72 @@ pub async fn soft_delete_batch(db: &Db, tenant: &Thing, id: &Thing) -> DomainRes
 
 // --- FEFO ------------------------------------------------------------------
 
-/// Count of `active` batches for a product (any stock/expiry). `0` means the
-/// product is not batch-tracked, so sales fall back to the plain
-/// `product.stock` path; `> 0` means FEFO consumption is mandatory (a
-/// batch-tracked product with only expired/empty lots must NOT sell).
-pub async fn count_active_batches(db: &Db, tenant: &Thing, product: &Thing) -> DomainResult<i64> {
+/// Count of `active` batches for a product **in one branch** (any stock/expiry).
+/// `0` means the product is not batch-tracked *in that branch*, so the sale
+/// falls back to the plain `product.stock` path; `> 0` means FEFO consumption is
+/// mandatory (a batch-tracked product with only expired/empty lots must NOT
+/// sell).
+///
+/// Acotar el conteo a la sucursal es lo que evita el falso positivo inverso:
+/// si el producto tiene lotes en el local B pero ninguno en A, vender en A NO
+/// debe exigir FEFO contra lotes ajenos — la sucursal A simplemente no lleva
+/// lotes de ese producto y cae al camino `product.stock` (que el pre-chequeo por
+/// bucket de 0041 ya limitó a lo que A realmente tiene).
+pub async fn count_active_batches(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    branch: Option<&Thing>,
+) -> DomainResult<i64> {
+    let q = format!(
+        "SELECT count() AS n FROM product_batch \
+         WHERE tenant = $t AND product = $p AND active = true AND {} GROUP ALL",
+        branch_cond(branch),
+    );
     let mut r = db
-        .query(
-            "SELECT count() AS n FROM product_batch \
-             WHERE tenant = $t AND product = $p AND active = true GROUP ALL",
-        )
+        .query(q)
         .bind(("t", tenant.clone()))
         .bind(("p", product.clone()))
+        .bind(("br", branch.cloned()))
         .await?;
     let n: Option<i64> = r.take((0, "n"))?;
     Ok(n.unwrap_or(0))
 }
 
-/// Read-only FEFO plan: order eligible batches by `expiry_date ASC,
-/// created_at ASC` and allocate `qty`. Returns `Err(InsufficientStock)` if
-/// total available < qty. Caller (sales Fase 4) is responsible for writing
-/// the resulting decrements and the matching `stock_movement`.
+/// Read-only FEFO plan **acotado a una sucursal**: order eligible batches by
+/// `expiry_date ASC, created_at ASC` and allocate `qty`. Returns
+/// `Err(InsufficientStock)` if total available < qty. Caller (sales Fase 4) is
+/// responsible for writing the resulting decrements and the matching
+/// `stock_movement`.
+///
+/// El filtro por `branch` (migración 0042) es la regla de negocio central de
+/// esta lane: vender en el local A consume el lote de A que vence primero, nunca
+/// el de B — aunque el de B venza antes. El frasco que el cajero tiene en la
+/// mano y el vencimiento que el sistema descuenta son el mismo.
 pub async fn plan_fefo(
     db: &Db,
     tenant: &Thing,
     product: &Thing,
     qty: i64,
+    branch: Option<&Thing>,
 ) -> DomainResult<Vec<FefoAllocation>> {
     if qty <= 0 {
         return Err(DomainError::Invalid("qty debe ser > 0".into()));
     }
+    // `expiry_date` y `created_at` van en el SELECT porque SurrealDB exige que
+    // el campo del ORDER BY esté proyectado.
+    let q = format!(
+        "SELECT id, stock, expiry_date, created_at FROM product_batch \
+         WHERE tenant = $t AND product = $p AND active = true AND stock > 0 \
+           AND expiry_date >= time::now() AND {} \
+         ORDER BY expiry_date ASC, created_at ASC",
+        branch_cond(branch),
+    );
     let mut r = db
-        .query(
-            "SELECT id, stock, expiry_date, created_at FROM product_batch \
-             WHERE tenant = $t AND product = $p AND active = true AND stock > 0 \
-               AND expiry_date >= time::now() \
-             ORDER BY expiry_date ASC, created_at ASC",
-        )
+        .query(q)
         .bind(("t", tenant.clone()))
         .bind(("p", product.clone()))
+        .bind(("br", branch.cloned()))
         .await?;
 
     #[derive(Deserialize)]

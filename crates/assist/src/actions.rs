@@ -2215,6 +2215,10 @@ pub async fn execute(
                 tenant,
                 NewPurchaseOrder {
                     supplier: supplier_id,
+                    // Casa matriz: el agente todavía no pregunta "¿para qué
+                    // local?". Elegir sucursal por voz es lane aparte; hasta
+                    // entonces el borrador entra donde entraba antes de 0042.
+                    branch: None,
                     currency: None,
                     notes: Some("Borrador creado por el agente".into()),
                     external_ref: None,
