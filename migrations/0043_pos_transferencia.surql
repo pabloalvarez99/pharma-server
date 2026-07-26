@@ -1,0 +1,33 @@
+-- pharma-server 0043: `pos_transferencia` como método de pago del POS.
+-- ---------------------------------------------------------------------------
+-- "Te hago la transfer" es el método no-efectivo dominante del micronegocio
+-- chileno y hasta hoy no existía: el cajero tenía que mentirle al sistema
+-- (marcar efectivo o tarjeta), y con eso el arqueo, los reportes y las
+-- respuestas del agente quedaban mal.
+--
+-- Por qué basta con ampliar el whitelist (y NO hace falta tabla nueva):
+--
+--   * El efectivo esperado del arqueo NO se calcula por "todo lo que no sea
+--     tarjeta": sale de `cash_register_session.cash_sales_running`, el agregado
+--     que mantiene el evento `cash_sales_running_maint` de la migración 0030,
+--     que suma `cash_amount` SÓLO cuando `payment_method IN ['pos_cash',
+--     'pos_mixed']`. Un tender nuevo fuera de esa lista queda automáticamente
+--     fuera del cajón — exactamente como se comporta hoy `pos_debit`/
+--     `pos_credit`. Es el invariante que este vector no puede romper.
+--   * El vuelto (`change`) sólo se calcula para `pos_cash`/`pos_mixed`; una
+--     transferencia liquida exacta, igual que una venta pura con tarjeta.
+--
+-- `DEFINE FIELD OVERWRITE` = mismo patrón con el que 0039 agregó `pos_fiado`
+-- (append-only: no se edita 0007). Se conservan TODOS los valores previos.
+-- Sin esto la venta no persiste: la tabla es SCHEMAFULL y el ASSERT rechaza el
+-- valor nuevo — el test de persistencia del tender es el guardián de esto.
+--
+-- `transfer` (ya presente desde 0007) es la transferencia de una orden WEB/
+-- store, otro flujo; el tender de mostrador vive en el namespace `pos_*` junto
+-- a `pos_cash`/`pos_fiado` para que el POS y los reportes hablen un solo
+-- idioma.
+--
+-- Append-only — nunca editar una migración ya aplicada.
+
+DEFINE FIELD OVERWRITE payment_method ON order TYPE string
+    ASSERT $value IN ['pos_cash','pos_debit','pos_credit','pos_mixed','pos_fiado','pos_transferencia','store','webpay','transfer'];

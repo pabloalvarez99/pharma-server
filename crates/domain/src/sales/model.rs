@@ -11,12 +11,17 @@ use super::interactions::InteractionDetail;
 /// POS payment methods accepted on counter. `pos_fiado` = venta a cuenta
 /// corriente (el cliente queda debiendo): NO mueve caja, exige `customer`, y
 /// genera un cargo en el ledger de fiado (migración 0039 / `crate::credit`).
+/// `pos_transferencia` = "te hago la transfer" (migración 0043): ingreso
+/// electrónico, liquida exacto y **no entra al efectivo esperado del arqueo**
+/// — misma ruta que `pos_debit`/`pos_credit`, porque el agregado
+/// `cash_sales_running` (0030) sólo suma `pos_cash`/`pos_mixed`.
 pub const POS_METHODS: &[&str] = &[
     "pos_cash",
     "pos_debit",
     "pos_credit",
     "pos_mixed",
     "pos_fiado",
+    "pos_transferencia",
 ];
 
 /// Default loyalty rule: 1 point per $1000 CLP (overridable via
