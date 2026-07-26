@@ -87,6 +87,7 @@ pub async fn seed_batch(
     use domain::inventory::model::NewBatch;
     let input = NewBatch {
         product: product_id.to_string(),
+        branch: None,
         batch_code: code.to_string(),
         expiry_date: chrono::DateTime::parse_from_rfc3339(expiry_rfc3339)
             .expect("expiry rfc3339")

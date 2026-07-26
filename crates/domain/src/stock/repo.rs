@@ -225,6 +225,29 @@ pub struct TransferMovements {
     pub in_id: String,
 }
 
+/// Un lote que viaja en una transferencia (migración 0042). El lote no "se
+/// mueve" de fila: se descuenta del lote de origen y se acumula en su espejo en
+/// el destino (mismo `batch_code` y vencimiento), creándolo si el destino aún no
+/// lo tenía. Dos filas porque el lote es FÍSICO: 30 cajas del lote L1 en el
+/// local A y 10 en el B son dos existencias distintas, cada una con su FEFO.
+pub struct TransferLotMove {
+    /// Lote de origen a descontar.
+    pub from_batch: Thing,
+    /// Espejo en el destino si ya existe; `None` ⇒ se crea.
+    pub to_batch: Option<Thing>,
+    pub batch_code: String,
+    pub expiry_date: DateTime<Utc>,
+    pub cost: Option<rust_decimal::Decimal>,
+    pub qty: i64,
+}
+
+fn dec_opt(d: Option<rust_decimal::Decimal>) -> surrealdb::sql::Value {
+    match d {
+        Some(x) => surrealdb::sql::Number::from(x).into(),
+        None => surrealdb::sql::Value::None,
+    }
+}
+
 /// Emite los dos `stock_movement` de suma cero de una transferencia en UNA sola
 /// transacción `BEGIN; … ; COMMIT;`:
 /// * salida: `delta = -qty`, `reason = "transfer_out"`, `branch = from`,
@@ -234,6 +257,15 @@ pub struct TransferMovements {
 /// dentro de la misma tx, así que al COMMIT el origen bajó y el destino subió
 /// `qty`. La suma de deltas es cero ⇒ `product.stock` (y el invariante global) no
 /// cambian: se mueve la distribución, no el total.
+///
+/// `lot_moves` (migración 0042) viaja en la MISMA transacción: si el producto
+/// lleva lotes en el origen, la transferencia mueve las unidades lote por lote
+/// (descuenta el de origen, acumula/crea su espejo en el destino). Sin esto la
+/// cantidad llegaría al destino pero los lotes se quedarían en el origen, y el
+/// FEFO del destino no encontraría nada que consumir: stock visible e
+/// invendible, justo el dead-end que la vara de producto prohíbe. Va en la misma
+/// tx que los movimientos porque `Σ product_batch.stock[X]` y
+/// `product_branch_stock[X]` tienen que cruzar el COMMIT juntos.
 ///
 /// El caller (servicio) ya validó: propiedad del tenant sobre el producto, que
 /// sea físico, `qty > 0`, `from != to`, existencia de ambas sucursales y
@@ -248,21 +280,42 @@ pub async fn apply_transfer(
     qty: i64,
     admin: Option<&Thing>,
     notes: Option<&str>,
+    lot_moves: &[TransferLotMove],
 ) -> DomainResult<TransferMovements> {
     let ref_note = notes
         .map(str::to_string)
         .unwrap_or_else(|| "transferencia".to_string());
-    let mut r = db
-        .query(
-            "BEGIN; \
-             CREATE stock_movement SET tenant = $t, product = $p, delta = $neg, \
-                 reason = 'transfer_out', admin = $a, ref = $ref, branch = $from \
-                 RETURN AFTER; \
-             CREATE stock_movement SET tenant = $t, product = $p, delta = $pos, \
-                 reason = 'transfer_in', admin = $a, ref = $ref, branch = $to \
-                 RETURN AFTER; \
-             COMMIT;",
-        )
+    let mut sql = String::from(
+        "BEGIN; \
+         CREATE stock_movement SET tenant = $t, product = $p, delta = $neg, \
+             reason = 'transfer_out', admin = $a, ref = $ref, branch = $from \
+             RETURN AFTER; \
+         CREATE stock_movement SET tenant = $t, product = $p, delta = $pos, \
+             reason = 'transfer_in', admin = $a, ref = $ref, branch = $to \
+             RETURN AFTER; ",
+    );
+    for (i, m) in lot_moves.iter().enumerate() {
+        sql.push_str(&format!(
+            "UPDATE product_batch SET stock = stock - $lq{i} \
+                WHERE id = $lfrom{i} AND tenant = $t; ",
+        ));
+        if m.to_batch.is_some() {
+            sql.push_str(&format!(
+                "UPDATE product_batch SET stock = stock + $lq{i}, active = true \
+                    WHERE id = $lto{i} AND tenant = $t; ",
+            ));
+        } else {
+            sql.push_str(&format!(
+                "CREATE product_batch SET tenant = $t, product = $p, branch = $to, \
+                    batch_code = $lc{i}, expiry_date = $le{i}, stock = $lq{i}, \
+                    cost = $lcost{i}; ",
+            ));
+        }
+    }
+    sql.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(sql)
         .bind(("t", tenant.clone()))
         .bind(("p", product.clone()))
         .bind(("neg", -qty))
@@ -270,9 +323,22 @@ pub async fn apply_transfer(
         .bind(("a", admin.cloned()))
         .bind(("ref", ref_note))
         .bind(("from", from.cloned()))
-        .bind(("to", to.cloned()))
-        .await?
-        .check()?;
+        .bind(("to", to.cloned()));
+    for (i, m) in lot_moves.iter().enumerate() {
+        qb = qb
+            .bind((format!("lq{i}"), m.qty))
+            .bind((format!("lfrom{i}"), m.from_batch.clone()))
+            .bind((format!("lc{i}"), m.batch_code.clone()))
+            .bind((
+                format!("le{i}"),
+                surrealdb::sql::Datetime::from(m.expiry_date),
+            ))
+            .bind((format!("lcost{i}"), dec_opt(m.cost)));
+        if let Some(to_batch) = &m.to_batch {
+            qb = qb.bind((format!("lto{i}"), to_batch.clone()));
+        }
+    }
+    let mut r = qb.await?.check()?;
 
     #[derive(Deserialize)]
     struct IdRow {

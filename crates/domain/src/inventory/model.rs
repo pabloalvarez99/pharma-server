@@ -65,6 +65,10 @@ pub struct AdjustMovement {
 pub struct BatchDto {
     pub id: String,
     pub product: String,
+    /// Sucursal donde está físicamente el lote. `None` = casa matriz
+    /// (migración 0042). El FEFO de una venta sólo consume lotes de la sucursal
+    /// donde se vende.
+    pub branch: Option<String>,
     pub batch_code: String,
     pub expiry_date: DateTime<Utc>,
     pub stock: i64,
@@ -80,6 +84,9 @@ pub struct BatchDto {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct NewBatch {
     pub product: String,
+    /// Sucursal donde queda el lote. Ausente / `""` / `"none"` = casa matriz.
+    #[serde(default)]
+    pub branch: Option<String>,
     pub batch_code: String,
     pub expiry_date: DateTime<Utc>,
     /// Initial stock for the batch. If > 0 a `stock_movement` of equal delta
@@ -106,6 +113,9 @@ pub struct UpdateBatch {
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct BatchFilters {
     pub product: Option<String>,
+    /// Acota a una sucursal. `"none"` = sólo casa matriz; ausente = todas
+    /// (la vista de inventario del dueño quiere ver el total del negocio).
+    pub branch: Option<String>,
     /// `true` (default) only batches still in stock & not expired.
     pub only_available: Option<bool>,
     /// Days to consider "expiring soon".

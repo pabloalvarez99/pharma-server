@@ -136,9 +136,15 @@ pub async fn create_batch(
     repo::product_for_movement(db, tenant, &pid)
         .await?
         .ok_or(DomainError::NotFound)?;
+    // Sucursal del lote (migración 0042). Se valida ANTES de la tx: un lote
+    // apuntando a una sucursal inexistente quedaría invisible para el FEFO de
+    // todos los locales — stock fantasma que nadie puede vender.
+    let branch = crate::stock::service::parse_branch(input.branch.as_deref())?;
+    crate::stock::service::ensure_branch(db, tenant, branch.as_ref(), "la sucursal del lote")
+        .await?;
     let admin_thing = parse_admin(admin)?;
     let (batch, _updated) =
-        repo::create_batch_atomic(db, tenant, &pid, &input, admin_thing).await?;
+        repo::create_batch_atomic(db, tenant, &pid, branch.as_ref(), &input, admin_thing).await?;
     Ok(batch)
 }
 
@@ -173,14 +179,17 @@ pub async fn delete_batch(db: &Db, tenant: &Thing, id: &str) -> DomainResult<()>
 }
 
 /// FEFO planner exposed for sales (Fase 4). Pure read; no writes.
+/// `branch` = sucursal donde se vende (`None` = casa matriz): sólo se consideran
+/// lotes de ESE local (migración 0042).
 pub async fn plan_fefo(
     db: &Db,
     tenant: &Thing,
     product_id: &str,
     qty: i64,
+    branch: Option<&Thing>,
 ) -> DomainResult<Vec<FefoAllocation>> {
     let pid = parse_thing(product_id)?;
-    repo::plan_fefo(db, tenant, &pid, qty).await
+    repo::plan_fefo(db, tenant, &pid, qty, branch).await
 }
 
 /// FEFO plan for a POS line, distinguishing "not batch-tracked" from
@@ -191,17 +200,21 @@ pub async fn plan_fefo(
 ///   earliest-expiry-first and must be applied in the sale tx.
 /// * `Err(InsufficientStock)` — tracked but available (non-expired) lots
 ///   cannot satisfy `qty`; the sale must be rejected.
+///
+/// Todo se evalúa DENTRO de la sucursal `branch` (migración 0042): "tiene lotes"
+/// y "los lotes alcanzan" son preguntas por local, no por tenant.
 pub async fn plan_fefo_optional(
     db: &Db,
     tenant: &Thing,
     product_id: &str,
     qty: i64,
+    branch: Option<&Thing>,
 ) -> DomainResult<Option<Vec<FefoAllocation>>> {
     let pid = parse_thing(product_id)?;
-    if repo::count_active_batches(db, tenant, &pid).await? == 0 {
+    if repo::count_active_batches(db, tenant, &pid, branch).await? == 0 {
         return Ok(None);
     }
-    Ok(Some(repo::plan_fefo(db, tenant, &pid, qty).await?))
+    Ok(Some(repo::plan_fefo(db, tenant, &pid, qty, branch).await?))
 }
 
 // --- faltas ----------------------------------------------------------------

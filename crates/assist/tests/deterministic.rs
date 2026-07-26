@@ -228,6 +228,7 @@ async fn por_vencer_lists_near_expiry_batches() {
         &tenant,
         imodel::NewBatch {
             product: para.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: Utc::now() + Duration::days(10),
             stock: 20,
@@ -427,6 +428,7 @@ async fn por_vencer_semana_uses_seven_day_window() {
         &tenant,
         imodel::NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: Utc::now() + Duration::days(20),
             stock: 10,

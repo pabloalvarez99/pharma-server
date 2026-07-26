@@ -300,10 +300,18 @@ pub async fn create_purchase_order(
         });
     }
 
+    // Sucursal destino de la compra (migración 0042). Validada antes de crear:
+    // una OC apuntando a una sucursal inexistente recibiría mercadería en un
+    // bucket que nadie puede vender.
+    let branch = crate::stock::service::parse_branch(input.branch.as_deref())?;
+    crate::stock::service::ensure_branch(db, tenant, branch.as_ref(), "la sucursal de la compra")
+        .await?;
+
     repo::create_purchase_order(
         db,
         tenant,
         &supplier,
+        branch.as_ref(),
         currency,
         input.notes.as_deref(),
         input.external_ref.as_deref(),
@@ -445,7 +453,11 @@ pub async fn receive_purchase_order(
         Some(a) if !a.is_empty() => Some(parse_thing(a)?),
         _ => None,
     };
-    repo::receive_purchase_order(db, tenant, &po, admin_thing, &effects)
+    // La mercadería entra a la sucursal de la OC (migración 0042): el
+    // `stock_movement` lleva esa sucursal para que el bucket que sube sea el del
+    // local que efectivamente recibió las cajas.
+    let branch = crate::stock::service::parse_branch(current.branch.as_deref())?;
+    repo::receive_purchase_order(db, tenant, &po, branch.as_ref(), admin_thing, &effects)
         .await?
         .ok_or(DomainError::NotFound)
 }
@@ -499,6 +511,10 @@ pub async fn receive_purchase_order_lines(
             "la recepción requiere al menos una línea".into(),
         ));
     }
+    // Sucursal que recibe (migración 0042): la de la OC, no una que mande el
+    // request. Así dos recepciones parciales de la misma orden no pueden dejar
+    // la mitad de los lotes en un local y la otra mitad en otro.
+    let branch = crate::stock::service::parse_branch(current.branch.as_deref())?;
 
     use std::collections::BTreeMap;
     // Index the PO's lines by id for O(1) lookup + over-receipt checks.
@@ -580,7 +596,9 @@ pub async fn receive_purchase_order_lines(
         let has_lot = rl.lot.as_deref().is_some_and(|l| !l.trim().is_empty());
         if !has_lot
             && (lotted_in_req.contains(pid_str)
-                || crate::inventory::repo::count_active_batches(db, tenant, &pid).await? > 0)
+                || crate::inventory::repo::count_active_batches(db, tenant, &pid, branch.as_ref())
+                    .await?
+                    > 0)
         {
             return Err(DomainError::Conflict(format!(
                 "el producto de la línea {} se controla por lote; indique lote y vencimiento",
@@ -599,7 +617,7 @@ pub async fn receive_purchase_order_lines(
                     rl.po_line_id
                 ))
             })?;
-            let existing = repo::find_batch(db, tenant, &pid, lot).await?;
+            let existing = repo::find_batch(db, tenant, &pid, branch.as_ref(), lot).await?;
             batch_effects.push(repo::ReceiveBatchEffect {
                 batch: existing,
                 product: pid.clone(),
@@ -655,6 +673,7 @@ pub async fn receive_purchase_order_lines(
         db,
         tenant,
         &po,
+        branch.as_ref(),
         admin_thing,
         final_status,
         &product_effects,
