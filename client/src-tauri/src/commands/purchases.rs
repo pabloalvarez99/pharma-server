@@ -218,6 +218,7 @@ pub async fn create_supplier(
 /// server computes the per-line `subtotal` + header `total`. `currency` defaults
 /// to CLP server-side when omitted. Returns the created PO header.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn create_purchase_order(
     state: State<'_, SessionState>,
     server_url: String,
@@ -226,6 +227,7 @@ pub async fn create_purchase_order(
     currency: Option<String>,
     notes: Option<String>,
     external_ref: Option<String>,
+    branch: Option<String>,
 ) -> Result<PurchaseOrder, String> {
     if items.is_empty() {
         return Err("La orden de compra requiere al menos un ítem.".to_string());
@@ -245,6 +247,12 @@ pub async fn create_purchase_order(
     }
     if let Some(v) = external_ref.filter(|s| !s.is_empty()) {
         body["external_ref"] = serde_json::Value::String(v);
+    }
+    // Sucursal que recibe la mercadería (V2.1): se fija al CREAR la OC porque
+    // el comprador ya sabe para qué local compra, y así dos recepciones
+    // parciales no pueden contradecirse de local.
+    if let Some(v) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(v);
     }
     let resp = http
         .post(format!("{base}/api/v1/purchase-orders"))

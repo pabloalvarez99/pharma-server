@@ -122,7 +122,19 @@ async fn ventas(
 }
 
 async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> DomainResult<Answer> {
-    let rows = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(days) }).await?;
+    // Sin filtro de sucursal a propósito: el dueño que pregunta "¿qué se me
+    // vence?" quiere el negocio entero. Lo que sí cambia con la migración 0042
+    // es que la respuesta dice EN QUÉ LOCAL está cada lote — si no, la alerta no
+    // es accionable en un negocio de dos locales.
+    let rows = reports::near_expiry(
+        db,
+        tenant,
+        NearExpiryFilters {
+            days: Some(days),
+            branch: None,
+        },
+    )
+    .await?;
     let ventana = if days == 7 {
         "esta semana".to_string()
     } else {
@@ -139,15 +151,24 @@ async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> Doma
         .iter()
         .take(3)
         .map(|r| {
+            // El local sólo se nombra cuando el lote está en una sucursal: un
+            // negocio de un solo local no tiene por qué leer "casa matriz" en
+            // cada línea.
+            let donde = r
+                .branch_name
+                .as_deref()
+                .map(|n| format!(" en {n}"))
+                .unwrap_or_default();
             if r.expired {
-                format!("{} (vencido, {} u.)", r.product_name, r.stock)
+                format!("{} (vencido, {} u.{})", r.product_name, r.stock, donde)
             } else {
                 format!(
-                    "{} (en {} {}, {} u.)",
+                    "{} (en {} {}, {} u.{})",
                     r.product_name,
                     r.days_to_expiry,
                     plural(r.days_to_expiry, "día", "días"),
-                    r.stock
+                    r.stock,
+                    donde
                 )
             }
         })
@@ -416,7 +437,15 @@ async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     let reorder = inventory::reorder_suggestions(db, tenant).await?;
 
     // Business — lots expiring within 7 days (for pharmacy, meds about to expire).
-    let expiry = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(7) }).await?;
+    let expiry = reports::near_expiry(
+        db,
+        tenant,
+        NearExpiryFilters {
+            days: Some(7),
+            branch: None,
+        },
+    )
+    .await?;
     let expired = expiry.iter().filter(|r| r.expired).count();
 
     // Health (Ley 20.000) — controlled prescriptions dispensed month-to-date.

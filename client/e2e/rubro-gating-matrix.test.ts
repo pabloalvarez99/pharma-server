@@ -52,8 +52,15 @@ const EXPECTED: Readonly<Record<Rubro, RubroFeatures>> = {
 };
 
 /** Modules visibleModulesForRubro gates; everything else is universal. Mirrors
- *  the gate in first-run.ts (recetas←recetas, inventory/compras←physicalStock). */
-const GATED_MODULES: ReadonlyArray<ModuleId> = ["recetas", "inventory", "compras"];
+ *  the gate in first-run.ts (recetas←recetas, inventory/compras/sucursales←
+ *  physicalStock: mover stock entre locales no tiene sentido en un rubro que no
+ *  lleva inventario físico). */
+const GATED_MODULES: ReadonlyArray<ModuleId> = [
+  "recetas",
+  "inventory",
+  "compras",
+  "sucursales",
+];
 const UNIVERSAL_MODULES: ReadonlyArray<ModuleId> = ALL_MODULES.filter(
   (m) => !GATED_MODULES.includes(m),
 );
@@ -97,9 +104,11 @@ describe("nav gate ↔ capability gate must AGREE for every rubro", () => {
     const f = featuresForRubro(r);
     // recetas module visible iff the rubro has recetas capability.
     expect(visible.has("recetas")).toBe(f.recetas);
-    // inventario + compras visible iff the rubro tracks physical stock.
+    // inventario + compras + sucursales visibles iff the rubro tracks physical
+    // stock (V2: transferir stock entre locales exige stock físico).
     expect(visible.has("inventory")).toBe(f.physicalStock);
     expect(visible.has("compras")).toBe(f.physicalStock);
+    expect(visible.has("sucursales")).toBe(f.physicalStock);
   });
 });
 

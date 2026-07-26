@@ -98,6 +98,11 @@ pub async fn create_product(
     if let Some(v) = cost_price.filter(|s| !s.is_empty()) {
         body["cost_price"] = serde_json::Value::String(v);
     }
+    // El lote nace en la sucursal activa del shell; `"none"` = casa matriz y el
+    // server ya lo interpreta así, pero no lo mandamos para no ensuciar el body.
+    if let Some(b) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(b);
+    }
     if let Some(n) = stock {
         body["stock"] = serde_json::Value::from(n);
     }
@@ -333,6 +338,11 @@ pub async fn create_product_variant(
     if let Some(v) = cost_price.filter(|s| !s.is_empty()) {
         body["cost_price"] = serde_json::Value::String(v);
     }
+    // El lote nace en la sucursal activa del shell; `"none"` = casa matriz y el
+    // server ya lo interpreta así, pero no lo mandamos para no ensuciar el body.
+    if let Some(b) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(b);
+    }
     if let Some(n) = stock {
         body["stock"] = serde_json::Value::from(n);
     }
@@ -399,13 +409,16 @@ pub async fn adjust_product_stock(
         .map_err(|e| format!("Respuesta de ajuste inválida del servidor: {e}"))
 }
 
-/// GET `/api/v1/batches` (Bearer). Filters: `product` (record id),
+/// GET `/api/v1/batches` (Bearer). Filters: `product` (record id), `branch`
+/// (sucursal del lote; `"none"` = casa matriz, ausente = todos los locales),
 /// `expiring_within_days`, `only_available`, `limit`. Returns lotes.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn list_batches(
     state: State<'_, SessionState>,
     server_url: String,
     product: Option<String>,
+    branch: Option<String>,
     expiring_within_days: Option<i64>,
     only_available: Option<bool>,
     limit: Option<u32>,
@@ -418,6 +431,9 @@ pub async fn list_batches(
         .bearer_auth(token.expose_secret());
     if let Some(p) = product.as_ref().filter(|s| !s.is_empty()) {
         req = req.query(&[("product", p)]);
+    }
+    if let Some(b) = branch.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("branch", b)]);
     }
     if let Some(d) = expiring_within_days {
         req = req.query(&[("expiring_within_days", d)]);
@@ -446,6 +462,7 @@ pub async fn create_batch(
     state: State<'_, SessionState>,
     server_url: String,
     product: String,
+    branch: Option<String>,
     batch_code: String,
     expiry_date: String,
     stock: Option<i64>,
@@ -460,6 +477,11 @@ pub async fn create_batch(
         "batch_code": batch_code,
         "expiry_date": expiry_date,
     });
+    // El lote nace en la sucursal activa del shell; `"none"` = casa matriz y el
+    // server ya lo interpreta así, pero no lo mandamos para no ensuciar el body.
+    if let Some(b) = branch.filter(|s| !s.is_empty() && s != "none") {
+        body["branch"] = serde_json::Value::String(b);
+    }
     if let Some(n) = stock {
         body["stock"] = serde_json::Value::from(n);
     }
@@ -484,13 +506,15 @@ pub async fn create_batch(
         .map_err(|e| format!("Respuesta de lote inválida del servidor: {e}"))
 }
 
-/// GET `/api/v1/reports/near-expiry?days=N` (Bearer). Batches expiring within
-/// `days` (default 30 server-side) including already-expired, urgent first.
+/// GET `/api/v1/reports/near-expiry?days=N&branch=X` (Bearer). Batches expiring
+/// within `days` (default 30 server-side) including already-expired, urgent
+/// first. `branch` acota al local (`"none"` = casa matriz, ausente = todos).
 #[tauri::command]
 pub async fn near_expiry(
     state: State<'_, SessionState>,
     server_url: String,
     days: Option<i64>,
+    branch: Option<String>,
 ) -> Result<Vec<NearExpiryRow>, String> {
     let token = token_of(&state)?;
     let http = client();
@@ -500,6 +524,9 @@ pub async fn near_expiry(
         .bearer_auth(token.expose_secret());
     if let Some(d) = days {
         req = req.query(&[("days", d)]);
+    }
+    if let Some(b) = branch.as_ref().filter(|s| !s.is_empty()) {
+        req = req.query(&[("branch", b)]);
     }
     let resp = req.send().await.map_err(conn_error)?;
     if !resp.status().is_success() {

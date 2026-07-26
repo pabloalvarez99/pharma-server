@@ -159,6 +159,8 @@ async function listBatches(a: CommandArgs): Promise<unknown> {
   const resp = await doFetch(
     `${b}/api/v1/batches${qs({
       product: a.product,
+      // Sucursal del lote (V2.1): `none` = casa matriz, ausente = todos los locales.
+      branch: a.branch,
       expiring_within_days: a.expiringWithinDays,
       only_available: a.onlyAvailable,
       limit: a.limit,
@@ -176,6 +178,8 @@ async function createBatch(a: CommandArgs): Promise<unknown> {
     batch_code: a.batchCode,
     expiry_date: a.expiryDate,
   };
+  // El lote nace en la sucursal activa; `none` lo deja en casa matriz.
+  if (a.branch && a.branch !== "none") body.branch = a.branch;
   putDef(body, "stock", a.stock);
   putStr(body, "cost", a.cost);
   putStr(body, "notes", a.notes);
@@ -190,7 +194,7 @@ async function createBatch(a: CommandArgs): Promise<unknown> {
 
 async function nearExpiry(a: CommandArgs): Promise<unknown> {
   const b = base(a.serverUrl as string);
-  const resp = await doFetch(`${b}/api/v1/reports/near-expiry${qs({ days: a.days })}`, {
+  const resp = await doFetch(`${b}/api/v1/reports/near-expiry${qs({ days: a.days, branch: a.branch })}`, {
     headers: authHeaders(),
   });
   if (!resp.ok) throw await errorMessage(resp);

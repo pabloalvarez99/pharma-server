@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FEFO por sucursal — QA en VIVO contra un pharma-api real (migración 0042).
+# FEFO + vencimientos por sucursal — QA en VIVO contra un pharma-api real
+# (migración 0042).
 #
 # Lo que valida, con dos locales reales y plata/lotes reales:
 #   1. FEFO NO cruza de sucursal: el local B tiene el lote que vence ANTES;
@@ -10,6 +11,8 @@
 #      lote nace en B, y B puede vender contra él de inmediato.
 #   4. Invariante 0042: Σ product_batch.stock[X] == product_branch_stock[X],
 #      verificado en ambos locales después de cada movimiento.
+#   5. Vencimientos por sucursal (V2.1): la alerta de un local NO lista los
+#      lotes del otro, y cada fila trae el nombre del local resuelto.
 #
 # Usage:  bash scripts/qa/fefo-sucursales-live-qa.sh
 # Requires: target/debug/{pharma,pharma-api}.exe, curl, jq.
@@ -209,6 +212,47 @@ else
 fi
 assert_cuadra "${PID}" "${BR_B}" "sucursal B"
 assert_cuadra "${PID}" none "casa matriz"
+
+
+# 9. ALERTA DE VENCIMIENTO POR SUCURSAL (V2.1 vencimientos) ------------------
+# Lotes nuevos, cortos, uno en cada local: la alerta de A no puede listar el de
+# B (si lo hiciera, mandaría al operador a revisar la góndola equivocada).
+gp POST /api/v1/batches   "{\"product\":\"${PID}\",\"batch_code\":\"L-VENCE-CASA\",\"expiry_date\":\"$(exp_in 5)\",\"stock\":5,\"cost\":\"400\"}" >/dev/null
+is2xx || { fail "crear lote por vencer en casa matriz ($(code))"; exit 1; }
+gp POST /api/v1/batches   "{\"product\":\"${PID}\",\"branch\":\"${BR_B}\",\"batch_code\":\"L-VENCE-B\",\"expiry_date\":\"$(exp_in 3)\",\"stock\":7,\"cost\":\"400\"}" >/dev/null
+is2xx || { fail "crear lote por vencer en B ($(code))"; exit 1; }
+
+venc_codes() { gp GET "/api/v1/reports/near-expiry?days=30$1" | J -r '[.[].batch_code] | sort | join(",")'; }
+
+SOLO_B=$(venc_codes "&branch=${BR_B}")
+if [[ "${SOLO_B}" == "L-VENCE-B" ]]; then
+  ok "alerta de vencimiento de B lista sólo su lote (${SOLO_B}) — no cruza a casa matriz"
+else
+  fail "alerta de B mal filtrada: '${SOLO_B}' (esperado 'L-VENCE-B')"
+fi
+
+SOLO_CASA=$(venc_codes "&branch=none")
+if [[ "${SOLO_CASA}" == "L-VENCE-CASA" ]]; then
+  ok "alerta de casa matriz lista sólo su lote (${SOLO_CASA}) — no lista los de B"
+else
+  fail "alerta de casa matriz mal filtrada: '${SOLO_CASA}' (esperado 'L-VENCE-CASA')"
+fi
+
+TODOS=$(venc_codes "")
+if [[ "${TODOS}" == "L-VENCE-B,L-VENCE-CASA" ]]; then
+  ok "sin filtro, la alerta cubre el negocio entero (${TODOS})"
+else
+  fail "alerta global incompleta: '${TODOS}' (esperado 'L-VENCE-B,L-VENCE-CASA')"
+fi
+
+# Cada fila trae su local resuelto: es lo que hace accionable la alerta.
+NOMBRE_B=$(gp GET "/api/v1/reports/near-expiry?days=30" | J -r '.[] | select(.batch_code=="L-VENCE-B") | .branch_name')
+NOMBRE_CASA=$(gp GET "/api/v1/reports/near-expiry?days=30" | J -r '.[] | select(.batch_code=="L-VENCE-CASA") | .branch_name // "null"')
+if [[ "${NOMBRE_B}" == "Local Centro" && "${NOMBRE_CASA}" == "null" ]]; then
+  ok "cada fila dice su local: L-VENCE-B en 'Local Centro', L-VENCE-CASA sin local (casa matriz)"
+else
+  fail "nombre de local mal resuelto: B='${NOMBRE_B}' (esperado 'Local Centro'), casa='${NOMBRE_CASA}' (esperado null)"
+fi
 
 # --- veredicto --------------------------------------------------------------
 echo

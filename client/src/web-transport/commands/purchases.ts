@@ -89,6 +89,9 @@ async function createPurchaseOrder(a: CommandArgs): Promise<unknown> {
   putStr(body, "currency", a.currency);
   putStr(body, "notes", a.notes);
   putStr(body, "external_ref", a.externalRef);
+  // Local al que ENTRA la mercadería (V2.1): los lotes de la recepción nacen
+  // ahí. `none` = casa matriz y el server ya lo asume, no hace falta mandarlo.
+  if (a.branch && a.branch !== "none") body.branch = a.branch;
   const resp = await doFetch(`${b}/api/v1/purchase-orders`, {
     method: "POST",
     headers: authHeaders(JSON_HEADERS),

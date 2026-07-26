@@ -342,19 +342,39 @@ pub async fn near_expiry(
     struct B {
         id: Thing,
         product: Thing,
+        #[serde(default)]
+        branch: Option<Thing>,
         batch_code: String,
         expiry_date: DateTime<Utc>,
         stock: i64,
     }
+    // Sucursal: tri-estado, misma gramática que `inventory::repo::list_batches`
+    // (ausente = todos los locales, `"none"`/`""` = casa matriz, id = ese local).
+    // Si divergiera de la de lotes, el cliente tendría dos vocabularios para lo
+    // mismo.
+    let branch_thing = match f.branch.as_deref() {
+        Some("none") | Some("") | None => None,
+        Some(s) => Some(
+            crate::stock::service::parse_branch(Some(s))?.ok_or_else(|| {
+                DomainError::Invalid(format!("esperaba una sucursal, recibí {s}"))
+            })?,
+        ),
+    };
+    let branch_cond = match f.branch.as_deref() {
+        Some("none") | Some("") => " AND branch = NONE",
+        Some(_) => " AND branch = $br",
+        None => "",
+    };
     let batches: Vec<B> = db
-        .query(
-            "SELECT id, product, batch_code, expiry_date, stock \
+        .query(format!(
+            "SELECT id, product, branch, batch_code, expiry_date, stock \
              FROM product_batch \
              WHERE tenant = $t AND active = true AND stock > 0 \
-               AND expiry_date <= $c \
-             ORDER BY expiry_date ASC",
-        )
+               AND expiry_date <= $c{branch_cond} \
+             ORDER BY expiry_date ASC"
+        ))
         .bind(("t", tenant.clone()))
+        .bind(("br", branch_thing))
         .bind(("c", surrealdb::sql::Datetime::from(cutoff)))
         .await?
         .check()?
@@ -397,11 +417,39 @@ pub async fn near_expiry(
         .map(|p| (p.id.to_string(), p.name))
         .collect();
 
+    // Nombres de sucursal, mismo patrón batcheado que los productos: una query
+    // por reporte, no una por fila. Los lotes de casa matriz (`branch = NONE`)
+    // no participan.
+    let branch_ids: Vec<Thing> = {
+        let mut seen: HashSet<String> = HashSet::new();
+        batches
+            .iter()
+            .filter_map(|b| b.branch.as_ref())
+            .filter(|t| seen.insert(t.to_string()))
+            .cloned()
+            .collect()
+    };
+    let branch_names: HashMap<String, String> = if branch_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let rows: Vec<P> = db
+            .query("SELECT id, name FROM $ids WHERE tenant = $t")
+            .bind(("t", tenant.clone()))
+            .bind(("ids", branch_ids))
+            .await?
+            .check()?
+            .take(0)?;
+        rows.into_iter()
+            .map(|p| (p.id.to_string(), p.name))
+            .collect()
+    };
+
     let today = now.date_naive();
     Ok(batches
         .into_iter()
         .map(|b| {
             let days_to_expiry = (b.expiry_date.date_naive() - today).num_days();
+            let branch = b.branch.map(|t| t.to_string());
             NearExpiryRow {
                 product_id: b.product.to_string(),
                 product_name: names
@@ -410,6 +458,8 @@ pub async fn near_expiry(
                     .unwrap_or_default(),
                 batch_id: b.id.to_string(),
                 batch_code: b.batch_code,
+                branch_name: branch.as_ref().and_then(|id| branch_names.get(id).cloned()),
+                branch,
                 expiry_date: b.expiry_date,
                 stock: b.stock,
                 days_to_expiry,
