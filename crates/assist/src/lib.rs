@@ -17,7 +17,7 @@ pub mod provider;
 
 pub use actions::{
     build, execute, parse_action, store, Action, ActionOutcome, ActionParse, ActionProposal,
-    ActionStore, BuildOutcome,
+    ActionStore, BuildOutcome, VentaLinea, VentaLineaParse,
 };
 pub use deterministic::Deterministic;
 pub use intent::{parse, Intent};
