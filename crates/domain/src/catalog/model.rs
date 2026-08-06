@@ -240,7 +240,7 @@ pub struct PublicStoreDto {
     pub name: String,
     /// Tenant slug (the `{slug}` path segment).
     pub slug: String,
-    /// Always "CLP" for now.
+    /// ISO-4217 del tenant (`money.currency`; CLP si no configuró nada).
     pub currency: String,
     pub whatsapp_e164: Option<String>,
     pub address_line: Option<String>,
