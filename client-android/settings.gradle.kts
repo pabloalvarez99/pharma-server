@@ -24,3 +24,4 @@ rootProject.name = "rutbusiness-android"
 
 include(":app")
 include(":core")
+include(":design")
