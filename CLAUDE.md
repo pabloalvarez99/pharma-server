@@ -1,5 +1,42 @@
 # pharma-server — Project Context
 
+> ## 📱 PISO DE HARDWARE — CELULARES VIEJOS Y LENTOS (founder, 2026-08-06) — restricción dura
+> **El usuario real puede ser una persona mayor con un celular viejo, lento y casi
+> sin espacio.** Esa es la máquina objetivo, no un caso borde. Toda decisión de
+> cliente móvil se mide contra ella; si algo solo funciona bien en un teléfono
+> nuevo, no está terminado. Reglas que se derivan y NO se negocian:
+>
+> 1. **Alcance de versión: `minSdk 21`** (Android 5.0, 2014). La app Tauri actual
+>    era `minSdk 24` (Android 7.0) y dejaba fuera aparatos que este producto sí
+>    quiere servir. Compose baja a 21 — usar ese piso, no el heredado.
+> 2. **Nunca APK universal.** Siempre AAB con split por ABI, o APKs por ABI. Un
+>    teléfono con 8 GB de almacenamiento no puede pagar 4 arquitecturas. Incluir
+>    `armeabi-v7a`: hay aparatos de 32 bits todavía en uso.
+> 3. **Respetar la accesibilidad del sistema, no reimplementarla.** La persona mayor
+>    ya subió el tamaño de letra en Ajustes de Android. La app tiene que obedecer
+>    eso: tipografía en `sp`, nada de tamaños fijos, y **probado al 200% de escala**
+>    sin que se rompa el layout. Igual con alto contraste, TalkBack y "reducir
+>    animaciones".
+> 4. **Objetivos táctiles ≥ 56 dp** en los flujos diarios (cobrar, fiar, cobrar
+>    deuda). El mínimo de Material es 48 dp; acá se sube porque el pulso no es el
+>    de un cajero de 25 años.
+> 5. **Presupuesto de memoria**: asumir **1–2 GB de RAM total**. Nada de cargar
+>    listas completas en memoria; virtualizar siempre. Medir RSS, no suponerlo.
+> 6. **Arranque en frío medido en el aparato lento**, no en el emulador del
+>    desarrollador. Baseline Profiles activados.
+> 7. **El servidor embebido en el teléfono es OPCIONAL, no obligatorio.** El `.so`
+>    del server pesa ~46 MB y SurrealKV necesita su RAM. En un aparato viejo eso
+>    puede no entrar. Arquitectura de dos modos, decidido por capacidad del
+>    aparato: **cliente liviano** apuntando a un server de la red o la nube, o
+>    **nodo completo** con el server adentro. La app tiene que funcionar entera en
+>    el modo liviano.
+> 8. **Datos móviles caros y lentos** son el caso normal. Offline-first no es solo
+>    para el server: la app tiene que ser usable con la red intermitente y no
+>    quemar megas.
+>
+> **Aparato de referencia para pruebas** (si no se probó acá, no está probado):
+> 2 GB de RAM, Android 8 o menor, pantalla 720p, almacenamiento casi lleno.
+
 > ## 🎯 GOAL DEL PROYECTO — RUTBUSINESS (norte, fijado 2026-06-16 por founder)
 > **Dar a CADA negocio chileno —cualquier rubro, identificado por su RUT— un ERP
 > gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
