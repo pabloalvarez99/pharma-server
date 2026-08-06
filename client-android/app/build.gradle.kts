@@ -80,6 +80,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core"))
+
     // Sin BOM a propósito: el BOM arrastra Compose 1.10+, que exige minSdk 23.
     // Ver el comentario de arriba en gradle/libs.versions.toml.
     implementation(libs.compose.runtime)

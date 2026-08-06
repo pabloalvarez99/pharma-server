@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "rutbusiness-android"
 
 include(":app")
+include(":core")

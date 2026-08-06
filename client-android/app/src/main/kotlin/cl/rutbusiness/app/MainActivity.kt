@@ -15,8 +15,9 @@ import cl.rutbusiness.app.ui.RutBusinessApp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val container = (application as RutBusinessApplication).container
         setContent {
-            RutBusinessApp()
+            RutBusinessApp(sesion = container.sesion)
         }
     }
 }
