@@ -1,68 +1,114 @@
 # pharma-server
 
-On-prem Rust server for pharmacy ERP. SurrealDB embedded (RocksDB), axum HTTP API, Windows service deployment via MSI.
+**RutBusiness** on-prem ERP server (Rust). Multi-vertical product for Chilean businesses (1 RUT = 1 business); pharmacy is the beachhead vertical, not the product limit.
 
-## Status
-Scaffold — feature/pharma-server-scaffold.
+Single installable binary: **Axum HTTP API** + **SurrealDB embedded** (`kv-surrealkv`) + **Windows service** (MSI). Offline-first, freemium core.
 
-## Build
+| | |
+|---|---|
+| **Version** | `0.1.24` |
+| **Repo** | [pabloalvarez99/pharma-server](https://github.com/pabloalvarez99/pharma-server) |
+| **Latest MSI** | [v0.1.23](https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23) |
+| **Rust** | pinned in `rust-toolchain.toml` |
 
-```powershell
-cargo build --release --workspace
+---
+
+## Repository layout
+
+```
+pharma-server/
+├── crates/           # Workspace members (see table below)
+├── config/           # Default TOML config
+├── migrations/       # SurrealQL schema migrations
+├── docs/
+│   ├── adr/          # Architecture Decision Records
+│   ├── product/      # Product / parity notes
+│   └── strategy/     # Roadmaps, freemium, license, payments
+├── installer/wix/    # MSI (cargo-wix)
+├── data/             # Runtime DB (gitignored)
+├── local/            # Machine-only notes & secrets (gitignored)
+├── Cargo.toml        # Workspace root
+├── bitacora.md       # Chronological technical log
+└── CLAUDE.md         # Agent / contributor project context
 ```
 
-## Run (dev)
-
-```powershell
-cargo run -p api
-curl http://localhost:8080/health/live
-```
+---
 
 ## Crates
 
 | Crate | Role |
 |-------|------|
-| core | Domain types, errors, config |
-| db | SurrealDB client + repos |
-| api | Axum HTTP server (entry: `cargo run -p api`) |
-| auth | JWT + argon2id, tenant claims |
-| jobs | Cron + NATS workers |
-| telemetry | tracing + OTLP + Prometheus |
-| service | Windows service entry, embeds api |
-| cli | Admin CLI (migrate, seed, user create) |
+| `core` | Config, errors, tenant |
+| `db` | SurrealDB client + embedded migrations |
+| `domain` | Business modules (catalog, inventory, sales, …) |
+| `api` | Axum HTTP server (`cargo run -p api`) |
+| `auth` | JWT + argon2id |
+| `license` | Ed25519 offline entitlement gate |
+| `agent` | Agent identity / signed envelopes |
+| `dte` | Chile SII DTE (boleta XML, TED, CAF) |
+| `jobs` | Cron + NATS workers |
+| `telemetry` | tracing + OTLP + Prometheus |
+| `service` | Windows service entry (embeds API) |
+| `cli` | Admin CLI (migrate, seed, license, users) |
 
-## Stack
+---
 
-- Rust 1.95 (pin in `rust-toolchain.toml`)
-- axum 0.8 + utoipa 5
-- SurrealDB 2.1 embedded (kv-surrealkv — pure-Rust LSM, no libclang/bindgen dependency)
-- jsonwebtoken 9 + argon2 0.5
-- tracing + opentelemetry-otlp + axum-prometheus
-- windows-service 0.7
-- cargo-wix (MSI installer)
+## Quick start
 
-## Run as Windows service (manual smoke)
+### Prerequisites
 
-Requires elevated PowerShell.
+- Rust toolchain matching `rust-toolchain.toml`
+- Windows (service / MSI) or any OS for API-only dev
+
+### Build
+
+```powershell
+cargo build --release --workspace
+```
+
+### Run (dev)
+
+```powershell
+cargo run -p api
+# health
+curl http://localhost:8080/health/live
+```
+
+Swagger UI is served by the API when enabled in config (see `config/default.toml`).
+
+### Tests
+
+```powershell
+cargo test --workspace
+```
+
+> **Disk note:** debug builds with SurrealDB are large. Prefer `cargo test -p <crate>` when iterating. `target/` is gitignored and safe to delete anytime (`cargo clean` or remove the folder).
+
+---
+
+## Windows service (manual smoke)
+
+Elevated PowerShell:
 
 ```powershell
 cargo build --release -p service
 
 sc.exe create PharmaServer `
-  binPath= "C:\Users\Administrator\Documents\GitHub\pharma-server\target\release\pharma-service.exe" `
+  binPath= "D:\path\to\pharma-server\target\release\pharma-service.exe" `
   start= demand
 sc.exe start PharmaServer
-Get-Service PharmaServer
 curl http://127.0.0.1:8080/health/live
 sc.exe stop PharmaServer
 sc.exe delete PharmaServer
 ```
 
-Service and CLI/dev binary cannot run simultaneously against the same `./data/surreal` directory (SurrealKv file lock).
+Service and CLI/dev binary cannot share the same `./data/surreal` directory (SurrealKv file lock).
+
+---
 
 ## MSI installer
 
-Prereqs: `cargo install cargo-wix` and WiX v3 toolset (`choco install wixtoolset`). Add `C:\Program Files (x86)\WiX Toolset v3.14\bin` to PATH.
+Prereqs: `cargo install cargo-wix`, WiX Toolset v3 on PATH.
 
 ```powershell
 cargo build --release -p service
@@ -75,10 +121,37 @@ cargo wix --package service --no-build --nocapture `
 Install / uninstall (admin):
 
 ```powershell
-msiexec /i target\wix\pharma-server-0.1.0-x86_64.msi /qn /l*v install.log
-Get-Service PharmaServer
-Get-NetFirewallRule -DisplayName "Pharma Server API"
-msiexec /x target\wix\pharma-server-0.1.0-x86_64.msi /qn
+msiexec /i target\wix\pharma-server-0.1.24-x86_64.msi /qn /l*v install.log
+msiexec /x target\wix\pharma-server-0.1.24-x86_64.msi /qn
 ```
 
-The MSI installs to `%ProgramFiles%\PharmaServer\`, registers the `PharmaServer` service (auto-start, LocalSystem), creates `%ProgramData%\PharmaServer\`, and opens inbound TCP 8080 in Windows Firewall.
+Installs to `%ProgramFiles%\PharmaServer\`, registers service `PharmaServer`, data under `%ProgramData%\PharmaServer\`, firewall TCP 8080.
+
+---
+
+## Stack
+
+- **axum** 0.8 + **utoipa** 5 (OpenAPI)
+- **SurrealDB** 2.1 embedded (`kv-surrealkv`)
+- **jsonwebtoken** 9 + **argon2** 0.5
+- **ed25519-dalek** (license + agent envelopes)
+- **tracing** + OpenTelemetry OTLP + Prometheus
+- **windows-service** 0.7 + **cargo-wix**
+
+---
+
+## Documentation
+
+| Path | Contents |
+|------|----------|
+| [`docs/README.md`](./docs/README.md) | Docs index |
+| [`docs/adr/`](./docs/adr/) | ADRs (freemium, license, DTE, …) |
+| [`docs/strategy/`](./docs/strategy/) | Product & commercial strategy |
+| [`bitacora.md`](./bitacora.md) | Session / technical changelog |
+| [`CLAUDE.md`](./CLAUDE.md) | Full project context for contributors/agents |
+
+---
+
+## Local-only files
+
+Anything under `local/` stays on this machine (notes, test credentials, scratch). Never commit secrets. See `local/README.md`.

@@ -1,26 +1,43 @@
-target/
+# ── Build artifacts ──────────────────────────────────────────
+/target/
+target-shared/
 **/*.rs.bk
 Cargo.lock.bak
 *.pdb
+
+# ── Runtime / local data ─────────────────────────────────────
 .env
 .env.local
-data/
+/data/
 *.db
 *.log
+
+# ── Installer outputs ────────────────────────────────────────
 installer/wix/target/
 installer/wix/*.wixobj
 installer/wix/*.wixpdb
 installer/wix/*.msi
+
+# ── IDE / OS ─────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 .DS_Store
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# ── Claude / agent local state ───────────────────────────────
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 
-# Custom cargo target dir used across sessions (CARGO_TARGET_DIR=target-shared)
-target-shared/
+# ── Machine-only (never commit) ──────────────────────────────
+/local/
+CREDENCIALES*
+*_check.txt
+Untitled
 
-# Notas locales del fundador (historial de prompts/sesiones), nunca commitear
+# Legacy session-note patterns (pre-local/ layout)
 a*_historial_*.md
 a_historial_*.md
 claudeapp.md

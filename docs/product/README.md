@@ -17,6 +17,7 @@ con mínima edición.
 |---|---|
 | [`parity-prisma-models.md`](./parity-prisma-models.md) | Mapeo modelos Prisma (Tu Farmacia legado Next.js) ↔ tablas SurrealDB pharma-server. Garantiza paridad de dominio. |
 | [`erp-parity-prompt.md`](./erp-parity-prompt.md) | Prompt template usado para auditorías de paridad ERP. |
+| [`free-web-services-shopify-parity-prompt.md`](./free-web-services-shopify-parity-prompt.md) | Prompt Claude Code: free web/storefront a nivel Shopify (craft + seam ERP + freemium generoso). |
 
 ## Convenciones
 

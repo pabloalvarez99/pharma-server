@@ -1,13 +1,31 @@
 # pharma-server — Project Context
 
-Servidor Rust on-prem para ERP de farmacia. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible separado** de Tu Farmacia.
+> ## 🎯 GOAL DEL PROYECTO — RUTBUSINESS (norte, fijado 2026-06-16 por founder)
+> **Dar a CADA negocio chileno —cualquier rubro, identificado por su RUT— un ERP
+> gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
+> invisible detrás del agente.** 1 RUT = 1 negocio = 1 agente. Modelo: freemium MSI
+> Windows (core gratis para siempre + tiers + microtx, [ADR-0001](./docs/adr/0001-freemium-pivot.md)).
+> **Farmacia = beachhead** (primer vertical validado), NO el límite ni la marca.
+> Fin de juego: ecosistema federado donde los agentes de distintos negocios transan
+> entre sí (Ed25519 envelopes, Fase 13). Ver [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+>
+> ## ⚡ ENFOQUE 100% RUTBUSINESS (founder, 2026-06-16) — directiva activa
+> **El producto es RUTBUSINESS**, NO "farmacia". `pharma-server` es solo el nombre del
+> repo git; la identidad del producto es **RutBusiness** (multi-rubro). Todo trabajo
+> nuevo se enmarca en RutBusiness: **cero** copy/UI/branding/scope pharma-específico
+> salvo como *vertical pack* condicional a `business.vertical`. Server + client (Tauri)
+> + CLI = piezas de RutBusiness, no de "pharma". Donde el código/doc asuma farmacia →
+> generalizar o condicionar al rubro (catálogo: [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md)).
+> Las secciones "para farmacias" más abajo son **histórico** — leer con este lente.
+
+Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
 
 **Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md).
 
 ## Producto / Visión comercial
 
-**Meta**: ERP **profesional para farmacias**, vendible como licencia on-prem (MSI + soporte). Comprador: farmacias independientes y cadenas chicas que quieren todo local, sin SaaS, sin cloud, sin lock-in.
+**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador: negocios independientes y cadenas chicas de **cualquier rubro** (farmacia, minimarket, restaurant, café, tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in. Farmacia = primer vertical validado (beachhead), no el límite.
 
 Pilares de venta (no negociables):
 - **Instalación 1 click** (MSI firmado, sin dependencias externas, sin Docker, sin Postgres aparte).
@@ -157,6 +175,92 @@ Crates (`Cargo.toml` raíz):
 7. **Bitácora dual**: cada cambio significativo → append en (a) `bitacora.md` (repo, commit history) y (b) `C:/Users/Administrator/Documents/obsidian-mind/work/active/pharma-server/bitacora.md` (vault, búsqueda). Después actualizar `work/active/pharma-server/decisions-log-index.md` con la línea nueva.
 
 8. **Secrets**: nunca commitear `config/local.toml` ni `data/`. JWT secret de `config/default.toml` (`change-me-in-production`) es placeholder; producción inyecta vía env `PHARMA__JWT__SECRET`. Loader: `config/default.toml` → `config/local.toml` (opcional) → env `PHARMA__*` separator `__`.
+
+9. **Auto push+PR tras GATE; releases manuales**: una branch que pasa GATE (`cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo test --workspace`) y está committeada → push a origin + abrir PR contra `feature/erp-parity` automáticamente. **Los MSI releases siguen siendo explícitos/manuales**, gated por smoke-test en Sandbox + triage de bugs conocidos. NUNCA auto-deployar trabajo no verificado ni mid-flight (ver Fase 9 ship gate: cert Authenticode + smoke VM limpia). El push/PR es reversible; cortar release a canal público no lo es.
+
+10. **Distribución = binario, NO source (decidido 2026-05-23)**: el repo source `pabloalvarez99/pharma-server` se mantiene **PRIVADO**. "Deploy/open source" significa publicar el **MSI binario** al mirror público `pharma-server-releases` (vía `release-publisher.yml` workflow_dispatch) — NUNCA hacer público el source. Open-sourcing del source rompería el license enforcement (`license::require` vive en el código) + diferido a Fase 13+ ([NO en esta sesión]). Antes de cualquier consideración futura de source-public: secret-scan del history completo (esp. que la clave privada del licenser nunca tocó este repo — vive solo en `pharma-license-server`).
+
+## Modo de trabajo por defecto — "continue working with team of agents ultrathink"
+
+Directiva permanente del fundador (2026-05-23). Cuando se invoque este prompt (o "keep 5 agents working", "continue", "send agents to work"), operar como **pipeline paralelo saturado de ~5 agentes** trabajando autónomamente sobre el BACKLOG, priorizando lo de mayor valor sin pedir confirmación tarea-por-tarea. Reglas:
+
+- **Saturación 5 slots**: mantener ~5 agentes/builds activos. Slot libre → despachar siguiente tarea de la cola sin idle. Pensar profundo (ultrathink) qué es lo más importante a continuación.
+- **Worktrees aislados, scope disjunto**: 1 agente = 1 worktree, paths sin solape (cero contención de merge). Cascada de branches dependientes off su base correcta.
+- **GATE obligatorio antes de PR**: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`. Verde → commit + push + PR contra base correcta (regla #9). NUNCA debilitar asserts para forzar verde; bug real → `#[ignore]` con nota + reportar.
+- **Quota wall**: "session limit · resets <hora>" mata spawns nuevos. Cuando esté walled, NO quemar despachos — rescatar trabajo uncommitted de worktrees vía **cargo local en main thread** (los builds locales NO dependen del quota de agentes), y re-saturar a 5 al reset. Agentes que mueren dejan trabajo **uncommitted** (HEAD intacto) — verificar estado real (`git -C <wt> status/log`) antes de confiar en cualquier wrap-up.
+- **Verificar antes de confiar**: notificaciones de background pueden reportar exit 0 con output truncado — re-grep sin truncar antes de declarar verde.
+- **Lo que NO es autónomo** (siempre pausar + confirmar): cortar MSI release (regla #9, bug-gated + smoke), hacer público el source (regla #10), force-push, acciones destructivas/irreversibles. Push/PR sí es autónomo (reversible).
+- Ver memoria `[[parallel-agent-pipeline]]` para el detalle operativo.
+
+### Equipo de agentes PERSISTENTE (nombres fijos + control de tokens)
+
+El equipo ya no es anónimo: son **agentes con nombre que existen siempre** para el
+proyecto. Charters versionados en [`.claude/agents/`](./.claude/agents/) (cada uno
+con frontmatter `name/description` → también son subagents válidos del Task tool).
+Tarjeta de uso + bootstraps en [`.claude/agents/README.md`](./.claude/agents/README.md).
+Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz).
+
+| Pane | Agente | Color | Rol | Scope |
+|------|--------|-------|-----|-------|
+| 1 | **paxoloop** | blue | Orquestador (ultrathink) | dispatch, integración PRs, **único que toca ESTADO ACTUAL** |
+| 2 | **paul** | green | Cashier loop | `client/src/views/{pos,devoluciones,clientes,caja}.ts` |
+| 3 | **marvin** | orange | Stock + servicios backend | `views/{inventory,compras,gastos}.ts` + domain/api/cli compartidos |
+| 4 | **ye** | yellow | Onboarding + multi-rubro | `views/{login,configuracion,dashboard,shell,importar}.ts` + `business.vertical` |
+| 5 | **bob** | purple | E2E + compliance | `client/e2e/` + `format.ts` + `views/{boletas,facturas,recetas,auditoria,reports}.ts` |
+| 6 | **milton** | red | Backend flexible | asignado por paxoloop |
+
+**Layout de panes FIJO (orden izquierda → derecha, NO negociable)**: la grilla de 6
+terminales en VS Code mantiene **siempre** este orden posicional —
+`1 paxoloop · 2 paul · 3 marvin · 4 ye · 5 bob · 6 milton`. La posición ES la identidad
+visual: el fundador ubica un agente por su columna, no por leer el nombre. Tras cada
+`/clear` re-aplicar `/rename <nombre>` + `/color <color>` (ver tabla) en el pane que
+le corresponde por posición. `/rename`+`/color` son por-sesión (cada pane es una
+sesión Claude aislada); no hay automatización cross-pane → es manual por pane, pero el
+orden posicional nunca cambia.
+
+- **Fuente única de tarea por agente** = STATUS BOARD en [`teamwork_op.txt`](./teamwork_op.txt)
+  (raíz; incluye lanes activas, BUG LOG, MULTI-RUBRO FINDINGS). El estado durable vive
+  AHÍ + memoria + git, **nunca** solo en el contexto del pane.
+- **Control de tokens (ciclo por pane)**: trabajar lane → PR verde → **AVISAR al
+  fundador y ESPERAR** → el fundador hace **`/clear`** → pegar bootstrap de 1 línea
+  (`Eres <nombre>. Lee .claude/agents/<nombre>.md y sigue tu protocolo.`) → tomar
+  siguiente tarea del status board. Re-entra barato (charter corto + status board +
+  solo sus archivos), sin re-derivar el repo.
+- **Aviso obligatorio al terminar (NO auto-`/clear`)**: cuando un agente deja un PR
+  abierto (o llega a ~80k tokens), **NO** se limpia solo. Imprime una línea de aviso
+  clara — `✅ <nombre> LISTO — PR #<n> abierto · lane <branch> · listo para /clear` —
+  y **espera**. El `/clear` lo dispara el fundador (o paxoloop), no el worker. Razón:
+  el fundador quiere revisar/decidir antes de perder el contexto del pane.
+- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; farmacia = beachhead, no
+  límite) → [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+  Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
+  `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
+
+### Catálogo de rubros (onboarding "elige tu rubro")
+
+Al primer inicio el operador elige su **rubro** de un catálogo (no solo
+farmacia/minimarket). Guardar en `admin_setting business.vertical`. La UI usa esa
+señal para mostrar/ocultar features por rubro (ej: recetas/controlados solo farmacia).
+Detalle + plan en [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md).
+
+Catálogo v1 (taxonomía reusada del proyecto **DSS** del fundador, ya desplegado en
+Vercel — ver abajo):
+`farmacia` · `minimarket` (almacén) · `restaurant` (comida) · `cafe` (pastelería) ·
+`tienda` (retail) · `belleza` (estética) · `servicios` (oficios) · `otro`.
+Cada rubro tiene: label + icono + (opcional) seed pack demo + features gated. Packs
+seed hoy: farmacia ✅, minimarket ✅; el resto se agregan incrementalmente (disciplina
+anti-framework: el catálogo lista todos, el pack se construye cuando se valida ese
+rubro). `otro` arranca vacío. Rubros de servicio (belleza/servicios) ponen a prueba
+el core agnóstico: ventas sin stock/lotes físicos.
+
+**Asset reusable — DSS** (https://dss-spa.vercel.app, Vercel + Cloudflare, fundador):
+agencia web que arma sitios por rubro; tiene (a) la **taxonomía de rubros** (form
+"Postular": Restaurant/Café/Tienda/Belleza/Servicios/Otro) → fuente del catálogo
+arriba; (b) **portafolio de páginas estáticas por rubro** (flagship tu-farmacia.cl)
+→ candidatas a **plantillas de storefront** cuando RutAgentIA ofrezca web por tenant
+(Fase 14 cloud companion + web-sync [ADR-0012]/[ADR-0013]). NO cross-import (repos
+separados, regla de scope): se reusa la TAXONOMÍA y, a futuro, las plantillas como
+referencia — no se importa código.
 
 ## Vault Obsidian — leer bajo demanda
 
