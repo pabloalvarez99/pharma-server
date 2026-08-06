@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tema XML mínimo: solo existe para que la ventana no traiga ActionBar y para
+  pintar el fondo antes del primer frame de Compose. Los colores reales viven
+  en el design system de Compose (ui/theme/**), no acá.
+  TODO(design-system): alinear windowBackground con el color de superficie del
+  tema Compose cuando el design system aterrice.
+-->
+<resources>
+    <style name="Theme.RutBusiness" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>
