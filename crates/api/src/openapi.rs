@@ -192,6 +192,7 @@ impl Modify for SecurityAddon {
         crate::v1::expenses::create_expense,
         crate::v1::expenses::list_expenses,
         crate::v1::expenses::sales_daily,
+        crate::v1::expenses::sales_by_method,
         crate::v1::expenses::margins_daily,
         crate::v1::expenses::top_products,
         crate::v1::expenses::stock_rotation,

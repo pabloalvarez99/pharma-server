@@ -75,6 +75,10 @@ const METHODS: { id: PaymentMethod; label: string }[] = [
   { id: "pos_debit", label: "Débito" },
   { id: "pos_credit", label: "Crédito" },
   { id: "pos_mixed", label: "Mixto" },
+  // Transferencia: el no-efectivo dominante del micronegocio chileno. Liquida
+  // exacto (sin vuelto) y NO entra al efectivo esperado del arqueo, igual que
+  // débito/crédito (migración 0043).
+  { id: "pos_transferencia", label: "Transferencia" },
   // Fiado: venta a cuenta corriente. No mueve caja; exige cliente elegido y
   // deja el cargo en su cuenta (ledger inmutable, migración 0039).
   { id: "pos_fiado", label: "Fiar" },
@@ -86,6 +90,7 @@ const METHOD_LABEL: Record<string, string> = {
   pos_credit: "Crédito",
   pos_mixed: "Mixto",
   pos_fiado: "Fiado",
+  pos_transferencia: "Transferencia",
 };
 
 export function renderPos(host: HTMLElement, serverUrl: string): void {
@@ -963,6 +968,10 @@ export function renderPos(host: HTMLElement, serverUrl: string): void {
       }
       cash = String(parseCash(splitCashIn.value));
       card = String(parseCash(splitCardIn.value));
+    } else if (method === "pos_transferencia") {
+      // Una transferencia no es plata en el cajón ni un cobro con tarjeta: no
+      // manda `cash` ni `card`, así el arqueo y el reporte por método no la
+      // confunden con otra cosa.
     } else {
       card = String(total);
     }

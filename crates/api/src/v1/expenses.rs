@@ -42,6 +42,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     // Reports = JWT only (no extra role); `margins-daily` adds a license gate.
     let reports = Router::new()
         .route("/api/v1/reports/sales-daily", get(sales_daily))
+        .route("/api/v1/reports/sales-by-method", get(sales_by_method))
         .route("/api/v1/reports/margins-daily", get(margins_daily))
         .route("/api/v1/reports/top-products", get(top_products))
         .route("/api/v1/reports/stock-rotation", get(stock_rotation))
@@ -120,6 +121,32 @@ pub async fn sales_daily(
     let tenant = tenant_of(&claims)?;
     Ok(Json(
         service::sales_daily(db.as_ref(), &tenant, filters).await?,
+    ))
+}
+
+/// Ingresos del período por método de pago (efectivo / tarjeta /
+/// transferencia / fiado). Core/free: es la respuesta a "¿cuánto me entró por
+/// transferencia?", que el negocio necesita todos los días.
+#[utoipa::path(get, path = "/api/v1/reports/sales-by-method", tag = "Expenses",
+    params(
+        ("from" = Option<String>, Query, description = "Desde (RFC3339)"),
+        ("to"   = Option<String>, Query, description = "Hasta (RFC3339)"),
+    ),
+    responses(
+        (status = 200, description = "Ingresos por método de pago", body = serde_json::Value),
+        (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 500, body = crate::error::ErrorEnvelope),
+    ),
+    security(("bearer_jwt" = [])))]
+pub async fn sales_by_method(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Query(filters): Query<SalesReportFilters>,
+) -> Result<Json<Vec<SalesByMethodRow>>, ApiError> {
+    let db = db_of(&state)?;
+    let tenant = tenant_of(&claims)?;
+    Ok(Json(
+        service::sales_by_method(db.as_ref(), &tenant, filters).await?,
     ))
 }
 

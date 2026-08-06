@@ -323,6 +323,118 @@ pub async fn sales_daily(
     Ok(by_day.into_values().collect())
 }
 
+/// Ingresos del período por **método de pago** (efectivo / tarjeta /
+/// transferencia / fiado / otro). Mismo filtro y misma exclusión de
+/// `refunded`/`cancelled` que `sales_daily`, para que los dos reportes cuenten
+/// la misma plata.
+///
+/// Reglas de atribución, explícitas porque son decisiones de negocio:
+///   * `pos_cash` → todo a efectivo; `pos_debit`/`pos_credit` → todo a tarjeta.
+///   * `pos_transferencia` (0043) → todo a transferencia. NO toca el efectivo
+///     esperado del arqueo: ese sale de `cash_sales_running` (0030), que sólo
+///     suma `pos_cash`/`pos_mixed`.
+///   * `pos_mixed` → reparte `cash_amount` a efectivo y `card_amount` a
+///     tarjeta; si por datos viejos no cuadra con el total, el resto cae en
+///     `otro` en vez de desaparecer (el reporte nunca miente por omisión).
+///   * `pos_fiado` → bucket propio: es ingreso devengado, todavía sin plata en
+///     la mano.
+/// Devuelve sólo los buckets con movimiento, ordenados de mayor a menor monto.
+pub async fn sales_by_method(
+    db: &Db,
+    tenant: &Thing,
+    f: SalesReportFilters,
+) -> DomainResult<Vec<SalesByMethodRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    // Sin `ORDER BY`: esto es un agregado, el orden de lectura no cambia el
+    // resultado y la salida se ordena por monto al final. (De paso evita el
+    // gotcha de SurrealDB — el campo del ORDER BY tiene que ir en la
+    // proyección, y `created_at` acá no se necesita para nada más.)
+    let sql = format!(
+        "SELECT payment_method, total, cash_amount, card_amount FROM order WHERE {}",
+        conds.join(" AND ")
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct R {
+        payment_method: String,
+        total: Decimal,
+        cash_amount: Option<Decimal>,
+        card_amount: Option<Decimal>,
+    }
+    let rows: Vec<R> = qb.await?.check()?.take(0)?;
+
+    use std::collections::BTreeMap;
+    let mut buckets: BTreeMap<&'static str, (i64, Decimal)> = BTreeMap::new();
+    let add = |bucket: &'static str,
+               amount: Decimal,
+               buckets: &mut BTreeMap<&'static str, (i64, Decimal)>| {
+        if amount.is_zero() {
+            return;
+        }
+        let e = buckets.entry(bucket).or_insert((0, Decimal::ZERO));
+        e.0 += 1;
+        e.1 += amount;
+    };
+    for r in rows {
+        match r.payment_method.as_str() {
+            "pos_cash" => add("efectivo", r.total, &mut buckets),
+            "pos_debit" | "pos_credit" => add("tarjeta", r.total, &mut buckets),
+            "pos_transferencia" => add("transferencia", r.total, &mut buckets),
+            "pos_fiado" => add("fiado", r.total, &mut buckets),
+            "pos_mixed" => {
+                let cash = r.cash_amount.unwrap_or(Decimal::ZERO);
+                let card = r.card_amount.unwrap_or(Decimal::ZERO);
+                // El efectivo de una mixta puede venir con vuelto incluido: lo
+                // que ENTRÓ al negocio es a lo sumo lo que faltaba para el total.
+                let cash_neto = cash.min((r.total - card).max(Decimal::ZERO));
+                add("efectivo", cash_neto, &mut buckets);
+                add("tarjeta", card.min(r.total), &mut buckets);
+                let resto = r.total - cash_neto - card.min(r.total);
+                add("otro", resto.max(Decimal::ZERO), &mut buckets);
+            }
+            _ => add("otro", r.total, &mut buckets),
+        }
+    }
+
+    let label = |b: &str| match b {
+        "efectivo" => "Efectivo",
+        "tarjeta" => "Tarjeta",
+        "transferencia" => "Transferencia",
+        "fiado" => "Fiado",
+        _ => "Otro",
+    };
+    let mut out: Vec<SalesByMethodRow> = buckets
+        .into_iter()
+        .map(|(method, (orders, amount))| SalesByMethodRow {
+            method: method.to_string(),
+            label: label(method).to_string(),
+            orders,
+            amount,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.amount
+            .cmp(&a.amount)
+            .then_with(|| a.method.cmp(&b.method))
+    });
+    Ok(out)
+}
+
 /// Batches on hand that expire on or before `now + days` (default 30),
 /// including already-expired ones (negative `days_to_expiry`). Tenant-scoped,
 /// only `active` batches with `stock > 0`. Sorted by `expiry_date` ascending

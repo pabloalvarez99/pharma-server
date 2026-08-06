@@ -1008,3 +1008,117 @@ async fn near_expiry_rechaza_sucursal_invalida() {
     .await;
     assert!(err.is_err(), "un id que no es branch se rechaza");
 }
+
+// --- ingresos por método de pago (V4 pagos, migración 0043) -----------------
+
+/// El reporte tiene que contar TODA la plata del período y atribuirla bien:
+/// efectivo, tarjeta, transferencia y fiado por separado, con la venta mixta
+/// repartida entre sus dos vías. Antes de esto el desglose sólo miraba
+/// `cash_amount`/`card_amount` y la plata de fiado/transferencia desaparecía.
+#[tokio::test]
+async fn sales_by_method_reparte_cada_peso_a_su_bucket() {
+    let (db, tenant, user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
+        .await
+        .unwrap();
+    let cliente = domain::customers::service::create_customer(
+        &db,
+        &tenant,
+        domain::customers::model::NewCustomer {
+            name: "Rosa".into(),
+            rut: None,
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let venta = |metodo: &str,
+                 qty: i64,
+                 cash: Option<Decimal>,
+                 card: Option<Decimal>,
+                 cust: Option<String>| {
+        smodel::PosSaleRequest {
+            items: vec![smodel::PosSaleItem {
+                product: p.id.clone(),
+                product_name: p.name.clone(),
+                quantity: qty,
+                unit_price: dec("1000"),
+            }],
+            payment_method: metodo.into(),
+            cash_amount: cash,
+            card_amount: card,
+            discount: None,
+            customer: cust,
+            customer_name: None,
+            customer_phone: None,
+            notes: None,
+            external_ref: None,
+            prescriptions: vec![],
+            branch: None,
+        }
+    };
+    let vender = |req: smodel::PosSaleRequest| {
+        let db = &db;
+        let tenant = &tenant;
+        let user = &user;
+        async move {
+            sales::post_sale(db, tenant, Some(user), Some("admin"), None, req)
+                .await
+                .expect("venta");
+        }
+    };
+
+    vender(venta("pos_cash", 2, Some(dec("2000")), None, None)).await; // 2000 efectivo
+    vender(venta("pos_debit", 1, None, Some(dec("1000")), None)).await; // 1000 tarjeta
+    vender(venta("pos_transferencia", 3, None, None, None)).await; // 3000 transferencia
+    vender(venta("pos_fiado", 1, None, None, Some(cliente.id.clone()))).await; // 1000 fiado
+                                                                               // Mixta de 5000: 2000 en efectivo + 3000 con tarjeta.
+    vender(venta(
+        "pos_mixed",
+        5,
+        Some(dec("2000")),
+        Some(dec("3000")),
+        None,
+    ))
+    .await;
+
+    let rows = service::sales_by_method(&db, &tenant, SalesReportFilters::default())
+        .await
+        .unwrap();
+    let monto = |m: &str| {
+        rows.iter()
+            .find(|r| r.method == m)
+            .map(|r| r.amount)
+            .unwrap_or(Decimal::ZERO)
+    };
+
+    assert_eq!(
+        monto("efectivo"),
+        dec("4000"),
+        "2000 puro + 2000 de la mixta"
+    );
+    assert_eq!(
+        monto("tarjeta"),
+        dec("4000"),
+        "1000 débito + 3000 de la mixta"
+    );
+    assert_eq!(monto("transferencia"), dec("3000"));
+    assert_eq!(monto("fiado"), dec("1000"), "el fiado es su propio bucket");
+    assert_eq!(
+        monto("otro"),
+        Decimal::ZERO,
+        "no debe sobrar plata sin bucket"
+    );
+
+    // Nada se pierde: la suma de los buckets es el ingreso del período.
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
+    assert_eq!(total, dec("12000"));
+
+    // Ordenado de mayor a menor para que la UI/agente lea lo importante primero.
+    let montos: Vec<Decimal> = rows.iter().map(|r| r.amount).collect();
+    let mut ordenado = montos.clone();
+    ordenado.sort_by(|a, b| b.cmp(a));
+    assert_eq!(montos, ordenado);
+}

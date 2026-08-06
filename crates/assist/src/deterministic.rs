@@ -44,6 +44,9 @@ impl AssistProvider for Deterministic {
                 comparativa(q.db, q.tenant, &q.intent, month_range(), last_month_range()).await
             }
             Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &q.intent).await,
+            Intent::IngresosPorMetodo(bucket) => {
+                ingresos_por_metodo(q.db, q.tenant, &q.intent, bucket.as_deref()).await
+            }
             Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent, 30).await,
             Intent::PorVencerSemana => por_vencer(q.db, q.tenant, &q.intent, 7).await,
             Intent::StockProducto(term) => stock_producto(q.db, q.tenant, &q.intent, term).await,
@@ -119,6 +122,69 @@ async fn ventas(
             "card": card.to_string(),
         })),
     )
+}
+
+/// Ingresos de HOY por método de pago. Responde "¿cuánto me entró por
+/// transferencia hoy?" (bucket puntual) y "efectivo vs transferencia"
+/// (desglose). Lee `reports::sales_by_method`, que ya reparte las ventas
+/// mixtas y separa el fiado.
+async fn ingresos_por_metodo(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    bucket: Option<&str>,
+) -> DomainResult<Answer> {
+    let rows = reports::sales_by_method(db, tenant, today_range()).await?;
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
+
+    if let Some(b) = bucket {
+        let fila = rows.iter().find(|r| r.method == b);
+        let monto = fila.map(|r| r.amount).unwrap_or(Decimal::ZERO);
+        let etiqueta = fila.map(|r| r.label.as_str()).unwrap_or(match b {
+            "transferencia" => "Transferencia",
+            "efectivo" => "Efectivo",
+            "tarjeta" => "Tarjeta",
+            _ => "Fiado",
+        });
+        let text = if monto.is_zero() {
+            format!("Hoy no te ha entrado nada por {}.", etiqueta.to_lowercase())
+        } else {
+            let share = if total.is_zero() {
+                Decimal::ZERO
+            } else {
+                (monto / total * Decimal::from(100)).round_dp(1)
+            };
+            format!(
+                "Hoy te entraron {} por {} ({}% de {} en total).",
+                clp(monto),
+                etiqueta.to_lowercase(),
+                share,
+                clp(total),
+            )
+        };
+        return Ok(Answer::new(intent, text).with_data(serde_json::json!({
+            "method": b,
+            "amount": monto.to_string(),
+            "total": total.to_string(),
+        })));
+    }
+
+    if rows.is_empty() {
+        return Ok(Answer::new(intent, "Hoy no registras ventas todavía.")
+            .with_data(serde_json::json!({ "total": "0" })));
+    }
+    let detalle: Vec<String> = rows
+        .iter()
+        .map(|r| format!("{} {}", r.label.to_lowercase(), clp(r.amount)))
+        .collect();
+    let text = format!("Hoy: {} — {} en total.", detalle.join(", "), clp(total));
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "total": total.to_string(),
+        "methods": rows
+            .iter()
+            .map(|r| serde_json::json!({ "method": r.method, "amount": r.amount.to_string() }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> DomainResult<Answer> {
@@ -751,35 +817,52 @@ async fn comparativa(
 }
 
 async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
-    let (orders, rev, cash, card) = sum_sales(db, tenant, month_range()).await?;
-    if orders == 0 {
+    // Antes esto sumaba sólo `cash_amount`/`card_amount` y presentaba los dos
+    // como el 100% del mes: con fiado (0039) y transferencia (0043) esa foto
+    // MIENTE (la plata que no es efectivo ni tarjeta desaparecía del desglose).
+    // Ahora sale de `sales_by_method`, que cubre todos los buckets.
+    let rows = reports::sales_by_method(db, tenant, month_range()).await?;
+    if rows.is_empty() {
         return Ok(Answer::new(
             intent,
             "No hay ventas este mes para desglosar por método de pago.",
         )
         .with_data(serde_json::json!({ "orders": 0 })));
     }
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
     let share = |part: Decimal| -> Decimal {
-        if rev.is_zero() {
+        if total.is_zero() {
             Decimal::ZERO
         } else {
-            (part / rev * Decimal::from(100)).round_dp(1)
+            (part / total * Decimal::from(100)).round_dp(1)
         }
     };
+    let detalle: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {} ({}%)",
+                r.label.to_lowercase(),
+                clp(r.amount),
+                share(r.amount)
+            )
+        })
+        .collect();
     let text = format!(
-        "Este mes: efectivo {} ({}%) y tarjeta {} ({}%), sobre {} en total.",
-        clp(cash),
-        share(cash),
-        clp(card),
-        share(card),
-        clp(rev),
+        "Este mes: {}, sobre {} en total.",
+        detalle.join(", "),
+        clp(total),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
-        "revenue": rev.to_string(),
-        "cash": cash.to_string(),
-        "card": card.to_string(),
-        "cash_pct": share(cash).to_string(),
-        "card_pct": share(card).to_string(),
+        "revenue": total.to_string(),
+        "methods": rows
+            .iter()
+            .map(|r| serde_json::json!({
+                "method": r.method,
+                "amount": r.amount.to_string(),
+                "pct": share(r.amount).to_string(),
+            }))
+            .collect::<Vec<_>>(),
     })))
 }
 
@@ -1112,7 +1195,7 @@ fn ayuda(intent: &Intent) -> Answer {
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». Si llevas \
          recetas: «recetas del mes» o «libro de controlados». De compras: «órdenes de \
          compra pendientes» o «cuántos proveedores tengo». Si fías: «¿cuánto me deben?» \
-         o «quién me debe». De impuestos: «¿cuánto IVA pago este mes?». También \
+         o «quién me debe». De impuestos: «¿cuánto IVA pago este mes?». De cómo te          pagan: «¿cuánto me entró por transferencia hoy?» o «efectivo vs          transferencia». También \
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea el proveedor Farmaltda», «crea un producto Aspirina a \
          $1000», «cambia el precio de paracetamol a $1500», «repón 40 de paracetamol», \

@@ -72,6 +72,31 @@ pub struct SalesReportFilters {
     pub to: Option<DateTime<Utc>>,
 }
 
+/// Ingresos del período desglosados por **cómo entró la plata** (migración 0043
+/// suma `pos_transferencia` al POS).
+///
+/// Se reporta por MONTO, que es lo que el dueño pregunta ("¿cuánto me entró por
+/// transferencia?"). Una venta mixta (`pos_mixed`) reparte su `cash_amount` a
+/// efectivo y su `card_amount` a tarjeta — la plata entró por dos vías y
+/// atribuirla a una sola mentiría —, y por eso cuenta en el `orders` de ambos
+/// buckets a los que aportó monto. La suma de `amount` sobre todos los buckets
+/// es el ingreso del período: **fiado incluido**, porque una venta a cuenta es
+/// ingreso devengado aunque todavía no haya plata en la mano (el reporte lo
+/// separa justamente para que se vea).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SalesByMethodRow {
+    /// Bucket estable para máquinas: `efectivo` | `tarjeta` | `transferencia` |
+    /// `fiado` | `otro`.
+    pub method: String,
+    /// Etiqueta es-CL lista para pantalla ("Transferencia").
+    pub label: String,
+    /// Ventas que aportaron a este bucket (una mixta cuenta en los dos).
+    pub orders: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub amount: Decimal,
+}
+
 /// Inventory-turnover row over the window. `turnover` = `qty_sold /
 /// current_stock`. The server keeps no historical stock snapshots, so
 /// *current* `product.stock` is used as the denominator proxy (documented

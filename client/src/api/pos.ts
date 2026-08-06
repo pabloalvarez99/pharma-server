@@ -20,7 +20,10 @@ export type PaymentMethod =
   | "pos_debit"
   | "pos_credit"
   | "pos_mixed"
-  | "pos_fiado";
+  | "pos_fiado"
+  /** "Te hago la transfer" (migración 0043): ingreso electrónico, liquida
+   *  exacto y NO entra al efectivo esperado del arqueo. */
+  | "pos_transferencia";
 
 /** A POS sale error surfaced from the Tauri layer as `"CODE|message"`. */
 export interface SaleError {

@@ -27,6 +27,11 @@ pub enum Intent {
     ComparativaMes,
     /// Sales broken down by payment method (cash vs card), month-to-date.
     VentasPorMetodo,
+    /// Ingresos de HOY por método de pago (migración 0043 suma transferencia).
+    /// `Some(bucket)` cuando la pregunta nombra un método concreto
+    /// (`transferencia` / `efectivo` / `tarjeta` / `fiado`), `None` = desglose
+    /// completo del día.
+    IngresosPorMetodo(Option<String>),
     /// Batches expiring soon / already expired (next 30 days).
     PorVencer,
     /// Batches expiring within the next 7 days.
@@ -89,6 +94,7 @@ impl Intent {
             Intent::ComparativaDia => "ventas_vs_ayer",
             Intent::ComparativaMes => "ventas_vs_mes_pasado",
             Intent::VentasPorMetodo => "ventas_metodo_pago",
+            Intent::IngresosPorMetodo(_) => "ingresos_metodo_pago",
             Intent::PorVencer => "por_vencer",
             Intent::PorVencerSemana => "por_vencer_semana",
             Intent::StockProducto(_) => "stock_producto",
@@ -258,6 +264,40 @@ pub fn parse(question: &str) -> Intent {
     // ("efectivo vs tarjeta" carries the "vs" cue) and the cash-drawer branch
     // ("efectivo"/"tarjeta" alone are cash cues). A method question is one that
     // names the *concept* of payment method, or contrasts cash AND card.
+    // Ingresos de HOY por método (V4 pagos). Va ANTES del desglose mensual
+    // porque es más específico: nombra un método concreto o pregunta por lo que
+    // "entró" hoy. `transferencia` es palabra larga y sin colisiones (a
+    // diferencia del caso `iva`, que exigió límite de palabra).
+    {
+        let nombra_transferencia =
+            contains_any(&q, &["transferencia", "transferencias", "transfer"]);
+        let entro_hoy = contains_any(&q, &["me entro", "entro por", "ingreso", "ingresos"]);
+        if nombra_transferencia
+            || (entro_hoy && contains_any(&q, &["efectivo", "tarjeta", "fiado"]))
+        {
+            let bucket = if nombra_transferencia {
+                Some("transferencia")
+            } else if contains_any(&q, &["efectivo", "cash"]) {
+                Some("efectivo")
+            } else if contains_any(&q, &["tarjeta", "debito", "credito"]) {
+                Some("tarjeta")
+            } else if contains_any(&q, &["fiado"]) {
+                Some("fiado")
+            } else {
+                None
+            };
+            // "efectivo vs transferencia" pide comparar, no un solo bucket.
+            let comparando = contains_any(&q, &[" vs ", " vs.", "versus", " y ", " o "])
+                && contains_any(&q, &["efectivo", "tarjeta", "fiado"])
+                && nombra_transferencia;
+            return Intent::IngresosPorMetodo(if comparando {
+                None
+            } else {
+                bucket.map(|b| b.to_string())
+            });
+        }
+    }
+
     if contains_any(
         &q,
         &[
@@ -920,6 +960,32 @@ mod tests {
             assert_eq!(parse(q), Intent::VentasPorMetodo, "q={q}");
         }
         // "efectivo en caja" is a cash question, not a method breakdown.
+        assert_eq!(parse("efectivo en caja"), Intent::CajaActual);
+    }
+
+    #[test]
+    fn ingresos_por_metodo_transferencia() {
+        // Pregunta por un método puntual → bucket capturado.
+        for q in [
+            "¿cuánto me entró por transferencia hoy?",
+            "cuanto llevo en transferencias",
+            "ventas por transferencia",
+        ] {
+            assert_eq!(
+                parse(q),
+                Intent::IngresosPorMetodo(Some("transferencia".into())),
+                "q={q}"
+            );
+        }
+        // Comparar dos métodos → desglose completo, sin bucket.
+        assert_eq!(
+            parse("efectivo vs transferencia"),
+            Intent::IngresosPorMetodo(None)
+        );
+        // El desglose mensual clásico NO se lo roba la lane nueva.
+        assert_eq!(parse("ventas por método de pago"), Intent::VentasPorMetodo);
+        assert_eq!(parse("efectivo vs tarjeta"), Intent::VentasPorMetodo);
+        // Y una pregunta de caja sigue siendo de caja.
         assert_eq!(parse("efectivo en caja"), Intent::CajaActual);
     }
 
