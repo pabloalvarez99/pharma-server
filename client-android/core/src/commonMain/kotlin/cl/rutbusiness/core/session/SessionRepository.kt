@@ -47,6 +47,7 @@ class SessionRepository(
 
     private var token: String? = null
     private var factory: ApiFactory? = null
+    private var restaurada = false
 
     /** Cliente HTTP apuntando a [baseUrl], reusado mientras la URL no cambie. */
     fun apiPara(baseUrl: String): ApiFactory {
@@ -60,8 +61,25 @@ class SessionRepository(
     fun apiActiva(): ApiFactory? =
         (_estado.value as? EstadoSesion.Activa)?.let { apiPara(it.baseUrl) }
 
-    /** Se llama una vez al arrancar la app. */
+    /**
+     * Se llama una vez al arrancar la app, y **antes** del primer frame: quien
+     * la dispara es `Application.onCreate`, no la UI.
+     *
+     * Por qué importa el orden: la lectura de disco tarda ~40 ms en el aparato
+     * lento. Colgada de un `LaunchedEffect` corría *después* de que Compose ya
+     * hubiera compuesto y dibujado el estado [EstadoSesion.Cargando], o sea un
+     * frame entero de spinner que se tiraba a la basura 50 ms más tarde.
+     * Disparada desde el arranque del proceso, esa lectura se solapa con la
+     * inicialización de Compose y en el aparato lento el spinner ya no alcanza
+     * a aparecer: el primer frame es directamente el login o el catálogo.
+     *
+     * Idempotente: si algo la llama dos veces, la segunda no hace daño, pero
+     * tampoco vuelve a leer disco de gusto.
+     */
     suspend fun restaurar() {
+        if (restaurada) return
+        restaurada = true
+
         val baseUrl = almacenamiento.preferencias.leerBaseUrl()
         val guardado = almacenamiento.tokens.leer()
         token = guardado
