@@ -9,10 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -21,6 +19,8 @@ import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
+import cl.rutbusiness.ui.components.RbAmount
+import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
@@ -33,13 +33,35 @@ import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 
+/**
+ * @param onIrALaCaja abre el ritual de la caja. Sale del bloque "En la caja",
+ *   que es donde la dueña ya está mirando cuando se lo pregunta.
+ * @param onIrAlFiado abre "quién me debe", desde el bloque que muestra el total.
+ * @param recargasPedidas cambia cada vez que se vuelve de una de esas dos
+ *   pantallas. El `ViewModel` sobrevive al cambio y su carga inicial ya corrió,
+ *   así que sin esto el resumen mostraría la caja y la deuda de hace un rato.
+ */
 @Composable
-fun ResumenRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
+fun ResumenRoute(
+    sesion: SessionRepository,
+    estado: EstadoSesion.Activa,
+    onIrALaCaja: () -> Unit = {},
+    onIrAlFiado: () -> Unit = {},
+    recargasPedidas: Int = 0,
+) {
     val vm: ResumenViewModel = viewModel(
         key = "resumen:${estado.baseUrl}",
         factory = viewModelFactory { initializer { ResumenViewModel(sesion) } },
     )
-    ResumenScreen(vm)
+
+    LaunchedEffect(recargasPedidas) {
+        // Cero es el primer montaje, y ahí ya cargó el `init` del ViewModel:
+        // volver a pedirlo sería un viaje por datos móviles de más en el
+        // arranque, que es justo el momento que el piso de hardware cuida.
+        if (recargasPedidas > 0) vm.cargar()
+    }
+
+    ResumenScreen(vm = vm, onIrALaCaja = onIrALaCaja, onIrAlFiado = onIrAlFiado)
 }
 
 /**
@@ -61,7 +83,11 @@ fun ResumenRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
  * haya que tocarla.
  */
 @Composable
-private fun ResumenScreen(vm: ResumenViewModel) {
+private fun ResumenScreen(
+    vm: ResumenViewModel,
+    onIrALaCaja: () -> Unit,
+    onIrAlFiado: () -> Unit,
+) {
     val dimens = RbTheme.dimens
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -99,8 +125,8 @@ private fun ResumenScreen(vm: ResumenViewModel) {
                 verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {
                 item("ventas") { VendidoHoy(vm) }
-                item("caja") { EnCaja(vm) }
-                item("fiado") { TeDeben(vm) }
+                item("caja") { EnCaja(vm, onIrALaCaja) }
+                item("fiado") { TeDeben(vm, onIrAlFiado) }
                 item("faltantes") { SePorAcabar(vm) }
                 item("vencimientos") { PorVencer(vm) }
             }
@@ -153,10 +179,9 @@ internal fun TarjetaDelDia(
             modifier = Modifier.rbHeading(),
         )
 
-        Text(
-            text = moneda.formatear(vendidoHoy),
-            style = estiloDeCifra(),
-            color = colors.textPrimary,
+        RbAmount(
+            amount = moneda.formatear(vendidoHoy),
+            emphasis = RbAmountEmphasis.Headline,
         )
 
         Text(
@@ -203,42 +228,17 @@ internal fun TarjetaDelDia(
     }
 }
 
-/**
- * El tamaño de la cifra del día.
- *
- * Al 100% va a una vez y media el título: es lo único que se tiene que leer
- * desde el otro lado del mostrador. Con la letra grande del sistema el
- * multiplicador se suelta, y no por ahorrar espacio: un monto es una palabra
- * sin espacios, así que cuando no entra Compose lo parte **por la mitad** y
- * "$1.234.567" se lee "$1.234." arriba y "567" abajo. Un número cortado al
- * medio es peor que un número más chico, y al 200% el aparato ya está
- * agrandando todo de todos modos.
- */
-@Composable
-private fun estiloDeCifra(): TextStyle {
-    val tipografia = RbTheme.typography
-    val agrandada = LocalDensity.current.fontScale >= 1.5f
-    return tipografia.numeric.copy(
-        fontSize = tipografia.title.fontSize * (if (agrandada) 1.0f else 1.5f),
-        fontWeight = FontWeight.Bold,
-    )
-}
-
 // --- 3: cuánta plata hay en caja -------------------------------------------
 
 @Composable
-private fun EnCaja(vm: ResumenViewModel) {
+private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
     val colors = RbTheme.colors
     val enCaja = vm.enCaja
 
     RbCard(title = "En la caja") {
         when {
             enCaja != null -> {
-                Text(
-                    text = vm.moneda.formatear(enCaja),
-                    style = RbTheme.typography.numeric.copy(fontWeight = FontWeight.Bold),
-                    color = colors.textPrimary,
-                )
+                RbAmount(amount = vm.moneda.formatear(enCaja))
                 Text(
                     text = buildString {
                         append("Es lo que debería haber ahora")
@@ -252,8 +252,8 @@ private fun EnCaja(vm: ResumenViewModel) {
             }
 
             vm.sinCajaAbierta -> Text(
-                text = "No hay ninguna caja abierta. Cuando abras la caja al empezar el día, " +
-                    "acá vas a ver cuánta plata debería haber adentro.",
+                text = "No hay ninguna caja abierta. Abrir la caja es lo primero del día: " +
+                    "desde ahí se empieza a contar la plata que entra.",
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -264,15 +264,26 @@ private fun EnCaja(vm: ResumenViewModel) {
                 color = colors.textSecondary,
             )
         }
+
+        // Abrir la caja es lo primero que hace la dueña en el día, así que
+        // cuando no hay ninguna abierta el botón es el principal de la tarjeta y
+        // no una acción secundaria escondida.
+        RbButton(
+            label = if (vm.sinCajaAbierta) "Abrir la caja" else "Ver la caja",
+            onClick = onIrALaCaja,
+            variant = if (vm.sinCajaAbierta) RbButtonVariant.Primary else RbButtonVariant.Secondary,
+            fillWidth = true,
+        )
     }
 }
 
 // --- 4: cuánto le deben -----------------------------------------------------
 
 @Composable
-private fun TeDeben(vm: ResumenViewModel) {
+private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
     val colors = RbTheme.colors
     val deuda = vm.porCobrar
+    val hayDeuda = deuda != null && deuda.deudores > 0 && !esCero(deuda.total)
 
     RbCard(title = "Te deben") {
         when {
@@ -282,7 +293,7 @@ private fun TeDeben(vm: ResumenViewModel) {
                 color = colors.textSecondary,
             )
 
-            deuda.deudores == 0 || esCero(deuda.total) -> Text(
+            !hayDeuda -> Text(
                 text = "Nadie te debe plata. Cuando fíes una venta, la deuda aparece acá hasta " +
                     "que te la paguen.",
                 style = RbTheme.typography.body,
@@ -290,11 +301,7 @@ private fun TeDeben(vm: ResumenViewModel) {
             )
 
             else -> {
-                Text(
-                    text = vm.moneda.formatear(deuda.total),
-                    style = RbTheme.typography.numeric.copy(fontWeight = FontWeight.Bold),
-                    color = colors.textPrimary,
-                )
+                RbAmount(amount = vm.moneda.formatear(deuda.total))
                 Text(
                     text = if (deuda.deudores == 1) {
                         "1 cliente con cuenta pendiente."
@@ -306,6 +313,16 @@ private fun TeDeben(vm: ResumenViewModel) {
                 )
             }
         }
+
+        // El botón está incluso cuando nadie debe: es la única puerta al fiado, y
+        // esconderla dejaría sin forma de llegar a la cuenta de alguien que ya
+        // terminó de pagar.
+        RbButton(
+            label = if (hayDeuda) "Ver quién me debe" else "Ver el fiado",
+            onClick = onIrAlFiado,
+            variant = RbButtonVariant.Secondary,
+            fillWidth = true,
+        )
     }
 }
 

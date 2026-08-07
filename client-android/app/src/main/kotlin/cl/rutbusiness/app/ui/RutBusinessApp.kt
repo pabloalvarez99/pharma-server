@@ -8,7 +8,7 @@ import cl.rutbusiness.app.ui.cobrar.CobrarRoute
 import cl.rutbusiness.app.ui.login.LoginRoute
 import cl.rutbusiness.app.ui.nav.ContenedorDeDestinos
 import cl.rutbusiness.app.ui.nav.Destino
-import cl.rutbusiness.app.ui.resumen.ResumenRoute
+import cl.rutbusiness.app.ui.nav.TuDiaRoute
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbLoadingState
@@ -72,7 +72,10 @@ private fun ConSesion(sesion: SessionRepository, estado: EstadoSesion.Activa) {
         when (destino) {
             Destino.Agente -> AssistRoute(sesion = sesion)
             Destino.Cobrar -> CobrarRoute(sesion = sesion, estado = estado)
-            Destino.Resumen -> ResumenRoute(sesion = sesion, estado = estado)
+            // "Tu día" no es sólo el resumen: de ahí salen las dos rutinas
+            // diarias -- abrir y cerrar la caja, y cobrar el fiado. Por qué no
+            // son pestañas propias está explicado en [TuDiaRoute].
+            Destino.Resumen -> TuDiaRoute(sesion = sesion, estado = estado)
         }
     }
 }
