@@ -38,6 +38,19 @@ class AntiRebote(private val ventanaMs: Long = VENTANA_MS) {
         return visto == null
     }
 
+    /**
+     * Anota [codigo] como recién visto, sin contarlo.
+     *
+     * Para cuando el producto entró al carrito por otro camino que no fue una
+     * lectura aceptada -crearlo ahí mismo porque no estaba en el catálogo-.
+     * Sin esto, el código sigue delante del lente cuando se cierra el
+     * formulario, la cámara lo lee como nuevo y el cliente paga dos.
+     */
+    fun anotar(codigo: String, ahoraMs: Long) {
+        purgar(ahoraMs)
+        vistos[codigo] = ahoraMs
+    }
+
     /** Vuelve al estado inicial: se usa al abrir la cámara para otra venta. */
     fun olvidar() = vistos.clear()
 

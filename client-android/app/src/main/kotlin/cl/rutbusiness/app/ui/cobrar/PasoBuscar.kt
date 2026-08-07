@@ -21,8 +21,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.diag.Latencia
+import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.ui.components.RbButton
+import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbDivider
@@ -76,6 +78,19 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 supportingText = "Escribe parte del nombre, o el código de barras completo.",
                 keyboardType = KeyboardType.Text,
             )
+
+            // El botón de la cámara sólo existe si el aparato tiene uno. En una
+            // tablet sin cámara -o en un test- no aparece, en vez de aparecer y
+            // llevar a un cartel de disculpas.
+            if (LocalCamaraDeCodigos.current != null) {
+                RbButton(
+                    label = "Escanear código",
+                    onClick = vm::abrirEscaner,
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = dimens.space2),
+                )
+            }
         }
 
         RbDivider()

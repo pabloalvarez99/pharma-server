@@ -48,6 +48,17 @@ private fun CobrarScreen(vm: CobrarViewModel) {
     // es "Nueva venta", que además limpia la clave de idempotencia.
     BackHandler(enabled = vm.paso == PasoDeCobro.Pago, onBack = vm::volverABuscar)
 
+    // El escáner tapa el paso actual en vez de ser un cuarto paso: el carrito
+    // sigue siendo el mismo y salir de la cámara deja la venta donde estaba.
+    // Se registra después del anterior, así que atrás cierra primero la cámara.
+    BackHandler(enabled = vm.escaneando) {
+        if (vm.creandoProducto) vm.cancelarCreacion() else vm.cerrarEscaner()
+    }
+    if (vm.escaneando) {
+        PasoEscaner(vm, modifier = Modifier.fillMaxSize())
+        return
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
             title = when (vm.paso) {
