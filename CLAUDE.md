@@ -6,9 +6,17 @@
 > cliente móvil se mide contra ella; si algo solo funciona bien en un teléfono
 > nuevo, no está terminado. Reglas que se derivan y NO se negocian:
 >
-> 1. **Alcance de versión: `minSdk 21`** (Android 5.0, 2014). La app Tauri actual
->    era `minSdk 24` (Android 7.0) y dejaba fuera aparatos que este producto sí
->    quiere servir. Compose baja a 21 — usar ese piso, no el heredado.
+> 1. **Alcance de versión: `minSdk 23`** (Android 6.0, 2015). La app Tauri era
+>    `minSdk 24` y dejaba fuera aparatos que este producto sí quiere servir; 23
+>    los recupera casi todos.
+>    *Historial:* se fijó en 21 el 2026-08-06 y se corrigió a 23 el 2026-08-07.
+>    AndroidX dejó de soportar API 21-22 a mitad de 2025, así que sostener 21
+>    obligaba a congelar Compose, Material3 y lifecycle en versiones **sin
+>    parches de seguridad**, y a escribir a mano el cifrado del token (el
+>    Keystore de Android 5 solo guarda pares RSA) — código que nunca llegó a
+>    correr en un aparato real. Para una app que mueve plata, quedarse sin
+>    parches por llegar a teléfonos de 2014 —que además tienen 1 GB de RAM— es
+>    mal negocio. **No volver a bajar a 21 sin resolver antes esas dos cosas.**
 > 2. **Nunca APK universal.** Siempre AAB con split por ABI, o APKs por ABI. Un
 >    teléfono con 8 GB de almacenamiento no puede pagar 4 arquitecturas. Incluir
 >    `armeabi-v7a`: hay aparatos de 32 bits todavía en uso.
