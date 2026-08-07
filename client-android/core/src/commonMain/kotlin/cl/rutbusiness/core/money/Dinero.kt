@@ -17,7 +17,28 @@ data class Dinero(
     val unidades: Long,
     /** Cuántos decimales tiene [unidades]. */
     val escala: Int,
-) {
+) : Comparable<Dinero> {
+
+    /**
+     * Cuál de los dos es más grande.
+     *
+     * Ordenar **no** es calcular: no sale un monto nuevo de acá, sale un
+     * `mayor`/`menor`/`igual`. Por eso esto no viola la regla de que la plata
+     * la calcula el server — la usa el resumen del día para decir "mejor que
+     * ayer" a partir de dos totales que el server ya sumó, sin restarlos ni
+     * sacarles un porcentaje.
+     *
+     * Las dos escalas se igualan hacia arriba antes de comparar: `1490` con
+     * escala 0 y `1490.00` con escala 2 son el mismo monto y tienen que dar
+     * iguales. `equals` sigue siendo estructural a propósito -- la escala la
+     * eligió el server y se guarda tal cual --, así que acá se comparan
+     * **montos** y allá, representaciones.
+     */
+    override fun compareTo(other: Dinero): Int {
+        val comun = maxOf(escala, other.escala)
+        return escalarA(comun).unidades.compareTo(other.escalarA(comun).unidades)
+    }
+
     operator fun plus(otro: Dinero): Dinero {
         val comun = maxOf(escala, otro.escala)
         return Dinero(escalarA(comun).unidades + otro.escalarA(comun).unidades, comun)

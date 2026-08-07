@@ -1,5 +1,6 @@
 package cl.rutbusiness.app.ui.cobrar
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -36,6 +37,17 @@ fun CobrarRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
  */
 @Composable
 private fun CobrarScreen(vm: CobrarViewModel) {
+    // Atrás desde el paso de pago vuelve a buscar, con el carrito intacto. Se
+    // registra más adentro que el de `RutBusinessApp`, así que gana: primero se
+    // deshace el paso, y recién cuando ya no hay paso que deshacer, atrás
+    // cambia de pestaña. Sin esto, atrás en medio de un cobro saltaba al agente
+    // y la cajera perdía de vista la venta que estaba cerrando.
+    //
+    // En Comprobante queda apagado a propósito: la venta ya se cobró y "volver"
+    // al paso de pago sugeriría que se puede cobrar de nuevo. La salida de ahí
+    // es "Nueva venta", que además limpia la clave de idempotencia.
+    BackHandler(enabled = vm.paso == PasoDeCobro.Pago, onBack = vm::volverABuscar)
+
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
             title = when (vm.paso) {

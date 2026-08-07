@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class DineroTest {
 
@@ -46,6 +47,44 @@ class DineroTest {
     fun `negativos ida y vuelta`() {
         val d = assertNotNull(Dinero.deTextoDeServidor("-250.75"))
         assertEquals("-250.75", d.aTextoDeServidor())
+    }
+
+    // --- comparar (lo usa el resumen del día para decir "mejor que ayer") ----
+
+    @Test
+    fun `compara montos de la misma escala`() {
+        val hoy = assertNotNull(Dinero.deTextoDeServidor("1490"))
+        val ayer = assertNotNull(Dinero.deTextoDeServidor("1200"))
+        assertTrue(hoy > ayer)
+        assertTrue(ayer < hoy)
+    }
+
+    /**
+     * El caso que rompería una comparación ingenua: el mismo monto con dos
+     * escalas distintas. El server manda `"1490"` un día y `"1490.00"` otro
+     * según de qué consulta salga, y decir "mejor que ayer" por eso sería
+     * mentir.
+     */
+    @Test
+    fun `el mismo monto con distinta escala compara igual`() {
+        val entero = assertNotNull(Dinero.deTextoDeServidor("1490"))
+        val conDecimales = assertNotNull(Dinero.deTextoDeServidor("1490.00"))
+        assertEquals(0, entero.compareTo(conDecimales))
+        assertEquals(0, conDecimales.compareTo(entero))
+    }
+
+    @Test
+    fun `compara montos de escalas distintas`() {
+        val hoy = assertNotNull(Dinero.deTextoDeServidor("1490.01"))
+        val ayer = assertNotNull(Dinero.deTextoDeServidor("1490"))
+        assertTrue(hoy > ayer)
+    }
+
+    @Test
+    fun `un dia sin ventas es menos que cualquier venta`() {
+        val hoy = assertNotNull(Dinero.deTextoDeServidor("1"))
+        assertTrue(hoy > Dinero.CERO)
+        assertTrue(Dinero.CERO < hoy)
     }
 }
 

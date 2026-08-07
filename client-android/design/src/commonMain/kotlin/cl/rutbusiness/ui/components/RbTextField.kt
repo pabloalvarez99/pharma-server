@@ -7,10 +7,10 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import cl.rutbusiness.ui.theme.RbTheme
@@ -66,6 +67,18 @@ fun RbTextField(
     /** Monospace for RUT / CLP / folios, so digits line up column to column. */
     numeric: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Text,
+    /**
+     * Qué dice la tecla de acción del teclado. `Send` cuando escribir y
+     * apretar esa tecla es la forma natural de terminar - un campo de chat,
+     * una búsqueda - para no obligar a bajar la vista hasta un botón.
+     */
+    imeAction: ImeAction = ImeAction.Default,
+    /**
+     * Qué hacer cuando se aprieta esa tecla. Nunca es la *única* forma de
+     * enviar: en un teclado de teléfono viejo esa tecla puede venir sin
+     * etiqueta clara, así que la pantalla siempre ofrece además un botón.
+     */
+    onImeAction: (() -> Unit)? = null,
     visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val colors = RbTheme.colors
@@ -116,7 +129,21 @@ fun RbTextField(
             cursorBrush = SolidColor(colors.brandText),
             interactionSource = interactionSource,
             visualTransformation = visualTransformation,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = keyboardType,
+                imeAction = imeAction,
+            ),
+            keyboardActions = onImeAction?.let { accion ->
+                // Las cuatro, no solo `onSend`: qué callback dispara el teclado
+                // depende del `imeAction`, y un teclado de fabricante en un
+                // aparato viejo no siempre respeta el que se pidió.
+                KeyboardActions(
+                    onSend = { accion() },
+                    onDone = { accion() },
+                    onGo = { accion() },
+                    onSearch = { accion() },
+                )
+            } ?: KeyboardActions.Default,
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(shape)
@@ -129,8 +156,15 @@ fun RbTextField(
                 },
             decorationBox = { innerTextField ->
                 Box(
+                    // `fillMaxWidth`, no `fillMaxSize`. Con `fillMaxSize` el
+                    // campo se queda con TODA la altura que le ofrezcan: dentro
+                    // de un `LazyColumn` no se nota, porque ahí la altura viene
+                    // ajustada al contenido, pero puesto en un `Column` junto a
+                    // un hermano con `weight(1f)` el campo se comía la pantalla
+                    // entera. El piso de 56dp ya lo pone `rbTouchTarget` más
+                    // arriba; acá la altura tiene que salir del texto.
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
                         .padding(horizontal = dimens.space3, vertical = dimens.space2),
                     contentAlignment = Alignment.CenterStart,
                 ) {

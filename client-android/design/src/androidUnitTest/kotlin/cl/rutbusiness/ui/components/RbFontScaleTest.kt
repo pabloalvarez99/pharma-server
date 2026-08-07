@@ -3,6 +3,7 @@ package cl.rutbusiness.ui.components
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -418,6 +419,58 @@ class RbFontScaleTest {
         assertTrue(
             "the confirm button is ${bounds.height} tall, under $touchTarget",
             bounds.height >= touchTarget,
+        )
+    }
+}
+
+/**
+ * Un campo de texto no puede comerse la pantalla.
+ *
+ * Regresión de un bug encontrado mirando la pantalla del agente: el
+ * `decorationBox` de [RbTextField] usaba `fillMaxSize`, así que el campo se
+ * quedaba con toda la altura que le ofrecieran. Dentro de un `LazyColumn` no
+ * se notaba —ahí la altura viene ajustada al contenido— pero puesto en un
+ * `Column` al lado de un hermano con `weight(1f)`, el campo tapaba la
+ * conversación entera.
+ *
+ * La regla que fija: un campo de una línea mide más o menos lo mismo esté
+ * donde esté, y nunca la pantalla completa.
+ */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = "w360dp-h640dp-xhdpi", sdk = [34])
+class RbTextFieldAlturaTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    @Test
+    fun `el campo no se queda con toda la altura disponible`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Column(Modifier.fillMaxSize()) {
+                    // El hermano flexible: se lleva lo que sobra.
+                    Box(Modifier.weight(1f).fillMaxWidth())
+                    RbTextField(
+                        value = "",
+                        onValueChange = {},
+                        label = "¿Qué necesitas?",
+                        placeholder = "Escribe o toca una sugerencia",
+                        modifier = Modifier.testTag("campo"),
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        val alto = compose.onNodeWithTag("campo").getUnclippedBoundsInRoot().height
+        val pantalla = compose.onRoot().getUnclippedBoundsInRoot().height
+
+        assertTrue("el campo mide $alto, menos que el piso táctil", alto >= RbDefaultDimens.touchTarget)
+        assertTrue(
+            "el campo mide $alto de una pantalla de $pantalla: se comió el espacio " +
+                "de todo lo demás",
+            alto < pantalla / 2,
         )
     }
 }

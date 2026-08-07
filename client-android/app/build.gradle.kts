@@ -2,6 +2,12 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // Los DTOs del agente (`ui/assist/AssistApi.kt`) son `@Serializable` y viven
+    // en este módulo. Sin el plugin, kotlinx no genera sus serializers y la
+    // primera llamada revienta en tiempo de ejecución con "Serializer for class
+    // ... is not found" — algo que ningún test de UI ve, porque la UI no
+    // serializa. Lo encontró `AssistApiEnVivoTest` hablando con un server real.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -76,7 +82,52 @@ android {
         )
     }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                // Fuentes reales: con los gráficos por defecto de Robolectric el
+                // motor de texto es un stub que devuelve ~0,5dp por carácter, y
+                // toda medición de ancho pasa sin significar nada.
+                it.systemProperty("robolectric.graphicsMode", "NATIVE")
+                // `AssistApiEnVivoTest` habla con un pharma-api de verdad y se
+                // salta solo si no hay ninguno. Gradle no pasa los `-D` de la
+                // línea de comandos al JVM de tests, así que se reenvían acá.
+                listOf(
+                    "rb.assist.baseUrl",
+                    "rb.assist.tenant",
+                    "rb.assist.email",
+                    "rb.assist.password",
+                ).forEach { clave ->
+                    System.getProperty(clave)?.let { valor -> it.systemProperty(clave, valor) }
+                }
+            }
+        }
+    }
+
     sourceSets["main"].java.srcDir("src/main/kotlin")
+    sourceSets["test"].java.srcDir("src/test/kotlin")
+}
+
+/**
+ * Las pruebas unitarias corren en debug y sólo en debug.
+ *
+ * Casi todas montan Compose, y para eso hace falta la `ComponentActivity` que
+ * hospeda la composición: la trae `compose.ui.test.manifest`, que entra por
+ * `debugImplementation` porque su `AndroidManifest` no puede terminar en el APK
+ * que se publica. En release ese manifiesto no está y Robolectric muere con
+ * "Unable to resolve activity for Intent ... androidx.activity.ComponentActivity"
+ * — un rojo permanente en `./gradlew test` que no decía nada sobre el código.
+ *
+ * No se pierde cobertura: no hay fuentes propias de release, así que
+ * `testReleaseUnitTest` compilaba exactamente el mismo Kotlin dos veces.
+ */
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) { variante ->
+        (variante as com.android.build.api.variant.HasHostTestsBuilder)
+            .hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]
+            ?.enable = false
+    }
 }
 
 dependencies {
@@ -104,6 +155,12 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    // La tarjeta de propuesta es el peor caso de la app al 200% de escala y se
+    // mide en la JVM para que la prueba corra en cada commit y no cuando
+    // alguien se acuerde de enchufar un teléfono.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
 }
