@@ -11,6 +11,7 @@ import android.security.KeyPairGeneratorSpec
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
@@ -95,6 +96,14 @@ internal class TokenStoreAndroid(context: Context) : TokenStore {
 
     // --- API 23+ ------------------------------------------------------------
 
+    /**
+     * La guarda de versión vive en [llaveAes], una llamada más arriba, y lint no
+     * la sigue a través del salto: reportaba cinco `NewApi` sobre
+     * `KeyGenParameterSpec` con `./gradlew lint` en rojo. La anotación dice lo
+     * que ya era cierto, y de yapa hace que lint verifique que todo el que
+     * llame acá venga con su chequeo de `SDK_INT` puesto.
+     */
+    @RequiresApi(Build.VERSION_CODES.M)
     private fun llaveAesDelKeystore(): SecretKey {
         val ks = KeyStore.getInstance(PROVEEDOR_KEYSTORE).apply { load(null) }
         (ks.getEntry(ALIAS_AES, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }

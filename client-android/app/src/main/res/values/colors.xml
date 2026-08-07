@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  El único color en XML del proyecto, y existe por un motivo de arranque, no de
+  diseño: es lo que la ventana pinta ANTES de que Compose exista. Su valor tiene
+  que ser el mismo `RbColors.background` del design system, o el usuario ve un
+  destello de otro color en el arranque en frío.
+
+  Claro: `RbLightColors.background` = #F7F4EE.
+  Oscuro (values-night): `RbDarkColors.background` = #0B0F16.
+-->
+<resources>
+    <color name="rb_window_background">#FFF7F4EE</color>
+</resources>

@@ -1,7 +1,6 @@
 package cl.rutbusiness.app.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import cl.rutbusiness.app.ui.cobrar.CobrarRoute
@@ -25,8 +24,6 @@ import cl.rutbusiness.ui.theme.RbTheme
 @Composable
 fun RutBusinessApp(sesion: SessionRepository) {
     val estado by sesion.estado.collectAsState()
-
-    LaunchedEffect(Unit) { sesion.restaurar() }
 
     RbTheme {
         when (val actual = estado) {

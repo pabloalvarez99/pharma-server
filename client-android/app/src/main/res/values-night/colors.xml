@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ver el comentario de `values/colors.xml`: espejo de `RbDarkColors.background`. -->
+<resources>
+    <color name="rb_window_background">#FF0B0F16</color>
+</resources>

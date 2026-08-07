@@ -78,5 +78,13 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test.junit4)
+    // `testImplementation` además de `debugImplementation`: este artefacto no
+    // trae código, trae un `AndroidManifest.xml` que declara
+    // `androidx.activity.ComponentActivity`, que es la que `createComposeRule`
+    // levanta. Colgado sólo de `debug`, `testReleaseUnitTest` no lo ve y los 8
+    // tests de escala mueren con "Unable to resolve activity for Intent ...
+    // cmp=cl.rutbusiness.ui.test/androidx.activity.ComponentActivity" — o sea
+    // la mitad de la suite del design system no corría en `./gradlew test`.
+    testImplementation(libs.compose.ui.test.manifest)
     debugImplementation(libs.compose.ui.test.manifest)
 }
