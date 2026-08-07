@@ -195,9 +195,13 @@ class AssistViewModel(
             }
 
             when (val r = AssistApi(api).confirmar(mensaje.propuesta.confirmToken)) {
-                is Resultado.Ok -> {
-                    reemplazar(mensajeId) { it.copy(estado = EstadoPropuesta.Hecha(r.valor.text)) }
-                    mensajes += Mensaje.DelAgente(nuevoId(), r.valor.text)
+                // La confirmación queda DENTRO de la tarjeta y no se repite como
+                // burbuja aparte. Agregarla dos veces se veía en el teléfono
+                // como si el agente hubiera contestado dos veces —o peor, como
+                // si hubiera registrado el gasto dos veces, que es exactamente
+                // el susto que esta pantalla existe para evitar.
+                is Resultado.Ok -> reemplazar(mensajeId) {
+                    it.copy(estado = EstadoPropuesta.Hecha(r.valor.text))
                 }
 
                 is Resultado.Falla -> reemplazar(mensajeId) {
