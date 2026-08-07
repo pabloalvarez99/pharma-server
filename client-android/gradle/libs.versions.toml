@@ -1,19 +1,21 @@
-# PISO DE HARDWARE — por qué estas versiones y no las últimas
+# PISO DE HARDWARE — versiones
 #
-# El techo lo pone `minSdk = 21` (CLAUDE.md, regla 1). AndroidX dejó de soportar
-# API 21 y 22 a mitad de 2025: todo lo publicado después declara `minSdk 23` y el
-# manifest merger corta el build. Verificado leyendo el AndroidManifest de cada
-# AAR, no adivinado:
+# `minSdk = 23` (CLAUDE.md, regla 1; decisión del founder 2026-08-07). Antes era
+# 21, y eso obligaba a congelar todo AndroidX: la librería dejó de soportar API
+# 21-22 a mitad de 2025, así que todo lo publicado después declara `minSdk 23` y
+# el manifest merger cortaba el build. Verificado leyendo el AndroidManifest de
+# cada AAR, no adivinado:
 #
-#   androidx.compose.animation:animation-core  1.9.x -> minSdk 21
-#                                              1.10.0 -> minSdk 23   <- corta acá
+#   androidx.compose.animation:animation-core  1.9.x  -> minSdk 21
+#                                              1.10.0 -> minSdk 23
 #   androidx.compose.material3                 1.4.0  -> minSdk 21
 #   androidx.lifecycle                         2.9.4  -> minSdk 21
 #   androidx.activity                          1.11.0 -> minSdk 21
 #
-# Por eso NO se usa el BOM de Compose: el BOM arrastra 1.10+. Cada artefacto va
-# pinneado a la última versión que todavía entra en un Android 5.0.
-# El día que el fundador acepte subir a minSdk 23 esto se destraba solo.
+# Con 23 ese techo desaparece: se puede volver al BOM de Compose y a las
+# versiones con parches de seguridad. Las versiones de abajo son las que había
+# bajo el techo viejo y siguen funcionando; subirlas es una tarea aparte, no un
+# efecto automático de este cambio.
 
 [versions]
 agp = "8.13.2"
@@ -23,7 +25,7 @@ agp = "8.13.2"
 # línea que este AGP entiende sin ruido.
 kotlin = "2.2.21"
 
-# Compose — última línea con minSdk 21
+# Compose — heredado del techo de minSdk 21 (ya no rige; se puede subir)
 composeUi = "1.9.5"
 composeMaterial3 = "1.4.0"
 
@@ -33,6 +35,24 @@ androidxLifecycle = "2.9.4"
 androidxNavigation = "2.9.8"
 androidxDatastore = "1.1.7"
 androidxProfileinstaller = "1.4.1"
+
+# Escáner de código de barras. El `minSdkVersion` se leyó del AndroidManifest
+# dentro de cada AAR, no del changelog:
+#
+#   androidx.camera:camera-*            1.4.2  -> minSdk 21
+#   com.google.mlkit:barcode-scanning   17.3.0 -> minSdk 21
+#
+# Las dos entran holgadas bajo el `minSdk 23` de la app, y seguirían entrando si
+# alguna vez vuelve a bajar.
+#
+# `barcode-scanning` es la variante **bundled**: el modelo viaja adentro del APK
+# (~2,3 MB por ABI, y acá el APK ya sale partido por ABI). La alternativa
+# `play-services-mlkit-barcode-scanning` pesa unos cientos de KB pero delega en
+# Google Play Services, que en el aparato objetivo puede estar viejo, castrado o
+# directamente no estar — y ahí el escáner no falla, simplemente nunca lee. Un
+# POS que no escanea no es un POS: se paga el peso.
+camerax = "1.4.2"
+mlkitBarcode = "17.3.0"
 
 ktor = "3.5.2"
 serializationJson = "1.9.0"
@@ -52,9 +72,16 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidxLifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidxLifecycle" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidxNavigation" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "androidxDatastore" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "androidxProfileinstaller" }
+
+camerax-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
 
 compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "composeUi" }
 compose-ui = { module = "androidx.compose.ui:ui", version.ref = "composeUi" }

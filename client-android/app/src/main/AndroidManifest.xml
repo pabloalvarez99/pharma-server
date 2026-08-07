@@ -4,6 +4,22 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+        Escáner de código de barras. El permiso se pide en el momento en que la
+        cajera toca "Escanear", nunca al abrir la app.
+
+        `required="false"` a propósito: sin eso Google Play esconde la app de
+        todo aparato sin cámara, y cobrar tipeando el código funciona igual. La
+        cámara suma, no condiciona.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
     <application
         android:name=".RutBusinessApplication"
         android:allowBackup="false"

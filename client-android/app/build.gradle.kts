@@ -19,9 +19,17 @@ android {
 
     defaultConfig {
         applicationId = "cl.rutbusiness.app"
-        // PISO DE HARDWARE (CLAUDE.md, regla 1): Android 5.0. La app Tauri era
-        // minSdk 24 y dejaba fuera aparatos que este producto sí quiere servir.
-        minSdk = 21
+        // PISO DE HARDWARE (CLAUDE.md, regla 1): Android 6.0, un teléfono de
+        // 2015. La app Tauri era minSdk 24 y dejaba fuera aparatos que este
+        // producto sí quiere servir; 23 los recupera casi todos.
+        //
+        // No bajamos a 21 (decisión del founder, 2026-08-07): AndroidX dejó de
+        // soportar API 21-22 a mitad de 2025, así que sostener 21 obliga a
+        // congelar Compose, Material3 y lifecycle en versiones sin parches de
+        // seguridad. Para una app que mueve plata, quedarse sin parches por
+        // llegar a teléfonos de 2014 —que además tienen 1 GB de RAM y no la van
+        // a correr bien— es mal negocio.
+        minSdk = 23
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -134,8 +142,8 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":design"))
 
-    // Sin BOM a propósito: el BOM arrastra Compose 1.10+, que exige minSdk 23.
-    // Ver el comentario de arriba en gradle/libs.versions.toml.
+    // Sin BOM todavía: las versiones vienen del techo de minSdk 21 que ya no
+    // rige. Volver al BOM es tarea aparte. Ver gradle/libs.versions.toml.
     implementation(libs.compose.runtime)
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
@@ -149,8 +157,20 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // `LocalLifecycleOwner`: el visor de la cámara se ata al ciclo de vida real
+    // para que la sesión de cámara se suelte al irse a segundo plano.
+    implementation(libs.androidx.lifecycle.runtime.compose)
     // Instala el baseline profile en el arranque de aparatos viejos.
     implementation(libs.androidx.profileinstaller)
+
+    // Escáner por cámara. Todo lo que sabe de CameraX y de ML Kit vive en
+    // `cl.rutbusiness.app.camara`; `ui/` habla con la interfaz `CamaraDeCodigos`
+    // y no importa nada de esto.
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+    implementation(libs.mlkit.barcode.scanning)
 
     debugImplementation(libs.compose.ui.tooling)
 

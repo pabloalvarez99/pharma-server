@@ -59,9 +59,9 @@ object Vencimiento {
     /**
      * Lee `YYYY-MM-DDTHH:MM:SS(.frac)?(Z|±HH:MM)` a segundos epoch UTC.
      *
-     * Escrito a mano en vez de usar `java.time`: el proyecto es `minSdk 21` y
-     * no tiene desugaring, así que `Instant.parse` revienta en un Android 5 o
-     * 6 — justo los aparatos que este producto quiere servir. Y agregar
+     * Escrito a mano en vez de usar `java.time`: `Instant.parse` necesita API 26
+     * y el proyecto es `minSdk 23` sin desugaring, así que revienta en un
+     * Android 6 o 7 — justo los aparatos que este producto quiere servir. Y agregar
      * `kotlinx-datetime` sería una dependencia entera para leer una fecha, en
      * un teléfono al que le importa cada megabyte del APK.
      *
