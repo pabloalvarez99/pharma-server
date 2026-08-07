@@ -1,6 +1,9 @@
 package cl.rutbusiness.app
 
 import android.content.Context
+import cl.rutbusiness.app.ui.impresora.ImpresoraBluetoothAndroid
+import cl.rutbusiness.app.ui.impresora.PreferenciasDeImpresoraAndroid
+import cl.rutbusiness.app.ui.impresora.ServiciosDeImpresora
 import cl.rutbusiness.core.session.AlmacenamientoPlataforma
 import cl.rutbusiness.core.session.SessionRepository
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +24,20 @@ import kotlinx.coroutines.plus
 class AppContainer(context: Context) {
     private val almacenamiento = AlmacenamientoPlataforma(context.applicationContext)
     val sesion = SessionRepository(almacenamiento)
+
+    /**
+     * La impresora térmica.
+     *
+     * Se arma acá, pero **no se toca nada del Bluetooth**: el adaptador se pide
+     * recién cuando alguien va a imprimir. Construir esto es guardar un
+     * `Context` y abrir un `SharedPreferences`, así que no le suma nada al
+     * arranque en frío que este archivo justamente cuida.
+     */
+    val impresora = ServiciosDeImpresora(
+        sesion = sesion,
+        enlace = ImpresoraBluetoothAndroid(context.applicationContext),
+        preferencias = PreferenciasDeImpresoraAndroid(context.applicationContext),
+    )
 
     private val scope = CoroutineScope(SupervisorJob())
 

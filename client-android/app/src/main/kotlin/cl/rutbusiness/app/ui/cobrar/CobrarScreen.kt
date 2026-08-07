@@ -1,18 +1,29 @@
 package cl.rutbusiness.app.ui.cobrar
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
+import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbTopBar
+import cl.rutbusiness.ui.theme.RbTheme
 
 @Composable
 fun CobrarRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
@@ -35,6 +46,7 @@ fun CobrarRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
  * El carrito sobrevive los tres pasos y también los errores: si el cobro falla,
  * se vuelve al paso de pago con todo cargado, no a una pantalla vacía.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CobrarScreen(vm: CobrarViewModel) {
     // Atrás desde el paso de pago vuelve a buscar, con el carrito intacto. Se
@@ -47,6 +59,13 @@ private fun CobrarScreen(vm: CobrarViewModel) {
     // al paso de pago sugeriría que se puede cobrar de nuevo. La salida de ahí
     // es "Nueva venta", que además limpia la clave de idempotencia.
     BackHandler(enabled = vm.paso == PasoDeCobro.Pago, onBack = vm::volverABuscar)
+
+    // Reimprimir se pide todo el tiempo y casi nunca justo después de cobrar:
+    // se cortó el papel, salió corrida, el cliente volvió a pedirla. Por eso
+    // vive en el paso de Buscar, que es donde la cajera está parada cuando no
+    // está cobrando, y no en la pantalla de comprobante que ya se cerró.
+    val impresora = impresoraViewModel()
+    var reimprimiendo by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
@@ -63,14 +82,45 @@ private fun CobrarScreen(vm: CobrarViewModel) {
             onBack = if (vm.paso == PasoDeCobro.Pago) vm::volverABuscar else null,
             actions = {
                 if (vm.paso == PasoDeCobro.Buscar) {
-                    RbButton(
-                        label = "Salir",
-                        onClick = vm::salir,
-                        variant = RbButtonVariant.Secondary,
-                    )
+                    // `FlowRow` y **no** `RbChipRow`: ese componente hace
+                    // `fillMaxWidth()` porque está pensado para una fila de
+                    // chips que ocupa la pantalla, y acá eso le comía el ancho
+                    // al título — el subtítulo quedaba tapado por el botón.
+                    // Lo que se necesita es sólo la parte de envolver: al 200%
+                    // "Reimprimir" y "Salir" no entran uno al lado del otro en
+                    // 360dp y tienen que bajar a dos líneas en vez de partir
+                    // una palabra por la mitad.
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(RbTheme.dimens.space2),
+                        verticalArrangement = Arrangement.spacedBy(RbTheme.dimens.space1),
+                    ) {
+                        if (impresora?.hayUltimaBoleta == true) {
+                            RbButton(
+                                label = "Reimprimir",
+                                onClick = { reimprimiendo = true },
+                                variant = RbButtonVariant.Secondary,
+                            )
+                        }
+                        RbButton(
+                            label = "Salir",
+                            onClick = vm::salir,
+                            variant = RbButtonVariant.Secondary,
+                        )
+                    }
                 }
             },
         )
+
+        if (reimprimiendo && impresora != null && vm.paso == PasoDeCobro.Buscar) {
+            TarjetaDeReimpresion(
+                vm = impresora,
+                onCerrar = {
+                    reimprimiendo = false
+                    impresora.cerrar()
+                },
+                modifier = Modifier.padding(RbTheme.dimens.space3),
+            )
+        }
 
         when (vm.paso) {
             PasoDeCobro.Buscar -> PasoBuscar(vm, modifier = Modifier.fillMaxSize())

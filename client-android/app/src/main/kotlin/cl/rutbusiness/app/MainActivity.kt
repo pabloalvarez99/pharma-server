@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import cl.rutbusiness.app.ui.RutBusinessApp
+import cl.rutbusiness.app.ui.impresora.ProveerImpresora
 
 /**
  * Único `Activity` de la app. Su trabajo es exactamente uno: montar Compose.
@@ -17,7 +18,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val container = (application as RutBusinessApplication).container
         setContent {
-            RutBusinessApp(sesion = container.sesion)
+            // La impresora entra por acá, en la frontera de plataforma, y baja
+            // por `CompositionLocal`. `RutBusinessApp` y las pantallas del
+            // medio no se enteran de que existe: la única que la pide es la
+            // tarjeta de boleta, en el fondo de la pantalla de cobro.
+            ProveerImpresora(container.impresora) {
+                RutBusinessApp(sesion = container.sesion)
+            }
         }
     }
 }

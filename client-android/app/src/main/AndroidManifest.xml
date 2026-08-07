@@ -5,6 +5,37 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
+        Impresora térmica de boleta por Bluetooth.
+
+        Dos caminos, porque el aparato objetivo es viejo y puede estar de
+        cualquiera de los dos lados: hasta Android 11 (API 30) el permiso es
+        BLUETOOTH y se concede al instalar; desde Android 12 (API 31) es
+        BLUETOOTH_CONNECT y hay que pedirlo en pantalla. `maxSdkVersion` en el
+        viejo evita pedirle a Android 12+ un permiso que ahí ya no existe.
+
+        BLUETOOTH_SCAN NO se declara, a propósito: es el permiso de *descubrir*
+        aparatos, y la app nunca escanea — sólo lee las impresoras que el
+        teléfono ya tiene emparejadas desde los ajustes del sistema. Pedirlo
+        mostraría "buscar dispositivos cercanos" en una app de boletas, que es
+        exactamente la clase de permiso que hace desconfiar; y no escanear es
+        además lo que mantiene la radio dormida en un teléfono con poca batería.
+
+        ACCESS_FINE_LOCATION tampoco: sólo hace falta para descubrir, nunca para
+        conectarse a algo ya emparejado.
+
+        La impresora es opcional: `required="false"` para que la app siga
+        instalándose en un teléfono sin radio Bluetooth.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <!--
         Escáner de código de barras. El permiso se pide en el momento en que la
         cajera toca "Escanear", nunca al abrir la app.
 

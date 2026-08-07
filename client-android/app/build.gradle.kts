@@ -115,6 +115,10 @@ android {
 
     sourceSets["main"].java.srcDir("src/main/kotlin")
     sourceSets["test"].java.srcDir("src/test/kotlin")
+    // La capa Bluetooth sólo se puede probar contra el framework de verdad:
+    // `ImpresoraBluetoothAndroidTest` corre en un aparato con
+    // `connectedDebugAndroidTest`.
+    sourceSets["androidTest"].java.srcDir("src/androidTest/kotlin")
 }
 
 /**
