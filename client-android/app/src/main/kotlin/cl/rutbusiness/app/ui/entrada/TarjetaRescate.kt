@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.claveDeDemostracion
 import cl.rutbusiness.core.backup.payloadQrRescate
+import cl.rutbusiness.core.backup.textoTarjetaImprimible
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
@@ -60,6 +61,9 @@ fun TarjetaRescate(
     val colors = RbTheme.colors
     val qrPayload = remember(clave, tenantSlug) {
         payloadQrRescate(tenantSlug, clave.bloques)
+    }
+    val textoPagina = remember(clave, tenantSlug) {
+        textoTarjetaImprimible(clave, tenantSlug)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -172,9 +176,20 @@ fun TarjetaRescate(
                 }
             }
 
+            // Página de texto lista para copiar al cuaderno / nota (sin PDF
+            // ni lib de QR todavía). Mismas palabras + payload del código.
+            RbCard(title = "Texto para el cuaderno (una página)") {
+                Text(
+                    text = textoPagina,
+                    style = RbTheme.typography.label,
+                    color = colors.textPrimary,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+
             Text(
-                text = "El PDF imprimible y el QR llegan en una versión " +
-                    "siguiente. Hoy alcanza con el cuaderno.",
+                text = "El dibujo del QR y el PDF llegan después. " +
+                    "Hoy alcanza con copiar este texto al cuaderno.",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )

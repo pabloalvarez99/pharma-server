@@ -13,11 +13,19 @@ use serde::{Deserialize, Serialize};
 /// Current blob format. Bump when KDF / AEAD / packing changes.
 pub const BACKUP_FORMAT_VERSION: u16 = 1;
 
+/// Inner **plaintext snapshot** version (JSON before AES-GCM).
+/// Distinct from [`BACKUP_FORMAT_VERSION`] (envelope crypto params).
+pub const SNAPSHOT_FORMAT_VERSION: u16 = 1;
+
 /// Documented path (API stub returns not-implemented until bucket is wired).
 pub const USER_BACKUP_UPLOAD_PATH: &str = "/api/v1/user-backup";
 
 /// List metadata for the tenant's opaque blobs.
 pub const USER_BACKUP_LIST_PATH: &str = "/api/v1/user-backup";
+
+/// Known snapshot section keys (client packs; server never reads plaintext).
+pub const SNAPSHOT_SECTION_PENDING_SALES: &str = "pending_sales";
+pub const SNAPSHOT_SECTION_RUBRO: &str = "rubro";
 
 // --- recovery phrase contract (client generates; server never sees plaintext) --
 
@@ -286,9 +294,11 @@ mod tests {
     #[test]
     fn format_version_is_stable_v1() {
         assert_eq!(BACKUP_FORMAT_VERSION, 1);
+        assert_eq!(SNAPSHOT_FORMAT_VERSION, 1);
         assert_eq!(KDF_ALG, "argon2id");
         assert_eq!(AEAD_ALG, "aes-256-gcm");
         assert_eq!(USER_BACKUP_UPLOAD_PATH, "/api/v1/user-backup");
+        assert_eq!(SNAPSHOT_SECTION_PENDING_SALES, "pending_sales");
     }
 
     #[test]

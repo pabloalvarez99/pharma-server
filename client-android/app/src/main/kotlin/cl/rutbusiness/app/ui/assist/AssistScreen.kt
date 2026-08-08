@@ -192,18 +192,8 @@ private fun Problema(mensaje: Mensaje.Problema, onReintentar: (String) -> Unit) 
 private fun Bienvenida(onElegir: (String) -> Unit) {
     val dimens = RbTheme.dimens
     val pack = packActual()
-    val sugerencias = if (pack.features.agentHome || pack.rubro == "feria") {
-        SUGERENCIAS_FERIA
-    } else {
-        SUGERENCIAS
-    }
-    val intro = if (pack.features.agentHome || pack.rubro == "feria") {
-        "Hablame como en el puesto. Antes de anotar nada, te lo muestro " +
-            "para que lo revises."
-    } else {
-        "Escríbeme como le hablarías a un empleado de confianza. " +
-            "Antes de guardar nada, te lo muestro para que lo revises."
-    }
+    val sugerencias = AssistSugerencias.para(pack)
+    val intro = AssistSugerencias.intro(pack)
 
     // Deliberadamente compacto, y sin `RbEmptyState`: ese componente reserva
     // 40dp arriba y abajo para el vacío de una lista, y acá esa respiración
@@ -237,33 +227,6 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
         }
     }
 }
-
-/**
- * Lo que se le puede pedir, en las palabras que el parser reconoce.
- *
- * Mezcla a propósito preguntas de mirar y órdenes de anotar: la dueña tiene
- * que descubrir temprano que el agente además **hace** cosas, porque ésa es la
- * parte del producto que no se adivina.
- */
-private val SUGERENCIAS = listOf(
-    "¿Cuánto vendí hoy?",
-    "¿Quién me debe plata?",
-    "¿Qué se está por acabar?",
-    "Registra un gasto de 5000 en arriendo",
-    "¿Cuánto vendí este mes?",
-)
-
-/**
- * Frases day-1 feria (ADR-0022): venta, fiado, hoy. Palabras que el parser
- * de `crates/assist` reconoce - kg/granel se limpian en `clean_venta_product`.
- */
-private val SUGERENCIAS_FERIA = listOf(
-    "Vendí 2 kg de tomates",
-    "Anota 2 kg de tomates fiado a Don Juan",
-    "¿Cuánto vendí hoy?",
-    "Fiado 1 atado de cilantro a doña Ana",
-    "¿Quién me debe plata?",
-)
 
 /** El campo de abajo. */
 @Composable

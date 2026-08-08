@@ -80,6 +80,13 @@ class SessionRepository(
         (_estado.value as? EstadoSesion.Activa)?.let { apiPara(it.baseUrl) }
 
     /**
+     * Slug del negocio del último login (para tarjeta de rescate / QR).
+     * No es secreto: es el mismo nombre corto que tipeó en el login.
+     */
+    suspend fun ultimoTenant(): String? =
+        almacenamiento.preferencias.leerUltimoTenant()
+
+    /**
      * Se llama una vez al arrancar la app, y **antes** del primer frame: quien
      * la dispara es `Application.onCreate`, no la UI.
      *

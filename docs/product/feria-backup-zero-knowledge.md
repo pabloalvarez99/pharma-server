@@ -25,14 +25,17 @@ usuario el blob es basura. **No hay recuperación de clave por soporte.**
 
 | Paso | Quién | Qué |
 |------|-------|-----|
-| Empaquetar snapshot offline | Cliente | Ventas, fiado, catálogo local |
-| KDF | Cliente | Argon2id: m=65536 KiB, t=3, p=1 → 32 B |
-| Cifrar | Cliente | AES-256-GCM, `format_version=1` |
+| Empaquetar snapshot offline | Cliente | `SnapshotBackupV1` JSON (`snapshot_version=1`): ventas en cola + secciones |
+| KDF | Cliente | Argon2id: m=65536 KiB, t=3, p=1 → 32 B (**libs pendientes**) |
+| Cifrar | Cliente | AES-256-GCM, envelope `format_version=1` |
 | Subir | Cliente → `POST /api/v1/user-backup` | `UploadEncryptedBackupRequest` (meta + base64) |
 | Validar | Server | sha256 + size + format_version (puro) |
 | Guardar | Server | Blob opaco en bucket (**stub:** `accepted: false` hasta bucket) |
 
-Parámetros congelados en `domain::user_backup` y `SobreCifrado.kt`.
+Parámetros congelados en `domain::user_backup`, `SobreCifrado.kt`, `SnapshotBackup.kt`.
+
+**Snapshot plaintext (antes de AEAD):** `pending_sales` (cola offline) es la
+sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
 
 ## Flujo restore (futuro)
 
@@ -50,7 +53,8 @@ Parámetros congelados en `domain::user_backup` y `SobreCifrado.kt`.
 | API stub | `crates/api/src/v1/user_backup.rs` → `POST/GET /api/v1/user-backup` |
 | Android clave UI | `client-android/core/.../backup/ClaveDelNegocio.kt` |
 | Android sobre v1 | `client-android/core/.../backup/SobreCifrado.kt` |
-| Pantalla rescate + payload QR | `client-android/app/.../entrada/TarjetaRescate.kt` |
+| Android snapshot v1 | `client-android/core/.../backup/SnapshotBackup.kt` |
+| Pantalla rescate + payload QR + texto página | `client-android/app/.../entrada/TarjetaRescate.kt` |
 | QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` |
 | Admin backup legacy | `POST /api/v1/admin/backup` = **otro** (dump servidor, admin+) |
 

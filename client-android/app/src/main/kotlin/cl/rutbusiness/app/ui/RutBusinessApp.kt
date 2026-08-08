@@ -107,11 +107,21 @@ private fun ConSesion(sesion: SessionRepository, estado: EstadoSesion.Activa) {
     var mostrandoTarjeta by remember {
         mutableStateOf(entrada?.preferencias?.debeMostrarTarjetaRescate() == true)
     }
+    // Slug del login → payload QR (`rutbusiness-rescue:v1:<tenant>:…`).
+    var tenantSlug by remember { mutableStateOf("mi-puesto") }
+    LaunchedEffect(mostrandoTarjeta) {
+        if (!mostrandoTarjeta) return@LaunchedEffect
+        val t = sesion.ultimoTenant()
+        if (!t.isNullOrBlank()) tenantSlug = t.trim()
+    }
     if (mostrandoTarjeta) {
-        TarjetaRescate(onListo = {
-            entrada?.preferencias?.marcarTarjetaRescateVista()
-            mostrandoTarjeta = false
-        })
+        TarjetaRescate(
+            onListo = {
+                entrada?.preferencias?.marcarTarjetaRescateVista()
+                mostrandoTarjeta = false
+            },
+            tenantSlug = tenantSlug,
+        )
         return
     }
 

@@ -12,15 +12,15 @@ package cl.rutbusiness.core.backup
  * **Nunca** se manda la frase al server.
  */
 
-const FORMAT_VERSION: Int = 1
-const KDF_ALG: String = "argon2id"
-const AEAD_ALG: String = "aes-256-gcm"
-const KDF_MEMORY_KIB: Int = 65_536
-const KDF_ITERATIONS: Int = 3
-const KDF_PARALLELISM: Int = 1
+const val FORMAT_VERSION: Int = 1
+const val KDF_ALG: String = "argon2id"
+const val AEAD_ALG: String = "aes-256-gcm"
+const val KDF_MEMORY_KIB: Int = 65_536
+const val KDF_ITERATIONS: Int = 3
+const val KDF_PARALLELISM: Int = 1
 
 /** Path documentado: `POST /api/v1/user-backup`. */
-const USER_BACKUP_UPLOAD_PATH: String = "/api/v1/user-backup"
+const val USER_BACKUP_UPLOAD_PATH: String = "/api/v1/user-backup"
 
 /**
  * Cabecera del sobre (salt/nonce en hex). Va junto al ciphertext; el server
