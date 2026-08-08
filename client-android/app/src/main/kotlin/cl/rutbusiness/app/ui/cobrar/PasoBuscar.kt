@@ -59,6 +59,8 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         if (vm.carrito.unidades > 0) withFrameNanos { Latencia.cerrar("agregar al carrito") }
     }
 
+    val barcodeOk = packActual().features.barcode
+    val copy = copyBuscarCobrar(barcodeOk)
     BuscarContenido(
         modifier = modifier,
         consulta = vm.consulta,
@@ -72,29 +74,23 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             !vm.hayConexion && vm.catalogoGuardadoEn != null ->
                 "Guardado ${Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora)}. " +
                     "El stock puede haber cambiado."
-            !packActual().features.barcode ->
-                "Escribe el nombre de lo que vendes (tomate, atado, bolsa…)."
-            else ->
-                "Escribe parte del nombre, o el código de barras completo."
+            else -> copy.ayudaOnline
         },
         // Cámara + pack.barcode: feria apaga el escáner (ADR-0022) aunque el
         // teléfono tenga cámara. En un test sin LocalRubro el pack default
         // deja barcode=true y el botón sigue el hardware.
-        onEscanear = when {
-            !packActual().features.barcode -> null
-            LocalCamaraDeCodigos.current == null -> null
-            else -> vm::abrirEscaner
-        },
-        etiquetaBuscar = if (packActual().features.barcode) {
-            "Buscar producto"
+        onEscanear = if (
+            escanerVisible(
+                barcode = barcodeOk,
+                hayCamara = LocalCamaraDeCodigos.current != null,
+            )
+        ) {
+            vm::abrirEscaner
         } else {
-            "¿Qué vendiste?"
+            null
         },
-        placeholderBuscar = if (packActual().features.barcode) {
-            "Nombre o código de barras"
-        } else {
-            "Nombre (tomate, cilantro…)"
-        },
+        etiquetaBuscar = copy.etiqueta,
+        placeholderBuscar = copy.placeholder,
         resultados = vm.resultados,
         buscando = vm.buscando,
         errorBusqueda = vm.errorBusqueda,

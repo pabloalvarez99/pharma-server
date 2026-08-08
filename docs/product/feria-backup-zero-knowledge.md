@@ -7,7 +7,7 @@ cifrado en producción todavía.
 
 El feriante pierde el teléfono y no pierde el historial **si** tiene:
 
-1. Su cuenta (Google, day-1 futuro; hoy email/clave del tenant).
+1. Su cuenta (Google: UI + contrato stub; OAuth real pendiente; hoy email/clave).
 2. La **llave del negocio** escrita en el cuaderno (tarjeta de rescate).
 
 RutBusiness guarda **solo ciphertext** en bucket propio. Sin la llave del

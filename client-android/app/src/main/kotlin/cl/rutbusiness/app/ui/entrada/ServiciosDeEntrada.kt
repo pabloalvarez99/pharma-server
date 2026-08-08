@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalOf
+import cl.rutbusiness.core.session.IdentidadGoogle
+import cl.rutbusiness.core.session.IdentidadGoogleNoCableada
 
 /**
  * Si el teléfono está conectado a algo.
@@ -54,10 +56,15 @@ interface PreferenciasDeEntrada {
  * [cl.rutbusiness.app.ui.impresora.ServiciosDeImpresora]: son cosas del
  * teléfono que necesita **una** pantalla, y hacerlas viajar por la raíz de la
  * app obligaría a que todo el resto las conozca.
+ *
+ * [identidadGoogle] es stub por default (ADR-0022): sin client id no hay OAuth
+ * real; la UI muestra copy feria y el camino correo/clave sigue siendo el
+ * feliz path offline-first.
  */
 class ServiciosDeEntrada(
     val red: RedDelTelefono,
     val preferencias: PreferenciasDeEntrada,
+    val identidadGoogle: IdentidadGoogle = IdentidadGoogleNoCableada,
 )
 
 /**

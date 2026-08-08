@@ -13,6 +13,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -24,6 +26,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.core.session.EstadoSesion
+import cl.rutbusiness.core.session.IdentidadGoogle
+import cl.rutbusiness.core.session.IdentidadGoogleNoCableada
+import cl.rutbusiness.core.session.ResultadoGoogle
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -34,6 +39,7 @@ import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import kotlinx.coroutines.launch
 
 /**
  * La puerta de entrada: la explicación del primer uso, y después el formulario.
@@ -94,6 +100,13 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
         return
     }
 
+    val identidad: IdentidadGoogle =
+        servicios?.identidadGoogle ?: IdentidadGoogleNoCableada
+    val rubroEsFeria = servicios?.preferencias?.rubroElegido() == "feria"
+    val scope = rememberCoroutineScope()
+    var avisoGoogle by remember { mutableStateOf<String?>(null) }
+    var pidiendoGoogle by remember { mutableStateOf(false) }
+
     FormularioDeEntrada(
         url = vm.url,
         onUrl = vm::cambiarUrl,
@@ -109,12 +122,44 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
         falla = vm.falla,
         impedimento = vm.impedimentoParaEntrar(),
         probando = vm.probando,
-        enviando = vm.enviando,
+        enviando = vm.enviando || pidiendoGoogle,
         puedeProbar = vm.puedeProbar,
         puedeEntrar = vm.puedeEntrar,
         onProbar = vm::probarConexion,
         onEntrar = vm::entrar,
         onVerExplicacion = { explicando = true },
+        rubroEsFeria = rubroEsFeria,
+        copyGoogle = identidad.copyPromocion(rubroEsFeria),
+        etiquetaGoogle = identidad.etiquetaBoton(),
+        googleDisponible = identidad.disponible(),
+        avisoGoogle = avisoGoogle,
+        onGoogle = {
+            // Stub: no login real. Cuando haya OAuth, acá se canjea el id_token
+            // con el server y se llama a sesion.activar(...). Offline sigue OK.
+            scope.launch {
+                pidiendoGoogle = true
+                avisoGoogle = null
+                when (val r = identidad.pedirCuenta()) {
+                    is ResultadoGoogle.Listo -> {
+                        // Carril futuro: exchange + SessionRepository.
+                        // No inventamos sesión local con un token de Google.
+                        avisoGoogle = "Tu cuenta de Google está lista, pero " +
+                            "el servidor todavía no acepta ese tipo de entrada. " +
+                            "Usá correo y clave."
+                    }
+                    is ResultadoGoogle.Cancelado -> {
+                        avisoGoogle = null
+                    }
+                    is ResultadoGoogle.NoDisponible -> {
+                        avisoGoogle = r.mensajeUsuario
+                    }
+                    is ResultadoGoogle.Error -> {
+                        avisoGoogle = r.mensajeUsuario
+                    }
+                }
+                pidiendoGoogle = false
+            }
+        },
     )
 }
 
@@ -165,6 +210,13 @@ internal fun FormularioDeEntrada(
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Copy feria (ADR-0022): Google como camino preferido en el puesto. */
+    rubroEsFeria: Boolean = false,
+    copyGoogle: String = IdentidadGoogleNoCableada.copyPromocion(false),
+    etiquetaGoogle: String = IdentidadGoogleNoCableada.etiquetaBoton(),
+    googleDisponible: Boolean = false,
+    avisoGoogle: String? = null,
+    onGoogle: () -> Unit = {},
 ) {
     val dimens = RbTheme.dimens
     val ocupado = probando || enviando
@@ -180,8 +232,8 @@ internal fun FormularioDeEntrada(
     //
     // `withFrameNanos` antes de leer `maxValue`: en el frame en que la falla se
     // agrega, la columna todavía mide lo de antes y el scroll llegaría corto.
-    LaunchedEffect(falla) {
-        if (falla != null) {
+    LaunchedEffect(falla, avisoGoogle) {
+        if (falla != null || avisoGoogle != null) {
             withFrameNanos { }
             scroll.animateScrollTo(scroll.maxValue)
         }
@@ -189,7 +241,7 @@ internal fun FormularioDeEntrada(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Entrar a tu negocio",
+            title = if (rubroEsFeria) "Entrar a tu puesto" else "Entrar a tu negocio",
             subtitle = "Una sola vez: después la app se acuerda",
         )
 
@@ -202,6 +254,50 @@ internal fun FormularioDeEntrada(
                 .padding(dimens.space3),
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
+            // Google first en feria (ADR-0022): se ve arriba; el camino LAN
+            // correo/clave queda abajo y sigue siendo el único que funciona
+            // sin consola OAuth. Sin secretos en el binario.
+            RbCard(
+                title = if (rubroEsFeria) {
+                    "Con tu cuenta de Google"
+                } else {
+                    "Cuenta de Google"
+                },
+            ) {
+                Text(
+                    text = copyGoogle,
+                    style = RbTheme.typography.body,
+                    color = RbTheme.colors.textPrimary,
+                )
+                RbButton(
+                    label = etiquetaGoogle,
+                    onClick = onGoogle,
+                    // Siempre tappeable: el stub explica por qué no hay OAuth.
+                    // Si un día disponible=true, el mismo botón lanza el picker.
+                    enabled = !ocupado,
+                    fillWidth = true,
+                )
+                if (!googleDisponible) {
+                    Text(
+                        text = if (rubroEsFeria) {
+                            "Todavía no está cableado en este teléfono. " +
+                                "Podés entrar igual con correo y clave."
+                        } else {
+                            "Disponible en una próxima versión."
+                        },
+                        style = RbTheme.typography.support,
+                        color = RbTheme.colors.textSecondary,
+                    )
+                }
+                avisoGoogle?.let { aviso ->
+                    Text(
+                        text = aviso,
+                        style = RbTheme.typography.support,
+                        color = RbTheme.colors.textSecondary,
+                    )
+                }
+            }
+
             RbCard(title = "¿Dónde está el computador del negocio?") {
                 RbTextField(
                     value = url,

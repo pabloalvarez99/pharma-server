@@ -1,14 +1,15 @@
 # Feria day-1 - qué ve el feriante
 
-Estado: alineado con código en main tras `f39a74d` + onboarding rubro (2026-08-08).
+Estado: alineado con código en main (Google stubs + copy feria, 2026-08-08).
 ADR: [0022](../adr/0022-feria-agent-first-identity-backup.md).
 
 ## Camino feliz (Android)
 
 1. **Primer uso** - 3 pantallas: qué es, dónde se guarda (offline + llave), qué traer.
 2. **Elegí rubro** - Feria/Calle primero (recomendado). Se guarda en el teléfono.
-3. **Login** - dirección del computador del negocio + negocio + correo/clave
-   (Google Sign-In = carril siguiente).
+3. **Login** - card **Con tu cuenta de Google** (stub: copy feria, botón
+   "Continuar con Google" explica que aún no está cableado) + dirección del
+   computador + negocio + correo/clave (camino real hoy).
 4. **Tarjeta de rescate** (solo si eligió feria) - 12 palabras / 8 bloques.
    "Ya la anoté en el cuaderno" o seguir (no recomendado).
 5. **Home = Agente** - chips:
@@ -43,9 +44,19 @@ El código **sigue** en el binario para farmacia y para un futuro "modo formal".
 
 Si anotar una venta o ver una deuda tarda más que el lápiz, es un bug de producto.
 
+## Google Sign-In (stubs)
+
+| Capa | Qué hay | Qué falta |
+|------|---------|-----------|
+| Android core | `IdentidadGoogle` + `IdentidadGoogleNoCableada` | Credential Manager + client id en `local.properties` (gitignored) |
+| Android UI | Card Google en login; copy feria distinto | Exchange real de `id_token` → sesión |
+| Domain | `google_identity::{GoogleSignInRequest,Response}` path `/api/v1/auth/google` | Ruta API + verify JWKS |
+
+**Regla 3:** no hay client id ni secret en el repo ni en el vault.
+
 ## Fuera de scope aún
 
 - PDF/QR de la tarjeta de rescate
 - Cifrado real + upload a bucket
-- Google Identity
-- Seed demo feria en Surreal
+- Google OAuth end-to-end (consola + secrets del capitán)
+- Seed demo feria en Surreal (código seed sí; corrida en lab)

@@ -228,7 +228,8 @@ internal val PASOS = listOf(
             "La dirección del computador del negocio (si te la dieron). " +
                 "Se ve así: 192.168.1.10:8080",
             "El nombre corto de tu negocio.",
-            "Tu correo y tu clave (o, más adelante, tu cuenta de Google).",
+            "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
+                "(sin otra contraseña que acordarte).",
         ),
         remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
             "Quedaron anotados el día que lo instaló.",
