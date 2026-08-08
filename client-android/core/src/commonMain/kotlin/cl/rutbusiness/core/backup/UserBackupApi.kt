@@ -104,6 +104,8 @@ data class MetaBackupWire(
     @SerialName("size_bytes") val sizeBytes: Long,
     @SerialName("uploaded_at_unix") val uploadedAtUnix: Long,
     val label: String? = null,
+    /** Presente al listar / tras accept; ausente en el body de subida. */
+    @SerialName("backup_id") val backupId: String? = null,
 )
 
 @Serializable

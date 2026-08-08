@@ -103,6 +103,7 @@ async fn upload(
     );
     let mut meta = body.meta;
     meta.tenant_id = tenant.clone();
+    meta.backup_id = Some(backup_id.clone());
     {
         let mut guard = store()
             .lock()

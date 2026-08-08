@@ -24,6 +24,7 @@ import cl.rutbusiness.app.ui.offline.PantallaDeCola
 import cl.rutbusiness.app.ui.offline.hayConexion
 import cl.rutbusiness.app.ui.offline.ventasEnCola
 import cl.rutbusiness.app.ui.rubro.packActual
+import cl.rutbusiness.app.ui.offline.ResultadoTraerNube
 import cl.rutbusiness.core.backup.UserBackupApi
 import cl.rutbusiness.core.backup.conRehidratacion
 import cl.rutbusiness.core.backup.envelopeToBase64
@@ -277,6 +278,96 @@ internal fun ContenedorDeDestinos(
                                 },
                             )
                         }
+                    },
+                    onTraerDeLaNube = if (sesion != null) {
+                        {
+                            val api = sesion.apiActiva()
+                            if (api == null) {
+                                estadoRespaldo = EstadoRespaldoUi(
+                                    mensaje = "Sin sesión para bajar de la nube.",
+                                    bytes = 0,
+                                    ventas = 0,
+                                )
+                                ResultadoTraerNube.Error("sin sesión")
+                            } else {
+                                val backupApi = UserBackupApi(api)
+                                when (val listado = backupApi.listar()) {
+                                    is Resultado.Falla -> {
+                                        val msg = "No se pudo listar: ${listado.error.userMessage}"
+                                        estadoRespaldo = EstadoRespaldoUi(
+                                            mensaje = msg,
+                                            bytes = 0,
+                                            ventas = 0,
+                                        )
+                                        ResultadoTraerNube.Error(msg)
+                                    }
+                                    is Resultado.Ok -> {
+                                        if (listado.valor.isEmpty()) {
+                                            val msg =
+                                                "No hay respaldos en este nodo. " +
+                                                    "En lab: RUTBUSINESS_USER_BACKUP_MEMORY=1 " +
+                                                    "y Preparar con red. " +
+                                                    "En prod: falta el bucket."
+                                            estadoRespaldo = EstadoRespaldoUi(
+                                                mensaje = msg,
+                                                bytes = 0,
+                                                ventas = 0,
+                                            )
+                                            ResultadoTraerNube.Vacio(msg)
+                                        } else {
+                                            val meta = listado.valor.maxByOrNull {
+                                                it.uploadedAtUnix
+                                            }!!
+                                            val id = meta.backupId?.takeIf { it.isNotBlank() }
+                                            if (id == null) {
+                                                val msg =
+                                                    "Hay ${listado.valor.size} meta(s) " +
+                                                        "sin backup_id (server viejo). " +
+                                                        "Actualizá el nodo o usá el sobre local."
+                                                estadoRespaldo = EstadoRespaldoUi(
+                                                    mensaje = msg,
+                                                    bytes = 0,
+                                                    ventas = 0,
+                                                )
+                                                ResultadoTraerNube.Error(msg)
+                                            } else {
+                                                when (val d = backupApi.descargar(id)) {
+                                                    is Resultado.Ok -> {
+                                                        ultimoSobreBase64 =
+                                                            d.valor.ciphertextBase64
+                                                        estadoRespaldo = EstadoRespaldoUi(
+                                                            mensaje =
+                                                                "Bajé el sobre ${d.valor.backupId}. " +
+                                                                    "Escribí la llave del cuaderno " +
+                                                                    "y tocá Abrir respaldo.",
+                                                            bytes = d.valor.meta.sizeBytes.toInt(),
+                                                            ventas = 0,
+                                                        )
+                                                        ResultadoTraerNube.Ok(
+                                                            d.valor.ciphertextBase64,
+                                                            d.valor.backupId,
+                                                        )
+                                                    }
+                                                    is Resultado.Falla -> {
+                                                        val msg =
+                                                            "No se pudo bajar $id: " +
+                                                                d.error.userMessage
+                                                        estadoRespaldo = EstadoRespaldoUi(
+                                                            mensaje = msg,
+                                                            bytes = 0,
+                                                            ventas = 0,
+                                                        )
+                                                        ResultadoTraerNube.Error(msg)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        null
                     },
                     ultimoSobreBase64 = ultimoSobreBase64,
                     estadoRespaldo = estadoRespaldo,

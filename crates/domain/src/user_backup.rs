@@ -94,6 +94,10 @@ pub struct EncryptedBackupMeta {
     /// Optional client-chosen label ("cuaderno 2026-08").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Server-assigned id when listing / after accept (opaque).
+    /// Absent on client upload body (client does not invent ids).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_id: Option<String>,
 }
 
 /// Client → server upload body.
@@ -337,6 +341,7 @@ mod tests {
             size_bytes: ct.len() as u64,
             uploaded_at_unix: 1,
             label: None,
+            backup_id: None,
         };
         assert!(validate_upload(&meta, ct, &sha).is_ok());
     }
@@ -352,6 +357,7 @@ mod tests {
             size_bytes: 99,
             uploaded_at_unix: 1,
             label: None,
+            backup_id: None,
         };
         assert!(matches!(
             validate_upload(&meta, ct, &sha),

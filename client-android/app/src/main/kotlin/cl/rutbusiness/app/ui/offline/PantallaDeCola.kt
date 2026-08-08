@@ -51,6 +51,13 @@ data class EstadoRespaldoUi(
     val ventas: Int,
 )
 
+/** Resultado de bajar un sobre cifrado del server (lab o bucket). */
+sealed class ResultadoTraerNube {
+    data class Ok(val sobreBase64: String, val backupId: String) : ResultadoTraerNube()
+    data class Vacio(val mensaje: String) : ResultadoTraerNube()
+    data class Error(val mensaje: String) : ResultadoTraerNube()
+}
+
 @Composable
 fun PantallaDeCola(
     cola: List<VentaEnCola>,
@@ -69,6 +76,11 @@ fun PantallaDeCola(
      * Restaurar local: material + sobre base64 (último preparado o pegado).
      */
     onRestaurarRespaldo: ((materialCuaderno: String, sobreBase64: String) -> Unit)? = null,
+    /**
+     * Lab / nube: listar y bajar ciphertext (nunca la frase).
+     * El callback devuelve base64 del sobre o un mensaje de error en null path.
+     */
+    onTraerDeLaNube: (suspend () -> ResultadoTraerNube)? = null,
     /** Base64 del último sobre armado en este teléfono (prefill restore). */
     ultimoSobreBase64: String? = null,
     estadoRespaldo: EstadoRespaldoUi? = null,
@@ -183,6 +195,29 @@ fun PantallaDeCola(
                             imeAction = ImeAction.Done,
                             modifier = Modifier.padding(top = dimens.space2),
                         )
+                        if (onTraerDeLaNube != null) {
+                            RbButton(
+                                label = "Traer de la nube",
+                                onClick = {
+                                    alcance.launch {
+                                        when (val r = onTraerDeLaNube()) {
+                                            is ResultadoTraerNube.Ok -> {
+                                                sobrePegado = r.sobreBase64
+                                            }
+                                            is ResultadoTraerNube.Vacio,
+                                            is ResultadoTraerNube.Error,
+                                            -> {
+                                                // El mensaje lo pone el contenedor en estadoRespaldo.
+                                            }
+                                        }
+                                    }
+                                },
+                                variant = RbButtonVariant.Secondary,
+                                fillWidth = true,
+                                enabled = conectado && !subiendoRespaldo,
+                                modifier = Modifier.padding(top = dimens.space2),
+                            )
+                        }
                         RbButton(
                             label = "Abrir respaldo",
                             onClick = {
