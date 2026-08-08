@@ -54,6 +54,7 @@ class PrepararRespaldoTest {
         assertTrue(r.bytesPlaintext > 0)
         assertTrue(r.mensaje.contains("no se sube", ignoreCase = true))
         assertEquals(2, r.snapshot.pendingSales.size)
+        assertEquals(null, r.sobre)
     }
 
     @Test
@@ -65,5 +66,22 @@ class PrepararRespaldoTest {
             cifradoListo = true,
         ).getOrThrow()
         assertTrue(r.mensaje.contains("cifrar", ignoreCase = true))
+    }
+
+    @Test
+    fun `con clave aes cifra de verdad`() {
+        val key = ByteArray(32) { 7 }
+        val r = prepararRespaldoDesdeCola(
+            tenantId = "puesto",
+            cola = listOf(venta("a")),
+            createdAtUnix = 100L,
+            claveAes32 = key,
+        ).getOrThrow()
+        val sobre = r.sobre
+        assertTrue(sobre != null)
+        assertTrue(r.mensaje.contains("Cifrado listo", ignoreCase = true))
+        val plain = descifrarSobreV1(key, sobre!!.envelopeBytes).getOrThrow()
+        val snap = desempaquetarSnapshot(plain).getOrThrow()
+        assertEquals(1, snap.pendingSales.size)
     }
 }

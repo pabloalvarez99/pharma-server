@@ -26,13 +26,14 @@ usuario el blob es basura. **No hay recuperación de clave por soporte.**
 | Paso | Quién | Qué |
 |------|-------|-----|
 | Empaquetar snapshot offline | Cliente | `SnapshotBackupV1` JSON (`snapshot_version=1`): ventas en cola + secciones |
-| KDF | Cliente | Argon2id: m=65536 KiB, t=3, p=1 → 32 B (**libs pendientes**) |
-| Cifrar | Cliente | AES-256-GCM, envelope `format_version=1` |
+| KDF | Cliente | Argon2id: m=65536 KiB, t=3, p=1 → 32 B (**pendiente lib**; provisional test-only SHA) |
+| Cifrar | Cliente | **AES-256-GCM real** (`CifrarSobre.kt` + `CryptoPlataforma` Android) |
+| Sobre wire | Cliente | `RB1\n` + header JSON + ciphertext\|\|tag |
 | Subir | Cliente → `POST /api/v1/user-backup` | `UploadEncryptedBackupRequest` (meta + base64) |
 | Validar | Server | sha256 + size + format_version (puro) |
 | Guardar | Server | Blob opaco en bucket (**stub:** `accepted: false` hasta bucket) |
 
-Parámetros congelados en `domain::user_backup`, `SobreCifrado.kt`, `SnapshotBackup.kt`.
+Parámetros en `domain::user_backup`, `SobreCifrado.kt`, `CifrarSobre.kt`, `SnapshotBackup.kt`.
 
 **Snapshot plaintext (antes de AEAD):** `pending_sales` (cola offline) es la
 sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
@@ -53,7 +54,9 @@ sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
 | API stub | `crates/api/src/v1/user_backup.rs` → `POST/GET /api/v1/user-backup` |
 | Android clave UI | `client-android/core/.../backup/ClaveDelNegocio.kt` |
 | Android sobre v1 | `client-android/core/.../backup/SobreCifrado.kt` |
+| Android AES-GCM | `client-android/core/.../backup/CifrarSobre.kt` + `CryptoPlataforma` |
 | Android snapshot v1 | `client-android/core/.../backup/SnapshotBackup.kt` |
+| Material recovery parse | `client-android/core/.../backup/MaterialRecuperacion.kt` |
 | Pantalla rescate + payload QR + texto página | `client-android/app/.../entrada/TarjetaRescate.kt` |
 | QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` |
 | Admin backup legacy | `POST /api/v1/admin/backup` = **otro** (dump servidor, admin+) |
