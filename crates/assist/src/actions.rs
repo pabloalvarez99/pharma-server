@@ -2145,6 +2145,12 @@ fn clean_venta_product(s: &str) -> String {
             "atado de ",
             "bolsas de ",
             "bolsa de ",
+            "bandejas de ",
+            "bandeja de ",
+            "docenas de ",
+            "docena de ",
+            "mallas de ",
+            "malla de ",
             "medios kilos de ",
             "medio kilo de ",
             "media de ",
@@ -2160,6 +2166,12 @@ fn clean_venta_product(s: &str) -> String {
             "atado ",
             "bolsas ",
             "bolsa ",
+            "bandejas ",
+            "bandeja ",
+            "docenas ",
+            "docena ",
+            "mallas ",
+            "malla ",
             "x ",
             "de ",
             "del ",
@@ -2184,6 +2196,14 @@ fn clean_venta_product(s: &str) -> String {
         " kgs",
         " kilo",
         " kilos",
+        " atado",
+        " atados",
+        " bandeja",
+        " bandejas",
+        " docena",
+        " docenas",
+        " malla",
+        " mallas",
         " a",
         " al",
         " para",
@@ -4685,6 +4705,10 @@ mod tests {
     fn parse_venta_unidades_feria_kg_atado() {
         let (lines, cliente, fiado) = venta("vendeme 2 kg de tomates");
         assert_eq!(lines, vec![linea("tomates", 2)]);
+        let (lines2, _, _) = venta("vendeme 1 bandeja de frutillas");
+        assert_eq!(lines2, vec![linea("frutillas", 1)]);
+        let (lines3, _, _) = venta("vendeme 1 docena de huevos");
+        assert_eq!(lines3, vec![linea("huevos", 1)]);
         assert_eq!(cliente, None);
         assert!(!fiado);
 
