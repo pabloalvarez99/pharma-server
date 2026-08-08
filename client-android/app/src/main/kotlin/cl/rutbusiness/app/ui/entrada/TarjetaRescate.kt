@@ -1,5 +1,6 @@
 package cl.rutbusiness.app.ui.entrada
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -8,26 +9,34 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cl.rutbusiness.core.backup.ClaveDelNegocio
+import cl.rutbusiness.core.backup.HUELLA_SIZE
 import cl.rutbusiness.core.backup.claveDeDemostracion
 import cl.rutbusiness.core.backup.claveNuevaDelNegocio
+import cl.rutbusiness.core.backup.huellaVisualDelPayload
 import cl.rutbusiness.core.backup.payloadQrRescate
 import cl.rutbusiness.core.backup.textoTarjetaImprimible
 import cl.rutbusiness.ui.components.RbButton
@@ -125,6 +134,31 @@ fun TarjetaRescate(
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                     )
+                    // Huella visual: se ve como código; NO es QR escaneable.
+                    val grilla = remember(qrPayload) { huellaVisualDelPayload(qrPayload) }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = dimens.space2),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        HuellaVisualCanvas(
+                            grilla = grilla,
+                            oscuro = colors.textPrimary,
+                            claro = colors.surface,
+                            modifier = Modifier
+                                .size(168.dp)
+                                .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
+                                .padding(6.dp),
+                        )
+                    }
+                    Text(
+                        text = "Huella visual del código (no es un QR escaneable). " +
+                            "El texto de abajo es lo que importa si lo copiás.",
+                        style = RbTheme.typography.support,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(top = dimens.space2),
+                    )
                     Text(
                         text = qrPayload,
                         style = RbTheme.typography.label,
@@ -189,8 +223,9 @@ fun TarjetaRescate(
             }
 
             Text(
-                text = "El dibujo del QR y el PDF llegan después. " +
-                    "Hoy alcanza con copiar este texto al cuaderno.",
+                text = "El QR escaneable y el PDF llegan después. " +
+                    "Hoy alcanza con copiar este texto al cuaderno " +
+                    "(y mirar la huella para reconocer la tarjeta).",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -226,6 +261,35 @@ fun TarjetaRescate(
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
             )
+        }
+    }
+}
+
+/**
+ * Dibuja la huella 21×21. No es un QR: no se escanea.
+ */
+@Composable
+private fun HuellaVisualCanvas(
+    grilla: Array<BooleanArray>,
+    oscuro: Color,
+    claro: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.aspectRatio(1f)) {
+        val n = HUELLA_SIZE.toFloat()
+        val cell = size.minDimension / n
+        // Fondo claro.
+        drawRect(color = claro, size = size)
+        for (y in 0 until HUELLA_SIZE) {
+            for (x in 0 until HUELLA_SIZE) {
+                if (grilla[y][x]) {
+                    drawRect(
+                        color = oscuro,
+                        topLeft = Offset(x * cell, y * cell),
+                        size = Size(cell, cell),
+                    )
+                }
+            }
         }
     }
 }
