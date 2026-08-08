@@ -9,6 +9,7 @@ import cl.rutbusiness.app.ui.common.aCopy
 import cl.rutbusiness.app.ui.common.esMasQueCero
 import cl.rutbusiness.app.ui.common.montoParaElServidor
 import cl.rutbusiness.app.ui.common.soloPlata
+import cl.rutbusiness.app.ui.offline.ServiciosOffline
 import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.money.MonedaRepository
@@ -53,7 +54,24 @@ enum class PasoDeCaja {
  */
 class CajaViewModel(
     private val sesion: SessionRepository,
+    /** El estado de la conexión. `null` en las pruebas de pantalla. */
+    private val offline: ServiciosOffline? = null,
 ) : ViewModel() {
+
+    /**
+     * `true` mientras se esté llegando al sistema del negocio.
+     *
+     * **La caja entera necesita server, y no hay forma honesta de sortearlo.**
+     * Abrir, sacar plata, meter plata, contar y cerrar son todas escrituras sin
+     * clave de idempotencia, así que no se pueden encolar como la venta: un
+     * reintento automático anotaría el retiro dos veces, y dos retiros de
+     * $2.500 son $5.000 que van a faltar en el arqueo. Y el "debería haber"
+     * contra el que se cuenta lo calcula el server sumando las ventas del día —
+     * sin él, contar la plata no se compara contra nada.
+     *
+     * Por eso la pantalla no se degrada: se planta y lo dice.
+     */
+    val hayConexion: Boolean get() = offline?.conexion?.hayConexion?.value ?: true
 
     var paso by mutableStateOf(PasoDeCaja.Abrir)
         private set

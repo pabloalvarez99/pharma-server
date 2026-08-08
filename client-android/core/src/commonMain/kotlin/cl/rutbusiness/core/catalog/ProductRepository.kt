@@ -34,7 +34,7 @@ class ProductRepository(private val api: ApiFactory) {
         texto: String,
         limite: Int = LIMITE_BUSQUEDA,
         desplazamiento: Int = 0,
-    ): Resultado<List<ProductDto>> = llamar(api.baseUrl) {
+    ): Resultado<List<ProductDto>> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/products") {
             val limpio = texto.trim()
             if (limpio.isNotEmpty()) parameter("search", limpio)
@@ -51,7 +51,7 @@ class ProductRepository(private val api: ApiFactory) {
      * producto o no existe. 404 llega como error y la pantalla lo muestra como
      * "ese código no está en tu catálogo", no como una lista vacía.
      */
-    suspend fun porCodigoDeBarras(codigo: String): Resultado<ProductDto> = llamar(api.baseUrl) {
+    suspend fun porCodigoDeBarras(codigo: String): Resultado<ProductDto> = llamar(api) {
         api.catalog().getByBarcode(codigo.trim()).cuerpo<ProductDto>(api.baseUrl)
     }
 

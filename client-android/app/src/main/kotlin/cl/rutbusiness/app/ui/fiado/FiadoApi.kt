@@ -35,14 +35,14 @@ class FiadoApi(private val api: ApiFactory) {
      * teléfono sería inventar un criterio distinto del que usa el resto del
      * sistema.
      */
-    suspend fun deudores(): Resultado<DeudoresDto> = llamar(api.baseUrl) {
+    suspend fun deudores(): Resultado<DeudoresDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/reports/por-cobrar")
             .exigirExito(api.baseUrl)
             .body()
     }
 
     /** La cuenta corriente de un cliente: `GET /api/v1/customers/{id}/cuenta`. */
-    suspend fun cuenta(clienteId: String): Resultado<CuentaDto> = llamar(api.baseUrl) {
+    suspend fun cuenta(clienteId: String): Resultado<CuentaDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/customers/$clienteId/cuenta")
             .exigirExito(api.baseUrl)
             .body()
@@ -58,7 +58,7 @@ class FiadoApi(private val api: ApiFactory) {
     suspend fun registrarAbono(
         clienteId: String,
         abono: NuevoAbono,
-    ): Resultado<MovimientoDeCuentaDto> = llamar(api.baseUrl) {
+    ): Resultado<MovimientoDeCuentaDto> = llamar(api) {
         api.http.post("${api.baseUrl}/api/v1/customers/$clienteId/abono") {
             contentType(ContentType.Application.Json)
             setBody(abono)

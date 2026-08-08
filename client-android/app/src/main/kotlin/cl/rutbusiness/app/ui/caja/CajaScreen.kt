@@ -13,8 +13,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
+import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
+import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbSkeletonLines
@@ -27,9 +29,10 @@ fun CajaRoute(
     estado: EstadoSesion.Activa,
     onVolver: () -> Unit,
 ) {
+    val offline = LocalOffline.current
     val vm: CajaViewModel = viewModel(
         key = "caja:${estado.baseUrl}",
-        factory = viewModelFactory { initializer { CajaViewModel(sesion) } },
+        factory = viewModelFactory { initializer { CajaViewModel(sesion, offline) } },
     )
     CajaScreen(vm = vm, onVolver = onVolver)
 }
@@ -85,6 +88,21 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
 
         val fatal = vm.error
         when {
+            // Se dice antes, no después de que falle. La caja es lo único de la
+            // app que sin señal no se puede hacer ni a medias, y la dueña tiene
+            // que enterarse al entrar y no al final del arqueo, con la plata ya
+            // contada arriba del mostrador.
+            !vm.hayConexion -> RbEmptyState(
+                title = "La caja necesita el sistema prendido",
+                hint = "Sin conexión no se puede abrir la caja, anotar retiros ni cerrar con " +
+                    "arqueo: lo que debería haber en el cajón lo calcula el sistema del " +
+                    "negocio sumando las ventas del día, y desde el teléfono no hay contra " +
+                    "qué comparar. Mientras tanto puedes seguir cobrando en efectivo.",
+                actionLabel = "Volver",
+                onAction = onVolver,
+                modifier = Modifier.padding(dimens.space3),
+            )
+
             fatal != null -> RbErrorState(
                 title = fatal.title,
                 message = fatal.message,

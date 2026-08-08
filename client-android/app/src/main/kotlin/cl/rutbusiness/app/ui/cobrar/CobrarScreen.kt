@@ -18,6 +18,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
 import cl.rutbusiness.app.ui.impresora.impresoraViewModel
+import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
@@ -27,9 +28,14 @@ import cl.rutbusiness.ui.theme.RbTheme
 
 @Composable
 fun CobrarRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
+    // Los servicios offline se leen acá, en el composable, y se le pasan al
+    // `ViewModel` por el constructor: un `ViewModel` no puede leer un
+    // `CompositionLocal`, y tampoco debería — es la frontera que mantiene la
+    // lógica testeable sin montar Compose.
+    val offline = LocalOffline.current
     val vm: CobrarViewModel = viewModel(
         key = "cobrar:${estado.baseUrl}",
-        factory = viewModelFactory { initializer { CobrarViewModel(sesion) } },
+        factory = viewModelFactory { initializer { CobrarViewModel(sesion, offline) } },
     )
     CobrarScreen(vm)
 }
@@ -89,7 +95,10 @@ private fun CobrarScreen(vm: CobrarViewModel) {
             title = when (vm.paso) {
                 PasoDeCobro.Buscar -> "Cobrar"
                 PasoDeCobro.Pago -> "Cómo paga"
-                PasoDeCobro.Comprobante -> "Listo"
+                // Sin red la venta quedó guardada, no cobrada en el sistema.
+                // "Listo" ahí sería la palabra equivocada.
+                PasoDeCobro.Comprobante ->
+                    if (vm.ventaEncolada != null) "Guardada" else "Listo"
             },
             subtitle = when (vm.paso) {
                 PasoDeCobro.Buscar -> "Busca el producto y agrégalo"
@@ -139,10 +148,18 @@ private fun CobrarScreen(vm: CobrarViewModel) {
             )
         }
 
+        // `weight(1f)` y **no** `fillMaxSize()`. Adentro de esta columna,
+        // `fillMaxSize` le pide al paso el alto completo de la pantalla, sin
+        // descontar lo que ya ocupó la barra de arriba: el paso arranca en cero
+        // y se dibuja **encima** del título. Con la pantalla alta no se nota
+        // porque arriba del paso hay padding, pero apenas queda menos alto -el
+        // teclado abierto, la franja de "sin conexión", la letra al 200%- el
+        // campo de búsqueda le pisa el "Cobrar" y el botón "Salir". Se vio en un
+        // emulador API 23 con el teclado arriba.
         when (vm.paso) {
-            PasoDeCobro.Buscar -> PasoBuscar(vm, modifier = Modifier.fillMaxSize())
-            PasoDeCobro.Pago -> PasoPago(vm, modifier = Modifier.fillMaxSize())
-            PasoDeCobro.Comprobante -> PasoComprobante(vm, modifier = Modifier.fillMaxSize())
+            PasoDeCobro.Buscar -> PasoBuscar(vm, modifier = Modifier.weight(1f))
+            PasoDeCobro.Pago -> PasoPago(vm, modifier = Modifier.weight(1f))
+            PasoDeCobro.Comprobante -> PasoComprobante(vm, modifier = Modifier.weight(1f))
         }
     }
 }

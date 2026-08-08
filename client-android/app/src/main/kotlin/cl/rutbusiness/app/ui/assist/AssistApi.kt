@@ -39,7 +39,7 @@ import kotlinx.serialization.json.JsonObject
 class AssistApi(private val api: ApiFactory) {
 
     suspend fun preguntar(pregunta: String): Resultado<RespuestaAgente> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.post("${api.baseUrl}/api/v1/assist/ask") {
                 contentType(ContentType.Application.Json)
                 setBody(PreguntaRequest(pregunta.trim()))
@@ -52,7 +52,7 @@ class AssistApi(private val api: ApiFactory) {
      * @param confirmToken tal cual vino en la propuesta, sin tocar.
      */
     suspend fun confirmar(confirmToken: String): Resultado<ResultadoAccion> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.post("${api.baseUrl}/api/v1/assist/act") {
                 contentType(ContentType.Application.Json)
                 setBody(ConfirmarRequest(confirmToken))

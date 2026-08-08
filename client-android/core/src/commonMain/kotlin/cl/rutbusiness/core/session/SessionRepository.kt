@@ -2,8 +2,11 @@ package cl.rutbusiness.core.session
 
 import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.net.ApiFactory
+import cl.rutbusiness.core.net.ReporteDeRed
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.net.ServerUrl
+import cl.rutbusiness.core.offline.CacheDeLecturas
+import cl.rutbusiness.core.offline.ClaveDeCache
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +44,12 @@ sealed interface EstadoSesion {
  */
 class SessionRepository(
     private val almacenamiento: AlmacenamientoPlataforma,
+    /**
+     * Quién se entera de si el server contesta. Se le pasa a cada [ApiFactory]
+     * que se arme acá, que son todas las de la app: así el cartel de "sin
+     * conexión" lo prende cualquier llamada, no sólo las de una pantalla.
+     */
+    private val red: ReporteDeRed = ReporteDeRed.Nulo,
 ) {
     private val _estado = MutableStateFlow<EstadoSesion>(EstadoSesion.Cargando)
     val estado: StateFlow<EstadoSesion> = _estado.asStateFlow()
@@ -54,8 +63,17 @@ class SessionRepository(
         val actual = factory
         if (actual != null && actual.baseUrl == baseUrl) return actual
         actual?.close()
-        return ApiFactory(baseUrl) { token }.also { factory = it }
+        return ApiFactory(baseUrl, red) { token }.also { factory = it }
     }
+
+    /**
+     * Disco de la plataforma, para el caché de lecturas y la cola de ventas.
+     *
+     * Lo expone la sesión porque es la que ya tiene el almacenamiento y la que
+     * sabe contra qué server estamos: las dos cosas que hacen falta para que el
+     * caché de un negocio no se le muestre a otro.
+     */
+    val disco: cl.rutbusiness.core.offline.AlmacenDeBloques get() = almacenamiento.bloques
 
     /** Cliente de la sesión activa, o `null` si todavía no hay sesión. */
     fun apiActiva(): ApiFactory? =
@@ -135,7 +153,20 @@ class SessionRepository(
         }
     }
 
+    /**
+     * Cierra la sesión.
+     *
+     * Se lleva el caché de lecturas: son los productos, los deudores y las
+     * ventas de un negocio, y quien entre después puede ser otra persona. La
+     * **cola de ventas no se toca** — esas ventas ya se cobraron y salen apenas
+     * alguien vuelva a entrar. Borrarlas acá sería perder plata cobrada porque
+     * alguien tocó "Salir".
+     */
     suspend fun salir() {
+        (_estado.value as? EstadoSesion.Activa)?.baseUrl?.let { baseUrl ->
+            CacheDeLecturas(almacenamiento.bloques) { 0L }
+                .olvidar(ClaveDeCache.todas(baseUrl))
+        }
         token = null
         almacenamiento.tokens.borrar()
         _estado.value = EstadoSesion.SinSesion(

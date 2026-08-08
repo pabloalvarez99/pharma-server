@@ -15,14 +15,17 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.diag.Latencia
+import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 import cl.rutbusiness.core.api.models.ProductDto
+import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbChip
@@ -46,6 +49,9 @@ import androidx.compose.material3.Text
 fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val haptica = LocalHapticFeedback.current
+    // El reloj se lee una vez por composición y no en cada fila: la antigüedad
+    // del catálogo es una sola frase, no algo que tenga que latir.
+    val ahora = LocalOffline.current?.reloj?.invoke() ?: 0L
 
     // Mide del toque al frame que ya trae el carrito nuevo. Se dispara con el
     // conteo de unidades, así que sólo corre cuando algo entró de verdad.
@@ -67,7 +73,16 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 // el campo vuelve a medir su contenido.
                 // TODO(design-system): cuando `RbTextField` use `fillMaxWidth()`
                 // en vez de `fillMaxSize()`, borrar esta línea.
-                .wrapContentHeight(unbounded = true)
+                //
+                // `align = Top` no es adorno: el default de `wrapContentHeight`
+                // es **centrar**, y cuando el bloque mide más que el alto
+                // disponible -teclado abierto, franja de "sin conexión", letra
+                // al 200%- centrarlo lo desborda por arriba y por abajo en
+                // partes iguales. El desborde de arriba se dibuja **encima** de
+                // la barra de título: se veía "Buscar producto" pisando
+                // "Cobrar" y el botón "Salir". Alineado arriba, lo que sobra
+                // sale por abajo, que es donde hay lista para scrollear.
+                .wrapContentHeight(align = Alignment.Top, unbounded = true)
                 .padding(horizontal = dimens.space3, vertical = dimens.space2),
         ) {
             RbTextField(
@@ -75,7 +90,17 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 onValueChange = vm::cambiarConsulta,
                 label = "Buscar producto",
                 placeholder = "Nombre o código de barras",
-                supportingText = "Escribe parte del nombre, o el código de barras completo.",
+                // Sin señal, la línea de ayuda cede el lugar a la fecha de lo
+                // que se está mostrando. No se suman las dos: en un panel de
+                // 640dp cada renglón extra arriba se lo saca a la lista de
+                // productos, que es lo que la cajera vino a tocar. Y de las dos
+                // frases, "de cuándo es este stock" es la que decide una venta.
+                supportingText = if (!vm.hayConexion && vm.catalogoGuardadoEn != null) {
+                    "Guardado ${Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora)}. " +
+                        "El stock puede haber cambiado."
+                } else {
+                    "Escribe parte del nombre, o el código de barras completo."
+                },
                 keyboardType = KeyboardType.Text,
             )
 
@@ -131,7 +156,14 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
 
         BarraDeTotal(
             unidades = vm.carrito.unidades,
-            total = vm.carrito.total?.let { vm.moneda.formatear(it) },
+            // Sin conexión no va monto: el adelanto del mostrador lo suma el
+            // teléfono, y sin server no hay quien lo confirme después. La barra
+            // ya sabe decirlo con palabras cuando no hay número.
+            total = if (vm.hayConexion) {
+                vm.carrito.total?.let { vm.moneda.formatear(it) }
+            } else {
+                null
+            },
             onCobrar = vm::irAPagar,
         )
     }

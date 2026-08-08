@@ -29,14 +29,37 @@ class ErrorDeApi(val appError: AppError) : Exception(appError.userMessage)
  * nada en try/catch y por eso nunca puede quedar una pantalla en blanco por un
  * error no atrapado.
  */
-suspend fun <T> llamar(baseUrl: String, bloque: suspend () -> T): Resultado<T> = try {
-    Resultado.Ok(bloque())
+suspend fun <T> llamar(baseUrl: String, bloque: suspend () -> T): Resultado<T> =
+    llamar(baseUrl, ReporteDeRed.Nulo, bloque)
+
+/**
+ * La misma llamada, avisándole a [ApiFactory.red] cómo le fue.
+ *
+ * Es la forma que usan los repositorios. Pasa por acá **todo** lo que habla con
+ * el server, y por eso es el único lugar donde hace falta enganchar el cartel
+ * de "sin conexión": engancharlo repositorio por repositorio dejaría agujeros,
+ * y un agujero acá es un cartel que no se prende cuando debería.
+ */
+suspend fun <T> llamar(api: ApiFactory, bloque: suspend () -> T): Resultado<T> =
+    llamar(api.baseUrl, api.red, bloque)
+
+private suspend fun <T> llamar(
+    baseUrl: String,
+    red: ReporteDeRed,
+    bloque: suspend () -> T,
+): Resultado<T> = try {
+    val valor = bloque()
+    red.anotarRespuesta()
+    Resultado.Ok(valor)
 } catch (e: CancellationException) {
     // Cancelar una corrutina no es un error del usuario: se re-lanza tal cual.
     throw e
 } catch (e: ErrorDeApi) {
+    // El server contestó: contestó que no. Eso es estar conectado.
+    red.anotarRespuesta()
     Resultado.Falla(e.appError)
 } catch (e: Throwable) {
+    red.anotarSilencio()
     Resultado.Falla(AppError.ServidorNoResponde(baseUrl, technical = e.toString()))
 }
 

@@ -28,7 +28,7 @@ import io.ktor.client.request.get
  */
 class BoletaApi(private val api: ApiFactory) {
 
-    suspend fun boleta(ordenId: String): Resultado<BoletaImprimible> = llamar(api.baseUrl) {
+    suspend fun boleta(ordenId: String): Resultado<BoletaImprimible> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/orders/$ordenId/receipt")
             .exigirExito(api.baseUrl)
             .body()

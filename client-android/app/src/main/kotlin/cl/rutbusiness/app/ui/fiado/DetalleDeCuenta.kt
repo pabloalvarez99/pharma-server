@@ -74,9 +74,23 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
             RbButton(
                 label = "Me está pagando",
                 onClick = vm::irAlAbono,
-                enabled = !vm.guardando && cuenta != null,
+                // Sin conexión el botón queda apagado, y el motivo va debajo.
+                // Dejarlo tocable para que el formulario falle al final sería
+                // hacerle escribir el monto a alguien que no lo va a poder
+                // guardar, con el cliente esperando.
+                enabled = !vm.guardando && cuenta != null && vm.motivoParaNoAbonar == null,
                 fillWidth = true,
             )
+        }
+
+        vm.motivoParaNoAbonar?.let { motivo ->
+            item("sin-abono") {
+                Text(
+                    text = motivo,
+                    style = RbTheme.typography.support,
+                    color = colors.textSecondary,
+                )
+            }
         }
 
         item("titulo-movimientos") {

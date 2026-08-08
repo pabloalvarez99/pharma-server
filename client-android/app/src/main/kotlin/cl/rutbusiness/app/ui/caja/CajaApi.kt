@@ -42,7 +42,7 @@ class CajaApi(private val api: ApiFactory) {
      * sentido cuando hay más de una, y es lo que decide dónde descuenta stock la
      * venta: la sesión hereda la sucursal de la caja.
      */
-    suspend fun cajas(): Resultado<List<CajaFisicaDto>> = llamar(api.baseUrl) {
+    suspend fun cajas(): Resultado<List<CajaFisicaDto>> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/cajas") {
             parameter("active", true)
         }.exigirExito(api.baseUrl).body()
@@ -54,7 +54,7 @@ class CajaApi(private val api: ApiFactory) {
      * El server permite **una caja abierta por cajero**, así que la primera de
      * la lista es la de quien está usando el teléfono.
      */
-    suspend fun sesionAbierta(): Resultado<SesionDeCajaDto?> = llamar(api.baseUrl) {
+    suspend fun sesionAbierta(): Resultado<SesionDeCajaDto?> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/cash-sessions") {
             parameter("status", "open")
             parameter("limit", 5)
@@ -62,7 +62,7 @@ class CajaApi(private val api: ApiFactory) {
     }
 
     /** Abrir la caja: `POST /api/v1/cash-sessions`. */
-    suspend fun abrir(apertura: AperturaDeCaja): Resultado<SesionDeCajaDto> = llamar(api.baseUrl) {
+    suspend fun abrir(apertura: AperturaDeCaja): Resultado<SesionDeCajaDto> = llamar(api) {
         api.http.post("${api.baseUrl}/api/v1/cash-sessions") {
             contentType(ContentType.Application.Json)
             setBody(apertura)
@@ -76,7 +76,7 @@ class CajaApi(private val api: ApiFactory) {
      * lo que debería haber **ahora**, sin cerrar nada. Es lo que muestra la
      * pantalla de estado y lo que hace innecesario que el teléfono sume.
      */
-    suspend fun arqueo(sesionId: String): Resultado<ArqueoDeCajaDto> = llamar(api.baseUrl) {
+    suspend fun arqueo(sesionId: String): Resultado<ArqueoDeCajaDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/cash-sessions/$sesionId/arqueo")
             .exigirExito(api.baseUrl)
             .body()
@@ -84,7 +84,7 @@ class CajaApi(private val api: ApiFactory) {
 
     /** Lo que entró y salió del cajón: `GET /api/v1/cash-sessions/{id}/movements`. */
     suspend fun movimientos(sesionId: String): Resultado<List<MovimientoDeCajaDto>> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.get("${api.baseUrl}/api/v1/cash-sessions/$sesionId/movements")
                 .exigirExito(api.baseUrl)
                 .body()
@@ -94,7 +94,7 @@ class CajaApi(private val api: ApiFactory) {
     suspend fun moverPlata(
         sesionId: String,
         movimiento: NuevoMovimiento,
-    ): Resultado<MovimientoDeCajaDto> = llamar(api.baseUrl) {
+    ): Resultado<MovimientoDeCajaDto> = llamar(api) {
         api.http.post("${api.baseUrl}/api/v1/cash-sessions/$sesionId/movements") {
             contentType(ContentType.Application.Json)
             setBody(movimiento)
@@ -108,7 +108,7 @@ class CajaApi(private val api: ApiFactory) {
      * diferencia que ve la dueña; no hay otra.
      */
     suspend fun cerrar(sesionId: String, cierre: CierreDeCaja): Resultado<ArqueoDeCajaDto> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.post("${api.baseUrl}/api/v1/cash-sessions/$sesionId/close") {
                 contentType(ContentType.Application.Json)
                 setBody(cierre)

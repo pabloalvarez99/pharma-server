@@ -14,8 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.money.Dinero
+import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
@@ -49,9 +51,12 @@ fun ResumenRoute(
     onIrAlFiado: () -> Unit = {},
     recargasPedidas: Int = 0,
 ) {
+    val offline = LocalOffline.current
     val vm: ResumenViewModel = viewModel(
         key = "resumen:${estado.baseUrl}",
-        factory = viewModelFactory { initializer { ResumenViewModel(sesion) } },
+        factory = viewModelFactory {
+            initializer { ResumenViewModel(sesion = sesion, offline = offline) }
+        },
     )
 
     LaunchedEffect(recargasPedidas) {
@@ -93,7 +98,14 @@ private fun ResumenScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
             title = "Tu día",
-            subtitle = "Cómo va el negocio hoy",
+            // Cuando lo que se muestra es la copia guardada, el subtítulo lo
+            // dice ahí mismo: es la primera línea que se lee y no se puede
+            // saltar. "Cómo va el negocio hoy" arriba de cifras de anoche sería
+            // la mentira más cara de esta pantalla.
+            subtitle = vm.guardadoEn?.let { guardadoEn ->
+                "Datos guardados en el teléfono, " +
+                    Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
+            } ?: "Cómo va el negocio hoy",
             actions = {
                 RbButton(
                     label = "Actualizar",
@@ -119,8 +131,11 @@ private fun ResumenScreen(
                 RbSkeletonLines(lines = 4, modifier = Modifier.padding(dimens.space3))
             }
 
+            // `weight(1f)` y no `fillMaxSize()`: adentro de la columna que
+            // empieza con la barra de arriba, `fillMaxSize` pide el alto entero
+            // de la pantalla y la lista termina dibujada encima del título.
             else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(dimens.space3),
                 verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {

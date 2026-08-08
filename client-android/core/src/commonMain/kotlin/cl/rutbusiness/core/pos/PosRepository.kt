@@ -38,7 +38,7 @@ class PosRepository(private val api: ApiFactory) {
     suspend fun vender(
         solicitud: SolicitudDeVenta,
         claveDeIdempotencia: String,
-    ): Resultado<RespuestaDeVenta> = llamar(api.baseUrl) {
+    ): Resultado<RespuestaDeVenta> = llamar(api) {
         api.http.post("${api.baseUrl}/api/v1/pos/sale") {
             contentType(ContentType.Application.Json)
             header("Idempotency-Key", claveDeIdempotencia)
@@ -47,7 +47,7 @@ class PosRepository(private val api: ApiFactory) {
     }
 
     /** El comprobante, con el vuelto ya calculado por el server. */
-    suspend fun comprobante(ordenId: String): Resultado<ComprobanteDto> = llamar(api.baseUrl) {
+    suspend fun comprobante(ordenId: String): Resultado<ComprobanteDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/orders/$ordenId/receipt")
             .exigirExito(api.baseUrl)
             .body()

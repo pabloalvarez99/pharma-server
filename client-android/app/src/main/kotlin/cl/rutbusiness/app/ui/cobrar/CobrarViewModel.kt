@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.diag.Latencia
 import cl.rutbusiness.app.ui.common.aCopy
+import cl.rutbusiness.app.ui.offline.ServiciosOffline
+import cl.rutbusiness.app.ui.offline.soloCache
 import cl.rutbusiness.app.ui.scanner.AntiRebote
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.catalog.ProductRepository
@@ -16,6 +18,9 @@ import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.money.MonedaRepository
 import cl.rutbusiness.core.net.Resultado
+import cl.rutbusiness.core.offline.ClaveDeCache
+import cl.rutbusiness.core.offline.ColaDeVentas
+import cl.rutbusiness.core.offline.VentaEnCola
 import cl.rutbusiness.core.pos.Carrito
 import cl.rutbusiness.core.pos.ComprobanteDto
 import cl.rutbusiness.core.pos.MedioDePago
@@ -26,12 +31,19 @@ import cl.rutbusiness.ui.components.RbErrorCopy
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.ListSerializer
 
 /** Los tres momentos de una venta. */
 enum class PasoDeCobro { Buscar, Pago, Comprobante }
 
 class CobrarViewModel(
     private val sesion: SessionRepository,
+    /**
+     * La cola, el caché y el estado de la conexión. `null` en las pruebas de
+     * pantalla que no montan el grafo entero: sin esto la pantalla se comporta
+     * como antes, asumiendo que hay red.
+     */
+    private val offline: ServiciosOffline? = null,
 ) : ViewModel() {
 
     var paso by mutableStateOf(PasoDeCobro.Buscar)
@@ -103,11 +115,102 @@ class CobrarViewModel(
      */
     private var claveDeCobro: String? = null
 
+    // --- sin red -------------------------------------------------------------
+
+    /** `true` mientras se esté llegando al sistema del negocio. */
+    val hayConexion: Boolean get() = offline?.conexion?.hayConexion?.value ?: true
+
+    /**
+     * La venta que quedó en la cola en vez de irse al server.
+     *
+     * Cuando esto no es `null`, el paso de comprobante muestra "guardada" en
+     * lugar de un vuelto: no hay vuelto que mostrar porque no hay total, y no
+     * hay total porque el total lo pone el server cuando la reciba.
+     */
+    var ventaEncolada by mutableStateOf<VentaEnCola?>(null)
+        private set
+
+    /**
+     * Cuándo se trajo **lo que está en pantalla**.
+     *
+     * No es "cuándo se guardó la copia": es la hora de la lista que la cajera
+     * está mirando ahora. La diferencia importa cuando la señal se corta con la
+     * pantalla abierta — ahí lo que se ve se trajo hace un minuto aunque la
+     * copia de disco sea de hace cinco horas, y poner la fecha vieja sería
+     * mentir al revés.
+     */
+    var catalogoGuardadoEn by mutableStateOf<Long?>(null)
+        private set
+
+    /** El catálogo que se pudo guardar, para buscar adentro sin red. */
+    private var catalogoLocal: List<ProductDto> = emptyList()
+
     init {
         viewModelScope.launch {
             sesion.apiActiva()?.let { moneda = MonedaRepository(it).resolver() }
         }
-        buscar()
+        // El orden importa y costó una pantalla vacía en el emulador: primero se
+        // levanta de disco lo que ya se tenía guardado, **después** se busca.
+        // Al revés, la primera búsqueda sin señal filtraba un catálogo local
+        // todavía vacío y la cajera veía "Sin productos todavía" teniendo los
+        // productos ahí mismo, en el teléfono. Leer el archivo son unos
+        // milisegundos; la red, treinta segundos de timeout.
+        viewModelScope.launch {
+            levantarCatalogoDeDisco()
+            buscar()
+            refrescarCatalogoGuardado()
+        }
+    }
+
+    /**
+     * Deja en disco los productos con los que se va a poder vender sin señal.
+     *
+     * Se refresca **cada seis horas como mucho**, no en cada entrada a la
+     * pantalla. Traer el catálogo es la descarga más grande que hace la app, y
+     * en un plan de datos chileno repetirla cada vez que la cajera vuelve a
+     * Cobrar es plata de la dueña. Seis horas cubre el cambio de precios de un
+     * día normal.
+     *
+     * Se guardan [LIMITE_CACHE] productos y no el catálogo entero: con 1-2 GB
+     * de RAM la regla es cachear lo que se usa. Son unas decenas de KB en disco
+     * y sólo están en memoria mientras esta pantalla vive.
+     */
+    private suspend fun levantarCatalogoDeDisco() {
+        val servicios = offline ?: return
+        val api = sesion.apiActiva() ?: return
+        val guardado = soloCache(
+            servicios,
+            ClaveDeCache.Que.Catalogo,
+            api.baseUrl,
+            ListSerializer(ProductDto.serializer()),
+        ) ?: return
+        catalogoLocal = guardado.valor
+        catalogoGuardadoEn = guardado.guardadoEn
+    }
+
+    /** Baja una copia nueva, si la que hay ya está vieja y hay con qué. */
+    private suspend fun refrescarCatalogoGuardado() {
+        val servicios = offline ?: return
+        val api = sesion.apiActiva() ?: return
+        if (!hayConexion) return
+        val guardadoEn = catalogoGuardadoEn
+        val fresco = guardadoEn != null &&
+            servicios.reloj() - guardadoEn < VIGENCIA_DEL_CATALOGO_MS
+        if (fresco) return
+
+        when (val r = ProductRepository(api).buscar("", limite = LIMITE_CACHE)) {
+            is Resultado.Ok -> {
+                catalogoLocal = r.valor
+                catalogoGuardadoEn = servicios.reloj()
+                servicios.cache.guardar(
+                    ClaveDeCache.de(ClaveDeCache.Que.Catalogo, api.baseUrl),
+                    ListSerializer(ProductDto.serializer()),
+                    r.valor,
+                )
+            }
+
+            is Resultado.Falla -> Unit
+        }
     }
 
     // --- búsqueda -----------------------------------------------------------
@@ -134,6 +237,18 @@ class CobrarViewModel(
     private fun buscar() {
         val api = sesion.apiActiva() ?: return
         val texto = consulta.trim()
+
+        // Sin señal no se sale a la red: serían treinta segundos de espera para
+        // terminar mostrando lo mismo que ya está en el teléfono. Se filtra el
+        // catálogo guardado, que es instantáneo, y la pantalla dice de cuándo es.
+        if (!hayConexion) {
+            resultados = filtrarLocal(texto)
+            buscando = false
+            buscoAlgunaVez = true
+            errorBusqueda = null
+            return
+        }
+
         buscando = true
         errorBusqueda = null
         trabajoDeBusqueda = viewModelScope.launch {
@@ -156,9 +271,25 @@ class CobrarViewModel(
             }
 
             when (val r = ProductRepository(api).buscar(texto)) {
-                is Resultado.Ok -> resultados = r.valor
+                is Resultado.Ok -> {
+                    resultados = r.valor
+                    // La lista que se ve es de ahora. Se anota igual, porque si
+                    // la señal se corta en el próximo minuto ésta es la hora
+                    // que hay que mostrar.
+                    catalogoGuardadoEn = offline?.reloj?.invoke()
+                }
+
                 is Resultado.Falla -> {
-                    errorBusqueda = r.error.aCopy("tus productos")
+                    // Si lo que falló fue la red y hay catálogo guardado, se
+                    // muestra ése en vez de una pantalla de error: el encargo
+                    // es que la dueña pueda seguir mirando lo que ya cargó.
+                    val local = filtrarLocal(texto)
+                    if (r.error is AppError.ServidorNoResponde && local.isNotEmpty()) {
+                        resultados = local
+                        errorBusqueda = null
+                    } else {
+                        errorBusqueda = r.error.aCopy("tus productos")
+                    }
                     if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
@@ -166,6 +297,27 @@ class CobrarViewModel(
             buscoAlgunaVez = true
         }
     }
+
+    /**
+     * Busca adentro del catálogo guardado.
+     *
+     * Por nombre y por código de barras, sin acentos ni mayúsculas: la cajera
+     * escribe "azucar" y el producto se llama "Azúcar". Es lo mismo que hace el
+     * server con `search`, resuelto en el teléfono para que funcione sin red.
+     */
+    private fun filtrarLocal(texto: String): List<ProductDto> {
+        val buscado = sinAcentos(texto)
+        if (buscado.isEmpty()) return catalogoLocal
+        return catalogoLocal.filter { producto ->
+            sinAcentos(producto.name).contains(buscado) ||
+                producto.barcode?.contains(buscado) == true ||
+                producto.slug.contains(buscado)
+        }
+    }
+
+    private fun sinAcentos(texto: String): String = texto.trim().lowercase()
+        .replace('á', 'a').replace('é', 'e').replace('í', 'i')
+        .replace('ó', 'o').replace('ú', 'u').replace('ü', 'u')
 
     // --- carrito ------------------------------------------------------------
 
@@ -266,6 +418,36 @@ class CobrarViewModel(
         // los pone la cámara del aparato. Sale por `adb logcat -s RbLatencia`.
         Latencia.marcar()
         val api = sesion.apiActiva() ?: return
+
+        // Sin señal el código se resuelve contra el catálogo guardado. No todos
+        // los productos traen el código de barras adentro de la lista que manda
+        // el server, así que esto puede no encontrarlo aunque el producto
+        // exista — y en ese caso se dice, no se ofrece crearlo: crear un
+        // producto necesita el server, y sin server sería un botón que falla.
+        if (!hayConexion) {
+            val local = catalogoLocal.firstOrNull { it.barcode == limpio }
+            if (local != null) {
+                agregar(local)
+                codigoSinProducto = null
+                errorDeEscaneo = null
+                ultimaLectura = LecturaOk(
+                    nombre = local.name,
+                    enCarrito = cantidadEnCarrito(local.id),
+                    orden = ++ordenDeLectura,
+                )
+            } else {
+                ultimaLectura = null
+                codigoSinProducto = null
+                errorDeEscaneo = RbErrorCopy(
+                    title = "No lo encontramos sin conexión",
+                    message = "El código $limpio no está en los productos que alcanzamos a " +
+                        "guardar. Búscalo por nombre, o espera a que vuelva la señal.",
+                    retryLabel = null,
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
             when (val r = ProductRepository(api).porCodigoDeBarras(limpio)) {
                 is Resultado.Ok -> {
@@ -460,15 +642,48 @@ class CobrarViewModel(
         }
     }
 
+    /**
+     * Qué medios de pago se pueden usar ahora mismo.
+     *
+     * Sin señal queda **sólo efectivo**, y eso se ve en la pantalla antes de
+     * que la dueña toque nada. Los otros dos no es que fallen: es que no se
+     * pueden hacer bien.
+     *
+     *  - **Fiado**: la cuenta corriente del cliente vive en el server. Anotar
+     *    una deuda contra un saldo que no podemos leer es exactamente cómo se
+     *    fía dos veces lo mismo.
+     *  - **Transferencia**: la dueña la da por buena cuando ve la plata en su
+     *    cuenta, y eso lo mira en otra app que tampoco tiene señal. Encolar una
+     *    venta pagada con una transferencia que nadie confirmó sería registrar
+     *    un cobro que puede no existir.
+     */
+    fun motivoParaNoUsar(opcion: MedioDePago): String? = when {
+        hayConexion -> null
+        opcion == MedioDePago.Efectivo -> null
+        opcion == MedioDePago.Fiado ->
+            "Sin conexión no se puede fiar: hay que revisar la cuenta del cliente en el sistema."
+        else ->
+            "Sin conexión no se puede cobrar por transferencia: no hay cómo confirmar que llegó."
+    }
+
     /** `null` = se puede cobrar. Si no, el motivo, ya escrito para mostrar. */
     fun impedimentoParaCobrar(): String? = when {
         carrito.vacio -> "Agrega al menos un producto."
+        motivoParaNoUsar(medio) != null -> motivoParaNoUsar(medio)
         medio.exigeCliente && cliente == null ->
             "El fiado queda en la cuenta de alguien: elige el cliente."
-        medio.pideMontoEntregado && montoEntregado.isBlank() ->
+        // Sin señal no se pide el monto entregado: el vuelto lo calcula el
+        // server y sin server no hay vuelto que mostrar. Pedir el número
+        // prometería una cuenta que no vamos a poder hacer.
+        hayConexion && medio.pideMontoEntregado && montoEntregado.isBlank() ->
             "Escribe con cuánto te paga para calcular el vuelto."
+        colaLlena -> "Hay demasiadas ventas esperando enviarse. Revisa la conexión antes de seguir."
         else -> null
     }
+
+    /** La cola no da para una más. Se avisa antes de cobrar, no después. */
+    private val colaLlena: Boolean
+        get() = offline != null && offline.cola.cuantasEsperan >= ColaDeVentas.MAXIMO
 
     fun cobrar() {
         if (cobrando || impedimentoParaCobrar() != null) return
@@ -487,10 +702,29 @@ class CobrarViewModel(
                 customer = cliente?.id,
             )
 
+            // Sin señal ni se intenta: se guarda y se avisa. Salir a la red
+            // para esperar treinta segundos de timeout delante de un cliente
+            // que quiere irse es tiempo regalado, y el resultado es el mismo.
+            if (!hayConexion) {
+                encolar(clave, solicitud)
+                return@launch
+            }
+
             when (val venta = repo.vender(solicitud, clave)) {
                 is Resultado.Falla -> {
-                    errorPago = copyDeCobroFallido(venta.error)
-                    cobrando = false
+                    // La red se cortó justo al confirmar: el caso que este
+                    // encargo existe para arreglar. La venta **no** se pierde
+                    // ni queda esperando que alguien toque "Reintentar" — entra
+                    // a la cola con la misma clave de idempotencia y sale sola.
+                    // Si el server llegó a grabarla antes de que se cortara, el
+                    // reintento contesta 200 con esa misma orden y no se cobra
+                    // dos veces.
+                    if (venta.error is AppError.ServidorNoResponde && sePuedeEncolar()) {
+                        encolar(clave, solicitud)
+                    } else {
+                        errorPago = copyDeCobroFallido(venta.error)
+                        cobrando = false
+                    }
                 }
 
                 is Resultado.Ok -> {
@@ -511,6 +745,52 @@ class CobrarViewModel(
         }
     }
 
+    /**
+     * Sólo el efectivo se encola.
+     *
+     * Es lo que se puede cobrar sin preguntarle nada a nadie: el cliente entregó
+     * billetes y ya está. La transferencia y el fiado necesitan una
+     * confirmación que sin server no existe, así que si una de ésas falla por
+     * red se muestra el error de siempre con su "Reintentar" -que reusa la
+     * misma clave y por lo tanto tampoco cobra dos veces-.
+     */
+    private fun sePuedeEncolar(): Boolean =
+        offline != null && medio == MedioDePago.Efectivo && !colaLlena
+
+    private suspend fun encolar(clave: String, solicitud: SolicitudDeVenta) {
+        val servicios = offline
+        if (servicios == null) {
+            errorPago = copyDeCobroFallido(AppError.ServidorNoResponde(""))
+            cobrando = false
+            return
+        }
+
+        val venta = VentaEnCola(
+            clave = clave,
+            solicitud = solicitud,
+            cobradaEn = servicios.reloj(),
+            lineas = carrito.items.size,
+        )
+
+        if (!servicios.cola.encolar(venta)) {
+            errorPago = RbErrorCopy(
+                title = "No podemos guardar más ventas",
+                message = "Ya hay ${ColaDeVentas.MAXIMO} ventas esperando enviarse. Revisa la " +
+                    "conexión con el sistema del negocio antes de seguir cobrando.",
+                retryLabel = null,
+            )
+            cobrando = false
+            return
+        }
+
+        ventaEncolada = venta
+        comprobante = null
+        totalCobrado = null
+        puntosGanados = 0
+        paso = PasoDeCobro.Comprobante
+        cobrando = false
+    }
+
     /** El total que cobró el server. Es el número que manda, no el del carrito. */
     var totalCobrado by mutableStateOf<String?>(null)
         private set
@@ -519,6 +799,7 @@ class CobrarViewModel(
     fun nuevaVenta() {
         carrito = Carrito()
         comprobante = null
+        ventaEncolada = null
         totalCobrado = null
         puntosGanados = 0
         montoEntregado = ""
@@ -573,4 +854,26 @@ class CobrarViewModel(
 
     private fun pareceCodigoDeBarras(texto: String): Boolean =
         texto.length >= 8 && texto.all { it.isDigit() }
+
+    private companion object {
+        /**
+         * Cuántos productos se guardan para vender sin señal.
+         *
+         * 200 cubre el mostrador de un almacén de barrio -lo que se vende todos
+         * los días- sin ser "el catálogo entero". En disco son unas decenas de
+         * KB y en memoria sólo mientras esta pantalla vive, que es lo que un
+         * aparato de 1-2 GB puede pagar.
+         */
+        const val LIMITE_CACHE = 200
+
+        /**
+         * Cada cuánto se vuelve a bajar esa copia.
+         *
+         * Seis horas. Traerla es la descarga más grande que hace la app, y
+         * repetirla cada vez que la cajera vuelve a Cobrar son megas de un plan
+         * de datos que paga la dueña. En seis horas entran los cambios de
+         * precio de un día normal.
+         */
+        const val VIGENCIA_DEL_CATALOGO_MS = 6L * 60L * 60L * 1000L
+    }
 }

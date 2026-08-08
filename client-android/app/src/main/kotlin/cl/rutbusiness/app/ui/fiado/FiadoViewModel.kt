@@ -11,10 +11,14 @@ import cl.rutbusiness.app.ui.common.aCopy
 import cl.rutbusiness.app.ui.common.esMasQueCero
 import cl.rutbusiness.app.ui.common.montoParaElServidor
 import cl.rutbusiness.app.ui.common.soloPlata
+import cl.rutbusiness.app.ui.offline.Lectura
+import cl.rutbusiness.app.ui.offline.ServiciosOffline
+import cl.rutbusiness.app.ui.offline.conCache
 import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.money.MonedaRepository
 import cl.rutbusiness.core.net.Resultado
+import cl.rutbusiness.core.offline.ClaveDeCache
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbErrorCopy
 import kotlinx.coroutines.launch
@@ -47,7 +51,36 @@ enum class PasoDeFiado {
  */
 class FiadoViewModel(
     private val sesion: SessionRepository,
+    /** El caché y el estado de la conexión. `null` en las pruebas de pantalla. */
+    private val offline: ServiciosOffline? = null,
 ) : ViewModel() {
+
+    /** `true` mientras se esté llegando al sistema del negocio. */
+    val hayConexion: Boolean get() = offline?.conexion?.hayConexion?.value ?: true
+
+    /** Cuándo se trajo la lista que se está mostrando. `null` = es de ahora. */
+    var guardadoEn by mutableStateOf<Long?>(null)
+        private set
+
+    /** El reloj de pared, para escribir "hace 20 minutos". */
+    val relojDePared: Long get() = offline?.reloj?.invoke() ?: 0L
+
+    /**
+     * Por qué no se puede anotar un abono ahora, o `null` si sí se puede.
+     *
+     * Se muestra **antes** de que la dueña llene el formulario. Un abono es una
+     * escritura sin clave de idempotencia (`POST /clientes/{id}/abonos` no la
+     * acepta), así que no se puede encolar como la venta: un reintento
+     * automático anotaría el pago dos veces y le perdonaría al cliente una
+     * deuda que sigue viva. Sin server, no hay abono.
+     */
+    val motivoParaNoAbonar: String?
+        get() = if (hayConexion) {
+            null
+        } else {
+            "Sin conexión no se pueden anotar pagos: hay que dejarlos escritos en la cuenta " +
+                "del cliente, y esa cuenta vive en el sistema del negocio."
+        }
 
     var paso by mutableStateOf(PasoDeFiado.Lista)
         private set
@@ -145,11 +178,32 @@ class FiadoViewModel(
         viewModelScope.launch {
             moneda = MonedaRepository(api).resolver()
 
-            when (val r = FiadoApi(api).deudores()) {
-                is Resultado.Ok -> deudores = r.valor
-                is Resultado.Falla -> {
-                    error = r.error.aCopy("quién te debe")
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
+            // Quién te debe se puede mirar sin señal: es lectura, y es de las
+            // cosas que la dueña consulta parada en el mostrador cuando llega
+            // alguien a pagar. Lo que no se va a poder es anotar el pago, y eso
+            // lo dice `motivoParaNoAbonar` antes de que lo intente.
+            when (
+                val lectura = conCache(
+                    offline = offline,
+                    que = ClaveDeCache.Que.Deudores,
+                    servidor = api.baseUrl,
+                    serializador = DeudoresDto.serializer(),
+                    traer = { FiadoApi(api).deudores() },
+                )
+            ) {
+                is Lectura.DelServidor -> {
+                    deudores = lectura.valor
+                    guardadoEn = null
+                }
+
+                is Lectura.DelTelefono -> {
+                    deudores = lectura.valor
+                    guardadoEn = lectura.guardadoEn
+                }
+
+                is Lectura.Falla -> {
+                    error = lectura.error.aCopy("quién te debe")
+                    if (lectura.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
 

@@ -36,6 +36,15 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val comprobante = vm.comprobante
 
+    // La venta que quedó en la cola tiene su propia pantalla y no reusa ésta.
+    // No es un comprobante: no hay folio, no hay total y no hay vuelto, porque
+    // todavía no la vio el sistema. Mostrarla con la misma cara que una venta
+    // cobrada sería el peor malentendido posible de esta app.
+    vm.ventaEncolada?.let { encolada ->
+        VentaGuardada(vm = vm, unidades = encolada.solicitud.items.sumOf { it.quantity })
+        return
+    }
+
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -80,6 +89,68 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 text = "Sumó ${vm.puntosGanados} ${if (vm.puntosGanados == 1L) "punto" else "puntos"} de fidelidad.",
                 style = RbTheme.typography.support,
                 color = RbTheme.colors.textSecondary,
+            )
+        }
+
+        RbButton(
+            label = "Cobrar otra venta",
+            onClick = vm::nuevaVenta,
+            fillWidth = true,
+        )
+    }
+}
+
+/**
+ * La venta se cobró en el mostrador pero todavía no llegó al sistema.
+ *
+ * **Cero plata en esta pantalla.** Ni total, ni vuelto, ni subtotal: no hay
+ * ningún monto que el server haya confirmado, y el único que el teléfono podría
+ * poner sería uno que calculó solo. La cajera ya tiene los billetes en la mano
+ * y sabe cuánto le dieron; lo que necesita saber acá es otra cosa, y es que la
+ * venta no se perdió.
+ *
+ * Tampoco se ofrece imprimir: una boleta necesita folio y el folio lo asigna el
+ * server. Un papel con los productos y sin folio no es una boleta.
+ */
+@Composable
+private fun VentaGuardada(vm: CobrarViewModel, unidades: Int) {
+    val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+    ) {
+        RbCard(modifier = Modifier.rbAssertive()) {
+            Text(
+                text = "Venta guardada",
+                style = RbTheme.typography.title,
+                color = colors.brandText,
+            )
+            Text(
+                text = "Se va a enviar sola apenas vuelva la señal. No la vuelvas a cobrar: " +
+                    "aunque se mande de nuevo, no se cobra dos veces.",
+                style = RbTheme.typography.body,
+                color = colors.textPrimary,
+            )
+        }
+
+        RbCard(title = "Lo que se llevó") {
+            vm.carrito.items.forEach { item ->
+                Text(
+                    text = "${item.cantidad} × ${item.nombre}",
+                    style = RbTheme.typography.body,
+                    color = colors.textPrimary,
+                )
+            }
+            Text(
+                text = "$unidades ${if (unidades == 1) "unidad" else "unidades"} · " +
+                    "el total lo confirma el sistema cuando reciba la venta",
+                style = RbTheme.typography.support,
+                color = colors.textSecondary,
             )
         }
 

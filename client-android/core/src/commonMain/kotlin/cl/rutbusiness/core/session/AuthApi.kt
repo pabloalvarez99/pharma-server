@@ -46,7 +46,7 @@ data class Me(
 class AuthApi(private val api: ApiFactory) {
 
     suspend fun login(tenant: String, email: String, password: String): Resultado<LoginResponse> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.post("${api.baseUrl}/api/v1/login") {
                 contentType(ContentType.Application.Json)
                 setBody(
@@ -60,7 +60,7 @@ class AuthApi(private val api: ApiFactory) {
         }
 
     /** Sirve para saber si el token guardado sigue vivo sin pedir credenciales. */
-    suspend fun me(): Resultado<Me> = llamar(api.baseUrl) {
+    suspend fun me(): Resultado<Me> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/me").exigirExito(api.baseUrl).body()
     }
 }

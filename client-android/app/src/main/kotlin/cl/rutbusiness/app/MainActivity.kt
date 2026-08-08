@@ -8,6 +8,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import cl.rutbusiness.app.camara.CamaraDeCodigosCameraX
 import cl.rutbusiness.app.ui.RutBusinessApp
 import cl.rutbusiness.app.ui.impresora.ProveerImpresora
+import cl.rutbusiness.app.ui.offline.ProveerOffline
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 
 /**
@@ -38,7 +39,9 @@ class MainActivity : ComponentActivity() {
             // para iOS sin tocarla.
             CompositionLocalProvider(LocalCamaraDeCodigos provides camara) {
                 ProveerImpresora(container.impresora) {
-                    RutBusinessApp(sesion = container.sesion)
+                    ProveerOffline(container.offline) {
+                        RutBusinessApp(sesion = container.sesion)
+                    }
                 }
             }
         }

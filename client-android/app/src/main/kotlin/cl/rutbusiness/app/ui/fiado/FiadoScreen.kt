@@ -20,6 +20,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.money.Moneda
+import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbAmount
@@ -42,9 +44,10 @@ fun FiadoRoute(
     estado: EstadoSesion.Activa,
     onVolver: () -> Unit,
 ) {
+    val offline = LocalOffline.current
     val vm: FiadoViewModel = viewModel(
         key = "fiado:${estado.baseUrl}",
-        factory = viewModelFactory { initializer { FiadoViewModel(sesion) } },
+        factory = viewModelFactory { initializer { FiadoViewModel(sesion, offline) } },
     )
     FiadoScreen(vm = vm, onVolver = onVolver)
 }
@@ -79,7 +82,13 @@ private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
                 PasoDeFiado.Abono -> "Me está pagando"
             },
             subtitle = when (vm.paso) {
-                PasoDeFiado.Lista -> "El fiado del negocio"
+                // Cuando la lista salió del teléfono, la fecha va en el
+                // subtítulo: los saldos son plata, y un saldo viejo sin fecha
+                // hace que la dueña cobre de menos o de más.
+                PasoDeFiado.Lista -> vm.guardadoEn?.let { guardadoEn ->
+                    "Saldos guardados en el teléfono, " +
+                        Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
+                } ?: "El fiado del negocio"
                 PasoDeFiado.Detalle -> "Lo que se llevó y lo que fue pagando"
                 PasoDeFiado.Abono -> vm.elegido?.name
             },
@@ -184,8 +193,13 @@ internal fun ListaDeDeudores(
                 onAction = { onConsulta("") },
             )
 
+            // `weight(1f)` y no `fillMaxSize()`: la lista es hermana del
+            // buscador dentro de esta columna, y `fillMaxSize` le pediría el
+            // alto completo sin descontar lo que el buscador ya ocupó — se
+            // dibujaría encima de él. Con la letra al 200% y el teclado abierto
+            // eso deja de ser teórico.
             else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(
                     start = dimens.space3,
                     end = dimens.space3,

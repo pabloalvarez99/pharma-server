@@ -52,7 +52,16 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 FilaDeCarrito(
                     item = item,
                     precioUnitario = vm.moneda.formatear(item.precioUnitario),
-                    subtotal = item.subtotal?.let { vm.moneda.formatear(it) },
+                    // El subtotal de la línea es una multiplicación, y sin
+                    // server esa multiplicación la haría el teléfono. Se calla:
+                    // el precio unitario sí se muestra porque lo mandó el
+                    // server tal cual, y la cantidad la puso la cajera.
+                    subtotal = if (vm.hayConexion) {
+                        item.subtotal?.let { vm.moneda.formatear(it) }
+                    } else {
+                        null
+                    },
+                    mostrarSubtotal = vm.hayConexion,
                     onMenos = { vm.cambiarCantidad(item.productoId, item.cantidad - 1) },
                     onMas = { vm.cambiarCantidad(item.productoId, item.cantidad + 1) },
                 )
@@ -72,12 +81,27 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 },
                 trailing = {
                     Text(
-                        // El total definitivo lo pone el server al cobrar; éste
-                        // es lo que va sumando el mostrador.
-                        text = vm.carrito.total?.let { vm.moneda.formatear(it) }
-                            ?: "lo confirma el sistema",
-                        style = RbTheme.typography.title,
-                        color = RbTheme.colors.textPrimary,
+                        // Sin conexión **no va ningún número acá**. El total lo
+                        // calcula el server, y sin server no hay a quién
+                        // preguntarle: un monto armado en el teléfono, en la
+                        // pantalla donde se cobra, es peor que no mostrar nada.
+                        // Con conexión sigue el adelanto del mostrador, que el
+                        // cobro reemplaza por el total real.
+                        text = when {
+                            !vm.hayConexion -> "se confirma al enviarse"
+                            else -> vm.carrito.total?.let { vm.moneda.formatear(it) }
+                                ?: "lo confirma el sistema"
+                        },
+                        style = if (vm.hayConexion) {
+                            RbTheme.typography.title
+                        } else {
+                            RbTheme.typography.body
+                        },
+                        color = if (vm.hayConexion) {
+                            RbTheme.colors.textPrimary
+                        } else {
+                            RbTheme.colors.textSecondary
+                        },
                     )
                 },
             )
@@ -86,16 +110,38 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         RbCard(title = "Cómo paga") {
             RbChipRow {
                 MedioDePago.entries.forEach { opcion ->
+                    val bloqueado = vm.motivoParaNoUsar(opcion) != null
                     RbChip(
                         label = opcion.etiqueta,
-                        tone = if (vm.medio == opcion) RbChipTone.Brand else RbChipTone.Neutral,
-                        selected = vm.medio == opcion,
-                        onClick = { vm.cambiarMedio(opcion) },
+                        tone = when {
+                            bloqueado -> RbChipTone.Neutral
+                            vm.medio == opcion -> RbChipTone.Brand
+                            else -> RbChipTone.Neutral
+                        },
+                        selected = vm.medio == opcion && !bloqueado,
+                        // Sin `onClick` el chip deja de ser tocable. Es a
+                        // propósito que quede a la vista y no que desaparezca:
+                        // la dueña sabe que el fiado existe, y un botón que se
+                        // esfumó la deja buscándolo. Abajo dice por qué no.
+                        onClick = if (bloqueado) null else ({ vm.cambiarMedio(opcion) }),
                     )
                 }
             }
 
-            if (vm.medio.pideMontoEntregado) {
+            // Lo que no se puede, dicho **antes** de que lo intente. Un cartel
+            // después del toque llega tarde: el cliente ya está esperando.
+            MedioDePago.entries
+                .mapNotNull { vm.motivoParaNoUsar(it) }
+                .distinct()
+                .forEach { motivo ->
+                    Text(
+                        text = motivo,
+                        style = RbTheme.typography.support,
+                        color = RbTheme.colors.textSecondary,
+                    )
+                }
+
+            if (vm.medio.pideMontoEntregado && vm.hayConexion) {
                 cl.rutbusiness.ui.components.RbTextField(
                     value = vm.montoEntregado,
                     onValueChange = vm::cambiarMontoEntregado,
@@ -107,7 +153,7 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 )
             }
 
-            if (vm.medio.exigeCliente) {
+            if (vm.medio.exigeCliente && vm.hayConexion) {
                 SelectorDeCliente(
                     clientes = vm.clientes,
                     elegido = vm.cliente,
@@ -133,8 +179,24 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             )
         }
 
+        if (!vm.hayConexion) {
+            Text(
+                text = "Sin conexión con el sistema del negocio. La venta se guarda en el " +
+                    "teléfono y se envía sola cuando vuelva la señal. El total se confirma " +
+                    "cuando se envíe.",
+                style = RbTheme.typography.support,
+                color = RbTheme.colors.textSecondary,
+            )
+        }
+
         RbButton(
-            label = if (vm.cobrando) "Cobrando..." else "Confirmar venta",
+            // "Guardar venta" y no "Confirmar venta": sin señal no se confirmó
+            // nada todavía, y la palabra tiene que decir lo que de verdad pasa.
+            label = when {
+                vm.cobrando -> "Cobrando..."
+                !vm.hayConexion -> "Guardar venta"
+                else -> "Confirmar venta"
+            },
             onClick = vm::cobrar,
             // Deshabilitado mientras se manda: el primer candado contra el
             // doble toque. El segundo, el que de verdad importa cuando la red
@@ -165,6 +227,7 @@ private fun FilaDeCarrito(
     item: ItemCarrito,
     precioUnitario: String,
     subtotal: String?,
+    mostrarSubtotal: Boolean,
     onMenos: () -> Unit,
     onMas: () -> Unit,
 ) {
@@ -185,11 +248,13 @@ private fun FilaDeCarrito(
                 )
             },
             trailing = {
-                Text(
-                    text = subtotal ?: "-",
-                    style = RbTheme.typography.numeric,
-                    color = RbTheme.colors.textPrimary,
-                )
+                if (mostrarSubtotal) {
+                    Text(
+                        text = subtotal ?: "-",
+                        style = RbTheme.typography.numeric,
+                        color = RbTheme.colors.textPrimary,
+                    )
+                }
             },
         )
 

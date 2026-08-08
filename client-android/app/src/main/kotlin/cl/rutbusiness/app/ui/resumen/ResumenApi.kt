@@ -39,7 +39,7 @@ class ResumenApi(private val api: ApiFactory) {
      * cajero recibe 403, y eso no es un error a esconder sino la respuesta
      * correcta, que la pantalla muestra como tal.
      */
-    suspend fun dashboard(): Resultado<DashboardDto> = llamar(api.baseUrl) {
+    suspend fun dashboard(): Resultado<DashboardDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/reports/dashboard")
             .exigirExito(api.baseUrl)
             .body()
@@ -53,7 +53,7 @@ class ResumenApi(private val api: ApiFactory) {
      * server; si ese día no hubo ventas, no hay fila.
      */
     suspend fun ventasDiarias(desde: String, hasta: String): Resultado<List<VentaDiariaDto>> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.get("${api.baseUrl}/api/v1/reports/sales-daily") {
                 parameter("from", desde)
                 parameter("to", hasta)
@@ -61,14 +61,14 @@ class ResumenApi(private val api: ApiFactory) {
         }
 
     /** Lo que le deben al negocio: `GET /api/v1/reports/por-cobrar`. */
-    suspend fun porCobrar(): Resultado<PorCobrarDto> = llamar(api.baseUrl) {
+    suspend fun porCobrar(): Resultado<PorCobrarDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/reports/por-cobrar")
             .exigirExito(api.baseUrl)
             .body()
     }
 
     /** Cajas abiertas ahora mismo: `GET /api/v1/cash-sessions?status=open`. */
-    suspend fun cajasAbiertas(): Resultado<List<CajaDto>> = llamar(api.baseUrl) {
+    suspend fun cajasAbiertas(): Resultado<List<CajaDto>> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/cash-sessions") {
             parameter("status", "open")
             parameter("limit", 5)
@@ -85,7 +85,7 @@ class ResumenApi(private val api: ApiFactory) {
      * un peso de diferencia entre lo que dice el teléfono y lo que dice el
      * arqueo es un cuadre que no cierra.
      */
-    suspend fun arqueo(cajaId: String): Resultado<ArqueoDto> = llamar(api.baseUrl) {
+    suspend fun arqueo(cajaId: String): Resultado<ArqueoDto> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/cash-sessions/$cajaId/arqueo")
             .exigirExito(api.baseUrl)
             .body()
@@ -93,7 +93,7 @@ class ResumenApi(private val api: ApiFactory) {
 
     /** Lotes que se vencen pronto: `GET /api/v1/reports/near-expiry`. */
     suspend fun porVencer(dias: Int = DIAS_DE_VENCIMIENTO): Resultado<List<LotePorVencerDto>> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.get("${api.baseUrl}/api/v1/reports/near-expiry") {
                 parameter("days", dias)
             }.exigirExito(api.baseUrl).body()
@@ -108,7 +108,7 @@ class ResumenApi(private val api: ApiFactory) {
      * ([UMBRAL_STOCK_BAJO]), para que el número y la lista no se contradigan.
      */
     suspend fun stockBajo(limite: Int = MAXIMO_EN_LISTA): Resultado<List<ProductDto>> =
-        llamar(api.baseUrl) {
+        llamar(api) {
             api.http.get("${api.baseUrl}/api/v1/products") {
                 parameter("low_stock", UMBRAL_STOCK_BAJO)
                 parameter("active", true)

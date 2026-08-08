@@ -29,7 +29,7 @@ data class ClienteDto(
  */
 class CustomerRepository(private val api: ApiFactory) {
 
-    suspend fun listar(): Resultado<List<ClienteDto>> = llamar(api.baseUrl) {
+    suspend fun listar(): Resultado<List<ClienteDto>> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/clientes")
             .exigirExito(api.baseUrl)
             .body<List<ClienteDto>>()

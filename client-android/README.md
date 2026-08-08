@@ -38,14 +38,39 @@ core/    Kotlin Multiplataforma. Red, modelos, sesión, errores.
 app/     Aplicación Android. Compose, ViewModels, y el único `Activity`.
 ```
 
-Solo dos cosas son `expect/actual`: el motor HTTP (`defaultHttpClientEngine`) y
-el almacenamiento persistente (`AlmacenamientoPlataforma`). El día que se sume
-iOS, se agrega `iosArm64()` en `core/build.gradle.kts` y se escriben esos dos
-`actual` para Darwin y Keychain. Nada más de la capa de red cambia.
+Tres cosas son `expect/actual`: el motor HTTP (`defaultHttpClientEngine`), el
+almacenamiento persistente (`AlmacenamientoPlataforma`) y el monitor de red
+(`MonitorDeRed`). El día que se sume iOS, se agrega `iosArm64()` en
+`core/build.gradle.kts` y se escriben esos tres `actual` para Darwin, Keychain y
+`NWPathMonitor`. Nada más de la capa de red cambia.
 
 **Regla que sostiene eso**: ningún composable importa `android.*`.
-`MainActivity` es la única frontera. Si un `import android.` se cuela dentro de
-`ui/`, esa lógica está en la capa equivocada.
+`MainActivity` es la única frontera, y lo de plataforma que la app necesita vive
+en paquetes propios fuera de `ui/` (`cl.rutbusiness.app.camara` para CameraX,
+`cl.rutbusiness.app.impresion` para el Bluetooth). `FronteraDePlataformaTest`
+rompe el build si un `import android.` se cuela dentro de `ui/`.
+
+## Sin señal
+
+El local tiene wifi que se cae y datos móviles que van y vienen, así que la app
+no asume que el server contesta. Todo eso vive en `core/.../offline/`:
+
+| Qué | Dónde |
+|---|---|
+| ¿Estamos llegando al sistema del negocio? | `ConexionConElNegocio` (enlace del SO **+** cómo le fue a la última llamada) |
+| Lo último que contestó el server | `CacheDeLecturas` (archivos sueltos, no DataStore: no quedan residentes) |
+| Ventas cobradas que todavía no llegaron | `ColaDeVentas` (disco, escritura atómica) |
+| Reintento solo, con backoff | `DespachadorDeVentas` |
+
+**Lo que no se pierde es la venta.** Se escribe a disco **antes** del primer
+intento, con la misma clave de idempotencia que usa el cobro normal, y el
+reintento sale con esa misma clave: el server contesta 200 con la orden que ya
+creó en vez de cobrar de nuevo. La dueña ve la cola desde la franja de arriba.
+
+Sin señal **se puede** mirar lo cacheado, armar el carrito y cobrar en efectivo.
+**No se puede** fiar, cobrar por transferencia ni tocar la caja, y cada una lo
+dice antes de que la dueña lo intente. Ningún monto se calcula en el teléfono:
+donde no hay número del server, la pantalla dice "se confirma al enviarse".
 
 ## El cliente de la API se genera
 

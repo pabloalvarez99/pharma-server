@@ -56,7 +56,7 @@ suspend fun crearProducto(
     nombre: String,
     precio: String,
     stock: Int = 1,
-): Resultado<ProductDto> = llamar(api.baseUrl) {
+): Resultado<ProductDto> = llamar(api) {
     api.http.post("${api.baseUrl}/api/v1/products") {
         contentType(ContentType.Application.Json)
         setBody(NuevoProducto(name = nombre, price = precio, stock = stock))
@@ -74,7 +74,7 @@ suspend fun pegarCodigo(
     api: ApiFactory,
     productoId: String,
     codigo: String,
-): Resultado<ProductDto> = llamar(api.baseUrl) {
+): Resultado<ProductDto> = llamar(api) {
     api.http.patch("${api.baseUrl}/api/v1/products/$productoId") {
         contentType(ContentType.Application.Json)
         setBody(CambioDeCodigo(codigo))

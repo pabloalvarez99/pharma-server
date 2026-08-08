@@ -15,6 +15,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.offline.FranjaDeConexion
+import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.offline.PantallaDeCola
+import cl.rutbusiness.app.ui.offline.hayConexion
+import cl.rutbusiness.app.ui.offline.ventasEnCola
 
 /**
  * El armazón de la navegación: qué pestaña está elegida, qué se dibuja arriba
@@ -42,6 +47,15 @@ internal fun ContenedorDeDestinos(
     var destino by rememberSaveable { mutableStateOf(inicial) }
     val estados = rememberSaveableStateHolder()
 
+    // El estado de la conexión y la cola de ventas viven arriba de las
+    // pestañas porque no son de ninguna: la dueña tiene que ver "sin conexión"
+    // esté donde esté, y contar las ventas que faltan mandar sin tener que
+    // buscar en qué pantalla estaban.
+    val offline = LocalOffline.current
+    val conectado = hayConexion()
+    val cola = ventasEnCola()?.value.orEmpty()
+    var viendoCola by rememberSaveable { mutableStateOf(false) }
+
     // Atrás desde una pestaña secundaria vuelve al inicio en vez de cerrar la
     // app de golpe. En [inicial] queda deshabilitado y el sistema hace lo suyo:
     // en la pantalla de entrada, atrás sí significa salir, y atraparlo ahí
@@ -55,7 +69,18 @@ internal fun ContenedorDeDestinos(
         destino = inicial
     }
 
+    // Va después del anterior a propósito: el `BackHandler` registrado más
+    // tarde es el que gana, así que atrás cierra primero la lista de la cola
+    // -que es lo último que se abrió- y recién después cambia de pestaña.
+    BackHandler(enabled = viendoCola) { viendoCola = false }
+
     Column(modifier = modifier.fillMaxSize()) {
+        FranjaDeConexion(
+            conectado = conectado,
+            cola = cola,
+            onVerCola = { viendoCola = true },
+        )
+
         // `weight(1f)` y no `fillMaxSize()`: el contenido ocupa lo que sobra
         // después de la barra. Con `fillMaxSize` la barra queda empujada fuera
         // de la pantalla, y al 200% eso pasa siempre.
@@ -75,8 +100,23 @@ internal fun ContenedorDeDestinos(
                 // tapado justo mientras se escribe.
                 .consumeWindowInsets(WindowInsets.systemBars.only(WindowInsetsSides.Bottom)),
         ) {
-            estados.SaveableStateProvider(destino.name) {
-                contenido(destino)
+            // La cola tapa el destino pero **no** la barra de pestañas ni la
+            // franja: mirar qué ventas faltan mandar no puede sacar a la dueña
+            // de donde estaba. Al cerrarla vuelve a la misma pantalla con el
+            // mismo estado, porque el `SaveableStateProvider` sigue montado.
+            if (viendoCola && offline != null) {
+                PantallaDeCola(
+                    cola = cola,
+                    conectado = conectado,
+                    ahora = offline.reloj(),
+                    onIntentarAhora = { offline.despachador.intentarAhora() },
+                    onDescartar = { clave -> offline.cola.descartar(clave) },
+                    onCerrar = { viendoCola = false },
+                )
+            } else {
+                estados.SaveableStateProvider(destino.name) {
+                    contenido(destino)
+                }
             }
         }
 

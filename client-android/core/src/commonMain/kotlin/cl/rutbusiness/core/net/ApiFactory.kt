@@ -4,6 +4,7 @@ import cl.rutbusiness.core.api.apis.CatalogApi
 import cl.rutbusiness.core.api.apis.InventoryApi
 import cl.rutbusiness.core.api.apis.SalesApi
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.DefaultRequest
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -22,12 +23,27 @@ import kotlinx.serialization.json.Json
  */
 class ApiFactory(
     baseUrl: String,
+    /**
+     * Quién se entera de si el server contestó. Por defecto nadie: los tests y
+     * las herramientas no necesitan el cartel de "sin conexión".
+     *
+     * Va **antes** que [tokenProvider] para que el proveedor de token siga
+     * siendo el último parámetro y las llamadas `ApiFactory(url) { token }` no
+     * cambien.
+     */
+    val red: ReporteDeRed = ReporteDeRed.Nulo,
+    /**
+     * El motor HTTP. En producción siempre el de la plataforma; las pruebas le
+     * pasan uno de mentira para poder ejercitar el camino completo -incluida la
+     * cabecera `Idempotency-Key`- sin levantar un server.
+     */
+    motor: HttpClientEngine = defaultHttpClientEngine(),
     private val tokenProvider: () -> String?,
 ) {
     /** URL canónica contra la que habla esta instancia. */
     val baseUrl: String = baseUrl.trimEnd('/')
 
-    val http: HttpClient = HttpClient(defaultHttpClientEngine()) {
+    val http: HttpClient = HttpClient(motor) {
         expectSuccess = false
         install(ContentNegotiation) { json(JSON) }
         // El bearer se pone en el cliente y no en cada `*Api` generado: así lo
