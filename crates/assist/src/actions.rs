@@ -170,6 +170,52 @@ pub enum Action {
         amount: Decimal,
         debt_before: Decimal,
     },
+    /// Sell over the counter — reuses `domain::sales::service::post_sale`, the
+    /// SAME atomic transaction the POS screen posts (stock decrement, stock
+    /// movements, FEFO lot consumption, loyalty, receta autodetection and the
+    /// drug-interaction check). Nothing about a sale is reimplemented here.
+    ///
+    /// `lines` (with the catalog's own `unit_price`), `subtotal`, `total` and
+    /// `warnings` are all resolved server-side at propose time (see [`build`]):
+    /// the money comes from `domain::invariants`, never from arithmetic typed
+    /// into this crate, so the agent and the till always agree on the number.
+    Vender {
+        lines: Vec<VentaLinea>,
+        subtotal: Decimal,
+        total: Decimal,
+        /// Optional buyer (loyalty points, sale history). `None` = walk-in.
+        customer_id: Option<String>,
+        customer_name: Option<String>,
+        /// es-CL drug-interaction warnings for this cart, so the owner reads
+        /// them BEFORE confirming (see [`interaction_warnings`]).
+        warnings: Vec<String>,
+    },
+    /// The same sale, charged to the customer's cuenta corriente (`pos_fiado`):
+    /// the drawer takes no cash and `post_sale` posts the cargo through
+    /// `domain::credit::repo::post_cargo`. The customer is mandatory —
+    /// "fiar" without a name is not a sale, it is a gift.
+    FiarVenta {
+        lines: Vec<VentaLinea>,
+        subtotal: Decimal,
+        total: Decimal,
+        customer_id: String,
+        customer_name: String,
+        /// What the customer owed at propose time; confirmation prose only.
+        debt_before: Decimal,
+        warnings: Vec<String>,
+    },
+}
+
+/// One resolved sale line. `unit_price` is the CATALOG price read at propose
+/// time — never a number the owner said out loud, never computed here — and it
+/// is frozen into the confirm token, so the confirmed sale charges exactly what
+/// the confirmation prompt showed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VentaLinea {
+    pub product_id: String,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_price: Decimal,
 }
 
 impl Action {
@@ -189,6 +235,8 @@ impl Action {
             Action::CrearProveedor { .. } => "crear_proveedor",
             Action::DispensarReceta { .. } => "dispensar_receta",
             Action::RegistrarAbono { .. } => "registrar_abono",
+            Action::Vender { .. } => "vender",
+            Action::FiarVenta { .. } => "fiar_venta",
         }
     }
 
@@ -305,6 +353,44 @@ impl Action {
                 customer_name,
                 clp(*debt_before),
             ),
+            // A sale moves stock AND money, so the confirmation prompt is the
+            // owner's only defence against a mis-heard product or quantity: it
+            // spells out every line (producto, cantidad, precio unitario, total
+            // de la línea), the total to charge, who is being fiado, and any
+            // drug-interaction warning — never a one-line "vender 2 cosas".
+            Action::Vender {
+                lines,
+                total,
+                customer_name,
+                warnings,
+                ..
+            } => {
+                let mut s = format!("Vender:\n{}\n", venta_lineas_text(lines));
+                s.push_str(&format!("Total a cobrar: {} en efectivo.", clp(*total)));
+                if let Some(c) = customer_name {
+                    s.push_str(&format!("\nSe la anoto a {c}."));
+                }
+                s.push_str(&warnings_text(warnings));
+                s
+            }
+            Action::FiarVenta {
+                lines,
+                total,
+                customer_name,
+                debt_before,
+                warnings,
+                ..
+            } => {
+                let mut s = format!("Fiar:\n{}\n", venta_lineas_text(lines));
+                s.push_str(&format!(
+                    "Total: {}. Queda fiado a {} (hoy debe {}).",
+                    clp(*total),
+                    customer_name,
+                    clp(*debt_before),
+                ));
+                s.push_str(&warnings_text(warnings));
+                s
+            }
         }
     }
 
@@ -438,8 +524,91 @@ impl Action {
                 "amount": amount.to_string(),
                 "debt_before": debt_before.to_string(),
             }),
+            Action::Vender {
+                lines,
+                subtotal,
+                total,
+                customer_id,
+                customer_name,
+                warnings,
+            } => serde_json::json!({
+                "lines": venta_lineas_json(lines),
+                "subtotal": subtotal.to_string(),
+                "total": total.to_string(),
+                "payment_method": "pos_cash",
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "warnings": warnings,
+            }),
+            Action::FiarVenta {
+                lines,
+                subtotal,
+                total,
+                customer_id,
+                customer_name,
+                debt_before,
+                warnings,
+            } => serde_json::json!({
+                "lines": venta_lineas_json(lines),
+                "subtotal": subtotal.to_string(),
+                "total": total.to_string(),
+                "payment_method": "pos_fiado",
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "debt_before": debt_before.to_string(),
+                "warnings": warnings,
+            }),
         }
     }
+}
+
+/// One "- 2 × Paracetamol 500 mg a $990 c/u = $1.980" per line. The line total
+/// comes from `domain::invariants::line_total` — the same formula the sale
+/// itself uses — so the prompt can never quote a number the till disagrees with.
+fn venta_lineas_text(lines: &[VentaLinea]) -> String {
+    lines
+        .iter()
+        .map(|l| {
+            format!(
+                "- {} × {} a {} c/u = {}",
+                l.quantity,
+                l.product_name,
+                clp(l.unit_price),
+                clp(domain::invariants::line_total(l.unit_price, l.quantity)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Structured echo of the lines so the UI can render a confirmation card
+/// without re-parsing [`venta_lineas_text`].
+fn venta_lineas_json(lines: &[VentaLinea]) -> serde_json::Value {
+    serde_json::Value::Array(
+        lines
+            .iter()
+            .map(|l| {
+                serde_json::json!({
+                    "product_id": l.product_id,
+                    "product_name": l.product_name,
+                    "quantity": l.quantity,
+                    "unit_price": l.unit_price.to_string(),
+                    "line_total": domain::invariants::line_total(l.unit_price, l.quantity)
+                        .to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Append drug-interaction warnings to a confirmation prompt (empty string when
+/// the cart is clean).
+fn warnings_text(warnings: &[String]) -> String {
+    warnings
+        .iter()
+        .map(|w| format!("\nOjo: {w}"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Resulting stock after applying a `set`/`delta` adjustment to `old`. Exactly
@@ -685,6 +854,21 @@ pub enum ActionParse {
         customer_name: String,
         amount: Decimal,
     },
+    /// A sale. `fiado` picks the payment method (cuenta corriente vs efectivo);
+    /// every `product_name` still needs DB resolution into a record id + the
+    /// catalog price, and `customer_name` into a customer id (see [`build`]).
+    Venta {
+        lines: Vec<VentaLineaParse>,
+        customer_name: Option<String>,
+        fiado: bool,
+    },
+}
+
+/// One "<cantidad> <producto>" heard in a sale request, before any DB lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VentaLineaParse {
+    pub product_name: String,
+    pub quantity: i64,
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -769,6 +953,17 @@ pub fn parse_action(question: &str) -> ActionParse {
         && !q.starts_with("cual")
     {
         return parse_cancela(&q);
+    }
+
+    // THE SALE — the counter's central act, so it is tested early. Like
+    // `parse_stock` it returns `Some` only when it confidently sees a sale
+    // command (sale/charge/fiar verb + something to sell); otherwise `None`, so
+    // the read intents about sales ("cuánto vendí hoy", "cuánto fiado tengo",
+    // "quién me debe") and the other write branches below are left untouched.
+    // `question` (not `q`) is threaded through because a capital letter is the
+    // cheapest signal that "a Juan" is a person and "a granel" is not.
+    if let Some(parsed) = parse_venta(&q, question) {
+        return parsed;
     }
 
     // Fiado payment: "abónale 5000 a doña Ana", "doña Ana me pagó 3000". Gated
@@ -1498,6 +1693,485 @@ fn clean_abono_name(s: &str) -> String {
     strip_trailing_punct(t).trim().to_string()
 }
 
+// ---- venta (el acto central del mesón) ---------------------------------------
+
+/// Largest quantity a single spoken line may carry. A shop order of more than
+/// this is far likelier to be a mis-heard price than a real quantity, so the
+/// agent asks again instead of proposing it.
+const VENTA_MAX_QTY: i64 = 10_000;
+
+/// Cap on lines in one spoken sale. Past this the till screen is the right tool.
+const VENTA_MAX_LINEAS: usize = 20;
+
+/// Imperative forms that introduce a SALE. Exact words on purpose (not stems):
+/// "vendidos"/"vendí" belong to the READ intents ("los más vendidos", "cuánto
+/// vendí hoy") and a stem match would steal them. "bend*" is the everyday b/v
+/// misspelling in Chile.
+const VENTA_VERBS: &[&str] = &[
+    "vende",
+    "vendeme",
+    "vendele",
+    "vendelo",
+    "vendela",
+    "vendeles",
+    "vender",
+    "venderle",
+    "venda",
+    "vendame",
+    "bende",
+    "bendeme",
+    "bendele",
+    "bender",
+    "despacha",
+    "despachame",
+    "despachale",
+    "despachar",
+];
+
+/// Imperative "chárgaselo a X" forms. Apart from [`VENTA_VERBS`] because
+/// "cobrar" is also the READ vocabulary of PorCobrar ("cuentas por cobrar"),
+/// which [`parse_venta`] refuses outright.
+const COBRO_VERBS: &[&str] = &["cobra", "cobrale", "cobrame", "cobrales", "cobrar", "cobrarle"];
+
+/// Imperative forms of "fiar" that can ANCHOR a sale ("fíale 1 alcohol gel a
+/// Juan"). The adjective forms ("fiado"/"fiada") are deliberately absent: they
+/// sit AFTER the product ("1 alcohol gel fiado a Juan"), so anchoring on them
+/// would swallow the product name.
+const FIAR_VERBS: &[&str] = &[
+    "fia", "fiale", "fiame", "fialo", "fiala", "fiar", "fiarle", "fiaselo",
+];
+
+/// Honorifics that mark the tail of a sale as a PERSON, not more product.
+const VENTA_HONORIFICS: &[&str] = &[
+    "senora ", "senor ", "sra ", "sr ", "srta ", "senorita ", "don ", "dona ", "cliente ",
+    "clienta ", "caballero ", "la senora ", "el senor ",
+];
+
+/// Connectors that can introduce the buyer at the tail of a sale request.
+const VENTA_CUST_CONN: &[&str] = &[" a la ", " para la ", " para el ", " al ", " a ", " para "];
+
+/// Spoken filler that is never product nor customer ("vende 2 x 500 AL TIRO").
+/// Stripped BEFORE the customer is captured, so "al tiro" can never be read as
+/// "al «Tiro»".
+const VENTA_FILLER: &[&str] = &[
+    " al tiro",
+    " altiro",
+    " por favor",
+    " porfa",
+    " porfis",
+    " ahora",
+    " ya",
+    " rapidito",
+    " rapido",
+    " gracias",
+    " please",
+    " de una",
+];
+
+/// Spoken small numbers. The owner says "un paracetamol", not "1 paracetamol".
+const VENTA_NUM_WORDS: &[(&str, i64)] = &[
+    ("un", 1),
+    ("una", 1),
+    ("uno", 1),
+    ("dos", 2),
+    ("tres", 3),
+    ("cuatro", 4),
+    ("cinco", 5),
+    ("seis", 6),
+    ("siete", 7),
+    ("ocho", 8),
+    ("nueve", 9),
+    ("diez", 10),
+    ("once", 11),
+    ("doce", 12),
+    ("docena", 12),
+    ("par", 2),
+];
+
+/// What kind of verb opened the request. It decides how a request WITHOUT a
+/// product is answered: "véndeme" with nothing to sell earns a nudge, while
+/// "cóbrale 5000 a doña Ana" is not a sale at all and must fall through to the
+/// read agent untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VentaAnchor {
+    /// vender / fiar — unmistakably a sale.
+    Venta,
+    /// cobrar, or a generic create verb riding a "fiado" cue.
+    Otro,
+}
+
+/// True when `word` is one of `verbs`, or one single-character typo away from
+/// one of them (both at least 5 chars, so short words are matched exactly).
+/// Covers the everyday "vendme"/"cobrle" slips without opening the door to
+/// unrelated vocabulary.
+fn fuzzy_verb(word: &str, verbs: &[&str]) -> bool {
+    if verbs.contains(&word) {
+        return true;
+    }
+    if word.chars().count() < 5 {
+        return false;
+    }
+    verbs
+        .iter()
+        .filter(|v| v.chars().count() >= 5)
+        .any(|v| edit_distance_1(word, v))
+}
+
+/// True when `a` and `b` are exactly one insertion, deletion or substitution
+/// apart. Cheap early-outs, no allocation, no full distance matrix.
+fn edit_distance_1(a: &str, b: &str) -> bool {
+    let (av, bv): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let (la, lb) = (av.len(), bv.len());
+    if la.abs_diff(lb) > 1 {
+        return false;
+    }
+    let mut i = 0;
+    let mut j = 0;
+    let mut edits = 0;
+    while i < la && j < lb {
+        if av[i] == bv[j] {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        edits += 1;
+        if edits > 1 {
+            return false;
+        }
+        match la.cmp(&lb) {
+            std::cmp::Ordering::Greater => i += 1,
+            std::cmp::Ordering::Less => j += 1,
+            std::cmp::Ordering::Equal => {
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    edits + (la - i) + (lb - j) == 1
+}
+
+/// True when `q` carries a fiado cue: the adjective ("fiado"/"fiada"), an
+/// imperative form of "fiar", or the everyday paraphrases. Word-initial like
+/// [`has_abono_cue`], so "confía" or "desafía" never trip it.
+fn has_fiado_cue(q: &str) -> bool {
+    q.split(|c: char| !c.is_alphanumeric())
+        .any(|w| w.starts_with("fiad") || FIAR_VERBS.contains(&w))
+        || q.contains("a cuenta")
+        || q.contains("la libreta")
+}
+
+/// Byte offset just past the verb that opens a sale, plus what kind of verb it
+/// was. A generic create verb ("anota …") only anchors when the text also
+/// carries a fiado cue — that is the "anota 1 alcohol gel fiado a Juan" form.
+fn venta_anchor(q: &str, fiado: bool) -> Option<(usize, VentaAnchor)> {
+    let mut create_at: Option<usize> = None;
+    let mut idx = 0usize;
+    for w in q.split_whitespace() {
+        let start = idx + q[idx..].find(w)?;
+        let end = start + w.len();
+        idx = end;
+        let word: String = w.chars().filter(|c| c.is_alphanumeric()).collect();
+        if fuzzy_verb(&word, VENTA_VERBS) || FIAR_VERBS.contains(&word.as_str()) {
+            return Some((end, VentaAnchor::Venta));
+        }
+        if fuzzy_verb(&word, COBRO_VERBS) {
+            return Some((end, VentaAnchor::Otro));
+        }
+        if create_at.is_none() && CREATE_VERBS.iter().any(|v| v.trim() == word) {
+            create_at = Some(end);
+        }
+    }
+    if fiado {
+        create_at.map(|p| (p, VentaAnchor::Otro))
+    } else {
+        None
+    }
+}
+
+/// Drop spoken filler off the tail (repeatedly: "al tiro por favor").
+fn strip_venta_filler(s: &str) -> &str {
+    let mut t = strip_trailing_punct(s.trim());
+    loop {
+        let before = t;
+        for f in VENTA_FILLER {
+            if let Some(x) = t.strip_suffix(f) {
+                t = strip_trailing_punct(x.trim());
+            }
+        }
+        if t == before {
+            return t;
+        }
+    }
+}
+
+/// Remove the fiado markers from the item region so they never land inside a
+/// product name ("1 alcohol gel FIADO a Juan"). The two "… de <cliente>" forms
+/// collapse to a plain " a " so the buyer connector survives the cleanup.
+fn strip_fiado_markers(s: &str) -> String {
+    let mut t = format!(" {} ", s.trim());
+    for (from, to) in [
+        (" a cuenta de ", " a "),
+        (" en la libreta de ", " a "),
+        (" a la libreta de ", " a "),
+    ] {
+        while let Some(p) = t.find(from) {
+            t.replace_range(p..p + from.len(), to);
+        }
+    }
+    for m in [
+        " al fiado ",
+        " fiado ",
+        " fiada ",
+        " fiados ",
+        " a cuenta ",
+        " en la libreta ",
+        " a la libreta ",
+    ] {
+        while let Some(p) = t.find(m) {
+            t.replace_range(p..p + m.len(), " ");
+        }
+    }
+    t.trim().to_string()
+}
+
+/// Split "<items> a <cliente>" at the LAST buyer connector. The tail is only
+/// taken as a person when the text really points at one — a fiado sale (there
+/// is always someone to fiar to), an honorific ("a la señora Pérez"), or a
+/// capitalised word in the ORIGINAL question ("a Juan"). Otherwise the whole
+/// region stays product, so "arroz a granel" is never sold to «Granel».
+fn split_venta_customer(region: &str, raw: &str, fiado: bool) -> (String, Option<String>) {
+    let whole = region.trim().to_string();
+    let hay = format!(" {} ", region.trim());
+    let mut best: Option<(usize, usize)> = None;
+    for c in VENTA_CUST_CONN {
+        let mut from = 0usize;
+        while let Some(rel) = hay[from..].find(c) {
+            let pos = from + rel;
+            let better = match best {
+                Some((p, l)) => pos > p || (pos == p && c.len() > l),
+                None => true,
+            };
+            if better {
+                best = Some((pos, c.len()));
+            }
+            from = pos + 1;
+        }
+    }
+    let Some((pos, len)) = best else {
+        return (whole, None);
+    };
+    let head = hay[..pos].trim().to_string();
+    let tail = hay[pos + len..].trim();
+    if head.is_empty() || tail.is_empty() {
+        return (whole, None);
+    }
+    let honorific = VENTA_HONORIFICS.iter().any(|h| tail.starts_with(h));
+    let name = clean_abono_name(tail);
+    let Some(first) = name.split_whitespace().next() else {
+        return (whole, None);
+    };
+    if fiado || honorific || word_is_capitalized_in(raw, first) {
+        (head, Some(titlecase(&name)))
+    } else {
+        (whole, None)
+    }
+}
+
+/// True when `word` (already normalized) appears capitalised in the owner's
+/// ORIGINAL text. `normalize` folds accents, which shifts byte offsets, so the
+/// comparison runs word by word instead of by slicing.
+fn word_is_capitalized_in(raw: &str, word: &str) -> bool {
+    raw.split_whitespace().any(|w| {
+        let stripped = strip_trailing_punct(w);
+        normalize(stripped) == word
+            && stripped
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_uppercase())
+    })
+}
+
+/// Split the item region into lines on " y " / ",". Only splits when EVERY
+/// later segment opens with a quantity, so "alcohol gel y jabón" (one product
+/// whose name carries a "y") stays a single line.
+fn split_venta_lineas(items: &str) -> Vec<String> {
+    let parts: Vec<&str> = items
+        .split(" y ")
+        .flat_map(|p| p.split(','))
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.len() > 1 && parts[1..].iter().all(|p| starts_with_quantity(p)) {
+        parts.into_iter().map(str::to_string).collect()
+    } else {
+        vec![items.trim().to_string()]
+    }
+}
+
+fn starts_with_quantity(seg: &str) -> bool {
+    let s = seg.trim_start();
+    if s.starts_with(|c: char| c.is_ascii_digit()) {
+        return true;
+    }
+    let first = s.split_whitespace().next().unwrap_or("");
+    VENTA_NUM_WORDS.iter().any(|(w, _)| *w == first)
+}
+
+/// Leading quantity of a line: digits, a spoken small number, or an implicit 1
+/// ("véndeme paracetamol" = one).
+fn take_quantity(seg: &str) -> (i64, &str) {
+    let s = seg.trim();
+    let head: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    if !head.is_empty() {
+        let digits: String = head.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<i64>() {
+            return (n, &s[head.len()..]);
+        }
+    }
+    let first = s.split_whitespace().next().unwrap_or("");
+    if let Some((_, n)) = VENTA_NUM_WORDS.iter().find(|(w, _)| *w == first) {
+        return (*n, &s[first.len()..]);
+    }
+    (1, s)
+}
+
+/// Strip counting words and articles off a captured product name. "2 x 500"
+/// leaves "500" — a product token (the 500 mg presentation), which the catalog
+/// lookup in [`build`] then resolves or reports as ambiguous.
+fn clean_venta_product(s: &str) -> String {
+    let mut t = strip_trailing_punct(s.trim()).trim();
+    loop {
+        let before = t;
+        for lead in [
+            "unidades de ",
+            "unidad de ",
+            "cajas de ",
+            "caja de ",
+            "tiras de ",
+            "tira de ",
+            "frascos de ",
+            "frasco de ",
+            "productos ",
+            "producto ",
+            "unidades ",
+            "unidad ",
+            "x ",
+            "de ",
+            "del ",
+            "el ",
+            "la ",
+            "los ",
+            "las ",
+        ] {
+            if let Some(rest) = t.strip_prefix(lead) {
+                t = rest.trim();
+            }
+        }
+        if t == before {
+            break;
+        }
+    }
+    for cut in [" a", " al", " para", " por"] {
+        if let Some(x) = t.strip_suffix(cut) {
+            t = x.trim();
+            break;
+        }
+    }
+    strip_trailing_punct(t).trim().to_string()
+}
+
+/// Try to read a sale. `None` (→ read path) unless the text confidently carries
+/// a sale command; `Some(Incomplete)` when the verb is there but the order is
+/// not; `Some(Venta)` when it is. Never guesses a product: the catalog lookup
+/// and the human confirmation in [`build`] are what stand between a mis-heard
+/// word and a stock movement.
+fn parse_venta(q: &str, raw: &str) -> Option<ActionParse> {
+    // A question is never a sale.
+    if ["que ", "cuanto", "cual", "quien", "cuando", "donde", "como "]
+        .iter()
+        .any(|p| q.starts_with(p))
+    {
+        return None;
+    }
+    // The fiado LEDGER reads share the vocabulary but never carry an order.
+    if ["por cobrar", "me deben", "me debe", "quien debe", "cuentas por"]
+        .iter()
+        .any(|w| q.contains(w))
+    {
+        return None;
+    }
+    // Other whitelisted writes own these nouns.
+    if q.contains("orden de compra") || q.contains("gasto") {
+        return None;
+    }
+    let fiado = has_fiado_cue(q);
+    let (anchor, kind) = venta_anchor(q, fiado)?;
+    // A generic create verb is only borrowed for the fiado form; it must not
+    // hijack "crea un producto/cliente/proveedor/receta".
+    if kind == VentaAnchor::Otro
+        && ["producto", "proveedor", "receta"]
+            .iter()
+            .any(|n| q.contains(n))
+    {
+        return None;
+    }
+    let region = strip_fiado_markers(strip_venta_filler(&q[anchor..]));
+    let (items, customer_name) = split_venta_customer(&region, raw, fiado);
+    let items = strip_venta_filler(&items).to_string();
+
+    let nudge = |msg: &str| match kind {
+        // "véndeme" with nothing to sell deserves an answer; "cóbrale 5000 a
+        // doña Ana" is not a sale at all — leave it to the read agent.
+        VentaAnchor::Venta => Some(ActionParse::Incomplete(msg.to_string())),
+        VentaAnchor::Otro => None,
+    };
+    if items.is_empty() {
+        return nudge("¿Qué te compraron? Por ejemplo: «véndeme 2 paracetamol».");
+    }
+
+    let mut lines = Vec::new();
+    for seg in split_venta_lineas(&items) {
+        let (quantity, rest) = take_quantity(&seg);
+        let product_name = clean_venta_product(rest);
+        if product_name.is_empty() {
+            continue;
+        }
+        if quantity <= 0 || quantity > VENTA_MAX_QTY {
+            return Some(ActionParse::Incomplete(format!(
+                "¿{quantity} unidades de {product_name}? Dime la cantidad de nuevo, por si te \
+                 entendí mal."
+            )));
+        }
+        lines.push(VentaLineaParse {
+            product_name,
+            quantity,
+        });
+    }
+    if lines.is_empty() {
+        return nudge("¿Qué te compraron? Por ejemplo: «véndeme 2 paracetamol».");
+    }
+    if lines.len() > VENTA_MAX_LINEAS {
+        return Some(ActionParse::Incomplete(
+            "Son demasiados productos para cantármelos de una; cóbralos en la pantalla de \
+             venta."
+                .into(),
+        ));
+    }
+    if fiado && customer_name.is_none() {
+        return Some(ActionParse::Incomplete(
+            "¿A quién se lo fío? Por ejemplo: «anota 1 alcohol gel fiado a Juan».".into(),
+        ));
+    }
+    Some(ActionParse::Venta {
+        lines,
+        customer_name,
+        fiado,
+    })
+}
+
 /// Leading run of money digits (`0-9` and CL thousands `.`) of `s`.
 fn digits_after(s: &str) -> String {
     s.trim_start()
@@ -2110,7 +2784,220 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 debt_before: debt,
             }))
         }
+        ActionParse::Venta {
+            lines,
+            customer_name,
+            fiado,
+        } => build_venta(db, tenant, &lines, customer_name.as_deref(), fiado).await,
     }
+}
+
+/// Resolve a spoken sale into a ready [`Action::Vender`] / [`Action::FiarVenta`]
+/// — or into a friendly es-CL refusal. Everything that can go wrong is caught
+/// HERE, before a token is minted, so the owner reads a sentence instead of
+/// confirming a sale that will fail:
+///
+/// * caja cerrada (efectivo only — fiado moves no cash),
+/// * producto inexistente / ambiguo / que se vende por variante,
+/// * medicamento controlado (Ley 20.000 — se va a Recetas, ver abajo),
+/// * stock insuficiente,
+/// * cliente inexistente o ambiguo (obligatorio al fiar).
+///
+/// Clinical safety: this path crosses the SAME two controls a screen sale
+/// crosses — `domain::sales::controlled::is_controlled` and
+/// `domain::sales::interactions::check` — and it crosses them EARLIER. A
+/// controlled substance is refused outright by voice (dispensing it needs the
+/// prescribing doctor on the record, which a spoken order cannot carry), and
+/// interaction warnings are shown BEFORE the owner confirms, not only in the
+/// sale's response. `post_sale` runs both again at execute time; nothing here
+/// replaces them.
+async fn build_venta(
+    db: &Db,
+    tenant: &Thing,
+    parsed: &[VentaLineaParse],
+    customer_name: Option<&str>,
+    fiado: bool,
+) -> DomainResult<BuildOutcome> {
+    // Cash needs an open drawer: the sale's cash lands in the OPEN session's
+    // running total (migración 0030), so selling with the drawer closed would
+    // put money in a till that no arqueo will ever count. Fiado takes no cash.
+    if !fiado {
+        use domain::cash_register::model::SessionFilters;
+        use domain::cash_register::service as caja;
+        let open = caja::list_sessions(
+            db,
+            tenant,
+            SessionFilters {
+                status: Some("open".into()),
+                user: None,
+                limit: Some(1),
+                offset: None,
+            },
+        )
+        .await?;
+        if open.is_empty() {
+            return Ok(BuildOutcome::Reject(
+                "No tienes la caja abierta, así que todavía no puedo cobrar. Ábrela primero \
+                 («abre la caja con $50.000») y te la registro al tiro."
+                    .into(),
+            ));
+        }
+    }
+
+    use domain::catalog::model::ProductFilters;
+    use domain::catalog::service as catalog;
+    let mut lines: Vec<VentaLinea> = Vec::with_capacity(parsed.len());
+    let mut ingredients: Vec<String> = Vec::new();
+    // Same SKU on two lines still has to fit in one stock: accumulate.
+    let mut pedido: HashMap<String, i64> = HashMap::new();
+    for want in parsed {
+        let products = catalog::list_products(
+            db,
+            tenant,
+            ProductFilters {
+                search: Some(want.product_name.clone()),
+                active: Some(true),
+                limit: Some(5),
+                ..Default::default()
+            },
+        )
+        .await?;
+        let p = match pick_venta_product(&products, &want.product_name) {
+            VentaMatch::Ninguno => {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré ningún producto que se llame «{}». Revisa el nombre o créalo \
+                     primero.",
+                    want.product_name
+                )));
+            }
+            VentaMatch::Varios(names) => {
+                return Ok(BuildOutcome::Reject(format!(
+                    "Tengo varios productos que coinciden con «{}»: {}. ¿Cuál te compraron?",
+                    want.product_name,
+                    names.join(", "),
+                )));
+            }
+            VentaMatch::Uno(p) => p,
+        };
+        // A multi-SKU parent is not sellable: `post_sale` refuses it too, but
+        // saying so before the confirmation saves the owner a dead end.
+        if p.variant_count.unwrap_or(0) > 0 {
+            return Ok(BuildOutcome::Reject(format!(
+                "«{}» se vende por talla o modelo. Dime cuál o escanea el código de la que se \
+                 llevan.",
+                p.name
+            )));
+        }
+        // Ley 20.000: dispensing a controlled substance needs the prescribing
+        // doctor identified, which a spoken order cannot carry. Refuse rather
+        // than sell it with a thinner record than the screen would keep.
+        if domain::sales::controlled::is_controlled(p.active_ingredient.as_deref()) {
+            return Ok(BuildOutcome::Reject(format!(
+                "«{}» es un medicamento controlado: hay que dejar registrado al médico y la \
+                 receta (Ley 20.000), así que esa venta va por la pantalla de Recetas.",
+                p.name
+            )));
+        }
+        let acc = pedido.entry(p.id.clone()).or_insert(0);
+        *acc += want.quantity;
+        if p.physical_stock && p.stock < *acc {
+            return Ok(BuildOutcome::Reject(if p.stock <= 0 {
+                format!("Te quedaste sin stock de {}.", p.name)
+            } else {
+                format!(
+                    "No me alcanza el stock de {}: me pides {} y quedan {}.",
+                    p.name, *acc, p.stock
+                )
+            }));
+        }
+        if let Some(ai) = p.active_ingredient.as_deref() {
+            if !ai.trim().is_empty() {
+                ingredients.push(ai.to_string());
+            }
+        }
+        lines.push(VentaLinea {
+            product_id: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: want.quantity,
+            unit_price: p.price,
+        });
+    }
+
+    // Buyer. Strict on purpose: fiando to the wrong Juan creates a debt on an
+    // innocent customer, so an ambiguous name asks instead of guessing (unlike
+    // the looser `pick_customer` the abono flow can afford).
+    let mut buyer: Option<(String, String)> = None;
+    if let Some(name) = customer_name {
+        use domain::customers::model::CustomerSearchQuery;
+        use domain::customers::service as customers;
+        let matches = customers::search_customers(
+            db,
+            tenant,
+            CustomerSearchQuery {
+                q: Some(name.to_string()),
+            },
+        )
+        .await?;
+        match pick_venta_customer(&matches, name) {
+            VentaMatch::Ninguno => {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré a ningún cliente que se llame «{name}». Créalo primero («crea \
+                     un cliente {name}») y te lo anoto."
+                )));
+            }
+            VentaMatch::Varios(names) => {
+                return Ok(BuildOutcome::Reject(format!(
+                    "Tengo varios clientes que coinciden con «{name}»: {}. ¿A cuál se la anoto?",
+                    names.join(", "),
+                )));
+            }
+            VentaMatch::Uno(c) => buyer = Some((c.id.clone(), c.name.clone())),
+        }
+    }
+
+    // Money: the domain's own canonical formulas — the very ones `post_sale`
+    // applies to these same frozen lines — so the confirmation prompt and the
+    // till can never quote two different totals. `assist` does no arithmetic.
+    let subtotal = domain::invariants::order_subtotal(
+        lines.iter().map(|l| (l.unit_price, l.quantity)),
+    );
+    let total = domain::invariants::order_total(subtotal, Decimal::ZERO);
+    let warnings = interaction_warnings(&ingredients);
+
+    if fiado {
+        let Some((customer_id, customer_name)) = buyer else {
+            return Ok(BuildOutcome::Reject(
+                "Para fiar necesito saber a quién. Dime el cliente y lo anoto.".into(),
+            ));
+        };
+        let Ok(customer_thing) = surrealdb::sql::thing(&customer_id) else {
+            return Ok(BuildOutcome::Reject(format!(
+                "No pude identificar al cliente «{customer_name}»."
+            )));
+        };
+        let debt_before = domain::credit::repo::balance(db, tenant, &customer_thing).await?;
+        return Ok(BuildOutcome::Ready(Action::FiarVenta {
+            lines,
+            subtotal,
+            total,
+            customer_id,
+            customer_name,
+            debt_before,
+            warnings,
+        }));
+    }
+    let (customer_id, customer_name) = match buyer {
+        Some((id, name)) => (Some(id), Some(name)),
+        None => (None, None),
+    };
+    Ok(BuildOutcome::Ready(Action::Vender {
+        lines,
+        subtotal,
+        total,
+        customer_id,
+        customer_name,
+        warnings,
+    }))
 }
 
 /// Prefer a case-insensitive exact name match, else the first hit.
@@ -2135,6 +3022,72 @@ fn pick_customer<'a>(
         .iter()
         .find(|c| c.name.to_lowercase() == want)
         .or_else(|| customers.first())
+}
+
+/// Outcome of resolving a spoken name against the catalog / the customer book
+/// for a SALE. Unlike the looser `pick_*` helpers, "several hits and no exact
+/// match" is its own answer: a sale moves stock and money, so the agent asks
+/// rather than picking the first row.
+enum VentaMatch<'a, T> {
+    Ninguno,
+    Uno(&'a T),
+    /// Names of the candidates, for the "¿cuál?" question.
+    Varios(Vec<String>),
+}
+
+fn pick_venta_product<'a>(
+    products: &'a [domain::catalog::model::ProductDto],
+    name: &str,
+) -> VentaMatch<'a, domain::catalog::model::ProductDto> {
+    let want = name.to_lowercase();
+    if let Some(p) = products.iter().find(|p| p.name.to_lowercase() == want) {
+        return VentaMatch::Uno(p);
+    }
+    match products.len() {
+        0 => VentaMatch::Ninguno,
+        1 => VentaMatch::Uno(&products[0]),
+        _ => VentaMatch::Varios(products.iter().take(3).map(|p| p.name.clone()).collect()),
+    }
+}
+
+fn pick_venta_customer<'a>(
+    customers: &'a [domain::customers::model::CustomerDto],
+    name: &str,
+) -> VentaMatch<'a, domain::customers::model::CustomerDto> {
+    let want = name.to_lowercase();
+    if let Some(c) = customers.iter().find(|c| c.name.to_lowercase() == want) {
+        return VentaMatch::Uno(c);
+    }
+    match customers.len() {
+        0 => VentaMatch::Ninguno,
+        1 => VentaMatch::Uno(&customers[0]),
+        _ => VentaMatch::Varios(customers.iter().take(3).map(|c| c.name.clone()).collect()),
+    }
+}
+
+/// Run the SAME drug-interaction checker the till screen runs
+/// (`domain::sales::interactions::check`) over the cart's active ingredients
+/// and phrase each hit in es-CL. Surfacing it at PROPOSE time is the point: the
+/// screen only shows the warning in the sale's response, i.e. after the fact.
+fn interaction_warnings(ingredients: &[String]) -> Vec<String> {
+    domain::sales::interactions::check(ingredients)
+        .iter()
+        .map(warning_text)
+        .collect()
+}
+
+/// One interaction, in the owner's words.
+fn warning_text(d: &domain::sales::interactions::InteractionDetail) -> String {
+    use domain::sales::interactions::Severity;
+    let sev = match d.severity {
+        Severity::Critica => "riesgo crítico",
+        Severity::Mayor => "riesgo alto",
+        Severity::Moderada => "riesgo moderado",
+    };
+    format!(
+        "{} + {} ({}). {} {}",
+        d.drugs.0, d.drugs.1, sev, d.effect, d.recommendation
+    )
 }
 
 /// Prefer a case-insensitive exact name match, else the first hit.
@@ -2610,10 +3563,171 @@ pub async fn execute(
                 }),
             }
         }
+        Action::Vender {
+            lines,
+            total,
+            customer_id,
+            customer_name,
+            ..
+        } => {
+            // `cash_amount` = the frozen total: the lines and their prices are
+            // the same ones `post_sale` re-totals, so the drawer's running cash
+            // and the order's total can never drift apart.
+            let resp = post_venta(
+                db,
+                tenant,
+                actor,
+                &lines,
+                "pos_cash",
+                Some(total),
+                customer_id.clone(),
+                customer_name.clone(),
+            )
+            .await?;
+            let mut text = format!(
+                "Venta lista: {}. Total {}, en efectivo.",
+                venta_detalle(&lines),
+                clp(resp.order.total),
+            );
+            if resp.loyalty_points_awarded > 0 {
+                if let Some(c) = customer_name.as_deref() {
+                    text.push_str(&format!(
+                        " Le sumé {} puntos a {c}.",
+                        resp.loyalty_points_awarded
+                    ));
+                }
+            }
+            text.push_str(&outcome_warnings(&resp.interaction_warnings));
+            ActionOutcome {
+                action: label,
+                text,
+                data: serde_json::json!({
+                    "id": resp.order.id,
+                    "total": resp.order.total.to_string(),
+                    "payment_method": resp.order.payment_method,
+                    "customer_id": customer_id,
+                    "customer_name": customer_name,
+                    "lines": venta_lineas_json(&lines),
+                    "loyalty_points_awarded": resp.loyalty_points_awarded,
+                }),
+            }
+        }
+        Action::FiarVenta {
+            lines,
+            total: _,
+            customer_id,
+            customer_name,
+            ..
+        } => {
+            let customer = surrealdb::sql::thing(&customer_id).map_err(|_| {
+                domain::DomainError::Invalid("no pude identificar al cliente de la venta".into())
+            })?;
+            // `pos_fiado`: no cash. `post_sale` posts the cargo to the customer's
+            // ledger through `domain::credit::repo::post_cargo` itself.
+            let resp = post_venta(
+                db,
+                tenant,
+                actor,
+                &lines,
+                "pos_fiado",
+                None,
+                Some(customer_id.clone()),
+                Some(customer_name.clone()),
+            )
+            .await?;
+            // Re-read the ledger instead of subtracting here: the balance the
+            // owner hears is the one the books actually hold.
+            let saldo = domain::credit::repo::balance(db, tenant, &customer).await?;
+            let mut text = format!(
+                "Fiado anotado: {}. Total {}. {} ahora debe {}.",
+                venta_detalle(&lines),
+                clp(resp.order.total),
+                customer_name,
+                clp(saldo),
+            );
+            text.push_str(&outcome_warnings(&resp.interaction_warnings));
+            ActionOutcome {
+                action: label,
+                text,
+                data: serde_json::json!({
+                    "id": resp.order.id,
+                    "total": resp.order.total.to_string(),
+                    "payment_method": resp.order.payment_method,
+                    "customer_id": customer_id,
+                    "customer_name": customer_name,
+                    "lines": venta_lineas_json(&lines),
+                    "saldo": saldo.to_string(),
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
     Ok(outcome)
+}
+
+/// Post a confirmed sale through `domain::sales::service::post_sale` — the same
+/// entry point `POST /api/v1/pos/sale` uses. NOTHING about a sale is
+/// reimplemented in this crate: stock decrement, stock movements, FEFO lot
+/// consumption, the fiado cargo, loyalty points, receta autodetection and the
+/// interaction check all happen inside that one call, so a sale by voice and a
+/// sale by screen leave identical books behind.
+#[allow(clippy::too_many_arguments)]
+async fn post_venta(
+    db: &Db,
+    tenant: &Thing,
+    actor: Option<&Thing>,
+    lines: &[VentaLinea],
+    payment_method: &str,
+    cash_amount: Option<Decimal>,
+    customer: Option<String>,
+    customer_name: Option<String>,
+) -> DomainResult<domain::sales::model::PosSaleResponse> {
+    use domain::sales::model::{PosSaleItem, PosSaleRequest};
+    use domain::sales::service as sales;
+    let req = PosSaleRequest {
+        items: lines
+            .iter()
+            .map(|l| PosSaleItem {
+                product: l.product_id.clone(),
+                product_name: l.product_name.clone(),
+                quantity: l.quantity,
+                unit_price: l.unit_price,
+            })
+            .collect(),
+        payment_method: payment_method.to_string(),
+        cash_amount,
+        card_amount: None,
+        discount: None,
+        customer,
+        customer_name,
+        customer_phone: None,
+        notes: Some("Venta registrada por el agente".into()),
+        external_ref: None,
+        prescriptions: Vec::new(),
+        branch: None,
+    };
+    sales::post_sale(db, tenant, actor, None, None, req).await
+}
+
+/// "2 × Paracetamol 500 mg, 1 × Ibuprofeno" — the inline form used once the
+/// sale already happened (the multi-line breakdown belongs to the confirmation).
+fn venta_detalle(lines: &[VentaLinea]) -> String {
+    lines
+        .iter()
+        .map(|l| format!("{} × {}", l.quantity, l.product_name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Interaction warnings returned by the executed sale, appended to the outcome
+/// so they reach the owner even if the cart changed between the two steps.
+fn outcome_warnings(warnings: &[domain::sales::interactions::InteractionDetail]) -> String {
+    warnings
+        .iter()
+        .map(|w| format!(" Ojo: {}", warning_text(w)))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// Append an append-only `audit_log` row for an executed agent action. Reuses
@@ -3343,5 +4457,283 @@ mod tests {
     fn unknown_token_is_not_found() {
         let store = ActionStore::new();
         assert_eq!(store.consume("nope", &tenant()), Err(ActError::NotFound));
+    }
+
+    // ---- venta: parsing ------------------------------------------------------
+
+    /// Assert `q` parses as a sale and return its parts.
+    fn venta(q: &str) -> (Vec<VentaLineaParse>, Option<String>, bool) {
+        match parse_action(q) {
+            ActionParse::Venta {
+                lines,
+                customer_name,
+                fiado,
+            } => (lines, customer_name, fiado),
+            other => panic!("expected Venta for {q:?}, got {other:?}"),
+        }
+    }
+
+    fn linea(name: &str, qty: i64) -> VentaLineaParse {
+        VentaLineaParse {
+            product_name: name.into(),
+            quantity: qty,
+        }
+    }
+
+    /// The four phrases the owner actually says (ADR-0016 wave "el agente
+    /// vende"), verbatim.
+    #[test]
+    fn parse_venta_las_cuatro_frases() {
+        let (lines, cliente, fiado) = venta("vendeme 2 paracetamol");
+        assert_eq!(lines, vec![linea("paracetamol", 2)]);
+        assert_eq!(cliente, None);
+        assert!(!fiado);
+
+        let (lines, cliente, fiado) = venta("cobrale 3 ibuprofeno a la senora Perez");
+        assert_eq!(lines, vec![linea("ibuprofeno", 3)]);
+        assert_eq!(cliente.as_deref(), Some("Perez"));
+        assert!(!fiado);
+
+        let (lines, cliente, fiado) = venta("anota 1 alcohol gel fiado a Juan");
+        assert_eq!(lines, vec![linea("alcohol gel", 1)]);
+        assert_eq!(cliente.as_deref(), Some("Juan"));
+        assert!(fiado, "«fiado» debe mandar la venta a la cuenta corriente");
+
+        // "2 x 500" = dos del de 500; "al tiro" es muletilla, no un cliente.
+        let (lines, cliente, fiado) = venta("vende 2 x 500 al tiro");
+        assert_eq!(lines, vec![linea("500", 2)]);
+        assert_eq!(cliente, None);
+        assert!(!fiado);
+    }
+
+    #[test]
+    fn parse_venta_sin_acentos_y_con_typos() {
+        for q in [
+            "véndeme 2 paracetamol",
+            "vendeme 2 paracetamol",
+            "bendeme 2 paracetamol", // b/v, el typo chileno de siempre
+            "vendme 2 paracetamol",  // una letra comida
+            "véndele 2 paracetamol",
+            "despachame 2 paracetamol",
+            "vendeme dos paracetamol", // número hablado
+        ] {
+            let (lines, _, fiado) = venta(q);
+            assert_eq!(lines, vec![linea("paracetamol", 2)], "q={q}");
+            assert!(!fiado, "q={q}");
+        }
+        // Sin cantidad = uno.
+        assert_eq!(venta("vendeme paracetamol").0, vec![linea("paracetamol", 1)]);
+    }
+
+    #[test]
+    fn parse_venta_fiado_en_todas_sus_formas() {
+        for q in [
+            "anota 1 alcohol gel fiado a Juan",
+            "fiale 1 alcohol gel a Juan",
+            "fíale un alcohol gel a Juan",
+            "vendele 1 alcohol gel fiado a Juan",
+            "registra 1 alcohol gel a cuenta de Juan",
+            "anota 1 alcohol gel en la libreta de Juan",
+        ] {
+            let (lines, cliente, fiado) = venta(q);
+            assert_eq!(lines, vec![linea("alcohol gel", 1)], "q={q}");
+            assert_eq!(cliente.as_deref(), Some("Juan"), "q={q}");
+            assert!(fiado, "q={q}");
+        }
+    }
+
+    #[test]
+    fn parse_venta_cliente_con_y_sin_honorifico() {
+        for (q, esperado) in [
+            ("cobrale 3 ibuprofeno a la señora Pérez", "Perez"),
+            ("cóbrale 3 ibuprofeno al señor Pérez", "Perez"),
+            ("cobrale 3 ibuprofeno a don Juan", "Juan"),
+            ("vendele 3 ibuprofeno a Juan", "Juan"),
+        ] {
+            let (lines, cliente, _) = venta(q);
+            assert_eq!(lines, vec![linea("ibuprofeno", 3)], "q={q}");
+            assert_eq!(cliente.as_deref(), Some(esperado), "q={q}");
+        }
+    }
+
+    /// Un " a " en minúscula dentro del nombre del producto NO es un cliente:
+    /// "arroz a granel" se vende, no se le fía a «Granel».
+    #[test]
+    fn parse_venta_no_confunde_producto_con_cliente() {
+        let (lines, cliente, _) = venta("vendeme 2 arroz a granel");
+        assert_eq!(lines, vec![linea("arroz a granel", 2)]);
+        assert_eq!(cliente, None);
+    }
+
+    #[test]
+    fn parse_venta_varias_lineas() {
+        let (lines, _, _) = venta("vendeme 2 paracetamol y 1 ibuprofeno");
+        assert_eq!(lines, vec![linea("paracetamol", 2), linea("ibuprofeno", 1)]);
+        // Un "y" DENTRO de un nombre no parte la línea (el segundo trozo no
+        // empieza con cantidad).
+        let (lines, _, _) = venta("vendeme 2 alcohol gel y jabon");
+        assert_eq!(lines, vec![linea("alcohol gel y jabon", 2)]);
+    }
+
+    #[test]
+    fn parse_venta_incompleta_pide_lo_que_falta() {
+        // Verbo de venta sin nada que vender.
+        assert!(matches!(
+            parse_action("vendeme"),
+            ActionParse::Incomplete(_)
+        ));
+        // Fiado sin cliente: nunca se fía "al aire".
+        match parse_action("anota 2 paracetamol fiado") {
+            ActionParse::Incomplete(msg) => assert!(msg.contains("quién"), "msg={msg}"),
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+        // Una cantidad absurda se pregunta, no se propone.
+        assert!(matches!(
+            parse_action("vendeme 99999 paracetamol"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    /// The read agent owns every one of these. A write branch that steals a
+    /// question is worse than one that misses it.
+    #[test]
+    fn parse_venta_no_le_roba_preguntas_al_agente_de_lectura() {
+        for q in [
+            "cuánto vendí hoy",
+            "cuánto vendí este mes",
+            "cuánto se vendió ayer",
+            "los más vendidos",
+            "productos más vendidos",
+            "cuánto fiado tengo",
+            "quién me debe",
+            "cuentas por cobrar",
+            "cuánto me deben",
+            "qué tengo que reponer",
+        ] {
+            assert_eq!(parse_action(q), ActionParse::NotAnAction, "q={q}");
+        }
+    }
+
+    /// The other write branches keep their vocabulary.
+    #[test]
+    fn parse_venta_no_colisiona_con_las_otras_acciones() {
+        assert!(matches!(
+            parse_action("registra un gasto de 5000 en arriendo"),
+            ActionParse::Gasto { .. }
+        ));
+        assert!(matches!(
+            parse_action("crea un producto Aspirina a $1000"),
+            ActionParse::Producto { .. }
+        ));
+        assert!(matches!(
+            parse_action("crea un cliente Juan Pérez"),
+            ActionParse::Cliente { .. }
+        ));
+        assert!(matches!(
+            parse_action("abónale 5000 a doña Ana"),
+            ActionParse::Abono { .. }
+        ));
+        assert!(matches!(
+            parse_action("crea una orden de compra de 10 paracetamol a Farmaltda a $500"),
+            ActionParse::Oc { .. }
+        ));
+        assert!(matches!(
+            parse_action("cierra la caja con 50000"),
+            ActionParse::CierreCaja { .. }
+        ));
+        assert!(matches!(
+            parse_action("repón 40 de paracetamol"),
+            ActionParse::AjusteStock { .. }
+        ));
+    }
+
+    // ---- venta: la propuesta que lee la dueña --------------------------------
+
+    fn linea_resuelta(name: &str, qty: i64, price: &str) -> VentaLinea {
+        VentaLinea {
+            product_id: "product:x".into(),
+            product_name: name.into(),
+            quantity: qty,
+            unit_price: dec(price),
+        }
+    }
+
+    /// The confirmation prompt is the owner's only defence against a mis-heard
+    /// order, so it must spell out product, quantity, unit price and total.
+    #[test]
+    fn summary_de_venta_muestra_todo_lo_que_hay_que_revisar() {
+        let a = Action::Vender {
+            lines: vec![
+                linea_resuelta("Paracetamol 500 mg", 2, "990"),
+                linea_resuelta("Ibuprofeno 400 mg", 1, "1200"),
+            ],
+            subtotal: dec("3180"),
+            total: dec("3180"),
+            customer_id: None,
+            customer_name: None,
+            warnings: vec![],
+        };
+        let s = a.summary();
+        assert!(s.contains("2 × Paracetamol 500 mg"), "{s}");
+        assert!(s.contains("$990 c/u"), "{s}");
+        assert!(s.contains("= $1.980"), "{s}");
+        assert!(s.contains("1 × Ibuprofeno 400 mg"), "{s}");
+        assert!(s.contains("Total a cobrar: $3.180"), "{s}");
+    }
+
+    #[test]
+    fn summary_de_fiado_dice_a_quien_y_cuanto_debe() {
+        let a = Action::FiarVenta {
+            lines: vec![linea_resuelta("Alcohol Gel", 1, "2500")],
+            subtotal: dec("2500"),
+            total: dec("2500"),
+            customer_id: "customer:1".into(),
+            customer_name: "Juan Pérez".into(),
+            debt_before: dec("5000"),
+            warnings: vec!["Warfarina + Ibuprofeno (riesgo crítico). Sangrado.".into()],
+        };
+        let s = a.summary();
+        assert!(s.contains("1 × Alcohol Gel a $2.500 c/u"), "{s}");
+        assert!(s.contains("Total: $2.500"), "{s}");
+        assert!(s.contains("Queda fiado a Juan Pérez"), "{s}");
+        assert!(s.contains("hoy debe $5.000"), "{s}");
+        assert!(s.contains("Ojo: Warfarina + Ibuprofeno"), "{s}");
+        assert_eq!(a.label(), "fiar_venta");
+    }
+
+    #[test]
+    fn params_de_venta_exponen_las_lineas() {
+        let a = Action::Vender {
+            lines: vec![linea_resuelta("Paracetamol 500 mg", 2, "990")],
+            subtotal: dec("1980"),
+            total: dec("1980"),
+            customer_id: Some("customer:1".into()),
+            customer_name: Some("Juan".into()),
+            warnings: vec![],
+        };
+        let p = a.params();
+        assert_eq!(p["total"], "1980");
+        assert_eq!(p["payment_method"], "pos_cash");
+        assert_eq!(p["lines"][0]["quantity"], 2);
+        assert_eq!(p["lines"][0]["unit_price"], "990");
+        assert_eq!(p["lines"][0]["line_total"], "1980");
+        assert_eq!(p["customer_name"], "Juan");
+    }
+
+    /// The interaction checker is the domain's, not a copy living here.
+    #[test]
+    fn interacciones_se_leen_del_chequeo_del_dominio() {
+        let w = interaction_warnings(&["Warfarina".to_string(), "Ibuprofeno".to_string()]);
+        assert_eq!(w.len(), 1, "warfarina + AINE es una interacción conocida");
+        assert!(w[0].contains("riesgo crítico"), "{}", w[0]);
+        assert!(interaction_warnings(&["Paracetamol".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn edit_distance_1_no_se_pasa_de_generosa() {
+        assert!(edit_distance_1("vendme", "vendeme"));
+        assert!(edit_distance_1("vende", "vender"));
+        assert!(!edit_distance_1("vendidos", "vender"));
+        assert!(!edit_distance_1("vende", "vende"));
     }
 }

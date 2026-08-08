@@ -104,9 +104,9 @@ async fn ask(
         // user who couldn't execute it. `/act` re-checks via the admin layer.
         if !can_write(&claims) {
             return Ok(Json(Answer::note(
-                "Solo un administrador o dueño puede registrar acciones (gastos, clientes, \
-                 productos, precios u órdenes de compra). Pídeselo a quien administra el \
-                 negocio.",
+                "Solo un administrador o dueño puede pedirme acciones (ventas, fiados, gastos, \
+                 clientes, productos, precios u órdenes de compra). Pídeselo a quien administra \
+                 el negocio; la venta por pantalla la puedes hacer igual.",
             )));
         }
         return match assist::build(db.as_ref(), &tenant, parsed).await? {

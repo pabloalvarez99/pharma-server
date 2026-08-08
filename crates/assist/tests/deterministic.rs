@@ -326,6 +326,9 @@ async fn comparativa_dia_contrasts_today_and_yesterday() {
     assert_eq!(data["delta"], "5000");
 }
 
+/// The breakdown is one row per bucket that actually moved money. It stopped
+/// being a fixed cash/card pair when fiado (0039) and transferencia (0043)
+/// landed: presenting those two as the whole 100% hid every other peso.
 #[tokio::test]
 async fn ventas_por_metodo_breaks_down_cash_card() {
     let (db, tenant, user) = setup().await;
@@ -333,11 +336,10 @@ async fn ventas_por_metodo_breaks_down_cash_card() {
     let a = ask(&db, &tenant, "ventas por método de pago").await;
     assert_eq!(a.intent, "ventas_metodo_pago");
     let data = a.data.unwrap();
-    // El desglose es una lista de buckets, no un par fijo cash/card: desde
-    // fiado (0039) y transferencia (0043) hay más de dos métodos, y presentar
-    // sólo dos como el 100% del mes miente. Sólo se sembró efectivo, así que
-    // hay exactamente un bucket y se lleva el total entero.
     assert_eq!(data["revenue"], "5000");
+    // Sólo se sembró efectivo: un único bucket, que se lleva el total entero.
+    // Se aserta el largo y no `methods[1].is_null()` para que un bucket de más
+    // falle aparezca donde aparezca, no sólo si cae justo en la posición 1.
     let methods = data["methods"].as_array().expect("methods es un arreglo");
     assert_eq!(methods.len(), 1, "sólo se sembró efectivo: {methods:?}");
     assert_eq!(methods[0]["method"], "efectivo");
