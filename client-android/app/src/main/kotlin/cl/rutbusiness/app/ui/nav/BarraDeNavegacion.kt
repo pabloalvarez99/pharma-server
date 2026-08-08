@@ -71,6 +71,20 @@ enum class Destino(val etiqueta: String) {
      * tres etiquetas completas al 200% en 360dp.
      */
     Resumen("Tu día"),
+    ;
+
+    /**
+     * Etiqueta según pack (ADR-0022). Feria: Cobrar → "Deudas" no aplica al
+     * enum (Deudas vive en Tu día); acá solo se reescribe el copy de la
+     * pestaña Cobrar a "Vender" (buscar por nombre, sin escáner) y Resumen
+     * a "Hoy" - más corto al sol y al 200%.
+     */
+    fun etiquetaPara(agentHome: Boolean): String = when {
+        !agentHome -> etiqueta
+        this == Cobrar -> "Vender"
+        this == Resumen -> "Hoy"
+        else -> etiqueta
+    }
 }
 
 /**
@@ -98,6 +112,8 @@ fun BarraDeNavegacion(
     actual: Destino,
     onElegir: (Destino) -> Unit,
     modifier: Modifier = Modifier,
+    /** Pack feria: copy "Vender" / "Hoy" (ADR-0022). */
+    agentHome: Boolean = false,
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
@@ -128,6 +144,7 @@ fun BarraDeNavegacion(
             Destino.entries.forEach { destino ->
                 Pestana(
                     destino = destino,
+                    etiqueta = destino.etiquetaPara(agentHome),
                     elegida = destino == actual,
                     onClick = { onElegir(destino) },
                     // `weight` reparte el ancho en partes iguales: la pestaña
@@ -147,6 +164,7 @@ fun BarraDeNavegacion(
 @Composable
 private fun Pestana(
     destino: Destino,
+    etiqueta: String,
     elegida: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -189,7 +207,7 @@ private fun Pestana(
         }
 
         Text(
-            text = destino.etiqueta,
+            text = etiqueta,
             style = RbTheme.typography.label,
             color = color,
             textAlign = TextAlign.Center,

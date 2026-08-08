@@ -20,6 +20,7 @@ import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.offline.PantallaDeCola
 import cl.rutbusiness.app.ui.offline.hayConexion
 import cl.rutbusiness.app.ui.offline.ventasEnCola
+import cl.rutbusiness.app.ui.rubro.packActual
 
 /**
  * El armazón de la navegación: qué pestaña está elegida, qué se dibuja arriba
@@ -123,6 +124,7 @@ internal fun ContenedorDeDestinos(
         BarraDeNavegacion(
             actual = destino,
             onElegir = { elegido -> destino = elegido },
+            agentHome = packActual().features.agentHome,
         )
     }
 }

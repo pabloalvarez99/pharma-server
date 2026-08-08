@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.diag.Latencia
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.offline.Fechado
@@ -67,16 +68,33 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         // renglón extra arriba se lo saca a la lista de productos, que es lo
         // que la cajera vino a tocar. Y de las dos frases, "de cuándo es este
         // stock" es la que decide una venta.
-        ayuda = if (!vm.hayConexion && vm.catalogoGuardadoEn != null) {
-            "Guardado ${Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora)}. " +
-                "El stock puede haber cambiado."
-        } else {
-            "Escribe parte del nombre, o el código de barras completo."
+        ayuda = when {
+            !vm.hayConexion && vm.catalogoGuardadoEn != null ->
+                "Guardado ${Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora)}. " +
+                    "El stock puede haber cambiado."
+            !packActual().features.barcode ->
+                "Escribe el nombre de lo que vendes (tomate, atado, bolsa…)."
+            else ->
+                "Escribe parte del nombre, o el código de barras completo."
         },
-        // El botón de la cámara sólo existe si el aparato tiene uno. En una
-        // tablet sin cámara -o en un test- no aparece, en vez de aparecer y
-        // llevar a un cartel de disculpas.
-        onEscanear = if (LocalCamaraDeCodigos.current != null) vm::abrirEscaner else null,
+        // Cámara + pack.barcode: feria apaga el escáner (ADR-0022) aunque el
+        // teléfono tenga cámara. En un test sin LocalRubro el pack default
+        // deja barcode=true y el botón sigue el hardware.
+        onEscanear = when {
+            !packActual().features.barcode -> null
+            LocalCamaraDeCodigos.current == null -> null
+            else -> vm::abrirEscaner
+        },
+        etiquetaBuscar = if (packActual().features.barcode) {
+            "Buscar producto"
+        } else {
+            "¿Qué vendiste?"
+        },
+        placeholderBuscar = if (packActual().features.barcode) {
+            "Nombre o código de barras"
+        } else {
+            "Nombre (tomate, cilantro…)"
+        },
         resultados = vm.resultados,
         buscando = vm.buscando,
         errorBusqueda = vm.errorBusqueda,
@@ -123,6 +141,8 @@ internal fun BuscarContenido(
     total: String?,
     onCobrar: () -> Unit,
     modifier: Modifier = Modifier,
+    etiquetaBuscar: String = "Buscar producto",
+    placeholderBuscar: String = "Nombre o código de barras",
 ) {
     val dimens = RbTheme.dimens
 
@@ -162,8 +182,8 @@ internal fun BuscarContenido(
             RbTextField(
                 value = consulta,
                 onValueChange = onConsulta,
-                label = "Buscar producto",
-                placeholder = "Nombre o código de barras",
+                label = etiquetaBuscar,
+                placeholder = placeholderBuscar,
                 supportingText = if (escribiendo) null else ayuda,
                 keyboardType = KeyboardType.Text,
                 // La tecla de acción del teclado busca ya, sin esperar el

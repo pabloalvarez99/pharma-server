@@ -198,10 +198,10 @@ internal val PASOS = listOf(
         titulo = "Esto es RutBusiness",
         encabezado = "El cuaderno del negocio, en tu teléfono",
         parrafos = listOf(
-            "Cobras una venta, anotas lo que fiaste, cierras la caja del día y ves cuánto " +
-                "vendiste.",
-            "Casi todo se hace pidiéndoselo a la app con tus palabras, como le hablarías a un " +
-                "empleado de confianza.",
+            "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
+                "cuánto hiciste hoy - más rápido que el cuaderno de mil pesos.",
+            "Hablale como a un empleado de confianza. Antes de guardar nada, " +
+                "te lo muestra para que lo revises.",
         ),
     ),
     // El texto de este paso se recortó dos veces a propósito. En el aparato de
@@ -210,25 +210,27 @@ internal val PASOS = listOf(
     // «Siguiente» y la explicación se pierde justo donde importaba.
     PasoDelPrimerUso(
         titulo = "Dónde se guarda todo",
-        encabezado = "Tus ventas se guardan en un computador tuyo",
+        encabezado = "En el teléfono y en un respaldo cifrado",
         parrafos = listOf(
-            "Este teléfono no guarda nada. Se conecta a un computador del negocio, y ahí queda " +
-                "todo.",
-            "Puede estar en el local, en la misma red, o arrendado en internet. A veces le " +
-                "dicen «el servidor».",
+            "Vendés aunque no haya señal: lo del día queda en el aparato.",
+            "Si activás el respaldo, se sube cifrado con una llave tuya. " +
+                "Nosotros no podemos leerla ni recuperarla: la escribís en el " +
+                "cuaderno el primer día (tarjeta de rescate).",
         ),
-        remate = "Lo primero es decirle a la app dónde está.",
+        remate = "Sin esa llave, el respaldo no sirve. Con ella y tu cuenta, " +
+            "volvés a entrar si se te rompe el teléfono.",
     ),
     PasoDelPrimerUso(
         titulo = "Lo que necesitas a mano",
-        encabezado = "Tres cosas y estás adentro",
+        encabezado = "Para entrar la primera vez",
         parrafos = emptyList(),
         lista = listOf(
-            "La dirección del computador. Se ve así: 192.168.1.10:8080",
+            "La dirección del computador del negocio (si te la dieron). " +
+                "Se ve así: 192.168.1.10:8080",
             "El nombre corto de tu negocio.",
-            "Tu correo y tu clave.",
+            "Tu correo y tu clave (o, más adelante, tu cuenta de Google).",
         ),
-        remate = "¿No los tienes? Pídeselos a quien instaló el sistema en ese computador. " +
+        remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
             "Quedaron anotados el día que lo instaló.",
     ),
 )

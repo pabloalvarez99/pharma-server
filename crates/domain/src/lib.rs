@@ -23,6 +23,7 @@ pub mod sales;
 pub mod seed;
 pub mod settings;
 pub mod stock;
+pub mod user_backup;
 pub mod web_keys;
 
 pub mod errors;

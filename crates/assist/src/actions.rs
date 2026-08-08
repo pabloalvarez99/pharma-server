@@ -2045,6 +2045,8 @@ fn clean_venta_product(s: &str) -> String {
     let mut t = strip_trailing_punct(s.trim()).trim();
     loop {
         let before = t;
+        // Feria / calle (ADR-0022): "2 kg de tomates", "1 atado de cilantro",
+        // "arroz a granel". Quantity already taken; unit words are not product.
         for lead in [
             "unidades de ",
             "unidad de ",
@@ -2054,10 +2056,29 @@ fn clean_venta_product(s: &str) -> String {
             "tira de ",
             "frascos de ",
             "frasco de ",
+            "kilos de ",
+            "kilo de ",
+            "kg de ",
+            "kgs de ",
+            "atados de ",
+            "atado de ",
+            "bolsas de ",
+            "bolsa de ",
+            "medios kilos de ",
+            "medio kilo de ",
+            "media de ",
             "productos ",
             "producto ",
             "unidades ",
             "unidad ",
+            "kilos ",
+            "kilo ",
+            "kg ",
+            "kgs ",
+            "atados ",
+            "atado ",
+            "bolsas ",
+            "bolsa ",
             "x ",
             "de ",
             "del ",
@@ -2074,7 +2095,19 @@ fn clean_venta_product(s: &str) -> String {
             break;
         }
     }
-    for cut in [" a", " al", " para", " por"] {
+    // Trailing unit: "tomates kg", "cebolla granel".
+    for cut in [
+        " a granel",
+        " granel",
+        " kg",
+        " kgs",
+        " kilo",
+        " kilos",
+        " a",
+        " al",
+        " para",
+        " por",
+    ] {
         if let Some(x) = t.strip_suffix(cut) {
             t = x.trim();
             break;
@@ -4557,12 +4590,34 @@ mod tests {
     }
 
     /// Un " a " en minúscula dentro del nombre del producto NO es un cliente:
-    /// "arroz a granel" se vende, no se le fía a «Granel».
+    /// "arroz a granel" se vende, no se le fía a «Granel». La unidad se limpia
+    /// (feria: granel/kg no son parte del nombre de catálogo).
     #[test]
     fn parse_venta_no_confunde_producto_con_cliente() {
         let (lines, cliente, _) = venta("vendeme 2 arroz a granel");
-        assert_eq!(lines, vec![linea("arroz a granel", 2)]);
+        assert_eq!(lines, vec![linea("arroz", 2)]);
         assert_eq!(cliente, None);
+    }
+
+    /// Feria / calle (ADR-0022): kg, atado, bolsa se despegan del producto.
+    #[test]
+    fn parse_venta_unidades_feria_kg_atado() {
+        let (lines, cliente, fiado) = venta("vendeme 2 kg de tomates");
+        assert_eq!(lines, vec![linea("tomates", 2)]);
+        assert_eq!(cliente, None);
+        assert!(!fiado);
+
+        let (lines, _, _) = venta("vendeme 1 atado de cilantro");
+        assert_eq!(lines, vec![linea("cilantro", 1)]);
+
+        let (lines, _, _) = venta("vendeme 3 kilos de papa");
+        assert_eq!(lines, vec![linea("papa", 3)]);
+
+        // Fiado feria: unidad + persona.
+        let (lines, cliente, fiado) = venta("anota 1 atado de cilantro fiado a doña Ana");
+        assert_eq!(lines, vec![linea("cilantro", 1)]);
+        assert_eq!(cliente.as_deref(), Some("Ana"));
+        assert!(fiado);
     }
 
     #[test]

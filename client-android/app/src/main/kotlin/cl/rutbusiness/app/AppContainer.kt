@@ -14,12 +14,15 @@ import cl.rutbusiness.core.offline.ColaDeVentas
 import cl.rutbusiness.core.offline.ConexionConElNegocio
 import cl.rutbusiness.core.offline.DespachadorDeVentas
 import cl.rutbusiness.core.offline.MonitorDeRed
+import cl.rutbusiness.app.ui.rubro.ServiciosDeRubro
+import cl.rutbusiness.core.rubro.RubroPackRepository
 import cl.rutbusiness.core.session.AlmacenamientoPlataforma
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 
@@ -52,6 +55,13 @@ class AppContainer(context: Context) {
     val conexion = ConexionConElNegocio(monitorDeRed.hayEnlace)
 
     val sesion = SessionRepository(almacenamiento, conexion)
+
+    /**
+     * Pack de rubro del tenant (feria, farmacia, …). Vive a nivel de proceso:
+     * se recarga al abrir sesión y se limpia al salir.
+     */
+    val rubroPack = RubroPackRepository()
+    val rubro = ServiciosDeRubro(rubroPack)
 
     /** Lo último que contestó el server, para cuando no conteste. */
     val cache = CacheDeLecturas(almacenamiento.bloques, reloj)
@@ -124,6 +134,21 @@ class AppContainer(context: Context) {
 
         scope.launch {
             sesion.estado.collect { haySesion.value = it is EstadoSesion.Activa }
+        }
+
+        // Pack de rubro: al entrar se pide al server; al salir se limpia.
+        // Offline → fallback local (PacksLocales). No bloquea la UI.
+        scope.launch {
+            sesion.estado.collectLatest { estado ->
+                when (estado) {
+                    is EstadoSesion.Activa -> {
+                        val api = sesion.apiActiva() ?: return@collectLatest
+                        rubroPack.cargar(api)
+                    }
+                    is EstadoSesion.SinSesion -> rubroPack.limpiar()
+                    EstadoSesion.Cargando -> Unit
+                }
+            }
         }
 
         // Cuando vuelve el enlace se pregunta si además volvió el server. Una

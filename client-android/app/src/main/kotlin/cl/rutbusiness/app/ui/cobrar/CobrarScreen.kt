@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,6 +24,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
 import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
@@ -89,7 +91,12 @@ private fun CobrarScreen(vm: CobrarViewModel) {
     BackHandler(enabled = vm.escaneando) {
         if (vm.creandoProducto) vm.cancelarCreacion() else vm.cerrarEscaner()
     }
-    if (vm.escaneando) {
+    val barcodeOk = packActual().features.barcode
+    // Pack feria: barcode=false - cierra el escáner si quedó abierto.
+    LaunchedEffect(vm.escaneando, barcodeOk) {
+        if (vm.escaneando && !barcodeOk) vm.cerrarEscaner()
+    }
+    if (vm.escaneando && barcodeOk) {
         PasoEscaner(vm, modifier = Modifier.fillMaxSize())
         return
     }
@@ -140,7 +147,10 @@ private fun CobrarScreen(vm: CobrarViewModel) {
                                 horizontalArrangement = Arrangement.spacedBy(RbTheme.dimens.space2),
                                 verticalArrangement = Arrangement.spacedBy(RbTheme.dimens.space1),
                             ) {
-                                if (impresora?.hayUltimaBoleta == true) {
+                                // Pack feria: printer=false - sin reimprimir térmica.
+                                if (packActual().features.printer &&
+                                    impresora?.hayUltimaBoleta == true
+                                ) {
                                     RbButton(
                                         label = "Reimprimir",
                                         onClick = { reimprimiendo = true },
@@ -158,7 +168,9 @@ private fun CobrarScreen(vm: CobrarViewModel) {
                 )
             }
 
-            if (reimprimiendo && impresora != null && vm.paso == PasoDeCobro.Buscar) {
+            if (reimprimiendo && packActual().features.printer &&
+                impresora != null && vm.paso == PasoDeCobro.Buscar
+            ) {
                 TarjetaDeReimpresion(
                     vm = impresora,
                     onCerrar = {

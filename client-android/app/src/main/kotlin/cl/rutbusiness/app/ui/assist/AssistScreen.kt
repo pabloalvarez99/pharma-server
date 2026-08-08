@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbChip
@@ -190,6 +191,19 @@ private fun Problema(mensaje: Mensaje.Problema, onReintentar: (String) -> Unit) 
 @Composable
 private fun Bienvenida(onElegir: (String) -> Unit) {
     val dimens = RbTheme.dimens
+    val pack = packActual()
+    val sugerencias = if (pack.features.agentHome || pack.rubro == "feria") {
+        SUGERENCIAS_FERIA
+    } else {
+        SUGERENCIAS
+    }
+    val intro = if (pack.features.agentHome || pack.rubro == "feria") {
+        "Hablame como en el puesto. Antes de anotar nada, te lo muestro " +
+            "para que lo revises."
+    } else {
+        "Escríbeme como le hablarías a un empleado de confianza. " +
+            "Antes de guardar nada, te lo muestro para que lo revises."
+    }
 
     // Deliberadamente compacto, y sin `RbEmptyState`: ese componente reserva
     // 40dp arriba y abajo para el vacío de una lista, y acá esa respiración
@@ -205,8 +219,7 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
         )
 
         Text(
-            text = "Escríbeme como le hablarías a un empleado de confianza. " +
-                "Antes de guardar nada, te lo muestro para que lo revises.",
+            text = intro,
             style = RbTheme.typography.body,
             color = RbTheme.colors.textSecondary,
         )
@@ -218,7 +231,7 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
         )
 
         RbChipRow {
-            SUGERENCIAS.forEach { sugerencia ->
+            sugerencias.forEach { sugerencia ->
                 RbChip(label = sugerencia, onClick = { onElegir(sugerencia) })
             }
         }
@@ -238,6 +251,18 @@ private val SUGERENCIAS = listOf(
     "¿Qué se está por acabar?",
     "Registra un gasto de 5000 en arriendo",
     "¿Cuánto vendí este mes?",
+)
+
+/**
+ * Frases day-1 feria (ADR-0022): venta, fiado, hoy. Palabras que el parser
+ * de `crates/assist` reconoce - kg/granel se limpian en `clean_venta_product`.
+ */
+private val SUGERENCIAS_FERIA = listOf(
+    "Vendí 2 kg de tomates",
+    "Don Juan debe 5000",
+    "¿Cuánto vendí hoy?",
+    "Fiado 1 atado de cilantro a doña Ana",
+    "¿Quién me debe plata?",
 )
 
 /** El campo de abajo. */

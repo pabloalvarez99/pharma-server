@@ -10,6 +10,7 @@ import cl.rutbusiness.app.ui.RutBusinessApp
 import cl.rutbusiness.app.ui.entrada.ProveerEntrada
 import cl.rutbusiness.app.ui.impresora.ProveerImpresora
 import cl.rutbusiness.app.ui.offline.ProveerOffline
+import cl.rutbusiness.app.ui.rubro.ProveerRubro
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 
 /**
@@ -43,7 +44,9 @@ class MainActivity : ComponentActivity() {
                 ProveerImpresora(container.impresora) {
                     ProveerOffline(container.offline) {
                         ProveerEntrada(container.entrada) {
-                            RutBusinessApp(sesion = container.sesion)
+                            ProveerRubro(container.rubro) {
+                                RutBusinessApp(sesion = container.sesion)
+                            }
                         }
                     }
                 }
