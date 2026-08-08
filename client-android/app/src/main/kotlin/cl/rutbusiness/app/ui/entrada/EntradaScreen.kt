@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.IdentidadGoogle
 import cl.rutbusiness.core.session.IdentidadGoogleNoCableada
@@ -134,18 +135,36 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
         googleDisponible = identidad.disponible(),
         avisoGoogle = avisoGoogle,
         onGoogle = {
-            // Stub: no login real. Cuando haya OAuth, acá se canjea el id_token
-            // con el server y se llama a sesion.activar(...). Offline sigue OK.
+            // Pide cuenta → canjea id_token con el server (501 hasta OAuth ops).
+            // Offline core no depende de esto (ADR-0005).
             scope.launch {
                 pidiendoGoogle = true
                 avisoGoogle = null
                 when (val r = identidad.pedirCuenta()) {
                     is ResultadoGoogle.Listo -> {
-                        // Carril futuro: exchange + SessionRepository.
-                        // No inventamos sesión local con un token de Google.
-                        avisoGoogle = "Tu cuenta de Google está lista, pero " +
-                            "el servidor todavía no acepta ese tipo de entrada. " +
-                            "Usá correo y clave."
+                        val destino = vm.direccion
+                        if (destino == null) {
+                            avisoGoogle =
+                                "Primero poné la dirección del sistema del negocio."
+                        } else {
+                            when (
+                                val login = sesion.entrarConGoogle(
+                                    baseUrlCruda = destino,
+                                    idToken = r.idToken,
+                                    tenant = vm.negocio.takeIf { it.isNotBlank() },
+                                    emailHint = r.email,
+                                )
+                            ) {
+                                is Resultado.Ok -> {
+                                    avisoGoogle = null
+                                }
+                                is Resultado.Falla -> {
+                                    avisoGoogle = login.error.userMessage +
+                                        " Si Google aún no está listo en el " +
+                                        "servidor, usá correo y clave."
+                                }
+                            }
+                        }
                     }
                     is ResultadoGoogle.Cancelado -> {
                         avisoGoogle = null

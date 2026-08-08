@@ -161,6 +161,47 @@ class SessionRepository(
     }
 
     /**
+     * Entra con `id_token` de Google (ADR-0022).
+     *
+     * Misma activación de sesión que [entrar]; el server debe verificar JWKS.
+     * Hoy suele fallar con 501 hasta que ops cablee OAuth. **No** loguear
+     * [idToken].
+     */
+    suspend fun entrarConGoogle(
+        baseUrlCruda: String,
+        idToken: String,
+        tenant: String? = null,
+        emailHint: String? = null,
+    ): Resultado<Unit> {
+        val baseUrl = ServerUrl.normalizar(baseUrlCruda)
+            ?: return Resultado.Falla(AppError.DireccionInvalida())
+        if (idToken.isBlank()) {
+            return Resultado.Falla(AppError.Inesperado("google id_token vacío"))
+        }
+        token = null
+        return when (
+            val r = AuthApi(apiPara(baseUrl)).loginConGoogle(
+                idToken = idToken,
+                tenant = tenant,
+            )
+        ) {
+            is Resultado.Falla -> r
+            is Resultado.Ok -> {
+                token = r.valor.token
+                almacenamiento.tokens.guardar(r.valor.token)
+                almacenamiento.preferencias.guardarBaseUrl(baseUrl)
+                val t = tenant?.trim().orEmpty()
+                val e = emailHint?.trim()?.lowercase().orEmpty()
+                if (t.isNotEmpty() || e.isNotEmpty()) {
+                    almacenamiento.preferencias.guardarUltimoAcceso(t, e)
+                }
+                _estado.value = EstadoSesion.Activa(baseUrl = baseUrl, me = null)
+                Resultado.Ok(Unit)
+            }
+        }
+    }
+
+    /**
      * Cierra la sesión.
      *
      * Se lleva el caché de lecturas: son los productos, los deudores y las
