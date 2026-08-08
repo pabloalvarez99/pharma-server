@@ -69,8 +69,8 @@ con salt del header y abre el snapshot. **Aún no** rehidrata la cola de ventas.
 | Preparar / restaurar | `PrepararRespaldo.kt`, `RestaurarRespaldo.kt` |
 | Cliente upload | `UserBackupApi.kt` + wire en `ContenedorDeDestinos` / `PantallaDeCola` |
 | Material recovery parse | `client-android/core/.../backup/MaterialRecuperacion.kt` |
-| Pantalla rescate + payload QR + texto página | `client-android/app/.../entrada/TarjetaRescate.kt` |
-| QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` |
+| Pantalla rescate + QR ZXing + texto página | `TarjetaRescate.kt` + `entrada/QrRescate.kt` |
+| QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` (nunca las 12 palabras) |
 | Admin backup legacy | `POST /api/v1/admin/backup` = **otro** (dump servidor, admin+) |
 
 El backup admin del ERP (tar.gz del data dir) **no** es el de feria. No
