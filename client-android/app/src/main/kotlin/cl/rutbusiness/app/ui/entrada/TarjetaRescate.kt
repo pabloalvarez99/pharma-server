@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.claveDeDemostracion
+import cl.rutbusiness.core.backup.payloadQrRescate
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
@@ -43,15 +44,23 @@ import cl.rutbusiness.ui.theme.rbHeading
  *
  * Stub de UI: usa [claveDeDemostracion] o la [clave] que le pasen desde el
  * alta real (cuando exista el generador con CSPRNG). No sube nada a la red.
+ *
+ * El "código para el QR" es el payload estable (`rutbusiness-rescue:v1:…`);
+ * el dibujo del QR / PDF llega cuando el capitán pida la librería de códigos.
  */
 @Composable
 fun TarjetaRescate(
     onListo: () -> Unit,
     modifier: Modifier = Modifier,
     clave: ClaveDelNegocio = remember { claveDeDemostracion() },
+    /** Slug del negocio para el payload QR (vacío = solo palabras/bloques). */
+    tenantSlug: String = "mi-puesto",
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val qrPayload = remember(clave, tenantSlug) {
+        payloadQrRescate(tenantSlug, clave.bloques)
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
@@ -101,6 +110,24 @@ fun TarjetaRescate(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            if (qrPayload != null) {
+                RbCard(title = "Código para el QR / PDF") {
+                    Text(
+                        text = "Cuando imprimamos la tarjeta, este texto va en el " +
+                            "código. Hoy podés copiarlo al cuaderno si querés.",
+                        style = RbTheme.typography.support,
+                        color = colors.textSecondary,
+                    )
+                    Text(
+                        text = qrPayload,
+                        style = RbTheme.typography.label,
+                        color = colors.textPrimary,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(top = dimens.space2),
+                    )
+                }
             }
 
             // Marco grueso: se ve al sol como "hoja importante".
