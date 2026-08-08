@@ -93,6 +93,13 @@ fun generarClaveDelNegocio(semilla: ByteArray): ClaveDelNegocio {
     return ClaveDelNegocio(palabras = palabras, bloques = bloques)
 }
 
+/**
+ * Clave de producción: 16 bytes del CSPRNG del aparato → frase + bloques.
+ * No persiste la semilla (la dueña la tiene en el cuaderno).
+ */
+fun claveNuevaDelNegocio(): ClaveDelNegocio =
+    generarClaveDelNegocio(CryptoPlataforma.randomBytes(16))
+
 /** Semilla de demo fija - solo previews y tests. Nunca en alta real. */
 fun claveDeDemostracion(): ClaveDelNegocio {
     val demo = byteArrayOf(

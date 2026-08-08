@@ -79,6 +79,26 @@ class ColaDeVentasTest {
     }
 
     @Test
+    fun `fusionar desde respaldo no duplica y resetea intentos`() = runTest {
+        val cola = ColaDeVentas(AlmacenDeMentira()) { reloj }
+        cola.cargar()
+        assertTrue(cola.encolar(venta("ya-esta")))
+
+        val delSobre = listOf(
+            venta("ya-esta").copy(intentos = 5, rechazada = true, motivo = "viejo"),
+            venta("nueva-1"),
+            venta("nueva-2"),
+        )
+        assertEquals(2, cola.fusionarDesdeRespaldo(delSobre))
+        assertEquals(3, cola.ventas.value.size)
+        val n1 = cola.ventas.value.first { it.clave == "nueva-1" }
+        assertEquals(0, n1.intentos)
+        assertFalse(n1.rechazada)
+        // La local no se pisa.
+        assertEquals("ya-esta", cola.ventas.value.first { it.clave == "ya-esta" }.clave)
+    }
+
+    @Test
     fun `la espera crece y se planta en cinco minutos`() {
         assertEquals(5_000L, ColaDeVentas.esperaTras(1))
         assertEquals(10_000L, ColaDeVentas.esperaTras(2))

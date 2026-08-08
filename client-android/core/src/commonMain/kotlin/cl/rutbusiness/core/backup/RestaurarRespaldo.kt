@@ -13,6 +13,11 @@ data class RestauracionRespaldo(
     val snapshot: SnapshotBackupV1,
     val ventasEnCola: Int,
     val mensaje: String,
+    /**
+     * Cuántas ventas se fusionaron a la cola local (si el caller lo hizo).
+     * -1 = no rehidrató (solo abrió el snapshot).
+     */
+    val rehidratadas: Int = -1,
 )
 
 /**
@@ -78,19 +83,41 @@ fun restaurarDesdeSobre(
         RestauracionRespaldo(
             snapshot = snap,
             ventasEnCola = n,
-            mensaje = when {
-                n == 0 ->
-                    "Respaldo abierto. No traía ventas pendientes."
-                n == 1 ->
-                    "Respaldo abierto: 1 venta pendiente. " +
-                        "Aún no se rehidrata la cola (siguiente paso)."
-                else ->
-                    "Respaldo abierto: $n ventas pendientes. " +
-                        "Aún no se rehidrata la cola (siguiente paso)."
-            },
+            mensaje = mensajeApertura(n, rehidratadas = -1),
+            rehidratadas = -1,
         ),
     )
 }
+
+/**
+ * Mensaje honesto post-apertura (con o sin merge a la cola local).
+ */
+fun mensajeApertura(ventasEnSobre: Int, rehidratadas: Int): String = when {
+    ventasEnSobre == 0 ->
+        "Respaldo abierto. No traía ventas pendientes."
+    rehidratadas < 0 ->
+        if (ventasEnSobre == 1) {
+            "Respaldo abierto: 1 venta pendiente."
+        } else {
+            "Respaldo abierto: $ventasEnSobre ventas pendientes."
+        }
+    rehidratadas == 0 && ventasEnSobre > 0 ->
+        "Respaldo abierto: $ventasEnSobre venta(s) ya estaban en este teléfono " +
+            "(o la cola está llena). No se duplicaron."
+    rehidratadas == 1 ->
+        "Listo: 1 venta del respaldo volvió a la cola. " +
+            "Sale sola cuando haya señal."
+    else ->
+        "Listo: $rehidratadas ventas del respaldo volvieron a la cola. " +
+            "Salen solas cuando haya señal."
+}
+
+/** Ajusta el mensaje tras fusionar a [cl.rutbusiness.core.offline.ColaDeVentas]. */
+fun RestauracionRespaldo.conRehidratacion(agregadas: Int): RestauracionRespaldo =
+    copy(
+        rehidratadas = agregadas,
+        mensaje = mensajeApertura(ventasEnCola, agregadas),
+    )
 
 /**
  * Atajo: material en texto + sobre en base64 (lo que la dueña pega o

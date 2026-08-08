@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.claveDeDemostracion
+import cl.rutbusiness.core.backup.claveNuevaDelNegocio
 import cl.rutbusiness.core.backup.payloadQrRescate
 import cl.rutbusiness.core.backup.textoTarjetaImprimible
 import cl.rutbusiness.ui.components.RbButton
@@ -43,8 +44,8 @@ import cl.rutbusiness.ui.theme.rbHeading
  * pierde la historia. La pantalla **obliga** a leer el aviso; no se esconde
  * en un menú.
  *
- * Stub de UI: usa [claveDeDemostracion] o la [clave] que le pasen desde el
- * alta real (cuando exista el generador con CSPRNG). No sube nada a la red.
+ * Por defecto genera material con CSPRNG del aparato ([claveNuevaDelNegocio]).
+ * Tests / previews pueden inyectar [claveDeDemostracion]. No sube nada a la red.
  *
  * El "código para el QR" es el payload estable (`rutbusiness-rescue:v1:…`);
  * el dibujo del QR / PDF llega cuando el capitán pida la librería de códigos.
@@ -53,7 +54,7 @@ import cl.rutbusiness.ui.theme.rbHeading
 fun TarjetaRescate(
     onListo: () -> Unit,
     modifier: Modifier = Modifier,
-    clave: ClaveDelNegocio = remember { claveDeDemostracion() },
+    clave: ClaveDelNegocio = remember { claveNuevaDelNegocio() },
     /** Slug del negocio para el payload QR (vacío = solo palabras/bloques). */
     tenantSlug: String = "mi-puesto",
 ) {

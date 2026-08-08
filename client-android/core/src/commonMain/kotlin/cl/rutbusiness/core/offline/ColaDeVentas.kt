@@ -162,6 +162,39 @@ class ColaDeVentas(
         guardar(_ventas.value.filterNot { it.clave == clave && it.rechazada })
     }
 
+    /**
+     * Fusiona ventas de un snapshot de respaldo (ADR-0022 restore).
+     *
+     * - No duplica por [VentaEnCola.clave] (la que ya está gana).
+     * - Respeta [MAXIMO]: no mete más de lo que cabe.
+     * - Las que entran salen con intentos en 0 y listas para mandarse ya.
+     *
+     * Devuelve cuántas filas **nuevas** se agregaron.
+     */
+    suspend fun fusionarDesdeRespaldo(entrantes: List<VentaEnCola>): Int = candado.withLock {
+        if (entrantes.isEmpty()) return@withLock 0
+        val actuales = _ventas.value
+        val claves = actuales.map { it.clave }.toHashSet()
+        val nuevas = mutableListOf<VentaEnCola>()
+        for (v in entrantes) {
+            if (v.clave.isBlank()) continue
+            if (v.clave in claves) continue
+            if (actuales.size + nuevas.size >= MAXIMO) break
+            nuevas.add(
+                v.copy(
+                    intentos = 0,
+                    proximoIntentoEn = 0L,
+                    rechazada = false,
+                    motivo = null,
+                ),
+            )
+            claves.add(v.clave)
+        }
+        if (nuevas.isEmpty()) return@withLock 0
+        guardar(actuales + nuevas)
+        nuevas.size
+    }
+
     /** La primera venta a la que le toca salir, o `null` si no hay ninguna lista. */
     fun proxima(): VentaEnCola? {
         val ahora = reloj()

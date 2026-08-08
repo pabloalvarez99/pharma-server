@@ -54,9 +54,16 @@ Si anotar una venta o ver una deuda tarda más que el lápiz, es un bug de produ
 
 **Regla 3:** no hay client id ni secret en el repo ni en el vault.
 
+## Respaldo cifrado (estado en main)
+
+- **Preparar** en cola offline: frase del cuaderno → PBKDF2 + AES-GCM → sobre local
+  + intento de `POST /api/v1/user-backup` (ciphertext only; sin bucket = accepted false).
+- **Abrir respaldo**: frase + base64 → rehidrata `pending_sales` en la cola.
+- **Sin** recuperación de clave por soporte. Bucket R2/S3 y Argon2id: pendientes.
+
 ## Fuera de scope aún
 
-- PDF/QR de la tarjeta de rescate
-- Cifrado real + upload a bucket
+- Dibujo QR (ZXing) / PDF de la tarjeta de rescate
+- Bucket real (ops del capitán)
 - Google OAuth end-to-end (consola + secrets del capitán)
-- Seed demo feria en Surreal (código seed sí; corrida en lab)
+- Seed demo feria corrida en lab (código seed sí)

@@ -86,4 +86,19 @@ class RestaurarRespaldoTest {
         val rest = restaurarDesdeTextos(words, b64).getOrThrow()
         assertEquals(1, rest.ventasEnCola)
     }
+
+    @Test
+    fun `conRehidratacion actualiza el mensaje`() {
+        val prep = prepararRespaldoDesdeCola(
+            tenantId = "puesto",
+            cola = listOf(venta()),
+            createdAtUnix = 100L,
+            materialRecuperacion = frase,
+        ).getOrThrow()
+        val abierta = restaurarDesdeSobre(frase, prep.sobre!!.envelopeBytes).getOrThrow()
+        val con = abierta.conRehidratacion(1)
+        assertEquals(1, con.rehidratadas)
+        assertTrue(con.mensaje.contains("volvió", ignoreCase = true) ||
+            con.mensaje.contains("Listo", ignoreCase = true))
+    }
 }
