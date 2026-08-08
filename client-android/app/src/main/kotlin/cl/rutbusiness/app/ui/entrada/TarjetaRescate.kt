@@ -39,13 +39,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import cl.rutbusiness.app.entrada.PaginaRescatePrint
 import cl.rutbusiness.app.entrada.matrizQrRescate
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.HUELLA_SIZE
 import cl.rutbusiness.core.backup.claveDeDemostracion
 import cl.rutbusiness.core.backup.claveNuevaDelNegocio
+import cl.rutbusiness.core.backup.htmlTarjetaImprimible
 import cl.rutbusiness.core.backup.huellaVisualDelPayload
 import cl.rutbusiness.core.backup.payloadQrRescate
+import cl.rutbusiness.core.backup.svgMatrizCodigo
 import cl.rutbusiness.core.backup.textoTarjetaImprimible
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -65,7 +68,7 @@ import cl.rutbusiness.ui.theme.rbHeading
  * Tests / previews pueden inyectar [claveDeDemostracion]. No sube nada a la red.
  *
  * El "código para el QR" es el payload estable (`rutbusiness-rescue:v1:…`);
- * el dibujo del QR / PDF llega cuando el capitán pida la librería de códigos.
+ * dibujo ZXing en pantalla + HTML de una página para imprimir / Guardar PDF.
  */
 @Composable
 fun TarjetaRescate(
@@ -85,6 +88,13 @@ fun TarjetaRescate(
     }
     val textoPagina = remember(clave, tenantSlug) {
         textoTarjetaImprimible(clave, tenantSlug)
+    }
+    val matrizQr = remember(qrPayload) {
+        qrPayload?.let { matrizQrRescate(it) }
+    }
+    val htmlPagina = remember(clave, tenantSlug, matrizQr) {
+        val svg = matrizQr?.let { svgMatrizCodigo(it) }
+        htmlTarjetaImprimible(clave, tenantSlug, svgQr = svg)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -147,7 +157,6 @@ fun TarjetaRescate(
                         color = colors.textSecondary,
                     )
                     // QR real (ZXing). Si falla el encode, huella visual de respaldo.
-                    val matrizQr = remember(qrPayload) { matrizQrRescate(qrPayload) }
                     val grillaHuella = remember(qrPayload) {
                         huellaVisualDelPayload(qrPayload)
                     }
@@ -244,9 +253,8 @@ fun TarjetaRescate(
                 }
             }
 
-            // Página de texto lista para copiar al cuaderno / nota.
-            // El PDF llega después; el portapapeles cubre day-1.
-            RbCard(title = "Texto para el cuaderno (una página)") {
+            // Una página: copiar, compartir texto, o imprimir / Guardar como PDF.
+            RbCard(title = "Una página para el cuaderno") {
                 Text(
                     text = textoPagina,
                     style = RbTheme.typography.label,
@@ -286,11 +294,20 @@ fun TarjetaRescate(
                     fillWidth = true,
                     modifier = Modifier.padding(top = dimens.space1),
                 )
+                RbButton(
+                    label = "Imprimir o guardar PDF",
+                    onClick = {
+                        PaginaRescatePrint.imprimirOGuardarPdf(context, htmlPagina)
+                    },
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = dimens.space1),
+                )
             }
 
             Text(
-                text = "El PDF de una página llega después. " +
-                    "Hoy: palabras en el cuaderno + QR de bloques en pantalla.",
+                text = "Imprimí o guardá el PDF y pegalo en el cuaderno. " +
+                    "Las 12 palabras no van en el QR (solo los bloques).",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )

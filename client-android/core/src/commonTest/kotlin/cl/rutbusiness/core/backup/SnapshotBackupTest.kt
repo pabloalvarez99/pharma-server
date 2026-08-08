@@ -75,4 +75,42 @@ class SnapshotBackupTest {
         // La frase completa junta no debe ser la única forma: numerada sí.
         assertTrue(texto.lines().any { it.trim().startsWith("1.") })
     }
+
+    @Test
+    fun `html de una pagina escapa y lleva palabras y payload`() {
+        val clave = claveDeDemostracion()
+        val html = htmlTarjetaImprimible(clave, "Puesto-Rosa")
+        assertTrue(html.startsWith("<!DOCTYPE html>"))
+        assertTrue(html.contains("Puesto-Rosa".lowercase()) || html.contains("puesto-rosa"))
+        assertTrue(html.contains(clave.palabras[0]))
+        assertTrue(html.contains(clave.bloquesCompletos()))
+        assertTrue(html.contains("rutbusiness-rescue:v1:puesto-rosa:"))
+        assertTrue(html.contains("No la mandes por WhatsApp") || html.contains("WhatsApp"))
+        // No mete la frase cruda como un solo nodo sin numerar (lista <li>).
+        assertTrue(html.contains("<li>"))
+        assertTrue(html.contains("&lt;") || !html.contains("<script"))
+    }
+
+    @Test
+    fun `html con svg qr inserta markup confiable`() {
+        val clave = claveDeDemostracion()
+        // Mini matriz 3x3 con un módulo.
+        val grilla = arrayOf(
+            booleanArrayOf(true, false, true),
+            booleanArrayOf(false, true, false),
+            booleanArrayOf(true, false, true),
+        )
+        val svg = assertNotNull(svgMatrizCodigo(grilla))
+        assertTrue(svg.contains("<svg"))
+        assertTrue(svg.contains("""x="0" y="0""""))
+        val html = htmlTarjetaImprimible(clave, "demo", svgQr = svg)
+        assertTrue(html.contains("<svg"))
+        assertTrue(html.contains("viewBox="))
+    }
+
+    @Test
+    fun `escaparHtml neutraliza tags`() {
+        assertEquals("&lt;b&gt;x&amp;y&lt;/b&gt;", escaparHtml("<b>x&y</b>"))
+        assertEquals("a&quot;b&#39;c", escaparHtml("a\"b'c"))
+    }
 }

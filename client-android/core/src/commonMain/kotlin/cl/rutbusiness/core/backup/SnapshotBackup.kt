@@ -107,10 +107,11 @@ fun armarSnapshotDesdeCola(
 )
 
 /**
- * Texto de una página para el cuaderno (sin PDF ni QR dibujado).
+ * Texto de una página para el cuaderno (copiar / notas).
  *
  * El feriante puede copiar a mano o pegar en una nota. Las 12 palabras van
  * numeradas; el payload QR va al final (bloques, no la frase).
+ * Para PDF / sistema de impresión ver [htmlTarjetaImprimible].
  */
 fun textoTarjetaImprimible(
     clave: ClaveDelNegocio,
@@ -130,11 +131,148 @@ fun textoTarjetaImprimible(
     sb.appendLine("Bloques: ${clave.bloquesCompletos()}")
     if (qr.isNotEmpty()) {
         sb.appendLine()
-        sb.appendLine("Código QR (cuando haya impresora):")
+        sb.appendLine("Código QR (payload de bloques):")
         sb.appendLine(qr)
     }
     sb.appendLine()
     sb.appendLine("Sin esta llave el respaldo no se puede abrir.")
     sb.appendLine("No mandes esto por WhatsApp.")
     return sb.toString().trimEnd() + "\n"
+}
+
+/**
+ * HTML de **una página** para imprimir o "Guardar como PDF" (PrintManager).
+ *
+ * Sin dependencias nativas: tipografía monoespaciada, palabras numeradas,
+ * bloques y opcionalmente un SVG del QR (matriz booleana). El SVG codifica
+ * solo el payload de bloques - nunca las 12 palabras.
+ *
+ * [svgQr] se inserta tal cual dentro del body (debe ser markup confiable
+ * generado por [svgMatrizCodigo]).
+ */
+fun htmlTarjetaImprimible(
+    clave: ClaveDelNegocio,
+    tenantSlug: String,
+    svgQr: String? = null,
+    titulo: String = "RutBusiness - tarjeta de rescate",
+): String {
+    val slug = tenantSlug.trim().lowercase()
+    val qrPayload = payloadQrRescate(tenantSlug, clave.bloques).orEmpty()
+    val palabrasHtml = clave.palabras.mapIndexed { i, p ->
+        "<li><strong>${i + 1}.</strong> ${escaparHtml(p)}</li>"
+    }.joinToString("\n")
+    val qrBlock = buildString {
+        if (!svgQr.isNullOrBlank()) {
+            appendLine("""<div class="qr">${svgQr.trim()}</div>""")
+            appendLine("""<p class="hint">QR de bloques (escaneable). Las 12 palabras solo en el cuaderno.</p>""")
+        }
+        if (qrPayload.isNotEmpty()) {
+            appendLine("""<p class="mono small">Payload: ${escaparHtml(qrPayload)}</p>""")
+        }
+    }
+    return """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${escaparHtml(titulo)}</title>
+<style>
+  @page { size: A4; margin: 16mm; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    color: #111;
+    line-height: 1.35;
+    max-width: 180mm;
+    margin: 0 auto;
+  }
+  h1 { font-size: 20pt; margin: 0 0 4mm; }
+  h2 { font-size: 12pt; margin: 6mm 0 2mm; }
+  .warn {
+    border: 2px solid #111;
+    padding: 3mm 4mm;
+    margin: 4mm 0;
+    background: #fff8e6;
+    font-size: 10pt;
+  }
+  ol.words {
+    columns: 2;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12pt;
+    padding-left: 6mm;
+  }
+  .blocks {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 14pt;
+    letter-spacing: 0.04em;
+    text-align: center;
+    border: 1px solid #333;
+    padding: 3mm;
+  }
+  .qr { text-align: center; margin: 4mm 0; }
+  .qr svg { width: 48mm; height: 48mm; }
+  .mono { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+  .small { font-size: 8pt; color: #333; }
+  .hint { font-size: 9pt; color: #333; }
+  .foot { margin-top: 6mm; font-size: 9pt; }
+</style>
+</head>
+<body>
+  <h1>${escaparHtml(titulo)}</h1>
+  <p>Negocio: <strong class="mono">${escaparHtml(slug)}</strong></p>
+  <div class="warn">
+    <strong>Pegá esta hoja en tu cuaderno.</strong>
+    Sin esta llave el respaldo cifrado no se puede abrir.
+    RutBusiness no puede recuperarla. No la mandes por WhatsApp.
+  </div>
+  <h2>Palabras (12)</h2>
+  <ol class="words">
+$palabrasHtml
+  </ol>
+  <h2>Bloques (lápiz)</h2>
+  <p class="blocks">${escaparHtml(clave.bloquesCompletos())}</p>
+  <h2>Código QR de rescate</h2>
+$qrBlock
+  <p class="foot">RutBusiness · tarjeta de rescate · una página · no compartir por chat</p>
+</body>
+</html>
+""".trim() + "\n"
+}
+
+/**
+ * SVG de una matriz booleana (QR o huella). Módulos negros = true.
+ * Escala en viewBox 0..n para que el CSS fije el tamaño físico.
+ */
+fun svgMatrizCodigo(grilla: Array<BooleanArray>): String? {
+    if (grilla.isEmpty()) return null
+    val h = grilla.size
+    val w = grilla.maxOfOrNull { it.size } ?: return null
+    if (w == 0) return null
+    val sb = StringBuilder()
+    sb.append("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $w $h" shape-rendering="crispEdges">""")
+    sb.append("""<rect width="$w" height="$h" fill="#fff"/>""")
+    for (y in 0 until h) {
+        val row = grilla[y]
+        for (x in 0 until minOf(w, row.size)) {
+            if (row[x]) {
+                sb.append("""<rect x="$x" y="$y" width="1" height="1" fill="#000"/>""")
+            }
+        }
+    }
+    sb.append("</svg>")
+    return sb.toString()
+}
+
+/** Escape mínimo para insertar texto en HTML. */
+fun escaparHtml(raw: String): String = buildString(raw.length + 8) {
+    for (c in raw) {
+        when (c) {
+            '&' -> append("&amp;")
+            '<' -> append("&lt;")
+            '>' -> append("&gt;")
+            '"' -> append("&quot;")
+            '\'' -> append("&#39;")
+            else -> append(c)
+        }
+    }
 }

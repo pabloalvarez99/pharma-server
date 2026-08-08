@@ -54,6 +54,10 @@ class TarjetaRescateTest {
         compose.onAllNodesWithText("rutbusiness-rescue:v1:puesto-rosa:", substring = true)
             .assertCountEquals(2)
         assertTrue(payload.startsWith("rutbusiness-rescue:v1:puesto-rosa:"))
+        // PDF / impresión: botón en el scroll (no se toca en Robolectric).
+        compose.onNodeWithText("Imprimir o guardar PDF")
+            .performScrollTo()
+            .assertIsDisplayed()
         // Botón anclado abajo (fuera del scroll): siempre a la vista.
         compose.onNodeWithText("Ya la anoté en el cuaderno")
             .assertIsDisplayed()

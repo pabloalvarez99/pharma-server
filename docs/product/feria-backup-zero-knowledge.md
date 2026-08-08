@@ -20,8 +20,9 @@ usuario el blob es basura. **No hay recuperación de clave por soporte.**
 1. Alta / primer login genera material de recuperación en el cliente
    (CSPRNG → 12 palabras es-CL **o** 8 bloques de 4 caracteres).
 2. Pantalla a pantalla completa: frase + aviso "escribila en el cuaderno".
-3. Stub UI: `TarjetaRescate` (Android) + `domain::user_backup` (shapes).
-4. Más adelante: PDF de una página con QR + palabras.
+3. UI: `TarjetaRescate` (Android) + `domain::user_backup` (shapes).
+4. PDF / impresión: HTML de una página + PrintManager ("Guardar como PDF")
+   con QR SVG de bloques (`htmlTarjetaImprimible` + `PaginaRescatePrint`).
 
 ## Flujo backup (v1)
 
@@ -45,15 +46,16 @@ sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
 ## Flujo restore
 
 **Hoy (local):** en la cola offline → "Abrir un respaldo" con llave + base64
-del sobre (prefill del último preparado). `restaurarDesdeSobre` re-deriva
-con salt del header y abre el snapshot. **Aún no** rehidrata la cola de ventas.
+del sobre (prefill del último preparado, o "Traer de la nube").
+`restaurarDesdeSobre` re-deriva con salt del header, abre el snapshot y
+`fusionarDesdeRespaldo` rehidrata `pending_sales` en la cola. Fallo de frase =
+error claro, sin "¿olvidaste tu clave?".
 
 **Siguiente:**
 
-1. Login Google / identidad del tenant.
-2. Descargar blob listado (`GET /api/v1/user-backup`).
-3. Rehidratar `pending_sales` en `ColaDeVentas`.
-4. Fallo de frase = error claro, sin "¿olvidaste tu clave?".
+1. Login Google real (JWKS + client id).
+2. Bucket de producción (hoy lab memory o `accepted: false`).
+3. Argon2id cuando haya lib multiplataforma.
 
 ## Código ancla
 
@@ -69,7 +71,8 @@ con salt del header y abre el snapshot. **Aún no** rehidrata la cola de ventas.
 | Preparar / restaurar | `PrepararRespaldo.kt`, `RestaurarRespaldo.kt` |
 | Cliente upload | `UserBackupApi.kt` + wire en `ContenedorDeDestinos` / `PantallaDeCola` |
 | Material recovery parse | `client-android/core/.../backup/MaterialRecuperacion.kt` |
-| Pantalla rescate + QR ZXing + texto página | `TarjetaRescate.kt` + `entrada/QrRescate.kt` |
+| Pantalla rescate + QR ZXing + texto/HTML página | `TarjetaRescate.kt` + `entrada/QrRescate.kt` + `PaginaRescatePrint.kt` |
+| HTML imprimible / PDF | `htmlTarjetaImprimible` + `svgMatrizCodigo` (core) → PrintManager |
 | QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` (nunca las 12 palabras) |
 | Admin backup legacy | `POST /api/v1/admin/backup` = **otro** (dump servidor, admin+) |
 
