@@ -7,6 +7,7 @@ pub mod agent;
 pub mod agent_orders;
 pub mod assist;
 pub mod audit;
+pub mod auth_google;
 pub mod backup;
 pub use backup::{backup_now, prune_backups, BackupReport};
 pub mod branches;
@@ -62,6 +63,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(seed::router(state.clone()))
         .merge(rubro::router(state.clone()))
         .merge(user_backup::router(state.clone()))
+        .merge(auth_google::router(state.clone()))
         .merge(public_catalog::router(state.clone()))
         .merge(public_orders::router(state.clone()))
         .merge(public_web::router(state.clone()))

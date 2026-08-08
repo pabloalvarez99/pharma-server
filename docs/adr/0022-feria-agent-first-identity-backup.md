@@ -88,3 +88,19 @@ Vara: **ganar al cuaderno** en velocidad de anotar una venta y de saber quién d
 - iOS.
 - Federated marketplace (Fase 13) — no se cierra la puerta; identidad Google es
   un ancla de usuario, el DID de nodo sigue siendo del ERP.
+
+## Implementation status (2026-08-08, main)
+
+Shipped in AFK loop (no secrets in repo):
+
+| Piece | Status |
+|-------|--------|
+| RubroPack feria + Android nav agent_home | done |
+| Tarjeta rescate + CSPRNG words/blocks + visual fingerprint | done (QR scannable later) |
+| PBKDF2-HMAC-SHA256 210k + AES-256-GCM envelope `RB1` | done (Argon2id later) |
+| Snapshot `pending_sales` + prepare from offline queue | done |
+| `POST/GET /api/v1/user-backup` + lab memory store | done (`RUTBUSINESS_USER_BACKUP_MEMORY=1`) |
+| Restore UI + rehydrate cola + disk last envelope | done |
+| Google OAuth E2E + production bucket | **open** (client stubs + domain shapes only) |
+
+Product docs: `docs/product/feria-backup-zero-knowledge.md`, `feria-day-1-operator.md`.
