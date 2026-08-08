@@ -11,16 +11,19 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.offline.EstadoRespaldoUi
 import cl.rutbusiness.app.ui.offline.FranjaDeConexion
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.offline.PantallaDeCola
 import cl.rutbusiness.app.ui.offline.hayConexion
 import cl.rutbusiness.app.ui.offline.ventasEnCola
 import cl.rutbusiness.app.ui.rubro.packActual
+import cl.rutbusiness.core.backup.prepararRespaldoDesdeCola
 
 /**
  * El armazón de la navegación: qué pestaña está elegida, qué se dibuja arriba
@@ -43,6 +46,11 @@ import cl.rutbusiness.app.ui.rubro.packActual
 internal fun ContenedorDeDestinos(
     modifier: Modifier = Modifier,
     inicial: Destino = Destino.Agente,
+    /**
+     * Tenant para armar el snapshot de respaldo (ADR-0022). Puede ser el slug
+     * de login o el id del JWT; si falta, se usa un placeholder local.
+     */
+    tenantId: String? = null,
     contenido: @Composable (Destino) -> Unit,
 ) {
     var destino by rememberSaveable { mutableStateOf(inicial) }
@@ -56,6 +64,9 @@ internal fun ContenedorDeDestinos(
     val conectado = hayConexion()
     val cola = ventasEnCola()?.value.orEmpty()
     var viendoCola by rememberSaveable { mutableStateOf(false) }
+    // No saveable: es un mensaje efímero de la última preparación.
+    var estadoRespaldo by remember { mutableStateOf<EstadoRespaldoUi?>(null) }
+    val pack = packActual()
 
     // Atrás desde una pestaña secundaria vuelve al inicio en vez de cerrar la
     // app de golpe. En [inicial] queda deshabilitado y el sistema hace lo suyo:
@@ -113,6 +124,34 @@ internal fun ContenedorDeDestinos(
                     onIntentarAhora = { offline.despachador.intentarAhora() },
                     onDescartar = { clave -> offline.cola.descartar(clave) },
                     onCerrar = { viendoCola = false },
+                    // Feria (o cualquiera): preparar snapshot de la cola sin
+                    // subir plaintext. Cifrado real = siguiente carril.
+                    onPrepararRespaldo = {
+                        val prep = prepararRespaldoDesdeCola(
+                            tenantId = tenantId?.takeIf { it.isNotBlank() } ?: "local",
+                            cola = cola,
+                            createdAtUnix = offline.reloj() / 1000L,
+                            rubro = pack.rubro,
+                            cifradoListo = false,
+                        )
+                        estadoRespaldo = prep.fold(
+                            onSuccess = {
+                                EstadoRespaldoUi(
+                                    mensaje = it.mensaje,
+                                    bytes = it.bytesPlaintext,
+                                    ventas = it.ventasEnCola,
+                                )
+                            },
+                            onFailure = {
+                                EstadoRespaldoUi(
+                                    mensaje = "No se pudo armar el paquete: ${it.message}",
+                                    bytes = 0,
+                                    ventas = 0,
+                                )
+                            },
+                        )
+                    },
+                    estadoRespaldo = estadoRespaldo,
                 )
             } else {
                 estados.SaveableStateProvider(destino.name) {

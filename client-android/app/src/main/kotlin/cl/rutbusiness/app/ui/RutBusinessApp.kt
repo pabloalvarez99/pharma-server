@@ -125,7 +125,9 @@ private fun ConSesion(sesion: SessionRepository, estado: EstadoSesion.Activa) {
         return
     }
 
-    ContenedorDeDestinos { destino ->
+    ContenedorDeDestinos(
+        tenantId = estado.me?.tenantId,
+    ) { destino ->
         when (destino) {
             Destino.Agente -> AssistRoute(sesion = sesion)
             Destino.Cobrar -> CobrarRoute(sesion = sesion, estado = estado)

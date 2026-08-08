@@ -20,6 +20,7 @@ import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.coroutines.launch
+// EstadoRespaldoUi vive en este mismo package.
 
 /**
  * Las ventas que todavía no llegaron al sistema del negocio.
@@ -35,6 +36,16 @@ import kotlinx.coroutines.launch
  * muestra. Se dicen los productos y la hora, que es lo que la dueña usa para
  * reconocer cuál venta es cuál.
  */
+/**
+ * Estado del último "Preparar respaldo" (ADR-0022).
+ * Solo UI: el core no guarda esto.
+ */
+data class EstadoRespaldoUi(
+    val mensaje: String,
+    val bytes: Int,
+    val ventas: Int,
+)
+
 @Composable
 fun PantallaDeCola(
     cola: List<VentaEnCola>,
@@ -44,6 +55,9 @@ fun PantallaDeCola(
     onDescartar: suspend (String) -> Unit,
     onCerrar: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Feria / ADR-0022: armar snapshot de la cola sin subir plaintext. */
+    onPrepararRespaldo: (() -> Unit)? = null,
+    estadoRespaldo: EstadoRespaldoUi? = null,
 ) {
     val dimens = RbTheme.dimens
     val alcance = rememberCoroutineScope()
@@ -61,7 +75,7 @@ fun PantallaDeCola(
             onBack = onCerrar,
         )
 
-        if (cola.isEmpty()) {
+        if (cola.isEmpty() && onPrepararRespaldo == null) {
             RbEmptyState(
                 title = "No hay ninguna esperando",
                 hint = "Todas las ventas que cobraste ya llegaron al sistema del negocio.",
@@ -75,6 +89,54 @@ fun PantallaDeCola(
             modifier = Modifier.fillMaxSize().padding(dimens.space3),
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
+            if (onPrepararRespaldo != null) {
+                item {
+                    RbCard(title = "Respaldo del día") {
+                        Text(
+                            text = "Arma un paquete con las ventas de este " +
+                                "teléfono. Se cifra con tu llave del cuaderno " +
+                                "antes de subir (cuando el cifrado esté listo).",
+                            style = RbTheme.typography.body,
+                            color = RbTheme.colors.textSecondary,
+                        )
+                        RbButton(
+                            label = "Preparar respaldo",
+                            onClick = onPrepararRespaldo,
+                            variant = RbButtonVariant.Secondary,
+                            fillWidth = true,
+                            modifier = Modifier.padding(top = dimens.space2),
+                        )
+                        estadoRespaldo?.let { est ->
+                            Text(
+                                text = est.mensaje,
+                                style = RbTheme.typography.support,
+                                color = RbTheme.colors.textPrimary,
+                                modifier = Modifier.padding(top = dimens.space2),
+                            )
+                            if (est.ventas > 0) {
+                                Text(
+                                    text = "${est.ventas} venta(s) · ${est.bytes} bytes",
+                                    style = RbTheme.typography.label,
+                                    color = RbTheme.colors.textSecondary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (cola.isEmpty()) {
+                item {
+                    RbEmptyState(
+                        title = "No hay ninguna esperando",
+                        hint = "Todas las ventas que cobraste ya llegaron al sistema del negocio.",
+                        actionLabel = "Volver",
+                        onAction = onCerrar,
+                    )
+                }
+                return@LazyColumn
+            }
+
             if (esperando > 0) {
                 item {
                     RbButton(
