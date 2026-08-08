@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -210,8 +209,8 @@ private fun resumenDelCarrito(vm: CobrarViewModel): String {
  * Crear el producto del código que no estaba, sin salir de la venta.
  *
  * Nombre y precio y nada más: lo que hace falta para cobrarlo hoy. El resto de
- * la ficha -categoría, laboratorio, costo- se completa después desde el
- * sistema del negocio, con calma y sin un cliente esperando.
+ * la ficha -categoría, laboratorio, costo- se completa después pidiéndoselo al
+ * agente, con calma y sin un cliente esperando.
  *
  * Mientras este formulario está arriba, el visor no está compuesto y la cámara
  * quedó suelta: no tiene sentido tener el sensor encendido mientras alguien
@@ -237,36 +236,28 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 color = RbTheme.colors.textPrimary,
             )
 
-            // `wrapContentHeight(unbounded = true)`: mismo motivo que en
-            // `PasoBuscar`. `RbTextField` pinta su decoración con
-            // `fillMaxSize()` y dentro de una altura acotada se come la
-            // pantalla. Se borra cuando el design system pase a `fillMaxWidth`.
-            Column(modifier = Modifier.wrapContentHeight(unbounded = true)) {
-                RbTextField(
-                    value = vm.nombreNuevo,
-                    onValueChange = vm::cambiarNombreNuevo,
-                    label = "Nombre",
-                    placeholder = "Como quieres verlo en la boleta",
-                    enabled = !vm.guardandoProducto,
-                    imeAction = ImeAction.Next,
-                )
-            }
+            RbTextField(
+                value = vm.nombreNuevo,
+                onValueChange = vm::cambiarNombreNuevo,
+                label = "Nombre",
+                placeholder = "Como quieres verlo en la boleta",
+                enabled = !vm.guardandoProducto,
+                imeAction = ImeAction.Next,
+            )
 
-            Column(modifier = Modifier.wrapContentHeight(unbounded = true)) {
-                RbTextField(
-                    value = vm.precioNuevo,
-                    onValueChange = vm::cambiarPrecioNuevo,
-                    label = "Precio",
-                    placeholder = "Sólo números",
-                    supportingText = vm.precioNuevo
-                        .takeIf { it.isNotBlank() }
-                        ?.let { "Se cobra ${vm.moneda.formatear(it)}" }
-                        ?: "El precio de venta al público.",
-                    numeric = true,
-                    keyboardType = KeyboardType.Number,
-                    enabled = !vm.guardandoProducto,
-                )
-            }
+            RbTextField(
+                value = vm.precioNuevo,
+                onValueChange = vm::cambiarPrecioNuevo,
+                label = "Precio",
+                placeholder = "Sólo números",
+                supportingText = vm.precioNuevo
+                    .takeIf { it.isNotBlank() }
+                    ?.let { "Se cobra ${vm.moneda.formatear(it)}" }
+                    ?: "El precio de venta al público.",
+                numeric = true,
+                keyboardType = KeyboardType.Number,
+                enabled = !vm.guardandoProducto,
+            )
 
             // El error va acá y no colgado de un campo: puede venir del nombre,
             // del precio o del server, y colgarlo del campo equivocado manda a
@@ -277,7 +268,8 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
 
             Text(
                 text = "Nace con una unidad en stock: la que tienes en la mano. El resto de la " +
-                    "ficha se completa después desde el sistema del negocio.",
+                    "ficha —categoría, costo, proveedor— se completa después con calma, " +
+                    "pidiéndoselo al agente.",
                 style = RbTheme.typography.support,
                 color = RbTheme.colors.textSecondary,
             )

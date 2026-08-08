@@ -1,14 +1,5 @@
-package cl.rutbusiness.app.impresion
+package cl.rutbusiness.app.impresora
 
-import cl.rutbusiness.app.ui.impresora.AnchoDePapel
-import cl.rutbusiness.app.ui.impresora.EnlaceDeImpresora
-import cl.rutbusiness.app.ui.impresora.EscPos
-import cl.rutbusiness.app.ui.impresora.EstadoDePapel
-import cl.rutbusiness.app.ui.impresora.FallaDeImpresion
-import cl.rutbusiness.app.ui.impresora.ImpresoraConocida
-import cl.rutbusiness.app.ui.impresora.ImpresoraElegida
-import cl.rutbusiness.app.ui.impresora.Intento
-import cl.rutbusiness.app.ui.impresora.PreferenciasDeImpresora
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothClass
@@ -19,6 +10,14 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import cl.rutbusiness.app.ui.impresora.AnchoDePapel
+import cl.rutbusiness.app.ui.impresora.EnlaceDeImpresora
+import cl.rutbusiness.app.ui.impresora.EscPos
+import cl.rutbusiness.app.ui.impresora.EstadoDePapel
+import cl.rutbusiness.app.ui.impresora.FallaDeImpresion
+import cl.rutbusiness.app.ui.impresora.ImpresoraConocida
+import cl.rutbusiness.app.ui.impresora.ImpresoraElegida
+import cl.rutbusiness.app.ui.impresora.Intento
 import java.io.IOException
 import java.util.TimeZone
 import java.util.UUID

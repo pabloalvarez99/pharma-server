@@ -1,8 +1,11 @@
 package cl.rutbusiness.app
 
 import android.content.Context
-import cl.rutbusiness.app.impresion.ImpresoraBluetoothAndroid
-import cl.rutbusiness.app.impresion.PreferenciasDeImpresoraAndroid
+import cl.rutbusiness.app.entrada.PreferenciasDeEntradaAndroid
+import cl.rutbusiness.app.entrada.RedDelTelefonoAndroid
+import cl.rutbusiness.app.impresora.ImpresoraBluetoothAndroid
+import cl.rutbusiness.app.impresora.PreferenciasDeImpresoraAndroid
+import cl.rutbusiness.app.ui.entrada.ServiciosDeEntrada
 import cl.rutbusiness.app.ui.impresora.ServiciosDeImpresora
 import cl.rutbusiness.app.ui.offline.ServiciosOffline
 import cl.rutbusiness.core.net.contestaElServidor
@@ -68,6 +71,18 @@ class AppContainer(context: Context) {
         sesion = sesion,
         enlace = ImpresoraBluetoothAndroid(context.applicationContext),
         preferencias = PreferenciasDeImpresoraAndroid(context.applicationContext),
+    )
+
+    /**
+     * Lo que necesita la pantalla de entrada.
+     *
+     * Igual de barato de construir que la impresora: guarda un `Context` y abre
+     * un `SharedPreferences`. Nada toca la radio ni la red hasta que alguien
+     * pregunta.
+     */
+    val entrada = ServiciosDeEntrada(
+        red = RedDelTelefonoAndroid(context.applicationContext),
+        preferencias = PreferenciasDeEntradaAndroid(context.applicationContext),
     )
 
     private val scope = CoroutineScope(SupervisorJob())

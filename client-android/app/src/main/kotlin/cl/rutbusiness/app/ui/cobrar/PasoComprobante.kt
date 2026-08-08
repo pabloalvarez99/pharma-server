@@ -65,7 +65,7 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             RbCard(title = "La venta quedó registrada") {
                 Text(
                     text = "No alcanzamos a traer el detalle del comprobante, pero el cobro ya " +
-                        "está hecho. Lo puedes ver en las ventas del día desde el sistema del negocio.",
+                        "está hecho. Lo ves en «Tu día», que ya cuenta esta venta.",
                     style = RbTheme.typography.body,
                     color = RbTheme.colors.textSecondary,
                 )

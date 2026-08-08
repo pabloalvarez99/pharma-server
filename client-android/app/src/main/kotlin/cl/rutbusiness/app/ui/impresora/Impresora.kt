@@ -55,13 +55,13 @@ sealed class FallaDeImpresion(
     class SinBluetooth : FallaDeImpresion(
         titulo = "Este teléfono no tiene Bluetooth",
         queHacer = "No se puede imprimir desde acá. La venta igual quedó registrada y la " +
-            "boleta se puede imprimir después desde el PC del negocio.",
+            "boleta se puede imprimir después desde el computador del negocio.",
         sePuedeReintentar = false,
     )
 
     class BluetoothApagado : FallaDeImpresion(
         titulo = "El Bluetooth está apagado",
-        queHacer = "Enciéndelo deslizando desde arriba de la pantalla, y toca Reintentar.",
+        queHacer = "Enciéndelo deslizando desde arriba de la pantalla, y toca «Reintentar».",
         sePuedeReintentar = true,
     )
 
@@ -91,14 +91,14 @@ sealed class FallaDeImpresion(
     class NoContesta(nombre: String, tecnico: String? = null) : FallaDeImpresion(
         titulo = "«$nombre» no contesta",
         queHacer = "Puede estar apagada o quedar muy lejos. Revisa que tenga luz encendida, " +
-            "acércate un poco y toca Reintentar.",
+            "acércate un poco y toca «Reintentar».",
         sePuedeReintentar = true,
         tecnico = tecnico,
     )
 
     class SinPapel(nombre: String) : FallaDeImpresion(
         titulo = "«$nombre» se quedó sin papel",
-        queHacer = "Cambia el rollo, cierra la tapa y toca Reintentar.",
+        queHacer = "Cambia el rollo, cierra la tapa y toca «Reintentar».",
         sePuedeReintentar = true,
     )
 
@@ -106,7 +106,7 @@ sealed class FallaDeImpresion(
     class SeCortoAMitad(nombre: String, tecnico: String? = null) : FallaDeImpresion(
         titulo = "Se cortó la impresión",
         queHacer = "Puede que la boleta haya salido a medias. Revisa el papel y toca " +
-            "Reintentar: reimprimir no vuelve a cobrar.",
+            "«Reintentar»: reimprimir no vuelve a cobrar.",
         sePuedeReintentar = true,
         tecnico = tecnico,
     )
@@ -114,7 +114,7 @@ sealed class FallaDeImpresion(
     /** No se pudo traer la boleta del server para imprimirla. */
     class SinDatosDeLaBoleta(tecnico: String? = null) : FallaDeImpresion(
         titulo = "No pudimos traer la boleta",
-        queHacer = "La venta está cobrada y guardada. Revisa la señal y toca Reintentar.",
+        queHacer = "La venta está cobrada y guardada. Revisa la señal y toca «Reintentar».",
         sePuedeReintentar = true,
         tecnico = tecnico,
     )
@@ -122,7 +122,7 @@ sealed class FallaDeImpresion(
     class Desconocida(tecnico: String? = null) : FallaDeImpresion(
         titulo = "No se pudo imprimir",
         queHacer = "Revisa que la impresora esté encendida, con papel y cerca, y toca " +
-            "Reintentar.",
+            "«Reintentar».",
         sePuedeReintentar = true,
         tecnico = tecnico,
     )

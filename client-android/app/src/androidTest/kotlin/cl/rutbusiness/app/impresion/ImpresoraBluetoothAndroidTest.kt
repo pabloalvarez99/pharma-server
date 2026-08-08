@@ -11,6 +11,7 @@ import cl.rutbusiness.app.ui.impresora.Intento
 import cl.rutbusiness.app.ui.impresora.PreferenciasDeImpresora
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import cl.rutbusiness.app.impresora.ImpresoraBluetoothAndroid
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue

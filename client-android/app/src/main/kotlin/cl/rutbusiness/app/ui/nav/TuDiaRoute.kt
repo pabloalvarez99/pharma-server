@@ -21,7 +21,8 @@ private enum class RutinaDelDia { Resumen, Caja, Fiado }
  * medida: tres etiquetas completas repartidas en 360dp con la letra al 200% ya
  * es el límite de lo que entra sin cortar una palabra — está escrito en
  * [BarraDeNavegacion] y lo prueba `BarraDeNavegacionEscalaTest`. Con cinco
- * pestañas cada una queda en 72dp y "Resumen" no cabe ni partiéndola, o sea que
+ * pestañas cada una queda en 72dp y una etiqueta de dos palabras no cabe ni
+ * partiéndola, o sea que
  * la pestaña se queda sin nombre justo para la persona que subió la letra porque
  * ve poco. Cambiar eso para meter dos destinos sería pagar la accesibilidad de
  * toda la app con un toque de ahorro.

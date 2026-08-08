@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cl.rutbusiness.app.ui.common.aCopy
+import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.session.SessionRepository
 import kotlinx.coroutines.launch
@@ -36,9 +38,15 @@ sealed interface Mensaje {
     /**
      * Algo salió mal. [preguntaParaReintentar] no es null cuando reintentar
      * tiene sentido, y guarda la pregunta original para no perderla.
+     *
+     * Lleva [titulo] además del cuerpo porque se dibuja con el mismo bloque de
+     * error que el resto de la app. Antes era un párrafo suelto en un fondo
+     * rojo, sin título y sin anuncio para el lector de pantalla: la única
+     * pantalla del producto que decía sus fallas distinto que las demás.
      */
     data class Problema(
         override val id: Long,
+        val titulo: String,
         val texto: String,
         val preguntaParaReintentar: String?,
     ) : Mensaje
@@ -128,9 +136,11 @@ class AssistViewModel(
             val api = sesion.apiActiva()
             if (api == null) {
                 pensando = false
+                val copy = AppError.SesionExpirada().aCopy("tu pregunta")
                 mensajes += Mensaje.Problema(
                     id = nuevoId(),
-                    texto = "Tu sesión venció. Vuelve a entrar para seguir conversando.",
+                    titulo = copy.title,
+                    texto = copy.message,
                     preguntaParaReintentar = null,
                 )
                 return@launch
@@ -151,13 +161,28 @@ class AssistViewModel(
                     }
                 }
 
-                is Resultado.Falla -> mensajes += Mensaje.Problema(
-                    id = nuevoId(),
-                    texto = r.error.userMessage,
-                    // La pregunta se guarda entera: reintentar no le cuesta
-                    // nada a quien ya la escribió una vez.
-                    preguntaParaReintentar = limpia,
-                )
+                is Resultado.Falla -> {
+                    // `aCopy` y no `userMessage` a secas: el mensaje crudo de
+                    // `ServidorNoResponde` trae la URL del server adentro, y la
+                    // dueña no tiene por qué leer una dirección técnica en medio
+                    // de una conversación. Es además lo que usan las otras
+                    // cuatro pantallas para lo mismo.
+                    val copy = r.error.aCopy("tu pregunta")
+                    mensajes += Mensaje.Problema(
+                        id = nuevoId(),
+                        titulo = copy.title,
+                        texto = copy.message,
+                        // La pregunta se guarda entera: reintentar no le cuesta
+                        // nada a quien ya la escribió una vez. Salvo cuando
+                        // reintentar no puede servir —sesión vencida, sin
+                        // permiso—, que es justo lo que dice `retryLabel`.
+                        preguntaParaReintentar = limpia.takeIf { copy.retryLabel != null },
+                    )
+                    // Igual que caja, cobrar, fiado y resumen: un token vencido
+                    // cierra la sesión y la app se va sola a la entrada. Esta
+                    // pantalla era la única que se quedaba mostrando el cartel.
+                    if (r.error is AppError.SesionExpirada) sesion.salir()
+                }
             }
             pensando = false
         }

@@ -61,8 +61,16 @@ enum class Destino(val etiqueta: String) {
     /** La pantalla que la cajera usa doscientas veces al día. */
     Cobrar("Cobrar"),
 
-    /** "¿Cuánto vendí hoy?", la pregunta de todos los días. */
-    Resumen("Resumen"),
+    /**
+     * "¿Cuánto vendí hoy?", la pregunta de todos los días.
+     *
+     * La etiqueta dice "Tu día" y no "Resumen" porque es el título que la
+     * dueña ve al llegar. La pestaña decía una palabra y la pantalla otra, y
+     * entonces buscar "Tu día" en la barra no encontraba nada. De paso entra
+     * mejor: es una palabra más corta en el peor caso de la barra, que es
+     * tres etiquetas completas al 200% en 360dp.
+     */
+    Resumen("Tu día"),
 }
 
 /**
@@ -185,9 +193,10 @@ private fun Pestana(
             style = RbTheme.typography.label,
             color = color,
             textAlign = TextAlign.Center,
-            // Sin `maxLines` a propósito: al 200% "Resumen" no entra en un
-            // tercio de 360dp y tiene que poder envolver. Cortar la palabra
-            // sería dejar la pestaña sin nombre justo para quien más lo lee.
+            // Sin `maxLines` a propósito: al 200% una etiqueta de dos palabras
+            // no entra en un tercio de 360dp y tiene que poder envolver. Cortar
+            // la palabra sería dejar la pestaña sin nombre justo para quien más
+            // lo lee.
             fontWeight = if (elegida) FontWeight.Bold else FontWeight.Medium,
         )
     }

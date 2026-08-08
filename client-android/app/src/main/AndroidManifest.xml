@@ -61,13 +61,26 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RutBusiness">
 
+        <!--
+            `windowSoftInputMode` lleva dos cosas y las dos hacen falta.
+
+            `adjustResize` es el que hace que el teclado empuje el contenido en
+            vez de taparlo, y de él dependen los `imePadding()` de las pantallas
+            con campos de plata.
+
+            `stateHidden` se sumó porque sin él Android **restaura** el teclado
+            que estaba abierto la vez anterior: la app se abría con medio panel
+            tapado por las teclas. En la pantalla del agente eso esconde
+            justamente las sugerencias tocables, que son lo único que la dueña
+            tiene para empezar sin escribir nada.
+        -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.RutBusiness"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize|stateHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

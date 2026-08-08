@@ -228,7 +228,7 @@ internal fun TarjetaDelDia(
 
             Text(
                 text = if (vendidoAyer == null) {
-                    "No pudimos traer lo de ayer para comparar. Toca Actualizar."
+                    "No pudimos traer lo de ayer para comparar. Toca «Actualizar»."
                 } else {
                     // Se dice "día completo" porque es lo que se está
                     // comparando: hoy va a medias y ayer ya terminó. Sin esa
@@ -258,7 +258,7 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
                     text = buildString {
                         append("Es lo que debería haber ahora")
                         vm.nombreDeCaja?.let { append(" en «$it»") }
-                        append(". Lo calcula el sistema del negocio con la apertura, ")
+                        append(". Lo calcula el computador del negocio con la apertura, ")
                         append("las ventas en efectivo y los movimientos.")
                     },
                     style = RbTheme.typography.support,
@@ -273,8 +273,11 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
                 color = colors.textSecondary,
             )
 
+            // "Arqueo" es la palabra del contador, no la de la dueña. Y el
+            // mensaje tenía que decir qué hacer, no sólo qué faltó.
             else -> Text(
-                text = "No pudimos traer el arqueo de la caja. El resto del resumen sí está al día.",
+                text = "No pudimos traer la cuenta de la caja. El resto sí está al día: toca " +
+                    "«Actualizar» arriba para volver a pedirla.",
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -303,7 +306,8 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
     RbCard(title = "Te deben") {
         when {
             deuda == null -> Text(
-                text = "No pudimos traer el fiado. El resto del resumen sí está al día.",
+                text = "No pudimos traer el fiado. El resto sí está al día: toca " +
+                    "«Actualizar» arriba para volver a pedirlo.",
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -379,8 +383,8 @@ private fun SePorAcabar(vm: ResumenViewModel) {
 
         if (vm.cuantosConStockBajo > vm.stockBajo.size) {
             Text(
-                text = "Y ${vm.cuantosConStockBajo - vm.stockBajo.size} más. Los ves todos en " +
-                    "el sistema del negocio.",
+                text = "Y ${vm.cuantosConStockBajo - vm.stockBajo.size} más. Pídeselos al " +
+                    "agente: «¿qué se está por acabar?».",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )

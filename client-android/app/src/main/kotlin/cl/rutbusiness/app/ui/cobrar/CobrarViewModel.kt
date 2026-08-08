@@ -575,9 +575,9 @@ class CobrarViewModel(
                     errorDeEscaneo = if (conCodigo is Resultado.Falla) {
                         RbErrorCopy(
                             title = "Quedó sin código",
-                            message = "Creamos \"$nombre\" y ya está en el carrito, pero no pudimos " +
-                                "dejarle pegado el código $codigo. La próxima vez vas a tener que " +
-                                "buscarlo por nombre.",
+                            message = "Creamos «$nombre» y ya está en el carrito, pero no " +
+                                "pudimos dejarle pegado el código $codigo. La próxima vez vas a " +
+                                "tener que buscarlo por nombre.",
                             retryLabel = null,
                         )
                     } else {
@@ -844,8 +844,9 @@ class CobrarViewModel(
     private fun copyDeCobroFallido(error: AppError): RbErrorCopy = when (error) {
         is AppError.ServidorNoResponde -> RbErrorCopy(
             title = "No llegó la venta",
-            message = "No alcanzamos a mandarle la venta al sistema del negocio. Revisa la señal " +
-                "y toca Reintentar: aunque la mandes de nuevo, no se cobra dos veces.",
+            message = "No alcanzamos a mandarle la venta al computador del negocio. Revisa que " +
+                "el teléfono tenga señal y toca «Reintentar»: aunque la mandes de nuevo, no se " +
+                "cobra dos veces.",
             retryLabel = "Reintentar",
         )
 

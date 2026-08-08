@@ -55,10 +55,14 @@ enum class RbErrorKind {
  *   phrasing that works when the caller has nothing specific to say.
  */
 fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = when (kind) {
+    // Nombra las dos causas, en orden de probabilidad, porque desde el teléfono
+    // se ven idénticas. La versión anterior culpaba sólo al teléfono ("no está
+    // llegando a internet") y mandaba a revisar la señal a quien tenía el
+    // computador del negocio apagado: media hora perdida en el lugar equivocado.
     RbErrorKind.Offline -> RbErrorCopy(
-        title = "Sin conexión",
-        message = "No pudimos cargar $what porque el teléfono no está llegando a " +
-            "internet. Revisa que tengas señal o wifi y vuelve a intentar.",
+        title = "No llegamos a tu negocio",
+        message = "No pudimos traer $what. Revisa que el teléfono tenga wifi o datos " +
+            "prendidos, y que el computador del negocio esté encendido.",
         retryLabel = "Reintentar",
     )
 
@@ -77,11 +81,18 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
         retryLabel = null,
     )
 
+    // "Tu RUT y tu clave" describía una pantalla de entrada que no existe: la
+    // app pide el nombre corto del negocio, el correo y la clave. Un mensaje
+    // que nombra un campo inexistente hace dudar de si la app es la correcta.
+    //
+    // Sin botón: los `ViewModel` cierran la sesión al ver este error, así que la
+    // app se va sola a la pantalla de entrada. Un botón acá alcanzaría a
+    // dibujarse un instante y llevaría a la misma pantalla que ya viene sola.
     RbErrorKind.Unauthorized -> RbErrorCopy(
         title = "Tienes que entrar de nuevo",
-        message = "Por seguridad se cerró tu sesión. Ingresa otra vez con tu RUT " +
-            "y tu clave para seguir trabajando.",
-        retryLabel = "Ingresar",
+        message = "Por seguridad se cerró tu sesión. Te vamos a llevar a la pantalla " +
+            "de entrada para que ingreses con tu correo y tu clave.",
+        retryLabel = null,
     )
 
     RbErrorKind.ServerFault -> RbErrorCopy(

@@ -148,7 +148,7 @@ fun copyDeDiferencia(
             // cuando en realidad no se pudo comparar es la única respuesta que
             // hace que la dueña deje de contar.
             calma = "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
-                "guardado y lo puedes ver en el sistema del negocio.",
+                "guardado: vuelve a abrir la caja más tarde para ver cómo quedó.",
         )
     }
 }

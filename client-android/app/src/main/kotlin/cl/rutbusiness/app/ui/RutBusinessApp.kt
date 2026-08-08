@@ -1,11 +1,13 @@
 package cl.rutbusiness.app.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import cl.rutbusiness.app.ui.assist.AssistRoute
 import cl.rutbusiness.app.ui.cobrar.CobrarRoute
-import cl.rutbusiness.app.ui.login.LoginRoute
+import cl.rutbusiness.app.ui.entrada.EntradaRoute
+import cl.rutbusiness.app.ui.entrada.LocalEntrada
 import cl.rutbusiness.app.ui.nav.ContenedorDeDestinos
 import cl.rutbusiness.app.ui.nav.Destino
 import cl.rutbusiness.app.ui.nav.TuDiaRoute
@@ -38,7 +40,7 @@ fun RutBusinessApp(sesion: SessionRepository) {
     RbTheme {
         when (val actual = estado) {
             EstadoSesion.Cargando -> RbLoadingState(label = "Abriendo RutBusiness...")
-            is EstadoSesion.SinSesion -> LoginRoute(sesion = sesion, estado = actual)
+            is EstadoSesion.SinSesion -> EntradaRoute(sesion = sesion, estado = actual)
             is EstadoSesion.Activa -> ConSesion(sesion = sesion, estado = actual)
         }
     }
@@ -68,6 +70,13 @@ fun RutBusinessApp(sesion: SessionRepository) {
  */
 @Composable
 private fun ConSesion(sesion: SessionRepository, estado: EstadoSesion.Activa) {
+    // Haber llegado hasta acá **una vez** es lo que apaga la explicación del
+    // primer uso, y no que la dueña haya terminado de leerla. Quien la saltó y
+    // entró bien tampoco necesita verla de nuevo; quien la leyó pero erró la
+    // dirección sí, y por eso la bandera se prende recién con la sesión abierta.
+    val entrada = LocalEntrada.current
+    LaunchedEffect(entrada) { entrada?.preferencias?.marcarQueEntro() }
+
     ContenedorDeDestinos { destino ->
         when (destino) {
             Destino.Agente -> AssistRoute(sesion = sesion)
