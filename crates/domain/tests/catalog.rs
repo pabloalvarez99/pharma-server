@@ -244,6 +244,79 @@ async fn tenant_isolation() {
     assert!(seen.is_empty(), "tenant 2 must not see tenant 1 products");
 }
 
+/// La página de catálogo sin filtros toma un camino distinto en el repo: se
+/// reescribe para que el planner recorra el índice `product_name` (migración
+/// 0044) ya ordenado en vez de leer el catálogo entero y ordenar en memoria.
+/// Estas aserciones fijan el contrato observable de esa reescritura: mismas
+/// filas, mismo orden, misma paginación y mismo aislamiento por tenant.
+#[tokio::test]
+async fn plain_page_is_name_ordered_paged_and_active_filtered() {
+    let (db, t) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let other: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+
+    // Alta en orden deliberadamente distinto al alfabético.
+    for name in ["Delta", "alfa", "Charlie", "Bravo", "Echo"] {
+        service::create_product(&db, &t, new_product(name, "100"))
+            .await
+            .unwrap();
+    }
+    // Un producto del otro tenant que ordenaría primero: no debe aparecer.
+    service::create_product(&db, &other, new_product("AAA otro tenant", "100"))
+        .await
+        .unwrap();
+    // Y uno desactivado, que la página normal (`active = true`) esconde.
+    let muerto = service::create_product(&db, &t, new_product("Borrado", "100"))
+        .await
+        .unwrap();
+    service::delete_product(&db, &t, &muerto.id).await.unwrap();
+
+    let page = |active: Option<bool>, limit: u32, offset: u32| {
+        let db = db.clone();
+        let t = t.clone();
+        async move {
+            service::list_products(
+                &db,
+                &t,
+                ProductFilters {
+                    active,
+                    limit: Some(limit),
+                    offset: Some(offset),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect::<Vec<_>>()
+        }
+    };
+
+    // `active=true` es lo que pide el POS. Orden por nombre, sin el desactivado
+    // y sin el producto del otro tenant.
+    assert_eq!(
+        page(Some(true), 40, 0).await,
+        vec!["Bravo", "Charlie", "Delta", "Echo", "alfa"],
+        "página normal: ordenada por nombre, sólo activos de este tenant"
+    );
+    // Sin filtro `active` sale también el desactivado, en el mismo orden.
+    assert_eq!(
+        page(None, 40, 0).await,
+        vec!["Borrado", "Bravo", "Charlie", "Delta", "Echo", "alfa"]
+    );
+    // Paginar no reordena ni saltea.
+    assert_eq!(page(Some(true), 2, 0).await, vec!["Bravo", "Charlie"]);
+    assert_eq!(page(Some(true), 2, 2).await, vec!["Delta", "Echo"]);
+    assert_eq!(page(Some(true), 2, 4).await, vec!["alfa"]);
+    assert!(page(Some(true), 2, 6).await.is_empty());
+    // `active=false` conserva la igualdad y lista los desactivados.
+    assert_eq!(page(Some(false), 40, 0).await, vec!["Borrado"]);
+}
+
 // ---------------------------------------------------------------------------
 // BUG-perf-001: product_stats pre-computed view (migration 0029) replaces the
 // O(n) full-scan aggregate. These lock in that the maintained view returns the
