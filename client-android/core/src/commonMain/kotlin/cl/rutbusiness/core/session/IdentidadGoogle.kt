@@ -105,11 +105,10 @@ object IdentidadGoogleNoCableada : IdentidadGoogle {
 }
 
 /**
- * Shape de wire que el server aceptará cuando exista
- * `POST /api/v1/auth/google` (documentado; no implementado).
+ * Shape de wire hacia `POST /api/v1/auth/google` ([AuthApi.loginConGoogle]).
  *
- * El cliente manda solo el `id_token` de Google + tenant opcional.
- * **Nunca** manda client secret.
+ * El server hoy responde 501 (stub). El cliente manda solo el `id_token` de
+ * Google + tenant opcional. **Nunca** manda client secret.
  */
 data class GoogleTokenExchangeRequest(
     val idToken: String,

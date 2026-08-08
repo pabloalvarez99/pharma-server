@@ -63,4 +63,34 @@ class AuthApi(private val api: ApiFactory) {
     suspend fun me(): Resultado<Me> = llamar(api) {
         api.http.get("${api.baseUrl}/api/v1/me").exigirExito(api.baseUrl).body()
     }
+
+    /**
+     * Exchange Google `id_token` → JWT de sesión (ADR-0022).
+     *
+     * Hoy el server contesta 501 hasta que ops cablee JWKS + client id.
+     * El cliente **nunca** manda client secret. No loguear [idToken].
+     */
+    suspend fun loginConGoogle(
+        idToken: String,
+        tenant: String? = null,
+    ): Resultado<LoginResponse> = llamar(api) {
+        api.http.post("${api.baseUrl}$GOOGLE_SIGN_IN_PATH") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                GoogleLoginRequest(
+                    idToken = idToken,
+                    tenant = tenant?.trim()?.takeIf { it.isNotEmpty() },
+                ),
+            )
+        }.exigirExito(api.baseUrl).body()
+    }
 }
+
+/** Path estable con `domain::google_identity::GOOGLE_SIGN_IN_PATH`. */
+const val GOOGLE_SIGN_IN_PATH: String = "/api/v1/auth/google"
+
+@Serializable
+private data class GoogleLoginRequest(
+    @SerialName("id_token") val idToken: String,
+    val tenant: String? = null,
+)
