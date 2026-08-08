@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.offline.Fechado
@@ -95,9 +96,11 @@ private fun ResumenScreen(
 ) {
     val dimens = RbTheme.dimens
 
+    val feria = packActual().features.agentHome || packActual().rubro == "feria"
+
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Tu día",
+            title = if (feria) "Hoy" else "Tu día",
             // Cuando lo que se muestra es la copia guardada, el subtítulo lo
             // dice ahí mismo: es la primera línea que se lee y no se puede
             // saltar. "Cómo va el negocio hoy" arriba de cifras de anoche sería
@@ -139,11 +142,15 @@ private fun ResumenScreen(
                 contentPadding = PaddingValues(dimens.space3),
                 verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {
+                // Feria (ADR-0022): Hoy + deudas primero. Caja/FEFO son
+                // retail formal y empujan el fiado fuera del pliegue.
                 item("ventas") { VendidoHoy(vm) }
-                item("caja") { EnCaja(vm, onIrALaCaja) }
                 item("fiado") { TeDeben(vm, onIrAlFiado) }
-                item("faltantes") { SePorAcabar(vm) }
-                item("vencimientos") { PorVencer(vm) }
+                if (!feria) {
+                    item("caja") { EnCaja(vm, onIrALaCaja) }
+                    item("faltantes") { SePorAcabar(vm) }
+                    item("vencimientos") { PorVencer(vm) }
+                }
             }
         }
     }

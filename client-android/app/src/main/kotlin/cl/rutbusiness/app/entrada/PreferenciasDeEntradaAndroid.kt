@@ -25,7 +25,26 @@ class PreferenciasDeEntradaAndroid(context: Context) : PreferenciasDeEntrada {
         prefs.edit().putBoolean(ENTRO, true).apply()
     }
 
+    override fun rubroElegido(): String? =
+        prefs.getString(RUBRO, null)?.takeIf { it.isNotBlank() }
+
+    override fun guardarRubroElegido(rubro: String) {
+        prefs.edit().putString(RUBRO, rubro.trim().lowercase()).apply()
+    }
+
+    override fun debeMostrarTarjetaRescate(): Boolean {
+        if (prefs.getBoolean(TARJETA_VISTA, false)) return false
+        // Solo informal / feria day-1 (ADR-0022).
+        return rubroElegido() == "feria"
+    }
+
+    override fun marcarTarjetaRescateVista() {
+        prefs.edit().putBoolean(TARJETA_VISTA, true).apply()
+    }
+
     private companion object {
         const val ENTRO = "ya_entro"
+        const val RUBRO = "rubro_elegido"
+        const val TARJETA_VISTA = "tarjeta_rescate_vista"
     }
 }

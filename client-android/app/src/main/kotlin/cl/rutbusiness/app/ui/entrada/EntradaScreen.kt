@@ -64,12 +64,33 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
     // Arranca en la explicación sólo si este teléfono nunca entró. Sin
     // servicios de plataforma —una prueba de otra pantalla— se salta: montar
     // una bienvenida que nadie pidió rompería esas pruebas sin proteger a nadie.
+    val primeraVez = servicios?.preferencias?.yaEntroAlgunaVez() == false
     var explicando by rememberSaveable(servicios) {
-        mutableStateOf(servicios?.preferencias?.yaEntroAlgunaVez() == false)
+        mutableStateOf(primeraVez)
+    }
+    // Tras el copy: elegir rubro (feria first) si aún no hay preferencia.
+    var eligiendoRubro by rememberSaveable(servicios) {
+        mutableStateOf(
+            primeraVez && servicios?.preferencias?.rubroElegido() == null,
+        )
     }
 
     if (explicando) {
-        PrimerUso(onListo = { explicando = false })
+        PrimerUso(onListo = {
+            explicando = false
+            // Si ya eligió rubro en una visita anterior, salta esta pantalla.
+            if (servicios?.preferencias?.rubroElegido() == null) {
+                eligiendoRubro = true
+            }
+        })
+        return
+    }
+
+    if (eligiendoRubro) {
+        ElegirRubro(onElegir = { rubro ->
+            servicios?.preferencias?.guardarRubroElegido(rubro)
+            eligiendoRubro = false
+        })
         return
     }
 

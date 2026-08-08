@@ -22,14 +22,29 @@ interface RedDelTelefono {
 /**
  * Lo que este teléfono ya sabe de la primera vez.
  *
- * Una sola bandera. Se prende con el primer login que funciona, no cuando la
- * dueña termina de leer: quien saltó la explicación y entró bien tampoco tiene
- * que volver a verla, y quien la leyó pero se equivocó de dirección sí quiere
- * poder repasarla.
+ * Banderas de onboarding. [marcarQueEntro] se prende con el primer login que
+ * funciona, no cuando la dueña termina de leer: quien saltó la explicación y
+ * entró bien tampoco tiene que volver a verla.
+ *
+ * [rubroElegido] y la tarjeta de rescate (ADR-0022) viven acá porque se eligen
+ * **antes** de que haya pack de server, y se aplican al entrar.
  */
 interface PreferenciasDeEntrada {
     fun yaEntroAlgunaVez(): Boolean
     fun marcarQueEntro()
+
+    /** Vertical elegido en el alta (`feria`, `farmacia`, …) o null. */
+    fun rubroElegido(): String?
+
+    fun guardarRubroElegido(rubro: String)
+
+    /**
+     * `true` si aún no se mostró la tarjeta de rescate y el rubro es informal
+     * (feria). Se apaga al confirmar "ya la anoté".
+     */
+    fun debeMostrarTarjetaRescate(): Boolean
+
+    fun marcarTarjetaRescateVista()
 }
 
 /**
