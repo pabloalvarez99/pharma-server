@@ -1,8 +1,27 @@
-# HANDOFF — Continuar trabajo en RutBusiness (pharma-server)
+# HANDOFF — ARCHIVADO (2026-08-08)
 
-> **Para Grok Build CLI (o cualquier agente/dev)**: este documento es el punto
-> de entrada. Léelo completo antes de tocar código. Actualizado: 2026-07-19
-> (A: **erp-parity + #327 delete/update variants MERGED → main**).
+> **Estado: ARCHIVADO.** No es punto de entrada vivo.
+>
+> Congelado el **2026-07-19** en el promote de `feature/erp-parity` + stack de
+> variants a `main`. Desde entonces `main` sumó Android Compose nativo
+> ([ADR-0021](./docs/adr/0021-android-compose-nativo.md)), caja/fiado offline,
+> country-pack, Free Web y el ERP completo en la rama canónica. Los worktrees y
+> paths de máquina de 2026-07 (p. ej. `assist-b2`) ya no son la base de trabajo.
+>
+> **Entrada actual:**
+> - Qué es / cómo se levanta → [`README.md`](./README.md)
+> - Contexto agentes y directivas del fundador → [`CLAUDE.md`](./CLAUDE.md)
+> - Decisiones → [`docs/adr/`](./docs/adr/)
+>
+> El cuerpo debajo se conserva como bitácora del promote 2026-07-19. No se
+> reescribe ni se usa como checklist de "qué sigue".
+
+---
+
+# HANDOFF histórico — promote erp-parity / variants (2026-07-19)
+
+> Snapshot del 2026-07-19: **erp-parity + #327 delete/update variants MERGED → main**.
+> Solo valor histórico.
 
 ### Estado rápido (2026-07-19 — full promote to main)
 

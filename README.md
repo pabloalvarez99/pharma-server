@@ -1,104 +1,121 @@
-# pharma-server
+# RutBusiness
 
 [![ci](https://github.com/pabloalvarez99/pharma-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pabloalvarez99/pharma-server/actions/workflows/ci.yml)
 [![audit](https://github.com/pabloalvarez99/pharma-server/actions/workflows/audit.yml/badge.svg?branch=main)](https://github.com/pabloalvarez99/pharma-server/actions/workflows/audit.yml)
 [![license: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](./Cargo.toml)
 
-On-prem Rust server for pharmacy ERP. SurrealDB embedded (RocksDB), axum HTTP API, Windows service deployment via MSI.
+> **Producto:** RutBusiness (multi-rubro). **Repo git:** `pharma-server` (nombre histórico; rename físico pendiente de go del fundador).
 
-## Status
-Scaffold — feature/pharma-server-scaffold.
+ERP/POS **offline-first** para microempresas chilenas: 1 RUT = 1 negocio = 1 agente.
+Farmacia es el **beachhead**, no el límite ni la marca. Server Rust on-prem + clientes
+operador + API HTTP `/api/v1`. Modelo freemium MSI (core gratis + tiers) - [ADR-0001](./docs/adr/0001-freemium-pivot.md).
 
-## Build
+## Qué hay hoy (main)
+
+No es un scaffold. En `main` vive el ERP usable en desarrollo:
+
+| Superficie | Path | Rol |
+|---|---|---|
+| **Server / API** | `crates/` (~14 crates) | axum + SurrealKV embebida, JWT, dominio ERP, DTE, license, agent, jobs, MSI service |
+| **Android operador** | `client-android/` | Kotlin + Jetpack Compose nativo - cliente móvil de primera clase ([ADR-0021](./docs/adr/0021-android-compose-nativo.md)) |
+| **Desktop Windows** | `client/` (Tauri 2) | MSI escritorio; mismo frontend TS que la web |
+| **Web operador (PWA)** | `client/` + `crates/api/static/` | Operador en navegador / Free Web servido por el API |
+| **CLI admin** | `crates/cli` | migrate, seed, usuarios, license |
+
+Módulos de dominio en main (no exhaustivo): inventario multi-SKU/variants, POS, compras/OC,
+caja, fiado, reportes, multi-sucursal, rubro-pack, country-pack (moneda/impuesto por tenant),
+capa license Ed25519, rieles de agente/Fase 13 parciales. Suite workspace del orden de
+**1000+ tests** (audit 2026-08-08: 1019 passed).
+
+## Qué NO es
+
+- No es un esqueleto vacío ni "solo API de farmacia".
+- No es SaaS-only: **offline-first on-prem** es el core; cloud companion es opt-in.
+- No es un solo frontend universal en móvil: Android es **Compose nativo**; Tauri/TS
+  sigue vivo para **desktop + web** (ADR-0015 superado en Android por ADR-0021).
+- No renombra crates/binarios/MSI sin go explícito del fundador (`pharma-api`,
+  `PharmaServer`, etc. son nombres de repo/instalador).
+
+## Cómo se levanta (dev)
 
 ```powershell
-cargo build --release --workspace
-```
-
-## Run (dev)
-
-```powershell
+# Server (puerto 8080). En Windows, si sccache falla: $env:RUSTC_WRAPPER = ""
 cargo run -p api
 curl http://localhost:8080/health/live
+
+# O wrapper con DB del árbol de trabajo (ajustá paths en el .cmd si hace falta):
+# .\start-server.cmd
 ```
 
-## Crates
+```powershell
+# Desktop / web operador
+cd client
+npm install
+npm run tauri dev    # escritorio
+# npm run build      # typecheck + Vite (PWA/web)
+```
 
-| Crate | Role |
-|-------|------|
-| core | Domain types, errors, config |
-| db | SurrealDB client + repos |
-| api | Axum HTTP server (entry: `cargo run -p api`) |
-| auth | JWT + argon2id, tenant claims |
-| jobs | Cron + NATS workers |
-| telemetry | tracing + OTLP + Prometheus |
-| service | Windows service entry, embeds api |
-| cli | Admin CLI (migrate, seed, user create) |
+```powershell
+# Android (server ya corriendo). Emulador: http://10.0.2.2:8080
+cd client-android
+.\gradlew assembleDebug
+# Instalá el APK del ABI del aparato (no hay APK universal - piso de hardware)
+```
+
+Primera cuenta: `POST /api/v1/setup` (`business_name`, `tenant_slug`, `email`, `password`).
+No hay contraseña default commiteada. Demo histórico (si está seedado): ver docs/ops y CLI seed.
+
+**DB:** SurrealKV en path configurable (`PHARMA__DB__PATH`). Servicio Windows e instancia
+dev no pueden compartir el mismo directorio (file lock).
+
+## Crates (server)
+
+| Crate | Rol |
+|---|---|
+| `api` | Axum HTTP (`cargo run -p api`), OpenAPI, static Free Web |
+| `domain` | Invariantes de negocio (inventario, ventas, caja, fiado, rubro, …) |
+| `core` | Tipos, errores, config |
+| `db` | SurrealDB client + repos + migraciones |
+| `auth` | JWT + argon2id, claims multi-tenant |
+| `dte` | Boleta/factura electrónica SII (nativo Rust) |
+| `license` | Entitlements Ed25519 offline + 402 |
+| `agent` | Identidad/envelopes firmados, assist |
+| `assist` | Capa assist del agente |
+| `jobs` | Cron / workers |
+| `sync` | Sync / seams interop |
+| `telemetry` | tracing + OTLP + Prometheus |
+| `service` | Windows service + embebido del API |
+| `cli` | Admin CLI |
 
 ## Stack
 
-- Rust 1.95 (pin in `rust-toolchain.toml`)
-- axum 0.8 + utoipa 5
-- SurrealDB 2.1 embedded (kv-surrealkv — pure-Rust LSM, no libclang/bindgen dependency)
-- jsonwebtoken 9 + argon2 0.5
-- tracing + opentelemetry-otlp + axum-prometheus
-- windows-service 0.7
-- cargo-wix (MSI installer)
+- Rust 1.95 pin (`rust-toolchain.toml`) · MSRV 1.85 · axum 0.8 · SurrealDB 2.x `kv-surrealkv`
+- Cliente desktop/web: Tauri 2 + TypeScript + Vite (`client/`)
+- Cliente móvil: Kotlin, Jetpack Compose, minSdk 23 (`client-android/`)
 
-## Run as Windows service (manual smoke)
+## MSI / servicio Windows
 
-Requires elevated PowerShell.
+Release histórico: [v0.1.23](https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23).
+Build local: `cargo build --release -p service` + `cargo wix` (WiX v3). Detalle y smoke en
+[`docs/ops/`](./docs/ops/) y `installer/`.
 
-```powershell
-cargo build --release -p service
+## Producción on-prem
 
-sc.exe create PharmaServer `
-  binPath= "C:\Users\Administrator\Documents\GitHub\pharma-server\target\release\pharma-service.exe" `
-  start= demand
-sc.exe start PharmaServer
-Get-Service PharmaServer
-curl http://127.0.0.1:8080/health/live
-sc.exe stop PharmaServer
-sc.exe delete PharmaServer
-```
+- [`config/production.toml.example`](config/production.toml.example)
+- [`docs/ops/production-checklist.md`](docs/ops/production-checklist.md)
+- [`docs/ops/backup-restore.md`](docs/ops/backup-restore.md)
 
-Service and CLI/dev binary cannot run simultaneously against the same `./data/surreal` directory (SurrealKv file lock).
+## Docs de entrada
 
-## MSI installer
+| Doc | Para qué |
+|---|---|
+| [`CLAUDE.md`](./CLAUDE.md) | Contexto agentes, directivas del fundador, stack |
+| [`docs/adr/`](./docs/adr/) | Decisiones arquitectónicas (inmutables) |
+| [`docs/strategy/`](./docs/strategy/) | Visión, freemium, multi-rubro, Fase 13 |
+| [`HANDOFF.md`](./HANDOFF.md) | **Archivado** (promote erp-parity 2026-07-19) - no es entrada viva |
+| [`client-android/README.md`](./client-android/README.md) | Cómo correr la app Compose |
 
-Prereqs: `cargo install cargo-wix` and WiX v3 toolset (`choco install wixtoolset`). Add `C:\Program Files (x86)\WiX Toolset v3.14\bin` to PATH.
+## Visión (una línea)
 
-```powershell
-cargo build --release -p service
-cargo wix --package service --no-build --nocapture `
-  -C -ext -C WixFirewallExtension `
-  -L -ext -L WixFirewallExtension
-# → target/wix/pharma-server-<version>-x86_64.msi
-```
-
-Install / uninstall (admin):
-
-```powershell
-msiexec /i target\wix\pharma-server-0.1.0-x86_64.msi /qn /l*v install.log
-Get-Service PharmaServer
-Get-NetFirewallRule -DisplayName "Pharma Server API"
-msiexec /x target\wix\pharma-server-0.1.0-x86_64.msi /qn
-```
-
-The MSI installs to `%ProgramFiles%\PharmaServer\`, registers the `PharmaServer` service (auto-start, LocalSystem), creates `%ProgramData%\PharmaServer\`, and opens inbound TCP 8080 in Windows Firewall.
-
-## Producción
-
-Antes de poner el servidor en producción en una farmacia real (offline-first,
-LAN-only), seguir la guía de operaciones:
-
-- [`config/production.toml.example`](config/production.toml.example) — plantilla
-  de configuración de producción (todo secreto como placeholder, se inyecta por
-  `PHARMA__*`; bind LAN-only, telemetría OFF, backup programado).
-- [`docs/ops/production-checklist.md`](docs/ops/production-checklist.md) —
-  checklist de go-live: secreto JWT fuerte, token de métricas, firewall a la
-  LAN, backup verificado + restauración probada, servicio auto-start, licencia,
-  telemetría opt-in, DB sin datos demo.
-- [`docs/ops/backup-restore.md`](docs/ops/backup-restore.md) — cómo funciona el
-  backup SurrealKv programado/manual y cómo restaurar (copia manual; la
-  restauración guiada es roadmap).
+SO del independiente chileno + riel de confianza entre nodos (identidad, discovery,
+negociación, liquidación). Detalle: [`docs/strategy/`](./docs/strategy/) - no re-derivar acá.
