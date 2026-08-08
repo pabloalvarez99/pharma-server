@@ -101,6 +101,10 @@ Shipped in AFK loop (no secrets in repo):
 | Snapshot `pending_sales` + prepare from offline queue | done |
 | `POST/GET /api/v1/user-backup` + lab memory store | done (`RUTBUSINESS_USER_BACKUP_MEMORY=1`) |
 | Restore UI + rehydrate cola + disk last envelope | done |
-| Google OAuth E2E + production bucket | **open** (client stubs + domain shapes only) |
+| Traer de la nube (list + download by `backup_id`) | done (lab memory / empty without store) |
+| `POST /api/v1/auth/google` 501 stub + `AuthApi` / `entrarConGoogle` | done (needs JWKS + client id) |
+| Assist units bandeja/docena/malla | done |
+| Google OAuth E2E + production bucket | **open** (ops: console + bucket) |
 
-Product docs: `docs/product/feria-backup-zero-knowledge.md`, `feria-day-1-operator.md`.
+Product docs: `docs/product/feria-backup-zero-knowledge.md`, `feria-day-1-operator.md`,
+`feria-lab-runbook.md`.
