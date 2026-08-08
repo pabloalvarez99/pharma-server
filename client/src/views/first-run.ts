@@ -294,6 +294,8 @@ export function visibleModulesForFeatures(f: RubroFeatures): ModuleId[] {
     // Sucursales mueve inventario físico entre locales: un rubro de servicios
     // (sin stock) no tiene nada que transferir, igual que Inventario/Compras.
     if (m === "inventory" || m === "compras" || m === "sucursales") return f.physicalStock;
+    // Feria / informal (ADR-0022): no SII day-1 — hide boletas + facturas.
+    if (m === "boletas" || m === "facturas") return f.dte;
     return true;
   });
 }

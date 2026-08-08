@@ -1,10 +1,10 @@
 // Business vertical (rubro) — the core signal of the freemium multi-rubro pivot.
 //
-// pharma-server is sold as a generic on-prem ERP; "farmacia" is the beachhead,
-// not the only vertical. The operator picks their rubro in Configuración and it
-// is persisted as the `business.vertical` admin_setting. The UI reads it to
-// show/hide vertical-specific sections so a minimarket never sees the
-// pharmacy-only Recetas/controlados (Ley 20.000) module.
+// pharma-server is sold as a generic on-prem ERP. From 2026-08-08 the primary
+// focus is **feria / calle** (ADR-0022); farmacia remains a full vertical pack
+// but is not the product north star. The operator picks their rubro in
+// Configuración (`business.vertical`). The UI reads the pack flags to show/hide
+// sections so a feriante never sees barcode/printer/DTE as first-day work.
 //
 // This module is the single source of truth for the concept so every lane
 // (onboarding shell nav here, Recetas/Facturas conditioning in the compliance
@@ -81,10 +81,11 @@ export function hasRecetas(v: Vertical): boolean {
   return v === "farmacia";
 }
 
-/** DTE/boleta/factura is universal in Chile — every rubro emits. Kept as an
- *  explicit predicate so callers read intent rather than assuming. */
-export function hasDte(_v: Vertical): boolean {
-  return true;
+/** DTE/boleta: most formal CL rubros emit; feria (informal) does not on day 1.
+ *  Prefer {@link featuresForRubro} / pack `dte` when the full rubro key is known. */
+export function hasDte(v: Vertical | string): boolean {
+  const r = parseRubro(typeof v === "string" ? v : v);
+  return featuresForRubro(r).dte;
 }
 
 /** Load the persisted vertical from the server, defaulting on any miss. Never
@@ -169,6 +170,22 @@ export interface RubroCard {
  *  minimarket. `✅` packs today: farmacia, minimarket, cafe, tienda; the rest
  *  seed nothing until their rubro is validated. */
 export const RUBRO_CATALOG: readonly RubroCard[] = [
+  {
+    value: "feria",
+    label: "Feria / Calle",
+    icon: "🥬",
+    help: "Puesto de feria o calle. Hablás y listo: sin código de barras ni impresora.",
+    tagline: "Tu puesto, sin cuaderno.",
+    iconId: "feria",
+    accent: "#f59e0b",
+    valueLines: [
+      "Le hablás: «vendí tres kilos de tomate a dos mil»",
+      "Fiado simple: quién te debe y cuánto",
+      "Sirve sin señal: la venta se guarda y se manda después",
+    ],
+    comingSoon: ["Venta por peso en el celular", "Recordatorios de quién te debe"],
+    seedVertical: null,
+  },
   {
     value: "farmacia",
     label: "Farmacia",
@@ -316,6 +333,7 @@ export function rubroCard(value: string | null | undefined): RubroCard | undefin
 /** Full rubro key — every value in {@link RUBRO_CATALOG}. Distinct from the
  *  coarse {@link Vertical}, which collapses extras to `otro`. */
 export type Rubro =
+  | "feria"
   | "farmacia"
   | "minimarket"
   | "restaurant"
@@ -350,20 +368,59 @@ export interface RubroFeatures {
   /** Clinical product fields (principio activo, laboratorio, interacciones).
    *  Farmacia only. */
   clinical: boolean;
+  /** Agent chat is the primary home (feria). */
+  agentHome: boolean;
+  /** Barcode / camera scanner in POS. */
+  barcode: boolean;
+  /** Thermal printer flows. */
+  printer: boolean;
+  /** Electronic invoice / DTE / SII surfaces. */
+  dte: boolean;
+  /** Informal day-1 (no RUT empresa / no SII). */
+  informalOk: boolean;
 }
 
+const FORMAL_RETAIL = {
+  agentHome: false,
+  barcode: true,
+  printer: true,
+  dte: true,
+  informalOk: false,
+} as const;
+
 // Per-rubro flags. Kept literal (not derived) so the table reads like the spec.
-// Rubros without their own row fall back to the generic ERP profile below.
 const RUBRO_FEATURES: Readonly<Record<Rubro, RubroFeatures>> = {
-  farmacia: { recetas: true, lotes: true, physicalStock: true, clinical: true },
-  minimarket: { recetas: false, lotes: true, physicalStock: true, clinical: false },
-  cafe: { recetas: false, lotes: true, physicalStock: true, clinical: false },
-  restaurant: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  tienda: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  otro: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  // Service rubros: sales without physical stock — exercises the agnostic core.
-  belleza: { recetas: false, lotes: false, physicalStock: false, clinical: false },
-  servicios: { recetas: false, lotes: false, physicalStock: false, clinical: false },
+  feria: {
+    recetas: false,
+    lotes: false,
+    physicalStock: true,
+    clinical: false,
+    agentHome: true,
+    barcode: false,
+    printer: false,
+    dte: false,
+    informalOk: true,
+  },
+  farmacia: { recetas: true, lotes: true, physicalStock: true, clinical: true, ...FORMAL_RETAIL },
+  minimarket: { recetas: false, lotes: true, physicalStock: true, clinical: false, ...FORMAL_RETAIL },
+  cafe: { recetas: false, lotes: true, physicalStock: true, clinical: false, ...FORMAL_RETAIL },
+  restaurant: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL_RETAIL },
+  tienda: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL_RETAIL },
+  otro: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL_RETAIL },
+  belleza: {
+    recetas: false,
+    lotes: false,
+    physicalStock: false,
+    clinical: false,
+    ...FORMAL_RETAIL,
+  },
+  servicios: {
+    recetas: false,
+    lotes: false,
+    physicalStock: false,
+    clinical: false,
+    ...FORMAL_RETAIL,
+  },
 };
 
 /** The capability flags for a rubro (or any stored string, coerced). Single
@@ -414,6 +471,11 @@ export function localAttrsForRubro(rubro: string | null | undefined): PackAttrFi
       ];
     case "belleza":
       return [{ key: "duracion_min", label: "Duración (min)", kind: "number" }];
+    case "feria":
+      return [
+        { key: "unidad", label: "Se vende por", kind: "text" },
+        { key: "precio_ref", label: "Precio de referencia", kind: "money" },
+      ];
     default:
       return [];
   }
@@ -435,8 +497,16 @@ function localPack(rubro: Rubro): RubroPack {
       lotes: f.lotes,
       physical_stock: f.physicalStock,
       clinical: f.clinical,
+      agent_home: f.agentHome,
+      barcode: f.barcode,
+      printer: f.printer,
+      dte: f.dte,
+      informal_ok: f.informalOk,
     },
-    vocab: { item: f.physicalStock ? "Producto" : "Servicio", catalog: "Inventario" },
+    vocab: {
+      item: card?.value === "feria" ? "Cosa" : f.physicalStock ? "Producto" : "Servicio",
+      catalog: card?.value === "feria" ? "Lo que vendo" : "Inventario",
+    },
     attrs: localAttrsForRubro(rubro),
     seed_vertical: card?.seedVertical ?? null,
     coming_soon: card?.comingSoon ?? [],
@@ -473,6 +543,11 @@ export function featuresFromPack(p: PackFeatures): RubroFeatures {
     lotes: p.lotes,
     physicalStock: p.physical_stock,
     clinical: p.clinical,
+    agentHome: p.agent_home ?? false,
+    barcode: p.barcode ?? true,
+    printer: p.printer ?? true,
+    dte: p.dte ?? true,
+    informalOk: p.informal_ok ?? false,
   };
 }
 

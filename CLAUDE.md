@@ -62,6 +62,26 @@
 > "¿una microempresaria en su celular, sin manual, le pide esto al agente y funciona como
 > en un ERP caro?". Esta meta NO caduca — enmarca toda decisión de producto y técnica.
 
+> ## 🥬 FOCO PRINCIPAL ACTIVO — FERIA / CALLE (founder, 2026-08-08) — gana sobre beachhead farmacia
+> **Cliente objetivo prioritario:** gente que vende en la feria o en la calle, con
+> cuaderno de mil pesos, celular antiguo, poco de tecnología, sol directo, una mano
+> libre, a veces sin señal, sin código de barras ni impresora, fía mucho, a menudo
+> informal (sin SII día 1).
+>
+> **Vara de diseño no negociable: el cuaderno.** Se abre al instante, se lee al sol,
+> funciona con manos mojadas, no se cuelga. Si una pantalla es más lenta o más
+> difícil que anotar una línea a mano, **pierde**. Usá esa vara para **matar o
+> esconder** features (escáner, impresora, DTE, catálogo denso), no para sumarlas.
+>
+> **Producto day-1 para este usuario = el agente** ("vendí tres kilos de tomate a
+> dos mil") + fiado + resumen del día + offline. Pack de rubro `feria` en
+> `domain::rubro` (ADR-0022). Farmacia, minimarket, etc. **siguen siendo
+> verticales completos** del mismo ERP; ya **no** son el norte de producto ni el
+> default de onboarding. La directiva de 2026-06-16 "farmacia = beachhead" queda
+> **superada** por esta en cuanto a foco y GTM; el código multi-rubro se reutiliza.
+>
+> Detalle del plan: `C:\obsidian-mind\work\decisions\2026-08-08-plan-feria-orquestador.md`.
+
 > ## 🏗️ ETAPA REAL: ~1% COMPLETO — CONSTRUIR PROFUNDIDAD, NO PULIR SUPERFICIE (founder, 2026-07-21)
 > **El proyecto recién lleva ~1%.** La meta ahora NO es infra, dominios ni pulido de
 > puerta de entrada, sino **hacer el producto MUCHO más completo y profundo**: features
@@ -80,7 +100,8 @@
 > gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
 > invisible detrás del agente.** 1 RUT = 1 negocio = 1 agente. Modelo: freemium MSI
 > Windows (core gratis para siempre + tiers + microtx, [ADR-0001](./docs/adr/0001-freemium-pivot.md)).
-> **Farmacia = beachhead** (primer vertical validado), NO el límite ni la marca.
+> **Feria / calle = foco GTM principal (2026-08-08).** Farmacia = vertical validado
+> histórico, NO el límite ni el norte de producto (ver bloque FOCO PRINCIPAL arriba).
 > Fin de juego: ecosistema federado donde los agentes de distintos negocios transan
 > entre sí (Ed25519 envelopes, Fase 13). Ver [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
 >
@@ -157,7 +178,7 @@
 > + apps · puente WhatsApp · mermas/vencimientos por local · agente coach financiero · modo
 > feria/offline.
 
-Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic. Clientes en este repo: `client/` (Tauri desktop + PWA) y `client-android/` (Compose nativo).
+Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT). Foco producto 2026-08-08 = feria/calle; farmacia y otros rubros = packs del mismo core. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic. Clientes en este repo: `client/` (Tauri desktop + PWA) y `client-android/` (Compose nativo).
 **Estado**: v0.1.28 · branch `main` (canónica; `feature/erp-parity` ya promovida 2026-07-19) · ERP multi-rubro en main (inventario/variants, POS, compras, caja, fiado, rubro-pack, country-pack, DTE, license, agent) · **Android Compose nativo** en `client-android/` ([ADR-0021](./docs/adr/0021-android-compose-nativo.md)) · desktop/PWA en `client/` · Free Web en `crates/api/static/` · suite workspace ~1000+ tests (audit 2026-08-08: 1019 passed) · **MSI release** histórico v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23) · freemium + Fase 10 license MVP + Fase 11 base mergeadas · **PIVOTE freemium MSI (2026-05-20)** → `docs/strategy/freemium-master-plan.md`.
 
 **Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md). **Posicionamiento de mercado (reframe 2026-05-27)**: el producto es *infraestructura competitiva para el independiente* frente al oligopolio (~90% Ahumada/Cruz Verde/Salcobrand), no "otro ERP" — mercado subdigitalizado (no saturado), moat de 4 capas (POS = caballo de Troya → datos agregados → poder de compra colectivo → red operacional), riesgo = distribución+confianza no técnico → ver [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md). **Tesis unificadora 2026-2035** (visión, moat, flywheel, AI-native, LATAM multi-país, distribución, integraciones-as-platform) → ver [`docs/strategy/latam-master-plan.md`](./docs/strategy/latam-master-plan.md).
@@ -166,7 +187,10 @@ Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquie
 
 ## Producto / Visión comercial
 
-**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador: negocios independientes y cadenas chicas de **cualquier rubro** (farmacia, minimarket, restaurant, café, tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in. Farmacia = primer vertical validado (beachhead), no el límite.
+**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador prioritario: feriantes y vendedores de calle (cuaderno → celular). También
+negocios independientes de **cualquier rubro** (farmacia, minimarket, restaurant, café,
+tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in.
+Farmacia fue el primer vertical con profundidad; feria es el foco de adopción 2026-08.
 
 Pilares de venta (no negociables):
 - **Instalación 1 click** (MSI firmado, sin dependencias externas, sin Docker, sin Postgres aparte).

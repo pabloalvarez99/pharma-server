@@ -14,9 +14,9 @@ import {
   type ModuleId,
 } from "../src/views/first-run";
 
-// Per-rubro gating MATRIX — the single coverage net that proves all 8 rubros of
-// the onboarding catalog (docs/strategy/rubro-catalog.md) show/hide the right
-// sections. `vertical.test.ts` (ye) and `first-run.test.ts` (ye) already cover
+// Per-rubro gating MATRIX — the single coverage net that proves every rubro of
+// the onboarding catalog (docs/strategy/rubro-catalog.md + feria ADR-0022)
+// show/hide the right sections. `vertical.test.ts` (ye) and `first-run.test.ts` (ye) already cover
 // slices; this file is exhaustive + locks the two cross-cutting contracts those
 // slices never assert TOGETHER:
 //
@@ -26,29 +26,44 @@ import {
 //      (featuresForRubro) must AGREE for every rubro — they drive different UI
 //      (shell nav vs. product/POS features) off the same intent and must not
 //      drift apart. Nothing tested this agreement before.
-//   3. DTE/boleta is UNIVERSAL: every CL business emits, so boleta+factura stay
-//      visible for ALL 8 rubros (RutBusiness pivot — farmacia is the beachhead,
-//      not the boundary).
+//   3. DTE/boleta is on for formal CL rubros; **off for feria** (informal day-1,
+//      ADR-0022). hasDte / nav boletas must agree with features.dte.
 //
-// Pure logic, no DOM, no server — runs under `npm test` (vitest). The live
-// boleta-universal / minimarket-no-receta contracts are exercised over real HTTP
-// in flows.mjs (golden path + noPrescriptionFlow).
+// Pure logic, no DOM, no server — runs under `npm test` (vitest).
 
-/** The 8 catalog rubros as their typed keys. */
+/** Catalog rubros as typed keys. */
 const RUBROS = RUBRO_CATALOG.map((r) => r.value as Rubro);
+
+const FORMAL = {
+  agentHome: false,
+  barcode: true,
+  printer: true,
+  dte: true,
+  informalOk: false,
+} as const;
 
 /** The exact capability set each rubro must turn on. Literal so this table reads
  *  like the spec and ANY silent flag flip in vertical.ts fails a test. */
 const EXPECTED: Readonly<Record<Rubro, RubroFeatures>> = {
-  farmacia: { recetas: true, lotes: true, physicalStock: true, clinical: true },
-  minimarket: { recetas: false, lotes: true, physicalStock: true, clinical: false },
-  cafe: { recetas: false, lotes: true, physicalStock: true, clinical: false },
-  restaurant: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  tienda: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  otro: { recetas: false, lotes: false, physicalStock: true, clinical: false },
-  // Service rubros sell WITHOUT physical inventory — the agnostic-core proof.
-  belleza: { recetas: false, lotes: false, physicalStock: false, clinical: false },
-  servicios: { recetas: false, lotes: false, physicalStock: false, clinical: false },
+  feria: {
+    recetas: false,
+    lotes: false,
+    physicalStock: true,
+    clinical: false,
+    agentHome: true,
+    barcode: false,
+    printer: false,
+    dte: false,
+    informalOk: true,
+  },
+  farmacia: { recetas: true, lotes: true, physicalStock: true, clinical: true, ...FORMAL },
+  minimarket: { recetas: false, lotes: true, physicalStock: true, clinical: false, ...FORMAL },
+  cafe: { recetas: false, lotes: true, physicalStock: true, clinical: false, ...FORMAL },
+  restaurant: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL },
+  tienda: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL },
+  otro: { recetas: false, lotes: false, physicalStock: true, clinical: false, ...FORMAL },
+  belleza: { recetas: false, lotes: false, physicalStock: false, clinical: false, ...FORMAL },
+  servicios: { recetas: false, lotes: false, physicalStock: false, clinical: false, ...FORMAL },
 };
 
 /** Modules visibleModulesForRubro gates; everything else is universal. Mirrors
@@ -60,6 +75,8 @@ const GATED_MODULES: ReadonlyArray<ModuleId> = [
   "inventory",
   "compras",
   "sucursales",
+  "boletas",
+  "facturas",
 ];
 const UNIVERSAL_MODULES: ReadonlyArray<ModuleId> = ALL_MODULES.filter(
   (m) => !GATED_MODULES.includes(m),
@@ -67,8 +84,9 @@ const UNIVERSAL_MODULES: ReadonlyArray<ModuleId> = ALL_MODULES.filter(
 const SERVICE_RUBROS: ReadonlyArray<Rubro> = ["belleza", "servicios"];
 
 describe("rubro catalog completeness", () => {
-  it("is the full 8-rubro catalog (forces this matrix to grow with it)", () => {
-    expect(RUBROS.length).toBe(8);
+  it("is the full catalog including feria beachhead (forces this matrix to grow with it)", () => {
+    expect(RUBROS.length).toBe(9);
+    expect(RUBROS[0]).toBe("feria");
   });
 
   it("the EXPECTED table covers exactly the catalog rubros (no rubro left ungated)", () => {
@@ -120,15 +138,15 @@ describe("universal modules — every rubro keeps the core ERP + DTE", () => {
     }
   });
 
-  it.each(RUBROS)("%s: boleta + factura SII are visible (DTE is universal in CL)", (r) => {
+  it.each(RUBROS)("%s: boleta + factura follow features.dte (off for feria)", (r) => {
     const visible = visibleModulesForRubro(r);
-    expect(visible).toContain("boletas");
-    expect(visible).toContain("facturas");
+    const want = featuresForRubro(r).dte;
+    expect(visible.includes("boletas")).toBe(want);
+    expect(visible.includes("facturas")).toBe(want);
   });
 
-  it.each(RUBROS)("%s: hasDte allows emission (boleta funciona en todos los rubros)", (r) => {
-    // hasDte keys off the coarse Vertical; map the full rubro down first.
-    expect(hasDte(parseVertical(r))).toBe(true);
+  it.each(RUBROS)("%s: hasDte agrees with features.dte", (r) => {
+    expect(hasDte(r)).toBe(featuresForRubro(r).dte);
   });
 
   it.each(RUBROS)("%s: the daily POS loop (pos/caja/clientes/devoluciones) stays visible", (r) => {
