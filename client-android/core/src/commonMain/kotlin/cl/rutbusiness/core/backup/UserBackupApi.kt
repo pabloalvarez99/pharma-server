@@ -46,7 +46,26 @@ class UserBackupApi(private val api: ApiFactory) {
             .exigirExito(api.baseUrl)
             .body()
     }
+
+    /**
+     * Baja un sobre cifrado por id (lab memory o bucket futuro).
+     * El cliente descifra local con la llave del cuaderno.
+     */
+    suspend fun descargar(backupId: String): Resultado<DescargaBackupWire> = llamar(api) {
+        val id = backupId.trim()
+        require(id.isNotEmpty()) { "backup_id vacío" }
+        api.http.get("${api.baseUrl}$USER_BACKUP_UPLOAD_PATH/$id")
+            .exigirExito(api.baseUrl)
+            .body()
+    }
 }
+
+@Serializable
+data class DescargaBackupWire(
+    val meta: MetaBackupWire,
+    @SerialName("ciphertext_base64") val ciphertextBase64: String,
+    @SerialName("backup_id") val backupId: String,
+)
 
 /** Meta de wire desde el sobre local (sin tocar la frase). */
 fun metaWireDesdeSobre(sobre: SobreCifradoV1): MetaBackupWire {

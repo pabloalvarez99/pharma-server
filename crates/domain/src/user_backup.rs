@@ -23,6 +23,9 @@ pub const USER_BACKUP_UPLOAD_PATH: &str = "/api/v1/user-backup";
 /// List metadata for the tenant's opaque blobs.
 pub const USER_BACKUP_LIST_PATH: &str = "/api/v1/user-backup";
 
+/// Download one opaque blob: `GET /api/v1/user-backup/{backup_id}`.
+pub const USER_BACKUP_DOWNLOAD_PREFIX: &str = "/api/v1/user-backup";
+
 /// Known snapshot section keys (client packs; server never reads plaintext).
 pub const SNAPSHOT_SECTION_PENDING_SALES: &str = "pending_sales";
 pub const SNAPSHOT_SECTION_RUBRO: &str = "rubro";
@@ -117,6 +120,17 @@ pub struct UploadEncryptedBackupResponse {
     pub backup_id: Option<String>,
 }
 
+/// Server → client download body (ciphertext only + meta).
+///
+/// The recovery phrase is **never** on this wire. Client re-derives the key
+/// locally from the notebook material + salt inside the envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadEncryptedBackupResponse {
+    pub meta: EncryptedBackupMeta,
+    pub ciphertext_base64: String,
+    pub backup_id: String,
+}
+
 /// Header the client prefixes inside the ciphertext package **before** AEAD
 /// encrypts the snapshot. Stored as plaintext JSON next to salt/nonce in the
 /// outer envelope the server never interprets beyond length/hash.
@@ -185,7 +199,7 @@ impl UploadValidationError {
     pub fn message(&self) -> String {
         match self {
             Self::BadFormatVersion => format!(
-                "format_version debe ser {BACKUP_FORMAT_VERSION} (v1 Argon2id+AES-GCM)"
+                "format_version debe ser {BACKUP_FORMAT_VERSION} (v1 PBKDF2/AES-GCM; Argon2id futuro)"
             ),
             Self::EmptyTenant => "tenant_id vacío".into(),
             Self::BadSha256Hex => "ciphertext_sha256_hex debe ser 64 hex chars".into(),

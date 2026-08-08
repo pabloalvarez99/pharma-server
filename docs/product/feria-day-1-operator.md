@@ -57,7 +57,9 @@ Si anotar una venta o ver una deuda tarda más que el lápiz, es un bug de produ
 ## Respaldo cifrado (estado en main)
 
 - **Preparar** en cola offline: frase del cuaderno → PBKDF2 + AES-GCM → sobre local
-  + intento de `POST /api/v1/user-backup` (ciphertext only; sin bucket = accepted false).
+  + intento de `POST /api/v1/user-backup` (ciphertext only).
+- **Lab store:** `RUTBUSINESS_USER_BACKUP_MEMORY=1` en el server → `accepted: true`
+  en RAM (no durable). Sin env = `accepted: false` hasta bucket.
 - **Abrir respaldo**: frase + base64 → rehidrata `pending_sales` en la cola.
 - **Sin** recuperación de clave por soporte. Bucket R2/S3 y Argon2id: pendientes.
 

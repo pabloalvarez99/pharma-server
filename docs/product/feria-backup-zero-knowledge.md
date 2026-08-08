@@ -33,8 +33,9 @@ usuario el blob es basura. **No hay recuperación de clave por soporte.**
 | Sobre wire | Cliente | `RB1\n` + header JSON + ciphertext\|\|tag |
 | Subir | Cliente → `POST /api/v1/user-backup` | `UserBackupApi.subirSobre` (meta + base64) |
 | Validar | Server | sha256 + size + format_version (puro) |
-| Guardar | Server | Blob opaco en bucket (**stub:** `accepted: false` hasta bucket) |
-| Restore local | Cliente | `restaurarDesdeSobre` / UI "Abrir un respaldo" en cola offline |
+| Guardar | Server | Bucket prod pendiente. **Lab:** `RUTBUSINESS_USER_BACKUP_MEMORY=1` guarda en RAM y `accepted: true` |
+| Listar / bajar | `GET /api/v1/user-backup` y `GET .../{id}` | Metas + ciphertext; sin frase |
+| Restore local | Cliente | `restaurarDesdeSobre` + rehidrata cola; UI "Abrir un respaldo" |
 
 Parámetros en `domain::user_backup`, `SobreCifrado.kt`, `CifrarSobre.kt`, `SnapshotBackup.kt`.
 
