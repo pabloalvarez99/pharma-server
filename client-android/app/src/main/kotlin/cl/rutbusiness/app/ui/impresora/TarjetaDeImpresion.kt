@@ -144,7 +144,9 @@ fun TarjetaDeReimpresion(
                     )
                 } else {
                     Text(
-                        text = "Todavía no imprimiste ninguna boleta desde este teléfono.",
+                        text = "Todavía no imprimiste ninguna boleta desde este teléfono. " +
+                            "Cobra una venta y en la pantalla de «Listo» va a aparecer el botón " +
+                            "de imprimir; después vuelve a estar acá para repetirla.",
                         style = RbTheme.typography.body,
                         color = RbTheme.colors.textSecondary,
                     )

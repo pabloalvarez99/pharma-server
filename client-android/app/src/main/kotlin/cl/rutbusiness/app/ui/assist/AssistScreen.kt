@@ -28,6 +28,7 @@ import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipRow
+import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
@@ -155,33 +156,22 @@ private fun Burbuja(texto: String, mia: Boolean) {
     }
 }
 
+/**
+ * Un turno que falló.
+ *
+ * [RbErrorState] y no un párrafo en un fondo rojo hecho a mano: así esta
+ * pantalla dice sus fallas igual que las otras seis, y sobre todo así el lector
+ * de pantalla las anuncia —`rbAssertive`— en vez de dejarlas pasar como un
+ * mensaje más de la conversación.
+ */
 @Composable
 private fun Problema(mensaje: Mensaje.Problema, onReintentar: (String) -> Unit) {
-    val colors = RbTheme.colors
-    val dimens = RbTheme.dimens
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RbTheme.shapes.card)
-            .background(colors.dangerContainer)
-            .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
-    ) {
-        Text(
-            text = mensaje.texto,
-            style = RbTheme.typography.body,
-            color = colors.textPrimary,
-        )
-        mensaje.preguntaParaReintentar?.let { pregunta ->
-            RbButton(
-                label = "Volver a preguntar",
-                onClick = { onReintentar(pregunta) },
-                variant = RbButtonVariant.Secondary,
-                fillWidth = true,
-            )
-        }
-    }
+    RbErrorState(
+        title = mensaje.titulo,
+        message = mensaje.texto,
+        retryLabel = mensaje.preguntaParaReintentar?.let { "Volver a preguntar" },
+        onRetry = mensaje.preguntaParaReintentar?.let { pregunta -> { onReintentar(pregunta) } },
+    )
 }
 
 /**

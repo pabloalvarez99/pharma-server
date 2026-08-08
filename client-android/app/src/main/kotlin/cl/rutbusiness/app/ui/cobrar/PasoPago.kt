@@ -229,10 +229,20 @@ private fun SelectorDeCliente(
     onElegir: (ClienteDto?) -> Unit,
 ) {
     if (clientes.isEmpty()) {
+        // El peor vacío que tenía la app: la cajera está a mitad de una venta,
+        // ya eligió Fiado, y el cartel le decía que fuera "al sistema del
+        // negocio" a crear el cliente. Desde el teléfono no hay tal cosa: era
+        // un callejón sin salida en el paso más caro de todos, con alguien
+        // esperando al otro lado del mostrador.
+        //
+        // Ahora dice las dos cosas que sí puede hacer ahora mismo, y en el orden
+        // en que sirven: cobrar de otra forma para no frenar la venta, o pedirle
+        // el cliente al agente.
         RbEmptyState(
-            title = "No hay clientes cargados",
-            hint = "El fiado queda en la cuenta de alguien. Crea el cliente en el sistema del " +
-                "negocio y va a aparecer acá.",
+            title = "Todavía no tienes clientes anotados",
+            hint = "El fiado queda en la cuenta de una persona, así que primero hay que " +
+                "anotarla. Cobra esta venta de otra forma para no hacer esperar, y después " +
+                "pídeselo al agente: «agrega el cliente Juan Pérez».",
         )
         return
     }

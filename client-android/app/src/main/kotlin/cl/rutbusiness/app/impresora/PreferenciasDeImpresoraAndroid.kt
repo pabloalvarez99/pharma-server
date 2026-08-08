@@ -1,6 +1,9 @@
-package cl.rutbusiness.app.ui.impresora
+package cl.rutbusiness.app.impresora
 
 import android.content.Context
+import cl.rutbusiness.app.ui.impresora.AnchoDePapel
+import cl.rutbusiness.app.ui.impresora.ImpresoraElegida
+import cl.rutbusiness.app.ui.impresora.PreferenciasDeImpresora
 
 /**
  * Dónde queda anotada la impresora del negocio, en este teléfono.

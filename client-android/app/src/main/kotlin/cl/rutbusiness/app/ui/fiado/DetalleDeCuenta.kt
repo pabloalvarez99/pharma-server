@@ -92,11 +92,26 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
                 RbLoadingState(label = "Trayendo la cuenta...")
             }
 
-            cuenta == null -> Unit
+            // Sin la cuenta no hay lista que mostrar, pero dejar el título
+            // "Lo que se llevó y lo que pagó" seguido de nada se lee como
+            // "esta persona nunca compró", que es una respuesta distinta.
+            cuenta == null -> item("sin-cuenta") {
+                Text(
+                    text = "No alcanzamos a traer los movimientos. No quiere decir que no " +
+                        "haya: vuelve a abrir esta cuenta en un momento.",
+                    style = RbTheme.typography.body,
+                    color = colors.textSecondary,
+                )
+            }
 
             cuenta.entries.isEmpty() -> item("sin-movimientos") {
                 Text(
-                    text = "Esta cuenta no tiene movimientos todavía.",
+                    // Antes decía "Esta cuenta no tiene movimientos todavía" y
+                    // se quedaba ahí: informaba en vez de enseñar. Ahora dice de
+                    // dónde salen las líneas, que es lo que hace falta saber la
+                    // primera vez que se abre una cuenta recién creada.
+                    text = "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando " +
+                        "le fíes una venta desde «Cobrar», y cuando anotes que te pagó.",
                     style = RbTheme.typography.body,
                     color = colors.textSecondary,
                 )
@@ -120,7 +135,9 @@ private fun SaldoDelCliente(vm: FiadoViewModel) {
                 text = if (vm.cargandoCuenta) {
                     "Trayendo la cuenta..."
                 } else {
-                    "No pudimos traer la cuenta. Vuelve atrás y entra de nuevo."
+                    "No pudimos traer la cuenta de esta persona. Toca atrás y vuelve a " +
+                        "abrirla; si sigue igual, revisa que el computador del negocio esté " +
+                        "encendido."
                 },
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,

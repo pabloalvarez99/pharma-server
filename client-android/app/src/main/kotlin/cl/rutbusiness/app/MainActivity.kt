@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import cl.rutbusiness.app.camara.CamaraDeCodigosCameraX
 import cl.rutbusiness.app.ui.RutBusinessApp
+import cl.rutbusiness.app.ui.entrada.ProveerEntrada
 import cl.rutbusiness.app.ui.impresora.ProveerImpresora
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 
@@ -31,14 +32,17 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            // Los dos enchufes entre la plataforma y la UI. De acá para abajo
-            // nadie sabe que existen CameraX ni el Bluetooth: las pantallas
-            // piden `CamaraDeCodigos` o `Impresora` por `CompositionLocal` y
-            // reciben una interfaz. Es lo que deja la capa de UI compilable
-            // para iOS sin tocarla.
+            // Los tres enchufes entre la plataforma y la UI. De acá para abajo
+            // nadie sabe que existen CameraX, el Bluetooth ni el
+            // `ConnectivityManager`: las pantallas piden `CamaraDeCodigos`,
+            // `Impresora` o `RedDelTelefono` por `CompositionLocal` y reciben
+            // una interfaz. Es lo que deja la capa de UI compilable para iOS sin
+            // tocarla.
             CompositionLocalProvider(LocalCamaraDeCodigos provides camara) {
                 ProveerImpresora(container.impresora) {
-                    RutBusinessApp(sesion = container.sesion)
+                    ProveerEntrada(container.entrada) {
+                        RutBusinessApp(sesion = container.sesion)
+                    }
                 }
             }
         }

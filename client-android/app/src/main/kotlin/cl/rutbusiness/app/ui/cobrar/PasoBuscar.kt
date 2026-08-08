@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
@@ -57,17 +56,6 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // `wrapContentHeight(unbounded = true)` no es decoración.
-                // `RbTextField` pinta su `decorationBox` con `fillMaxSize()`, así
-                // que dentro de una columna de altura acotada el campo se estira
-                // hasta comerse la pantalla entera y deja la lista y la barra de
-                // total fuera de cuadro. En el login no se veía porque ahí la
-                // columna scrollea y la altura máxima ya es infinita.
-                // Midiendo con altura infinita, ese `fillMaxSize` queda inerte y
-                // el campo vuelve a medir su contenido.
-                // TODO(design-system): cuando `RbTextField` use `fillMaxWidth()`
-                // en vez de `fillMaxSize()`, borrar esta línea.
-                .wrapContentHeight(unbounded = true)
                 .padding(horizontal = dimens.space3, vertical = dimens.space2),
         ) {
             RbTextField(
@@ -101,18 +89,26 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 .weight(1f)
                 .fillMaxWidth(),
             loading = vm.buscando && vm.resultados.isEmpty(),
+            loadingLabel = "Buscando en tu catálogo...",
             error = vm.errorBusqueda,
             onRetry = vm::buscarAhora,
             emptyTitle = if (vm.consulta.isBlank()) {
-                "Todavía no hay productos"
+                "Todavía no tienes productos"
             } else {
-                "Nada con \"${vm.consulta.trim()}\""
+                "Nada con «${vm.consulta.trim()}»"
             },
+            // El vacío enseña los dos caminos que existen **dentro de la app**,
+            // y no manda a "cargarlos en el sistema del negocio" como decía
+            // antes: eso es un callejón sin salida para alguien que sólo tiene
+            // el teléfono en la mano.
             emptyHint = if (vm.consulta.isBlank()) {
-                "Cuando cargues productos en el sistema del negocio, van a aparecer acá para cobrarlos."
+                "Pídeselo al agente («agrega un producto»), o escanea un código de barras: " +
+                    "cuando no esté en el catálogo, la app te deja crearlo ahí mismo."
             } else {
                 "Revisa cómo se escribe, o prueba con una palabra más corta."
             },
+            emptyActionLabel = "Borrar la búsqueda".takeIf { vm.consulta.isNotBlank() },
+            onEmptyAction = { vm.cambiarConsulta("") }.takeIf { vm.consulta.isNotBlank() },
             key = { it.id },
         ) { producto ->
             FilaDeProducto(
@@ -205,8 +201,14 @@ private fun BarraDeTotal(
         verticalArrangement = Arrangement.spacedBy(dimens.space2),
     ) {
         Text(
+            // "El carrito está vacío" y no "sin productos todavía": arriba, en el
+            // vacío del catálogo, dice "Todavía no tienes productos", y las dos
+            // frases juntas se leían como la misma cosa dicha dos veces. Son
+            // cosas distintas -- el catálogo del negocio y el carrito de esta
+            // venta -- y ahora se llaman distinto. Es además la misma frase que
+            // usa el panel del escáner para el carrito vacío.
             text = if (unidades == 0) {
-                "Sin productos todavía"
+                "El carrito está vacío"
             } else {
                 "$unidades ${if (unidades == 1) "producto" else "productos"} · ${total ?: "el sistema confirma el total al cobrar"}"
             },

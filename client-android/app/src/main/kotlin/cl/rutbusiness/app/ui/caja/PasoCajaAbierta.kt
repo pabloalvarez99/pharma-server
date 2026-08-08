@@ -85,7 +85,7 @@ private fun DeberiaHaber(vm: CajaViewModel) {
         if (esperado == null) {
             Text(
                 text = "No pudimos traer la cuenta de la caja. La caja sigue abierta y puedes " +
-                    "seguir vendiendo; toca Actualizar para volver a pedirla.",
+                    "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla.",
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -97,7 +97,7 @@ private fun DeberiaHaber(vm: CajaViewModel) {
             emphasis = RbAmountEmphasis.Headline,
         )
         Text(
-            text = "Lo calcula el sistema del negocio con lo que pusiste al abrir, lo que " +
+            text = "Lo calcula el computador del negocio con lo que pusiste al abrir, lo que " +
                 "vendiste en efectivo y lo que sacaste o metiste a mano.",
             style = RbTheme.typography.support,
             color = colors.textSecondary,

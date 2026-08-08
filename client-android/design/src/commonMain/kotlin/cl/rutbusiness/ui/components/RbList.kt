@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -128,6 +130,15 @@ fun <T> RbList(
     items: List<T>,
     modifier: Modifier = Modifier,
     loading: Boolean = false,
+    /**
+     * Qué está trayendo, dicho como lo diría una persona: "Buscando productos".
+     *
+     * Tiene default para no romper a nadie, pero pasarlo es lo correcto. El
+     * resto de las pantallas del producto anuncian qué esperan —"Viendo cómo
+     * está la caja", "Viendo quién te debe"— y una lista que dice "Cargando" a
+     * secas se siente de otra app.
+     */
+    loadingLabel: String = "Cargando...",
     error: RbErrorCopy? = null,
     onRetry: (() -> Unit)? = null,
     emptyTitle: String = "Todavía no hay nada acá",
@@ -137,27 +148,49 @@ fun <T> RbList(
     key: ((T) -> Any)? = null,
     row: @Composable (T) -> Unit,
 ) {
+    // Los tres estados que no son lista van adentro de un scroller.
+    //
+    // Este componente ocupa el hueco que la lista habría llenado, y ese hueco
+    // tiene altura fija — los que lo usan le pasan un `weight(1f)`. Al 200% de
+    // escala el vacío no entra ahí: el título se veía y la **pista** —la parte
+    // que enseña qué hacer, o sea la razón de ser del estado vacío— quedaba
+    // debajo del borde, invisible justo para quien subió la letra porque ve
+    // poco. Lo mismo el mensaje de una falla, que es aún más largo.
+    //
+    // El scroller va acá y no adentro de `RbEmptyState`: ese componente también
+    // se usa dentro de pantallas que ya scrollean —`PasoPago`, el showcase— y
+    // dos scrollers verticales anidados no son un detalle de estilo, revientan
+    // con "measured with an infinity maximum height constraints".
+    val enUnScroller: @Composable (@Composable () -> Unit) -> Unit = { contenido ->
+        Column(
+            modifier = modifier.verticalScroll(rememberScrollState()),
+        ) { contenido() }
+    }
+
     when {
-        error != null -> RbErrorState(
-            title = error.title,
-            message = error.message,
-            modifier = modifier.padding(RbTheme.dimens.space3),
-            retryLabel = error.retryLabel,
-            onRetry = onRetry,
-        )
+        error != null -> enUnScroller {
+            RbErrorState(
+                title = error.title,
+                message = error.message,
+                modifier = Modifier.padding(RbTheme.dimens.space3),
+                retryLabel = error.retryLabel,
+                onRetry = onRetry,
+            )
+        }
 
         loading -> Column(modifier = modifier) {
-            RbLoadingState()
+            RbLoadingState(label = loadingLabel)
             RbSkeletonLines(lines = 5, modifier = Modifier.padding(RbTheme.dimens.space3))
         }
 
-        items.isEmpty() -> RbEmptyState(
-            title = emptyTitle,
-            modifier = modifier,
-            hint = emptyHint,
-            actionLabel = emptyActionLabel,
-            onAction = onEmptyAction,
-        )
+        items.isEmpty() -> enUnScroller {
+            RbEmptyState(
+                title = emptyTitle,
+                hint = emptyHint,
+                actionLabel = emptyActionLabel,
+                onAction = onEmptyAction,
+            )
+        }
 
         else -> LazyColumn(modifier = modifier.fillMaxWidth()) {
             items(items = items, key = key) { item ->

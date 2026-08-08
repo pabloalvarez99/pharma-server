@@ -425,14 +425,15 @@ class CajaViewModel(
         error is AppError.ErrorDelServidor && error.status == 409 -> RbErrorCopy(
             title = "Ya tienes una caja abierta",
             message = "Aparece una caja tuya sin cerrar, capaz de ayer o de otro teléfono. " +
-                "Toca Actualizar para verla: desde ahí la puedes cerrar y abrir la de hoy.",
+                "Toca «Actualizar» para verla: desde ahí la puedes cerrar y abrir la de hoy.",
             retryLabel = null,
         )
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
             title = "No pudimos abrir la caja",
-            message = "No llegamos al sistema del negocio. Revisa la señal y vuelve a intentar; " +
-                "si la caja igual quedó abierta, la vas a ver al actualizar.",
+            message = "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
+                "señal y vuelve a intentar; si la caja igual quedó abierta, la vas a ver al " +
+                "actualizar.",
             retryLabel = "Reintentar",
         )
 
@@ -461,15 +462,15 @@ class CajaViewModel(
     private fun copyDeCierreFallido(error: AppError): RbErrorCopy = when {
         error is AppError.ErrorDelServidor && error.status == 409 -> RbErrorCopy(
             title = "Esta caja ya estaba cerrada",
-            message = "Alguien la cerró antes, o se cerró en otro teléfono. Toca Actualizar " +
-                "para ver cómo quedó.",
+            message = "Alguien la cerró antes, o se cerró en otro teléfono. Toca " +
+                "«Actualizar» para ver cómo quedó.",
             retryLabel = null,
         )
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
             title = "No pudimos cerrar la caja",
-            message = "No llegamos al sistema del negocio. Revisa la señal y vuelve a " +
-                "intentar: si ya se había cerrado, te lo vamos a decir.",
+            message = "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
+                "señal y vuelve a intentar: si ya se había cerrado, te lo vamos a decir.",
             retryLabel = "Reintentar",
         )
 
