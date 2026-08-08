@@ -44,6 +44,9 @@ impl AssistProvider for Deterministic {
                 comparativa(q.db, q.tenant, &q.intent, month_range(), last_month_range()).await
             }
             Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &q.intent).await,
+            Intent::IngresosPorMetodo(bucket) => {
+                ingresos_por_metodo(q.db, q.tenant, &q.intent, bucket.as_deref()).await
+            }
             Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent, 30).await,
             Intent::PorVencerSemana => por_vencer(q.db, q.tenant, &q.intent, 7).await,
             Intent::StockProducto(term) => stock_producto(q.db, q.tenant, &q.intent, term).await,
@@ -56,6 +59,8 @@ impl AssistProvider for Deterministic {
             Intent::MargenMes => margen_mes(q.db, q.tenant, &q.intent).await,
             Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &q.intent, term).await,
             Intent::GastosMes => gastos_mes(q.db, q.tenant, &q.intent).await,
+            Intent::PorCobrar => por_cobrar(q.db, q.tenant, &q.intent).await,
+            Intent::IvaMes => iva_mes(q.db, q.tenant, &q.intent).await,
             Intent::StockBajo => stock_bajo(q.db, q.tenant, &q.intent).await,
             Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &q.intent).await,
             Intent::ResumenDia => resumen_dia(q.db, q.tenant, &q.intent).await,
@@ -119,8 +124,83 @@ async fn ventas(
     )
 }
 
+/// Ingresos de HOY por método de pago. Responde "¿cuánto me entró por
+/// transferencia hoy?" (bucket puntual) y "efectivo vs transferencia"
+/// (desglose). Lee `reports::sales_by_method`, que ya reparte las ventas
+/// mixtas y separa el fiado.
+async fn ingresos_por_metodo(
+    db: &Db,
+    tenant: &Thing,
+    intent: &Intent,
+    bucket: Option<&str>,
+) -> DomainResult<Answer> {
+    let rows = reports::sales_by_method(db, tenant, today_range()).await?;
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
+
+    if let Some(b) = bucket {
+        let fila = rows.iter().find(|r| r.method == b);
+        let monto = fila.map(|r| r.amount).unwrap_or(Decimal::ZERO);
+        let etiqueta = fila.map(|r| r.label.as_str()).unwrap_or(match b {
+            "transferencia" => "Transferencia",
+            "efectivo" => "Efectivo",
+            "tarjeta" => "Tarjeta",
+            _ => "Fiado",
+        });
+        let text = if monto.is_zero() {
+            format!("Hoy no te ha entrado nada por {}.", etiqueta.to_lowercase())
+        } else {
+            let share = if total.is_zero() {
+                Decimal::ZERO
+            } else {
+                (monto / total * Decimal::from(100)).round_dp(1)
+            };
+            format!(
+                "Hoy te entraron {} por {} ({}% de {} en total).",
+                clp(monto),
+                etiqueta.to_lowercase(),
+                share,
+                clp(total),
+            )
+        };
+        return Ok(Answer::new(intent, text).with_data(serde_json::json!({
+            "method": b,
+            "amount": monto.to_string(),
+            "total": total.to_string(),
+        })));
+    }
+
+    if rows.is_empty() {
+        return Ok(Answer::new(intent, "Hoy no registras ventas todavía.")
+            .with_data(serde_json::json!({ "total": "0" })));
+    }
+    let detalle: Vec<String> = rows
+        .iter()
+        .map(|r| format!("{} {}", r.label.to_lowercase(), clp(r.amount)))
+        .collect();
+    let text = format!("Hoy: {} — {} en total.", detalle.join(", "), clp(total));
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "total": total.to_string(),
+        "methods": rows
+            .iter()
+            .map(|r| serde_json::json!({ "method": r.method, "amount": r.amount.to_string() }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
 async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> DomainResult<Answer> {
-    let rows = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(days) }).await?;
+    // Sin filtro de sucursal a propósito: el dueño que pregunta "¿qué se me
+    // vence?" quiere el negocio entero. Lo que sí cambia con la migración 0042
+    // es que la respuesta dice EN QUÉ LOCAL está cada lote — si no, la alerta no
+    // es accionable en un negocio de dos locales.
+    let rows = reports::near_expiry(
+        db,
+        tenant,
+        NearExpiryFilters {
+            days: Some(days),
+            branch: None,
+        },
+    )
+    .await?;
     let ventana = if days == 7 {
         "esta semana".to_string()
     } else {
@@ -137,15 +217,24 @@ async fn por_vencer(db: &Db, tenant: &Thing, intent: &Intent, days: i64) -> Doma
         .iter()
         .take(3)
         .map(|r| {
+            // El local sólo se nombra cuando el lote está en una sucursal: un
+            // negocio de un solo local no tiene por qué leer "casa matriz" en
+            // cada línea.
+            let donde = r
+                .branch_name
+                .as_deref()
+                .map(|n| format!(" en {n}"))
+                .unwrap_or_default();
             if r.expired {
-                format!("{} (vencido, {} u.)", r.product_name, r.stock)
+                format!("{} (vencido, {} u.{})", r.product_name, r.stock, donde)
             } else {
                 format!(
-                    "{} (en {} {}, {} u.)",
+                    "{} (en {} {}, {} u.{})",
                     r.product_name,
                     r.days_to_expiry,
                     plural(r.days_to_expiry, "día", "días"),
-                    r.stock
+                    r.stock,
+                    donde
                 )
             }
         })
@@ -414,7 +503,15 @@ async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     let reorder = inventory::reorder_suggestions(db, tenant).await?;
 
     // Business — lots expiring within 7 days (for pharmacy, meds about to expire).
-    let expiry = reports::near_expiry(db, tenant, NearExpiryFilters { days: Some(7) }).await?;
+    let expiry = reports::near_expiry(
+        db,
+        tenant,
+        NearExpiryFilters {
+            days: Some(7),
+            branch: None,
+        },
+    )
+    .await?;
     let expired = expiry.iter().filter(|r| r.expired).count();
 
     // Health (Ley 20.000) — controlled prescriptions dispensed month-to-date.
@@ -720,35 +817,52 @@ async fn comparativa(
 }
 
 async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
-    let (orders, rev, cash, card) = sum_sales(db, tenant, month_range()).await?;
-    if orders == 0 {
+    // Antes esto sumaba sólo `cash_amount`/`card_amount` y presentaba los dos
+    // como el 100% del mes: con fiado (0039) y transferencia (0043) esa foto
+    // MIENTE (la plata que no es efectivo ni tarjeta desaparecía del desglose).
+    // Ahora sale de `sales_by_method`, que cubre todos los buckets.
+    let rows = reports::sales_by_method(db, tenant, month_range()).await?;
+    if rows.is_empty() {
         return Ok(Answer::new(
             intent,
             "No hay ventas este mes para desglosar por método de pago.",
         )
         .with_data(serde_json::json!({ "orders": 0 })));
     }
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
     let share = |part: Decimal| -> Decimal {
-        if rev.is_zero() {
+        if total.is_zero() {
             Decimal::ZERO
         } else {
-            (part / rev * Decimal::from(100)).round_dp(1)
+            (part / total * Decimal::from(100)).round_dp(1)
         }
     };
+    let detalle: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{} {} ({}%)",
+                r.label.to_lowercase(),
+                clp(r.amount),
+                share(r.amount)
+            )
+        })
+        .collect();
     let text = format!(
-        "Este mes: efectivo {} ({}%) y tarjeta {} ({}%), sobre {} en total.",
-        clp(cash),
-        share(cash),
-        clp(card),
-        share(card),
-        clp(rev),
+        "Este mes: {}, sobre {} en total.",
+        detalle.join(", "),
+        clp(total),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
-        "revenue": rev.to_string(),
-        "cash": cash.to_string(),
-        "card": card.to_string(),
-        "cash_pct": share(cash).to_string(),
-        "card_pct": share(card).to_string(),
+        "revenue": total.to_string(),
+        "methods": rows
+            .iter()
+            .map(|r| serde_json::json!({
+                "method": r.method,
+                "amount": r.amount.to_string(),
+                "pct": share(r.amount).to_string(),
+            }))
+            .collect::<Vec<_>>(),
     })))
 }
 
@@ -998,6 +1112,76 @@ async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
     })))
 }
 
+/// "¿Cuánto me deben?" — cuentas por cobrar del fiado. Nombra a los dos que más
+/// deben (que es lo accionable) y da el total.
+async fn por_cobrar(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let rep = domain::credit::repo::debtors(db, tenant).await?;
+    if rep.rows.is_empty() {
+        return Ok(
+            Answer::new(intent, "Nadie te debe: no tienes fiado pendiente.")
+                .with_data(serde_json::json!({ "debtor_count": 0, "total": "0" })),
+        );
+    }
+    let top: Vec<String> = rep
+        .rows
+        .iter()
+        .take(2)
+        .map(|d| format!("{} {}", d.name, clp(d.balance)))
+        .collect();
+    let text = format!(
+        "Te deben {} en total, de {} {}. Los que más deben: {}.",
+        clp(rep.total_por_cobrar),
+        rep.debtor_count,
+        plural(rep.debtor_count as i64, "cliente", "clientes"),
+        top.join(", "),
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "debtor_count": rep.debtor_count,
+        "total": rep.total_por_cobrar.to_string(),
+        "debtors": rep.rows.iter().take(10).map(|d| serde_json::json!({
+            "name": d.name,
+            "balance": d.balance.to_string(),
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// IVA del mes (F29): débito de ventas − crédito de compras. Avisa cuando hay
+/// facturas de compra sin capturar, porque ahí la cifra todavía es estimada.
+async fn iva_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+    let period = chrono::Utc::now().format("%Y-%m").to_string();
+    let sum = domain::compliance::repo::iva_summary(db, tenant, &period).await?;
+    let book = domain::compliance::repo::purchase_book(db, tenant, &period).await?;
+
+    let saldo = if sum.iva_a_pagar >= Decimal::ZERO {
+        format!("te toca pagar {}", clp(sum.iva_a_pagar))
+    } else {
+        format!("te queda {} a favor", clp(-sum.iva_a_pagar))
+    };
+    let aviso = if book.pending_declaration > 0 {
+        format!(
+            " Ojo: {} {} de compra sin capturar, así que el crédito puede subir.",
+            book.pending_declaration,
+            plural(book.pending_declaration as i64, "factura", "facturas"),
+        )
+    } else {
+        String::new()
+    };
+    let text = format!(
+        "Este mes: IVA de ventas {}, IVA de compras {}. Con eso {}.{}",
+        clp(sum.iva_debito),
+        clp(sum.iva_credito),
+        saldo,
+        aviso,
+    );
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "period": sum.period,
+        "iva_debito": sum.iva_debito.to_string(),
+        "iva_credito": sum.iva_credito.to_string(),
+        "iva_a_pagar": sum.iva_a_pagar.to_string(),
+        "pending_declaration": book.pending_declaration,
+    })))
+}
+
 fn ayuda(intent: &Intent) -> Answer {
     Answer::new(
         intent,
@@ -1010,11 +1194,13 @@ fn ayuda(intent: &Intent) -> Answer {
          esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». Si llevas \
          recetas: «recetas del mes» o «libro de controlados». De compras: «órdenes de \
-         compra pendientes» o «cuántos proveedores tengo». También \
+         compra pendientes» o «cuántos proveedores tengo». Si fías: «¿cuánto me deben?» \
+         o «quién me debe». De impuestos: «¿cuánto IVA pago este mes?». De cómo te          pagan: «¿cuánto me entró por transferencia hoy?» o «efectivo vs          transferencia». También \
          puedo registrar acciones: «registra un gasto de 5000 en arriendo», «crea un \
          cliente Juan Pérez», «crea el proveedor Farmaltda», «crea un producto Aspirina a \
          $1000», «cambia el precio de paracetamol a $1500», «repón 40 de paracetamol», \
-         «abre la caja con $50.000», «cierra la caja con $50.000», «registra una receta a \
+         «abre la caja con $50.000», «cierra la caja con $50.000», «abónale 5000 a doña \
+         Ana» (o «doña Ana me pagó 5000») para registrar un pago del fiado, «registra una receta a \
          Juan Pérez rut 12.345.678-9 de paracetamol», «crea una orden de compra de 10 \
          paracetamol a Farmaltda a $500», «recibe la orden de compra» o «cancela la orden \
          de compra».",

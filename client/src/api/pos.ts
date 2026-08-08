@@ -13,7 +13,17 @@ export interface PosItem {
 /** POS payment methods the server accepts on the counter. `pos_mixed` is a
  *  split tender (cash + card) — for it `posSale` sends both `cashAmount` and
  *  `cardAmount` and the server only requires their sum to cover the total. */
-export type PaymentMethod = "pos_cash" | "pos_debit" | "pos_credit" | "pos_mixed";
+/** `pos_fiado` = venta a cuenta corriente (fiado): exige `customer`, NO mueve
+ *  caja y genera un cargo en el ledger del cliente (server-side). */
+export type PaymentMethod =
+  | "pos_cash"
+  | "pos_debit"
+  | "pos_credit"
+  | "pos_mixed"
+  | "pos_fiado"
+  /** "Te hago la transfer" (migración 0043): ingreso electrónico, liquida
+   *  exacto y NO entra al efectivo esperado del arqueo. */
+  | "pos_transferencia";
 
 /** A POS sale error surfaced from the Tauri layer as `"CODE|message"`. */
 export interface SaleError {
@@ -54,8 +64,10 @@ export interface PosSaleResult {
 
 /** POST /api/v1/pos/sale (Bearer + fresh Idempotency-Key minted in Rust).
  *  `customer` is an optional record id — when present the server links the sale
- *  and awards loyalty points. Rejects with a `"CODE|message"` string — use
- *  {@link parseSaleError}. */
+ *  and awards loyalty points. `branch` es la sucursal activa: el stock se
+ *  descuenta de ESE local (V2); ausente = el server usa la sucursal de la caja
+ *  abierta y, si no hay, la casa matriz. Rejects with a `"CODE|message"` string
+ *  — use {@link parseSaleError}. */
 export async function posSale(
   serverUrl: string,
   items: PosItem[],
@@ -64,6 +76,7 @@ export async function posSale(
   cardAmount?: string,
   customer?: string,
   discount?: string,
+  branch?: string,
 ): Promise<PosSaleResult> {
   const res = await invoke<RawSaleResponse>("pos_sale", {
     serverUrl,
@@ -73,6 +86,7 @@ export async function posSale(
     cardAmount,
     customer,
     discount,
+    branch,
   });
   return {
     orderId: res?.order?.id ?? "",

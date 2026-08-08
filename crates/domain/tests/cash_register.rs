@@ -67,6 +67,8 @@ async fn open_then_close_with_sales_and_movements_computes_expected_and_discrepa
         &user,
         OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -98,6 +100,7 @@ async fn open_then_close_with_sales_and_movements_computes_expected_and_discrepa
             notes: None,
             external_ref: None,
             prescriptions: vec![],
+            branch: None,
         };
         sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
             .await
@@ -167,6 +170,8 @@ async fn cannot_open_second_session_for_same_user() {
         &user,
         OpenSessionInput {
             register_name: "caja-1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -179,6 +184,8 @@ async fn cannot_open_second_session_for_same_user() {
         &user,
         OpenSessionInput {
             register_name: "caja-2".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -209,6 +216,8 @@ async fn concurrent_open_same_user_yields_single_session() {
                 &user,
                 OpenSessionInput {
                     register_name: format!("caja-{i}"),
+                    register: None,
+                    branch: None,
                     opening_cash: dec("5000"),
                     notes: None,
                 },
@@ -255,6 +264,8 @@ async fn movement_on_closed_session_rejected() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -297,6 +308,8 @@ async fn close_already_closed_is_conflict() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -342,6 +355,8 @@ async fn concurrent_close_same_session_closes_once() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -399,6 +414,8 @@ async fn concurrent_movement_and_close_keep_drawer_consistent() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -475,6 +492,8 @@ async fn invalid_movement_type_or_amount_rejected() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -529,6 +548,7 @@ fn cash_sale(product_id: &str, name: &str, price: &str) -> PosSaleRequest {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     }
 }
 
@@ -544,6 +564,8 @@ async fn cash_sales_running_matches_scan_after_refund() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -638,6 +660,8 @@ async fn cash_sales_running_is_tenant_isolated() {
         &user_b,
         OpenSessionInput {
             register_name: "cb".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -650,6 +674,8 @@ async fn cash_sales_running_is_tenant_isolated() {
         &user_a,
         OpenSessionInput {
             register_name: "ca".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("0"),
             notes: None,
         },
@@ -703,6 +729,8 @@ async fn cross_tenant_isolation_for_sessions() {
         &user,
         OpenSessionInput {
             register_name: "c1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("1000"),
             notes: None,
         },
@@ -713,4 +741,117 @@ async fn cross_tenant_isolation_for_sessions() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "NOT_FOUND");
+}
+
+// --- transferencia (V4 pagos, migración 0043) -------------------------------
+
+/// **El invariante del vector pagos**: una venta por transferencia es plata que
+/// entró al negocio pero NO al cajón. El efectivo esperado del arqueo tiene que
+/// ignorarla — si la sumara, el cajero cerraría con un faltante fantasma todos
+/// los días. Se verifica contra el mismo `arqueo` que usa el cierre real.
+#[tokio::test]
+async fn venta_por_transferencia_no_entra_al_efectivo_esperado() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("10000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let p = catalog::create_product(&db, &tenant, new_product("Pan", "2000", 50))
+        .await
+        .unwrap();
+    let venta = |metodo: &str, cash: Option<Decimal>| PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: p.id.clone(),
+            product_name: p.name.clone(),
+            quantity: 1,
+            unit_price: dec("2000"),
+        }],
+        payment_method: metodo.into(),
+        cash_amount: cash,
+        card_amount: None,
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+        branch: None,
+    };
+
+    // Una en efectivo (sí entra al cajón) y una por transferencia (no).
+    sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta("pos_cash", Some(dec("2000"))),
+    )
+    .await
+    .unwrap();
+    let transfer = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta("pos_transferencia", None),
+    )
+    .await
+    .expect("la venta por transferencia debe persistir (whitelist 0043)");
+
+    // Guardián del whitelist: sin `DEFINE FIELD OVERWRITE` en 0043 la venta ni
+    // siquiera se guardaría (la tabla es SCHEMAFULL y el ASSERT la rechaza).
+    assert_eq!(
+        transfer.order.payment_method, "pos_transferencia",
+        "el tender tiene que persistir tal cual se cobró"
+    );
+    // Liquida exacto: no hay efectivo recibido, así que tampoco hay vuelto que
+    // devolver ni plata que el cajón deba esperar.
+    assert!(
+        transfer.order.cash_amount.is_none(),
+        "una transferencia no registra efectivo recibido"
+    );
+
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(
+        live.cash_sales,
+        dec("2000"),
+        "sólo la venta en efectivo cuenta como venta en efectivo"
+    );
+    assert_eq!(
+        live.session.closing_cash_expected,
+        Some(dec("12000")),
+        "esperado = apertura 10000 + 2000 en efectivo; la transferencia NO infla el cajón"
+    );
+
+    // Y el cierre cuadra contando sólo el efectivo real: cero discrepancia.
+    let close = service::close_session(
+        &db,
+        &tenant,
+        &s.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("12000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        close.session.discrepancia,
+        Some(Decimal::ZERO),
+        "el cajón cuadra: la transferencia nunca estuvo en el cajón"
+    );
 }

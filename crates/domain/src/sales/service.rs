@@ -32,7 +32,7 @@
 //! Public stable signatures so api router compiles today.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use rust_decimal::Decimal;
 use surrealdb::sql::{thing, Thing};
@@ -69,16 +69,13 @@ fn parse_tenant_thing(s: &str, table: &str) -> DomainResult<Thing> {
 /// assignment. Different tenants never share a lock, so multi-tenant
 /// throughput is unaffected; within a tenant the POS demand (a few cashiers)
 /// is orders of magnitude below the serialized ceiling.
-static SALE_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> =
-    OnceLock::new();
-
+///
+/// El lock vive en [`crate::locks`] porque desde V2 (stock por sucursal) NO es
+/// exclusivo de la venta: la transferencia entre sucursales escribe las mismas
+/// filas (`product`, `stock_movement`, `product_branch_stock`) y debe
+/// serializarse contra la venta, no en paralelo a ella.
 fn tenant_sale_lock(tenant: &Thing) -> Arc<AsyncMutex<()>> {
-    let locks = SALE_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
-    let mut guard = locks.lock().expect("SALE_LOCKS mutex poisoned");
-    guard
-        .entry(tenant.to_string())
-        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-        .clone()
+    crate::locks::tenant_stock_lock(tenant)
 }
 
 /// Max commit retries on a retryable MVCC conflict before surfacing the DB
@@ -208,6 +205,30 @@ pub async fn post_sale(
         .map(|s| parse_tenant_thing(s, "customer"))
         .transpose()?;
 
+    // Fiado (venta a cuenta) exige cliente: sin cliente no hay a quién cobrarle.
+    if req.payment_method == "pos_fiado" && customer.is_none() {
+        return Err(DomainError::Invalid(
+            "para fiar debes elegir el cliente".into(),
+        ));
+    }
+
+    // Sucursal de la venta (V2, migración 0041). Precedencia:
+    //   1. `req.branch` — el POS manda la sucursal activa del selector, y el
+    //      agente puede decir "vendé en el local 2".
+    //   2. la sesión de caja abierta del cajero — "la venta descuenta de la
+    //      sucursal de la caja" sin que el cliente tenga que mandar nada.
+    //   3. casa matriz (`None`) — negocio de un solo local: se comporta igual
+    //      que antes de V2, que es lo que hace este cambio compatible hacia
+    //      atrás con todo instalado hoy.
+    let branch = match req.branch.as_deref() {
+        Some(b) => crate::stock::service::parse_branch(Some(b))?,
+        None => match sold_by {
+            Some(u) => crate::cash_register::service::open_session_branch(db, tenant, u).await?,
+            None => None,
+        },
+    };
+    crate::stock::service::ensure_branch(db, tenant, branch.as_ref(), "la sucursal").await?;
+
     // === Serialized, retry-on-conflict critical section (BUG-003/004) ===
     // The per-tenant lock removes the sale-vs-sale SurrealKv write-write
     // conflict (and the partial-write corruption of `product.stock` it
@@ -237,6 +258,20 @@ pub async fn post_sale(
                 .iter()
                 .map(|p| (p.id.to_string(), (p.stock, p.physical_stock)))
                 .collect();
+            // On-hand del BUCKET de la sucursal donde se vende (migración 0041),
+            // en una sola query para no pagar N round-trips en el hot path. Un
+            // producto sin fila cuenta como 0: esa sucursal nunca recibió nada.
+            // Se re-lee en cada intento, igual que el stock global.
+            let branch_stock = crate::stock::repo::branch_stock_qty_many(
+                db,
+                tenant,
+                &product_things,
+                branch.as_ref(),
+            )
+            .await?;
+            // Acumulador por producto: una venta puede traer el mismo SKU en
+            // dos líneas y la suma no puede pasarse del saldo de la sucursal.
+            let mut taken: HashMap<String, i64> = HashMap::new();
             let mut physical: Vec<bool> = Vec::with_capacity(req.items.len());
             for (req_item, pthing) in req.items.iter().zip(product_things.iter()) {
                 let (stock, is_physical) = by_id
@@ -258,6 +293,19 @@ pub async fn post_sale(
                 if is_physical && stock < req_item.quantity {
                     return Err(DomainError::InsufficientStock);
                 }
+                // Aislamiento por sucursal: el stock global puede alcanzar y aun
+                // así NO se puede vender, porque las unidades están en otro
+                // local. Sin este chequeo el bucket de la sucursal quedaría
+                // negativo y "vender en A" consumiría lo de B.
+                if is_physical {
+                    let key = pthing.to_string();
+                    let here = branch_stock.get(&key).copied().unwrap_or(0);
+                    let acc = taken.entry(key).or_insert(0);
+                    *acc += req_item.quantity;
+                    if here < *acc {
+                        return Err(DomainError::InsufficientStock);
+                    }
+                }
                 physical.push(is_physical);
             }
 
@@ -277,6 +325,7 @@ pub async fn post_sale(
                             tenant,
                             &it.product,
                             it.quantity,
+                            branch.as_ref(),
                         )
                         .await?,
                     );
@@ -291,6 +340,7 @@ pub async fn post_sale(
                 sold_by,
                 sold_by_name,
                 customer.as_ref(),
+                branch.as_ref(),
                 &req,
                 &fefo_plans,
                 &physical,
@@ -310,6 +360,15 @@ pub async fn post_sale(
             }
         }
     };
+
+    // Fiado: la venta a cuenta genera un CARGO en el ledger del cliente (deuda).
+    // Idempotente por orden (post_cargo verifica). NO toca caja (no es efectivo).
+    if req.payment_method == "pos_fiado" {
+        if let Some(c) = customer.as_ref() {
+            let order_thing = parse_tenant_thing(&applied.order.id, "order")?;
+            crate::credit::repo::post_cargo(db, tenant, c, &order_thing, total, sold_by).await?;
+        }
+    }
 
     // Loyalty: if customer set, award points based on total + setting.
     let mut loyalty_awarded = 0_i64;
@@ -453,6 +512,266 @@ pub async fn list_orders(db: &Db, tenant: &Thing, f: OrderFilters) -> DomainResu
     repo::list_orders(db, tenant, &f).await
 }
 
+// --- web pickup orders (Free Web PR3, ADR-0020) ------------------------------
+
+/// Marker prefix for "product exists but cannot be sold on the web" — the api
+/// layer intercepts it (same scheme as `IDEMPOTENCY_CACHED`) and answers 422
+/// `PRODUCT_NOT_AVAILABLE` instead of a generic 400.
+pub const PRODUCT_NOT_AVAILABLE_MARKER: &str = "PRODUCT_NOT_AVAILABLE";
+
+/// Derive a `RET-XXXX` pickup code from fresh UUID bytes over the unambiguous
+/// alphabet (no 0/O/1/I/L).
+fn mint_pickup_code() -> String {
+    let bytes = *uuid::Uuid::new_v4().as_bytes();
+    let mut code = String::from("RET-");
+    for b in &bytes[..4] {
+        code.push(PICKUP_CODE_ALPHABET[*b as usize % PICKUP_CODE_ALPHABET.len()] as char);
+    }
+    code
+}
+
+/// Create a web pickup order: availability check (`active && online_visible
+/// && prescription 'direct'`), oversell guard on `stock - stock_reserved`,
+/// reservation + order + items in ONE tx (per-tenant serialized, same lock as
+/// POS sales). Prices come from the product row (`online_price ?? price`) —
+/// client-supplied money is never trusted.
+///
+/// Idempotency mirrors `post_sale`: keys are namespaced `web:` so storefront
+/// retries can never collide with POS keys; a replay surfaces as
+/// `DomainError::Conflict("IDEMPOTENCY_CACHED:<json>")` for the handler to
+/// unwrap into a 200.
+pub async fn create_web_order(
+    db: &Db,
+    tenant: &Thing,
+    idempotency_key: Option<&str>,
+    req: WebPickupOrderRequest,
+) -> DomainResult<WebPickupOrderResponse> {
+    if req.customer.name.trim().is_empty() || req.customer.phone.trim().is_empty() {
+        return Err(DomainError::Invalid("datos de cliente inválidos".into()));
+    }
+    if req.items.is_empty() || req.items.len() > WEB_ORDER_MAX_ITEMS {
+        return Err(DomainError::Invalid(format!(
+            "items debe tener entre 1 y {WEB_ORDER_MAX_ITEMS} líneas"
+        )));
+    }
+    for it in &req.items {
+        if it.qty < 1 || it.qty > WEB_ORDER_MAX_QTY {
+            return Err(DomainError::Invalid(format!(
+                "cantidad inválida para {}: {}",
+                it.product_id, it.qty
+            )));
+        }
+    }
+    if let Some(f) = &req.fulfillment {
+        if let Some(kind) = f.kind.as_deref() {
+            if kind != "pickup" {
+                return Err(DomainError::Invalid(
+                    "solo retiro en tienda (pickup) está disponible".into(),
+                ));
+            }
+        }
+    }
+
+    // Namespaced idempotency: web keys never collide with POS keys.
+    let web_key = idempotency_key.map(|k| format!("web:{k}"));
+    let body_fp = if web_key.is_some() {
+        Some(
+            serde_json::to_string(&req)
+                .map_err(|e| DomainError::Other(anyhow::anyhow!("body fingerprint: {e}")))?,
+        )
+    } else {
+        None
+    };
+    if let (Some(key), Some(fp)) = (web_key.as_deref(), body_fp.as_deref()) {
+        match repo::lookup_idempotency(db, tenant, key, fp).await? {
+            repo::IdempotencyHit::Replay { response_json, .. } => {
+                return Err(DomainError::Conflict(format!(
+                    "IDEMPOTENCY_CACHED:{response_json}"
+                )));
+            }
+            repo::IdempotencyHit::Conflict => {
+                return Err(DomainError::Conflict(
+                    "IDEMPOTENCY_KEY_REUSE_CONFLICT: la misma Idempotency-Key \
+                     se reutilizó con un body distinto"
+                        .to_string(),
+                ));
+            }
+            repo::IdempotencyHit::None => {}
+        }
+    }
+
+    let product_things: Vec<Thing> = req
+        .items
+        .iter()
+        .map(|i| parse_tenant_thing(&i.product_id, "product"))
+        .collect::<DomainResult<Vec<_>>>()?;
+
+    // === Serialized critical section (same tenant lock as POS sales) ===
+    // Availability + oversell check re-runs each retry so a losing MVCC
+    // conflict against a concurrent writer re-reads fresh counters.
+    let order = {
+        let sale_lock = tenant_sale_lock(tenant);
+        let _guard = sale_lock.lock().await;
+        let mut attempt = 0usize;
+        loop {
+            let loaded = repo::load_products_for_web_order(db, tenant, &product_things).await?;
+            let by_id: HashMap<String, &repo::WebOrderProductRow> =
+                loaded.iter().map(|p| (p.id.to_string(), p)).collect();
+
+            let mut lines: Vec<repo::WebOrderLine> = Vec::with_capacity(req.items.len());
+            let mut subtotal = Decimal::ZERO;
+            for (it, pthing) in req.items.iter().zip(product_things.iter()) {
+                // Missing, inactive, hidden and prescription-only are all the
+                // same "not available" — the write seam never enumerates.
+                let p = by_id.get(&pthing.to_string()).copied().ok_or_else(|| {
+                    DomainError::Invalid(format!(
+                        "{PRODUCT_NOT_AVAILABLE_MARKER}:{}",
+                        it.product_id
+                    ))
+                })?;
+                let direct = p.prescription_type.as_deref().unwrap_or("direct") == "direct";
+                if !p.active || !p.online_visible || !direct {
+                    return Err(DomainError::Invalid(format!(
+                        "{PRODUCT_NOT_AVAILABLE_MARKER}:{}",
+                        it.product_id
+                    )));
+                }
+                if p.physical_stock && p.stock - p.stock_reserved < it.qty {
+                    return Err(DomainError::InsufficientStock);
+                }
+                let unit_price = p.online_price.unwrap_or(p.price);
+                let line_sub = crate::invariants::line_total(unit_price, it.qty);
+                subtotal += line_sub;
+                lines.push(repo::WebOrderLine {
+                    product: pthing.clone(),
+                    product_name: p.name.clone(),
+                    quantity: it.qty,
+                    unit_price,
+                    subtotal: line_sub,
+                });
+            }
+
+            let notes = req
+                .fulfillment
+                .as_ref()
+                .and_then(|f| f.notes.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let expires_at = chrono::Utc::now() + chrono::Duration::hours(WEB_ORDER_RESERVE_HOURS);
+
+            match repo::apply_web_order(
+                db,
+                tenant,
+                &lines,
+                req.customer.name.trim(),
+                req.customer.phone.trim(),
+                notes,
+                &mint_pickup_code(),
+                expires_at,
+                subtotal,
+                subtotal,
+            )
+            .await
+            {
+                Ok(order) => break order,
+                Err(e) if attempt < MAX_SALE_COMMIT_RETRIES && is_retryable_conflict(&e) => {
+                    attempt += 1;
+                    conflict_backoff(attempt).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
+
+    let resp = WebPickupOrderResponse {
+        order_id: order.id.clone(),
+        pickup_code: order.pickup_code.clone().unwrap_or_default(),
+        status: order.status.clone(),
+        currency: "CLP".to_string(),
+        total: order.total.to_string(),
+        expires_at: order.expires_at.unwrap_or_default(),
+    };
+
+    if let (Some(key), Some(fp)) = (web_key.as_deref(), body_fp.as_deref()) {
+        let json = serde_json::to_string(&resp).map_err(|e| DomainError::Other(e.into()))?;
+        repo::store_idempotency(db, tenant, key, fp, &json, 201).await?;
+    }
+
+    Ok(resp)
+}
+
+/// Web pickup lifecycle: `reserved → preparing → ready_for_pickup →
+/// completed`; anything pre-completed may go to `cancelled`. Cancel releases
+/// the reservation; complete releases it AND decrements `stock` in the same
+/// tx (simple decrement — the POS-paid handoff refines this later).
+pub async fn transition_web_order(
+    db: &Db,
+    tenant: &Thing,
+    order_id: &str,
+    to: &str,
+) -> DomainResult<OrderDto> {
+    let order_thing = parse_tenant_thing(order_id, "order")?;
+
+    let allowed = |from: &str, to: &str| -> bool {
+        matches!(
+            (from, to),
+            ("reserved", "preparing")
+                | ("preparing", "ready_for_pickup")
+                | ("ready_for_pickup", "completed")
+                | ("reserved", "cancelled")
+                | ("preparing", "cancelled")
+                | ("ready_for_pickup", "cancelled")
+        )
+    };
+
+    // Same per-tenant lock as sales/refunds: the release/decrement UPDATE must
+    // never race a concurrent stock writer.
+    let sale_lock = tenant_sale_lock(tenant);
+    let _guard = sale_lock.lock().await;
+
+    let (order, items) = repo::get_web_order(db, tenant, &order_thing)
+        .await?
+        .ok_or(DomainError::NotFound)?;
+    if !allowed(&order.status, to) {
+        return Err(DomainError::Invalid(format!(
+            "transición inválida de '{}' a '{to}'",
+            order.status
+        )));
+    }
+    let release = to == "cancelled" || to == "completed";
+    let decrement = to == "completed";
+    let set_ready = to == "ready_for_pickup";
+    // El retiro descuenta del local donde se preparó el pedido: la sucursal
+    // quedó estampada en la orden al reservarla. `None` = casa matriz.
+    let branch = crate::stock::service::parse_branch(order.branch.as_deref())?;
+
+    let mut attempt = 0usize;
+    loop {
+        match repo::apply_web_transition(
+            db,
+            tenant,
+            &order_thing,
+            to,
+            &items,
+            branch.as_ref(),
+            release,
+            decrement,
+            set_ready,
+        )
+        .await
+        {
+            Ok(updated) => return Ok(updated),
+            Err(e) if attempt < MAX_SALE_COMMIT_RETRIES && is_retryable_conflict(&e) => {
+                attempt += 1;
+                conflict_backoff(attempt).await;
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 pub async fn get_order(
     db: &Db,
     tenant: &Thing,
@@ -589,6 +908,11 @@ pub async fn create_refund(
     let mut restock_plans: Vec<Option<Vec<crate::inventory::model::FefoAllocation>>> =
         vec![None; req.items.len()];
 
+    // Sucursal a la que vuelve la mercadería: la de la venta original. Una
+    // devolución suelta (sin orden) repone en la casa matriz. Se resuelve dentro
+    // del bloque de la orden más abajo.
+    let mut refund_branch: Option<Thing> = None;
+
     // === Serialized, per-tenant critical section (refund integrity) ===
     // The cumulative over-refund guard below is a check-then-act TOCTOU: it
     // reads what was already refunded for this order (`sum_prior_refunds`) and
@@ -606,9 +930,12 @@ pub async fn create_refund(
     let _refund_guard = sale_lock.lock().await;
 
     if let Some(ord) = order_thing.as_ref() {
-        let (_order, sold_items) = repo::get_order(db, tenant, ord)
+        let (order_row, sold_items) = repo::get_order(db, tenant, ord)
             .await?
             .ok_or(DomainError::NotFound)?;
+        // La devolución repone EN LA SUCURSAL DONDE SE VENDIÓ: devolver en el
+        // local A no puede inflar el stock del local B.
+        refund_branch = crate::stock::service::parse_branch(order_row.branch.as_deref())?;
         let mut sold: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
         // Consumed FEFO lots per product (earliest-expiry first, as recorded by
         // the sale), used to plan where returned units go back.
@@ -708,6 +1035,7 @@ pub async fn create_refund(
         tenant,
         processed_by,
         order_thing.as_ref(),
+        refund_branch.as_ref(),
         &req,
         &restock_plans,
         total,

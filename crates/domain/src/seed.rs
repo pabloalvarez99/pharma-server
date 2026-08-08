@@ -1450,6 +1450,9 @@ pub async fn seed_demo(
                 tenant,
                 NewBatch {
                     product: product.id.clone(),
+                    // Demo de un solo local: los lotes nacen en casa matriz,
+                    // igual que el stock que siembra el resto del seed.
+                    branch: None,
                     batch_code: item.batch_code.to_string(),
                     expiry_date: expiry,
                     stock: item.stock,
@@ -1537,6 +1540,7 @@ async fn seed_purchase_orders(
             tenant,
             NewPurchaseOrder {
                 supplier: supplier_ids[sup_idx].clone(),
+                branch: None,
                 currency: None,
                 notes: Some("Orden de compra demo".to_string()),
                 external_ref: Some(format!("{DEMO_PO_PREFIX}{po_n:03}")),

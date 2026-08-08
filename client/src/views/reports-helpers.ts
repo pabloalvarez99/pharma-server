@@ -15,6 +15,7 @@ import type {
   TopProductRow,
   StockRotationRow,
   InventorySummary,
+  PurchaseBook,
 } from "../api";
 import { toCsv, type ExportBundle } from "./stock-helpers";
 
@@ -121,6 +122,30 @@ export function buildRotationExport(
 
 /** Every panel the Reportes view has loaded, for the "Exportar todo" bundle. A
  *  panel absent (still loading / gated / failed) is simply omitted. */
+/** Libro de compras → CSV/JSON. El CSV lleva las columnas que pide el contador
+ *  (fecha, tipo DTE, folio, proveedor con RUT, neto, IVA, total) más `estimado`
+ *  para distinguir las filas cuya factura aún no se capturó. */
+export function buildLibroExport(book: PurchaseBook): ExportBundle {
+  const header = ["fecha", "tipo", "folio", "proveedor", "rut", "neto", "iva", "total", "estimado"];
+  const body = book.rows.map((r) => [
+    r.date,
+    r.tipo,
+    r.folio ?? "",
+    r.supplier_name,
+    r.supplier_rut ?? "",
+    r.neto,
+    r.iva,
+    r.total,
+    r.declared ? "no" : "si",
+  ]);
+  return {
+    csv: toCsv(header, body),
+    json: JSON.stringify(book, null, 2),
+    count: book.rows.length,
+    truncated: false,
+  };
+}
+
 export interface LoadedReports {
   sales?: readonly DailySalesRow[];
   margins?: readonly DailyMarginRow[];
@@ -128,6 +153,8 @@ export interface LoadedReports {
   top?: readonly TopProductRow[];
   inventory?: InventorySummary;
   rotation?: readonly StockRotationRow[];
+  /** Libro de compras del mes (V3) — alimenta el export CSV/JSON. */
+  libro?: PurchaseBook;
 }
 
 /** Combined machine-readable JSON of all loaded reports — the headline "exporta

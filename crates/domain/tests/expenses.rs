@@ -119,6 +119,8 @@ async fn cash_expense_with_open_session_posts_retiro_reflected_in_arqueo() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -183,6 +185,8 @@ async fn cash_expense_without_session_does_not_move_a_drawer() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("5000"),
             notes: None,
         },
@@ -230,6 +234,8 @@ async fn cash_expense_racing_close_never_creates_phantom_faltante() {
         &user,
         cmodel::OpenSessionInput {
             register_name: "Caja 1".into(),
+            register: None,
+            branch: None,
             opening_cash: dec("10000"),
             notes: None,
         },
@@ -390,6 +396,7 @@ async fn sales_daily_aggregates_orders_per_utc_date_excluding_refunded() {
             notes: None,
             external_ref: None,
             prescriptions: vec![],
+            branch: None,
         };
         sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
             .await
@@ -509,16 +516,30 @@ async fn near_expiry_window_sort_expired_and_exclusions() {
     );
 
     // Wide window pulls FAR in too.
-    let wide = service::near_expiry(&db, &tenant, NearExpiryFilters { days: Some(365) })
-        .await
-        .unwrap();
+    let wide = service::near_expiry(
+        &db,
+        &tenant,
+        NearExpiryFilters {
+            days: Some(365),
+            branch: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(wide.len(), 4);
     assert_eq!(wide.last().unwrap().batch_code, "FAR");
 
     // days=0 → only batches expiring at/before now.
-    let none_future = service::near_expiry(&db, &tenant, NearExpiryFilters { days: Some(0) })
-        .await
-        .unwrap();
+    let none_future = service::near_expiry(
+        &db,
+        &tenant,
+        NearExpiryFilters {
+            days: Some(0),
+            branch: None,
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(none_future.len(), 1);
     assert_eq!(none_future[0].batch_code, "EXPIRED");
 }
@@ -603,6 +624,7 @@ async fn margins_daily_revenue_cost_margin_and_unknown_cost() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
@@ -684,6 +706,7 @@ async fn top_products_ranking_abc_and_limit() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
@@ -792,6 +815,7 @@ async fn stock_rotation_turnover_days_and_oos() {
         notes: None,
         external_ref: None,
         prescriptions: vec![],
+        branch: None,
     };
     sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
         .await
@@ -856,4 +880,245 @@ async fn stock_rotation_tenant_scoped_empty() {
         .await
         .unwrap();
     assert!(rows.is_empty());
+}
+
+// --- vencimientos por sucursal (migración 0042) -----------------------------
+
+async fn seed_batch_in(
+    db: &Db,
+    tenant: &Thing,
+    product: &Thing,
+    branch: Option<&str>,
+    code: &str,
+    expiry_expr: &str,
+    stock: i64,
+) {
+    let br = branch.map(|s| Thing::from_str(s).unwrap());
+    db.query(format!(
+        "CREATE product_batch SET tenant=$t, product=$p, branch=$br, batch_code=$c, \
+         expiry_date={expiry_expr}, stock=$s, active=true"
+    ))
+    .bind(("t", tenant.clone()))
+    .bind(("p", product.clone()))
+    .bind(("br", br))
+    .bind(("c", code.to_string()))
+    .bind(("s", stock))
+    .await
+    .unwrap()
+    .check()
+    .unwrap();
+}
+
+async fn new_branch(db: &Db, tenant: &Thing, name: &str) -> String {
+    domain::branches::service::create_branch(
+        db,
+        tenant,
+        domain::branches::model::NewBranch {
+            name: name.into(),
+            code: None,
+            address: None,
+            comuna: None,
+            phone: None,
+        },
+    )
+    .await
+    .expect("crear sucursal")
+    .id
+}
+
+/// La alerta de vencimiento de un local NO lista los lotes de otro: es el
+/// criterio de aceptación de la lane (un lote que vence en B no manda a nadie
+/// a revisar la góndola de A).
+#[tokio::test]
+async fn near_expiry_por_sucursal_no_cruza_locales() {
+    let (db, tenant, _user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 0))
+        .await
+        .unwrap();
+    let pid = Thing::from_str(&p.id).unwrap();
+    let a = new_branch(&db, &tenant, "Local A").await;
+    let b = new_branch(&db, &tenant, "Local B").await;
+
+    seed_batch_in(&db, &tenant, &pid, Some(&a), "EN_A", "time::now() + 5d", 3).await;
+    seed_batch_in(&db, &tenant, &pid, Some(&b), "EN_B", "time::now() + 6d", 4).await;
+    seed_batch_in(&db, &tenant, &pid, None, "EN_MATRIZ", "time::now() + 7d", 5).await;
+
+    // Filtrado por A: sólo el lote de A.
+    let solo_a = service::near_expiry(
+        &db,
+        &tenant,
+        NearExpiryFilters {
+            days: Some(30),
+            branch: Some(a.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    let codes: Vec<&str> = solo_a.iter().map(|r| r.batch_code.as_str()).collect();
+    assert_eq!(codes, vec!["EN_A"], "la alerta de A no lista lotes de B");
+    assert_eq!(solo_a[0].branch.as_deref(), Some(a.as_str()));
+    assert_eq!(
+        solo_a[0].branch_name.as_deref(),
+        Some("Local A"),
+        "el nombre del local viene resuelto"
+    );
+
+    // `none` = casa matriz: ni A ni B.
+    let matriz = service::near_expiry(
+        &db,
+        &tenant,
+        NearExpiryFilters {
+            days: Some(30),
+            branch: Some("none".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let codes: Vec<&str> = matriz.iter().map(|r| r.batch_code.as_str()).collect();
+    assert_eq!(codes, vec!["EN_MATRIZ"]);
+    assert_eq!(matriz[0].branch, None);
+    assert_eq!(matriz[0].branch_name, None, "casa matriz no tiene nombre");
+
+    // Sin filtro: el negocio entero, cada fila con su local.
+    let todo = service::near_expiry(&db, &tenant, NearExpiryFilters::default())
+        .await
+        .unwrap();
+    let codes: Vec<&str> = todo.iter().map(|r| r.batch_code.as_str()).collect();
+    assert_eq!(
+        codes,
+        vec!["EN_A", "EN_B", "EN_MATRIZ"],
+        "ordenado por vencimiento"
+    );
+    assert_eq!(todo[1].branch_name.as_deref(), Some("Local B"));
+}
+
+/// Una sucursal inexistente o un id de otra tabla es input inválido, no un
+/// reporte vacío silencioso.
+#[tokio::test]
+async fn near_expiry_rechaza_sucursal_invalida() {
+    let (db, tenant, _user) = setup().await;
+    let err = service::near_expiry(
+        &db,
+        &tenant,
+        NearExpiryFilters {
+            days: Some(30),
+            branch: Some("product:p1".into()),
+        },
+    )
+    .await;
+    assert!(err.is_err(), "un id que no es branch se rechaza");
+}
+
+// --- ingresos por método de pago (V4 pagos, migración 0043) -----------------
+
+/// El reporte tiene que contar TODA la plata del período y atribuirla bien:
+/// efectivo, tarjeta, transferencia y fiado por separado, con la venta mixta
+/// repartida entre sus dos vías. Antes de esto el desglose sólo miraba
+/// `cash_amount`/`card_amount` y la plata de fiado/transferencia desaparecía.
+#[tokio::test]
+async fn sales_by_method_reparte_cada_peso_a_su_bucket() {
+    let (db, tenant, user) = setup().await;
+    let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
+        .await
+        .unwrap();
+    let cliente = domain::customers::service::create_customer(
+        &db,
+        &tenant,
+        domain::customers::model::NewCustomer {
+            name: "Rosa".into(),
+            rut: None,
+            phone: None,
+            email: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let venta = |metodo: &str,
+                 qty: i64,
+                 cash: Option<Decimal>,
+                 card: Option<Decimal>,
+                 cust: Option<String>| {
+        smodel::PosSaleRequest {
+            items: vec![smodel::PosSaleItem {
+                product: p.id.clone(),
+                product_name: p.name.clone(),
+                quantity: qty,
+                unit_price: dec("1000"),
+            }],
+            payment_method: metodo.into(),
+            cash_amount: cash,
+            card_amount: card,
+            discount: None,
+            customer: cust,
+            customer_name: None,
+            customer_phone: None,
+            notes: None,
+            external_ref: None,
+            prescriptions: vec![],
+            branch: None,
+        }
+    };
+    let vender = |req: smodel::PosSaleRequest| {
+        let db = &db;
+        let tenant = &tenant;
+        let user = &user;
+        async move {
+            sales::post_sale(db, tenant, Some(user), Some("admin"), None, req)
+                .await
+                .expect("venta");
+        }
+    };
+
+    vender(venta("pos_cash", 2, Some(dec("2000")), None, None)).await; // 2000 efectivo
+    vender(venta("pos_debit", 1, None, Some(dec("1000")), None)).await; // 1000 tarjeta
+    vender(venta("pos_transferencia", 3, None, None, None)).await; // 3000 transferencia
+    vender(venta("pos_fiado", 1, None, None, Some(cliente.id.clone()))).await; // 1000 fiado
+                                                                               // Mixta de 5000: 2000 en efectivo + 3000 con tarjeta.
+    vender(venta(
+        "pos_mixed",
+        5,
+        Some(dec("2000")),
+        Some(dec("3000")),
+        None,
+    ))
+    .await;
+
+    let rows = service::sales_by_method(&db, &tenant, SalesReportFilters::default())
+        .await
+        .unwrap();
+    let monto = |m: &str| {
+        rows.iter()
+            .find(|r| r.method == m)
+            .map(|r| r.amount)
+            .unwrap_or(Decimal::ZERO)
+    };
+
+    assert_eq!(
+        monto("efectivo"),
+        dec("4000"),
+        "2000 puro + 2000 de la mixta"
+    );
+    assert_eq!(
+        monto("tarjeta"),
+        dec("4000"),
+        "1000 débito + 3000 de la mixta"
+    );
+    assert_eq!(monto("transferencia"), dec("3000"));
+    assert_eq!(monto("fiado"), dec("1000"), "el fiado es su propio bucket");
+    assert_eq!(
+        monto("otro"),
+        Decimal::ZERO,
+        "no debe sobrar plata sin bucket"
+    );
+
+    // Nada se pierde: la suma de los buckets es el ingreso del período.
+    let total: Decimal = rows.iter().map(|r| r.amount).sum();
+    assert_eq!(total, dec("12000"));
+
+    // Ordenado de mayor a menor para que la UI/agente lea lo importante primero.
+    let montos: Vec<Decimal> = rows.iter().map(|r| r.amount).collect();
+    let mut ordenado = montos.clone();
+    ordenado.sort_by(|a, b| b.cmp(a));
+    assert_eq!(montos, ordenado);
 }

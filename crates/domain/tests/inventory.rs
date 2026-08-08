@@ -161,6 +161,7 @@ async fn batch_creation_emits_initial_movement() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L001".into(),
             expiry_date: exp,
             stock: 30,
@@ -199,6 +200,7 @@ async fn fefo_orders_by_expiry_then_created() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L-late".into(),
             expiry_date: late,
             stock: 5,
@@ -214,6 +216,7 @@ async fn fefo_orders_by_expiry_then_created() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L-early".into(),
             expiry_date: early,
             stock: 3,
@@ -229,6 +232,7 @@ async fn fefo_orders_by_expiry_then_created() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L-mid".into(),
             expiry_date: mid,
             stock: 4,
@@ -240,7 +244,7 @@ async fn fefo_orders_by_expiry_then_created() {
     .await
     .unwrap();
 
-    let plan = inv::plan_fefo(&db, &t, &p.id, 6).await.unwrap();
+    let plan = inv::plan_fefo(&db, &t, &p.id, 6, None).await.unwrap();
     // Expect 3 from early then 3 from mid.
     assert_eq!(plan.len(), 2);
     assert_eq!(plan[0].batch, b_early.id);
@@ -249,7 +253,7 @@ async fn fefo_orders_by_expiry_then_created() {
     assert_eq!(plan[1].qty, 3);
 
     // Insufficient available across all batches → InsufficientStock.
-    let err = inv::plan_fefo(&db, &t, &p.id, 100).await.unwrap_err();
+    let err = inv::plan_fefo(&db, &t, &p.id, 100, None).await.unwrap_err();
     assert_eq!(err.code(), "INSUFFICIENT_STOCK");
     let _ = b_mid; // silence unused warnings
 }
@@ -266,6 +270,7 @@ async fn batch_soft_delete_keeps_row() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: exp,
             stock: 10,
@@ -378,6 +383,7 @@ async fn summary_aggregates_products_batches_faltas() {
         &t,
         NewBatch {
             product: p.id.clone(),
+            branch: None,
             batch_code: "L1".into(),
             expiry_date: exp,
             stock: 1,

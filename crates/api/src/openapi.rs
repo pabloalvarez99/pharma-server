@@ -50,6 +50,19 @@ impl Modify for SecurityAddon {
                         .build(),
                 ),
             );
+            components.add_security_scheme(
+                "api_key",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "Clave de storefront `rb_live_…` (Free Web PR2). \
+                             Las rutas de escritura exigen además la firma HMAC \
+                             `X-Rb-Signature` + `X-Rb-Timestamp`.",
+                        ))
+                        .build(),
+                ),
+            );
         }
     }
 }
@@ -92,6 +105,12 @@ impl Modify for SecurityAddon {
         (name = "Backup", description = "Backup on-demand del data dir (SurrealKv + agent.key)."),
         (name = "ConfigCenter", description = "Sucursales + cajas: CRUD admin para multi-sucursal / multi-caja."),
         (name = "License", description = "Hot-reload + status de licencia activa. Admin only."),
+        (name = "PublicWeb", description = "Storefront público del tier Free (ADR-0020). \
+            Sin JWT; 404 uniforme salvo que el tenant haya publicado (`web.published`). \
+            Nunca expone costos ni stock numérico."),
+        (name = "AdminWeb", description = "Claves de storefront (Free Web PR2): CRUD admin. \
+            El plaintext y el secreto HMAC se muestran una sola vez al crear/rotar; \
+            la DB guarda solo SHA-256."),
     ),
     paths(
         // Sales
@@ -105,6 +124,9 @@ impl Modify for SecurityAddon {
         crate::v1::sales::set_setting,
         // Inventory
         crate::v1::stock_movements::list_movements_paginated,
+        crate::v1::stock::list_branch_stock,
+        crate::v1::stock::branch_stock_report,
+        crate::v1::stock::transfer,
         crate::v1::inventory::create_movement,
         crate::v1::inventory::adjust_movement,
         crate::v1::inventory::import_movements,
@@ -170,6 +192,7 @@ impl Modify for SecurityAddon {
         crate::v1::expenses::create_expense,
         crate::v1::expenses::list_expenses,
         crate::v1::expenses::sales_daily,
+        crate::v1::expenses::sales_by_method,
         crate::v1::expenses::margins_daily,
         crate::v1::expenses::top_products,
         crate::v1::expenses::stock_rotation,
@@ -193,6 +216,19 @@ impl Modify for SecurityAddon {
         crate::v1::purchasing::create_po_payment,
         crate::v1::purchasing::cancel_purchase_order,
         crate::v1::purchasing::import_prices,
+        // Public web storefront (Free Web PR1, ADR-0020)
+        crate::v1::public_web::get_store,
+        crate::v1::public_web::list_catalog,
+        crate::v1::public_web::get_product,
+        // Public web pickup orders (Free Web PR3)
+        crate::v1::public_web::create_web_order,
+        // Admin storefront keys (Free Web PR2)
+        crate::v1::admin_web::create_key,
+        crate::v1::admin_web::list_keys,
+        crate::v1::admin_web::rotate_key,
+        crate::v1::admin_web::revoke_key,
+        // Admin web order transitions (Free Web PR3)
+        crate::v1::admin_web::transition_order,
         // Agent federation (PR #64)
         crate::v1::agent::did,
         crate::v1::agent::inbox,
@@ -240,6 +276,19 @@ impl Modify for SecurityAddon {
         ErrorBody,
         domain::catalog::model::ProductDto,
         domain::catalog::model::NewVariant,
+        domain::catalog::model::PublicStoreDto,
+        domain::catalog::model::PublicProductDto,
+        domain::catalog::model::PublicAvailability,
+        domain::catalog::model::PublicCatalogPage,
+        domain::web_keys::WebKeyDto,
+        crate::v1::admin_web::CreateKeyRequest,
+        crate::v1::admin_web::CreatedKeyResponse,
+        crate::v1::admin_web::TransitionRequest,
+        domain::sales::model::WebPickupOrderRequest,
+        domain::sales::model::WebPickupCustomer,
+        domain::sales::model::WebPickupFulfillment,
+        domain::sales::model::WebPickupItem,
+        domain::sales::model::WebPickupOrderResponse,
     )),
     modifiers(&SecurityAddon),
 )]

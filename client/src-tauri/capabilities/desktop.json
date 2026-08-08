@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Desktop-only permissions. `tauri-plugin-updater` is not compiled on Android/iOS (the crate declares mobile support \"none\"), so its permissions do not exist there — keeping `updater:default` in the shared capability makes the mobile build fail with `Permission updater:default not found`.",
+  "platforms": [
+    "windows",
+    "linux",
+    "macOS"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "updater:default"
+  ]
+}

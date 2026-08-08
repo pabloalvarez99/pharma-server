@@ -218,6 +218,7 @@ async fn pos_sale_for_t1_with_t2_product_is_not_found() {
         notes: None,
         external_ref: None,
         prescriptions: Vec::new(),
+        branch: None,
     };
     let res =
         domain::sales::service::post_sale(&t.db, &t.t1, Some(&t.t1_user), None, None, req).await;

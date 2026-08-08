@@ -41,6 +41,20 @@ pub struct AppConfig {
     /// origins to let a cross-origin web app call `/api/v1` (ADR-0018).
     #[serde(default)]
     pub cors: CorsConfig,
+    /// SaaS provisioning endpoint (`POST /admin/v1/tenants`). Sin key ⇒ la ruta
+    /// responde 404 como si no existiera (instalaciones on-prem no la exponen).
+    #[serde(default)]
+    pub provisioning: ProvisioningConfig,
+}
+
+/// Config del endpoint de aprovisionamiento SaaS. Solo el license-server
+/// (signup web) conoce la key; se inyecta vía `PHARMA__PROVISIONING__KEY`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProvisioningConfig {
+    /// Shared secret comparado constante-tiempo contra `X-Provisioning-Key`.
+    /// `None`/vacío ⇒ endpoint apagado (404).
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 /// Global CORS settings for cross-origin browser clients (the web front).

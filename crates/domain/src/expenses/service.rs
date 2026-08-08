@@ -323,6 +323,118 @@ pub async fn sales_daily(
     Ok(by_day.into_values().collect())
 }
 
+/// Ingresos del período por **método de pago** (efectivo / tarjeta /
+/// transferencia / fiado / otro). Mismo filtro y misma exclusión de
+/// `refunded`/`cancelled` que `sales_daily`, para que los dos reportes cuenten
+/// la misma plata.
+///
+/// Reglas de atribución, explícitas porque son decisiones de negocio:
+///   * `pos_cash` → todo a efectivo; `pos_debit`/`pos_credit` → todo a tarjeta.
+///   * `pos_transferencia` (0043) → todo a transferencia. NO toca el efectivo
+///     esperado del arqueo: ese sale de `cash_sales_running` (0030), que sólo
+///     suma `pos_cash`/`pos_mixed`.
+///   * `pos_mixed` → reparte `cash_amount` a efectivo y `card_amount` a
+///     tarjeta; si por datos viejos no cuadra con el total, el resto cae en
+///     `otro` en vez de desaparecer (el reporte nunca miente por omisión).
+///   * `pos_fiado` → bucket propio: es ingreso devengado, todavía sin plata en
+///     la mano.
+/// Devuelve sólo los buckets con movimiento, ordenados de mayor a menor monto.
+pub async fn sales_by_method(
+    db: &Db,
+    tenant: &Thing,
+    f: SalesReportFilters,
+) -> DomainResult<Vec<SalesByMethodRow>> {
+    let mut conds = vec![
+        "tenant = $t".to_string(),
+        "status NOT IN ['refunded','cancelled']".to_string(),
+    ];
+    if f.from.is_some() {
+        conds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        conds.push("created_at <= $b".to_string());
+    }
+    // Sin `ORDER BY`: esto es un agregado, el orden de lectura no cambia el
+    // resultado y la salida se ordena por monto al final. (De paso evita el
+    // gotcha de SurrealDB — el campo del ORDER BY tiene que ir en la
+    // proyección, y `created_at` acá no se necesita para nada más.)
+    let sql = format!(
+        "SELECT payment_method, total, cash_amount, card_amount FROM order WHERE {}",
+        conds.join(" AND ")
+    );
+    let mut qb = db.query(sql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        qb = qb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        qb = qb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct R {
+        payment_method: String,
+        total: Decimal,
+        cash_amount: Option<Decimal>,
+        card_amount: Option<Decimal>,
+    }
+    let rows: Vec<R> = qb.await?.check()?.take(0)?;
+
+    use std::collections::BTreeMap;
+    let mut buckets: BTreeMap<&'static str, (i64, Decimal)> = BTreeMap::new();
+    let add = |bucket: &'static str,
+               amount: Decimal,
+               buckets: &mut BTreeMap<&'static str, (i64, Decimal)>| {
+        if amount.is_zero() {
+            return;
+        }
+        let e = buckets.entry(bucket).or_insert((0, Decimal::ZERO));
+        e.0 += 1;
+        e.1 += amount;
+    };
+    for r in rows {
+        match r.payment_method.as_str() {
+            "pos_cash" => add("efectivo", r.total, &mut buckets),
+            "pos_debit" | "pos_credit" => add("tarjeta", r.total, &mut buckets),
+            "pos_transferencia" => add("transferencia", r.total, &mut buckets),
+            "pos_fiado" => add("fiado", r.total, &mut buckets),
+            "pos_mixed" => {
+                let cash = r.cash_amount.unwrap_or(Decimal::ZERO);
+                let card = r.card_amount.unwrap_or(Decimal::ZERO);
+                // El efectivo de una mixta puede venir con vuelto incluido: lo
+                // que ENTRÓ al negocio es a lo sumo lo que faltaba para el total.
+                let cash_neto = cash.min((r.total - card).max(Decimal::ZERO));
+                add("efectivo", cash_neto, &mut buckets);
+                add("tarjeta", card.min(r.total), &mut buckets);
+                let resto = r.total - cash_neto - card.min(r.total);
+                add("otro", resto.max(Decimal::ZERO), &mut buckets);
+            }
+            _ => add("otro", r.total, &mut buckets),
+        }
+    }
+
+    let label = |b: &str| match b {
+        "efectivo" => "Efectivo",
+        "tarjeta" => "Tarjeta",
+        "transferencia" => "Transferencia",
+        "fiado" => "Fiado",
+        _ => "Otro",
+    };
+    let mut out: Vec<SalesByMethodRow> = buckets
+        .into_iter()
+        .map(|(method, (orders, amount))| SalesByMethodRow {
+            method: method.to_string(),
+            label: label(method).to_string(),
+            orders,
+            amount,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.amount
+            .cmp(&a.amount)
+            .then_with(|| a.method.cmp(&b.method))
+    });
+    Ok(out)
+}
+
 /// Batches on hand that expire on or before `now + days` (default 30),
 /// including already-expired ones (negative `days_to_expiry`). Tenant-scoped,
 /// only `active` batches with `stock > 0`. Sorted by `expiry_date` ascending
@@ -342,19 +454,39 @@ pub async fn near_expiry(
     struct B {
         id: Thing,
         product: Thing,
+        #[serde(default)]
+        branch: Option<Thing>,
         batch_code: String,
         expiry_date: DateTime<Utc>,
         stock: i64,
     }
+    // Sucursal: tri-estado, misma gramática que `inventory::repo::list_batches`
+    // (ausente = todos los locales, `"none"`/`""` = casa matriz, id = ese local).
+    // Si divergiera de la de lotes, el cliente tendría dos vocabularios para lo
+    // mismo.
+    let branch_thing = match f.branch.as_deref() {
+        Some("none") | Some("") | None => None,
+        Some(s) => Some(
+            crate::stock::service::parse_branch(Some(s))?.ok_or_else(|| {
+                DomainError::Invalid(format!("esperaba una sucursal, recibí {s}"))
+            })?,
+        ),
+    };
+    let branch_cond = match f.branch.as_deref() {
+        Some("none") | Some("") => " AND branch = NONE",
+        Some(_) => " AND branch = $br",
+        None => "",
+    };
     let batches: Vec<B> = db
-        .query(
-            "SELECT id, product, batch_code, expiry_date, stock \
+        .query(format!(
+            "SELECT id, product, branch, batch_code, expiry_date, stock \
              FROM product_batch \
              WHERE tenant = $t AND active = true AND stock > 0 \
-               AND expiry_date <= $c \
-             ORDER BY expiry_date ASC",
-        )
+               AND expiry_date <= $c{branch_cond} \
+             ORDER BY expiry_date ASC"
+        ))
         .bind(("t", tenant.clone()))
+        .bind(("br", branch_thing))
         .bind(("c", surrealdb::sql::Datetime::from(cutoff)))
         .await?
         .check()?
@@ -397,11 +529,39 @@ pub async fn near_expiry(
         .map(|p| (p.id.to_string(), p.name))
         .collect();
 
+    // Nombres de sucursal, mismo patrón batcheado que los productos: una query
+    // por reporte, no una por fila. Los lotes de casa matriz (`branch = NONE`)
+    // no participan.
+    let branch_ids: Vec<Thing> = {
+        let mut seen: HashSet<String> = HashSet::new();
+        batches
+            .iter()
+            .filter_map(|b| b.branch.as_ref())
+            .filter(|t| seen.insert(t.to_string()))
+            .cloned()
+            .collect()
+    };
+    let branch_names: HashMap<String, String> = if branch_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let rows: Vec<P> = db
+            .query("SELECT id, name FROM $ids WHERE tenant = $t")
+            .bind(("t", tenant.clone()))
+            .bind(("ids", branch_ids))
+            .await?
+            .check()?
+            .take(0)?;
+        rows.into_iter()
+            .map(|p| (p.id.to_string(), p.name))
+            .collect()
+    };
+
     let today = now.date_naive();
     Ok(batches
         .into_iter()
         .map(|b| {
             let days_to_expiry = (b.expiry_date.date_naive() - today).num_days();
+            let branch = b.branch.map(|t| t.to_string());
             NearExpiryRow {
                 product_id: b.product.to_string(),
                 product_name: names
@@ -410,6 +570,8 @@ pub async fn near_expiry(
                     .unwrap_or_default(),
                 batch_id: b.id.to_string(),
                 batch_code: b.batch_code,
+                branch_name: branch.as_ref().and_then(|id| branch_names.get(id).cloned()),
+                branch,
                 expiry_date: b.expiry_date,
                 stock: b.stock,
                 days_to_expiry,

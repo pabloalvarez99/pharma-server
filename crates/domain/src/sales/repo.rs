@@ -55,6 +55,20 @@ struct OrderRow {
     sold_by_name: Option<String>,
     notes: Option<String>,
     external_ref: Option<String>,
+    #[serde(default)]
+    channel: Option<String>,
+    #[serde(default)]
+    pickup_code: Option<String>,
+    #[serde(default)]
+    fulfillment_type: Option<String>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    ready_at: Option<DateTime<Utc>>,
+    /// Sucursal de la venta (migración 0041). `default` porque las órdenes
+    /// anteriores a la migración no tienen el campo.
+    #[serde(default)]
+    branch: Option<Thing>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -77,6 +91,12 @@ impl From<OrderRow> for OrderDto {
             sold_by_name: r.sold_by_name,
             notes: r.notes,
             external_ref: r.external_ref,
+            channel: r.channel,
+            pickup_code: r.pickup_code,
+            fulfillment_type: r.fulfillment_type,
+            expires_at: r.expires_at,
+            ready_at: r.ready_at,
+            branch: r.branch.map(|t| t.to_string()),
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -233,6 +253,12 @@ pub struct AppliedSale {
 /// siempre); `false` = servicio (`product.physical_stock = false`) → la línea
 /// crea sólo su `order_item`, sin tocar inventario ni emitir movimiento. Un
 /// servicio nunca trae `fefo_plan`, así que el bloque FEFO no se ve afectado.
+///
+/// `branch` (migración 0041) es la sucursal donde se vende: se estampa en la
+/// `order` (reportes por local) y en CADA `stock_movement`, que es lo que hace
+/// que el evento `product_branch_stock_maint` descuente del bucket correcto.
+/// `None` = casa matriz / sitio único. El caller ya validó que la sucursal
+/// existe y que tiene stock suficiente EN ESE BUCKET.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_sale(
     db: &Db,
@@ -240,6 +266,7 @@ pub async fn apply_sale(
     sold_by: Option<&Thing>,
     sold_by_name: Option<&str>,
     customer: Option<&Thing>,
+    branch: Option<&Thing>,
     req: &PosSaleRequest,
     fefo_plans: &[Option<Vec<FefoAllocation>>],
     physical: &[bool],
@@ -261,8 +288,8 @@ pub async fn apply_sale(
             payment_method=$pm, subtotal=$sub, discount=$disc, total=$tot, \
             cash_amount=$cash, card_amount=$card, customer=$cust, \
             customer_name=$cname, customer_phone=$cphone, sold_by=$sb, \
-            sold_by_name=$sbname, notes=$notes, external_ref=$ext \
-            RETURN AFTER; ",
+            sold_by_name=$sbname, notes=$notes, external_ref=$ext, \
+            branch=$br RETURN AFTER; ",
     );
     // Per item we always emit the `order_item` CREATE; a *physical* line also
     // emits the `product.stock` UPDATE + `stock_movement` CREATE. A service line
@@ -290,7 +317,7 @@ pub async fn apply_sale(
             q.push_str(&format!(
                 "CREATE stock_movement SET tenant=$t, product=$p{i}, \
                     delta = 0 - $qty{i}, reason='sale', \
-                    admin=$sb, ref=$ref RETURN AFTER; ",
+                    admin=$sb, ref=$ref, branch=$br RETURN AFTER; ",
             ));
             stmt_idx += 1;
             Some(mov_slot)
@@ -331,6 +358,7 @@ pub async fn apply_sale(
         .bind(("sbname", sold_by_name.map(str::to_string)))
         .bind(("notes", req.notes.clone()))
         .bind(("ext", req.external_ref.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("ref", order_thing.to_string()));
     for (i, item) in req.items.iter().enumerate() {
         let pid = surrealdb::sql::thing(&item.product)
@@ -511,12 +539,20 @@ pub struct AppliedRefund {
 /// originating product is not batch-tracked) → `product.stock` bump only,
 /// legacy behavior. The batch increments are grouped at the tail so the
 /// per-item result indices stay fixed.
+///
+/// `branch` (migración 0041) es la sucursal a la que vuelve la mercadería: la
+/// de la venta original cuando la devolución referencia una orden, y la casa
+/// matriz cuando es una devolución suelta. Va estampada en cada
+/// `stock_movement(reason='return')`, así el evento
+/// `product_branch_stock_maint` repone en el local correcto — devolver en el
+/// local A no puede inflar el stock del local B.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_refund(
     db: &Db,
     tenant: &Thing,
     processed_by: Option<&Thing>,
     order: Option<&Thing>,
+    branch: Option<&Thing>,
     req: &NewDevolucion,
     restock_plans: &[Option<Vec<FefoAllocation>>],
     total: Decimal,
@@ -553,8 +589,8 @@ pub async fn apply_refund(
             stmt += 1;
             q.push_str(&format!(
                 "CREATE stock_movement SET tenant=$t, product=$p{i}, \
-                    delta=$qty{i}, reason='return', admin=$by, ref=$devref \
-                    RETURN AFTER; ",
+                    delta=$qty{i}, reason='return', admin=$by, ref=$devref, \
+                    branch=$br RETURN AFTER; ",
             ));
             mov_idx.push(Some(stmt));
             stmt += 1;
@@ -592,6 +628,7 @@ pub async fn apply_refund(
         .bind(("tot", dec_val(total)))
         .bind(("mr", req.metodo_reembolso.clone()))
         .bind(("by", processed_by.cloned()))
+        .bind(("br", branch.cloned()))
         .bind(("dev", dev_thing.clone()))
         .bind(("devref", dev_thing.to_string()));
     for (i, it) in req.items.iter().enumerate() {
@@ -752,6 +789,9 @@ pub async fn list_orders(db: &Db, tenant: &Thing, f: &OrderFilters) -> DomainRes
     if f.customer.is_some() {
         conds.push("customer = $c".to_string());
     }
+    if f.channel.is_some() {
+        conds.push("channel = $ch".to_string());
+    }
     if f.from.is_some() {
         conds.push("created_at >= $from".to_string());
     }
@@ -784,6 +824,7 @@ pub async fn list_orders(db: &Db, tenant: &Thing, f: &OrderFilters) -> DomainRes
         .bind(("t", tenant.clone()))
         .bind(("s", f.status.clone().unwrap_or_default()))
         .bind(("pm", f.payment_method.clone().unwrap_or_default()))
+        .bind(("ch", f.channel.clone().unwrap_or_default()))
         .bind(("c", cust))
         .bind(("from", from_v))
         .bind(("to", to_v))
@@ -1038,6 +1079,236 @@ pub async fn award_loyalty(
     .await?
     .check()?;
     Ok(())
+}
+
+// --- web pickup orders (Free Web PR3, ADR-0020) ------------------------------
+
+/// Product projection for the web-order availability + reservation check.
+#[derive(Debug, Deserialize)]
+pub struct WebOrderProductRow {
+    pub id: Thing,
+    pub name: String,
+    pub price: Decimal,
+    #[serde(default)]
+    pub online_price: Option<Decimal>,
+    pub stock: i64,
+    #[serde(default)]
+    pub stock_reserved: i64,
+    pub active: bool,
+    #[serde(default)]
+    pub online_visible: bool,
+    #[serde(default = "default_true")]
+    pub physical_stock: bool,
+    #[serde(default)]
+    pub prescription_type: Option<String>,
+}
+
+/// Load the web-order projection for `products` (tenant-scoped, direct
+/// record-id fetch). Missing ids simply don't come back — the service treats
+/// missing/inactive/hidden uniformly (no enumeration through the write seam).
+pub async fn load_products_for_web_order(
+    db: &Db,
+    tenant: &Thing,
+    products: &[Thing],
+) -> DomainResult<Vec<WebOrderProductRow>> {
+    if products.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut r = db
+        .query(
+            "SELECT id, name, price, online_price, stock, stock_reserved, \
+             active, online_visible, physical_stock, prescription_type \
+             FROM $ids WHERE tenant = $t",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", products.to_vec()))
+        .await?
+        .check()?;
+    Ok(r.take(0)?)
+}
+
+/// One priced line of a web pickup order (service computes the money).
+pub struct WebOrderLine {
+    pub product: Thing,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_price: Decimal,
+    pub subtotal: Decimal,
+}
+
+/// Persist a web pickup order in ONE multi-statement tx: per line
+/// `product.stock_reserved += qty`, then the `order` row
+/// (status='reserved', channel='web'), then its `order_item`s. Stock itself
+/// is NOT decremented — that happens on the `completed` transition.
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_web_order(
+    db: &Db,
+    tenant: &Thing,
+    lines: &[WebOrderLine],
+    customer_name: &str,
+    customer_phone: &str,
+    notes: Option<&str>,
+    pickup_code: &str,
+    expires_at: DateTime<Utc>,
+    subtotal: Decimal,
+    total: Decimal,
+) -> DomainResult<OrderDto> {
+    let oid = uuid::Uuid::new_v4().simple().to_string();
+    let order_thing = Thing::from(("order", oid.as_str()));
+
+    let mut q = String::from("BEGIN; ");
+    for i in 0..lines.len() {
+        q.push_str(&format!(
+            "UPDATE $p{i} SET stock_reserved = stock_reserved + $q{i} WHERE tenant = $t; ",
+        ));
+    }
+    q.push_str(
+        "CREATE type::thing('order', $oid) SET tenant=$t, status='reserved', \
+            channel='web', payment_method='store', fulfillment_type='pickup', \
+            subtotal=$sub, discount=0, total=$tot, customer_name=$cname, \
+            customer_phone=$cphone, notes=$notes, pickup_code=$pcode, \
+            expires_at=$exp RETURN AFTER; ",
+    );
+    for i in 0..lines.len() {
+        q.push_str(&format!(
+            "CREATE order_item SET tenant=$t, order=$ord, product=$p{i}, \
+                product_name=$pn{i}, quantity=$q{i}, unit_price=$up{i}, \
+                subtotal=$st{i}; ",
+        ));
+    }
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("oid", oid.clone()))
+        .bind(("t", tenant.clone()))
+        .bind(("ord", order_thing.clone()))
+        .bind(("sub", dec_val(subtotal)))
+        .bind(("tot", dec_val(total)))
+        .bind(("cname", customer_name.to_string()))
+        .bind(("cphone", customer_phone.to_string()))
+        .bind(("notes", notes.map(str::to_string)))
+        .bind(("pcode", pickup_code.to_string()))
+        .bind(("exp", dt_val(expires_at)));
+    for (i, line) in lines.iter().enumerate() {
+        qb = qb
+            .bind((format!("p{i}"), line.product.clone()))
+            .bind((format!("pn{i}"), line.product_name.clone()))
+            .bind((format!("q{i}"), line.quantity))
+            .bind((format!("up{i}"), dec_val(line.unit_price)))
+            .bind((format!("st{i}"), dec_val(line.subtotal)));
+    }
+    let mut resp = qb.await?.check()?;
+    // Statement order: n reserve UPDATEs, then the order CREATE.
+    let row: Option<OrderRow> = resp.take(lines.len())?;
+    row.map(Into::into).ok_or(DomainError::NotFound)
+}
+
+/// Load a web-channel order + its `(product, quantity)` lines for a status
+/// transition. `None` when missing, foreign-tenant, or not `channel='web'`.
+pub async fn get_web_order(
+    db: &Db,
+    tenant: &Thing,
+    id: &Thing,
+) -> DomainResult<Option<(OrderDto, Vec<(Thing, i64)>)>> {
+    #[derive(Deserialize)]
+    struct ItemRow {
+        product: Option<Thing>,
+        quantity: i64,
+    }
+    let mut r = db
+        .query(
+            "SELECT * FROM order \
+                WHERE id = $id AND tenant = $t AND channel = 'web' LIMIT 1; \
+             SELECT product, quantity FROM order_item \
+                WHERE order = $id AND tenant = $t;",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("id", id.clone()))
+        .await?;
+    let order: Option<OrderRow> = r.take(0)?;
+    let Some(order) = order else {
+        return Ok(None);
+    };
+    let items: Vec<ItemRow> = r.take(1)?;
+    Ok(Some((
+        order.into(),
+        items
+            .into_iter()
+            .filter_map(|i| i.product.map(|p| (p, i.quantity)))
+            .collect(),
+    )))
+}
+
+/// Apply a web-order status transition atomically. `release` returns the
+/// reserved units (`stock_reserved -= qty`, floored at 0); `decrement`
+/// additionally consumes `stock` (the `completed` pickup). `set_ready`
+/// stamps `ready_at` (the `ready_for_pickup` transition).
+///
+/// El retiro (`decrement`) emite además un `stock_movement(reason='web_pickup')`
+/// por línea, con la `branch` de la orden. Antes bajaba `product.stock` sin fila
+/// de auditoría: eso rompía el invariante raíz
+/// `product.stock = Σ stock_movement.delta` (agujero de auditoría preexistente)
+/// y, desde la migración 0041, habría desincronizado
+/// `Σ product_branch_stock == product.stock`.
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_web_transition(
+    db: &Db,
+    tenant: &Thing,
+    order: &Thing,
+    to: &str,
+    items: &[(Thing, i64)],
+    branch: Option<&Thing>,
+    release: bool,
+    decrement: bool,
+    set_ready: bool,
+) -> DomainResult<OrderDto> {
+    let mut q = String::from("BEGIN; ");
+    q.push_str(if set_ready {
+        "UPDATE $ord SET status = $to, ready_at = time::now() \
+            WHERE tenant = $t RETURN AFTER; "
+    } else {
+        "UPDATE $ord SET status = $to WHERE tenant = $t RETURN AFTER; "
+    });
+    if release {
+        for i in 0..items.len() {
+            if decrement {
+                q.push_str(&format!(
+                    "UPDATE $p{i} SET \
+                        stock_reserved = math::max([stock_reserved - $q{i}, 0]), \
+                        stock = stock - $q{i} WHERE tenant = $t; \
+                     CREATE stock_movement SET tenant=$t, product=$p{i}, \
+                        delta = 0 - $q{i}, reason='web_pickup', ref=$oref, \
+                        branch=$br; ",
+                ));
+            } else {
+                q.push_str(&format!(
+                    "UPDATE $p{i} SET \
+                        stock_reserved = math::max([stock_reserved - $q{i}, 0]) \
+                        WHERE tenant = $t; ",
+                ));
+            }
+        }
+    }
+    q.push_str("COMMIT;");
+
+    let mut qb = db
+        .query(q)
+        .bind(("t", tenant.clone()))
+        .bind(("ord", order.clone()))
+        .bind(("oref", order.to_string()))
+        .bind(("br", branch.cloned()))
+        .bind(("to", to.to_string()));
+    if release {
+        for (i, (p, qty)) in items.iter().enumerate() {
+            qb = qb
+                .bind((format!("p{i}"), p.clone()))
+                .bind((format!("q{i}"), *qty));
+        }
+    }
+    let mut resp = qb.await?.check()?;
+    let row: Option<OrderRow> = resp.take(0)?;
+    row.map(Into::into).ok_or(DomainError::NotFound)
 }
 
 pub async fn store_idempotency(

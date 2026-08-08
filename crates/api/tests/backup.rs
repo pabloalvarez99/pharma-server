@@ -77,6 +77,7 @@ async fn spawn() -> (axum::Router, String, TempDir, std::path::PathBuf) {
         public_catalog: pharma_core::config::PublicCatalogConfig::default(),
         public_orders: pharma_core::config::PublicOrdersConfig::default(),
         stock_webhook: Arc::new(pharma_core::config::StockWebhookConfig::default()),
+        provisioning_key: None,
     };
     (api::build_router(state), token, tmp, db_path)
 }

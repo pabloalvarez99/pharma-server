@@ -15,12 +15,13 @@ pub mod error;
 mod health;
 mod middleware;
 pub mod openapi;
+pub mod provisioning;
 mod routes;
 pub mod setup;
 pub mod stock_webhook;
 mod v1;
 
-pub use middleware::{audit, rate_limit, role};
+pub use middleware::{audit, public_auth, rate_limit, role};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -59,6 +60,10 @@ pub struct AppState {
     /// ERP→web stock-change webhook config (ADR-0013). Always present; a
     /// disabled/empty config makes the dispatcher a no-op (the common case).
     pub stock_webhook: Arc<stock_webhook::StockWebhookConfig>,
+    /// Shared secret for `POST /admin/v1/tenants` (SaaS signup provisioning,
+    /// SP2). `None`/empty ⇒ the route answers 404 (every on-prem install).
+    /// Wired from `PHARMA__PROVISIONING__KEY`.
+    pub provisioning_key: Option<String>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -69,6 +74,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(openapi::router(&state))
         .merge(routes::router())
         .merge(setup::router(state.clone()))
+        .merge(provisioning::router())
         .merge(v1::router(state.clone()))
         .layer(audit::layer(state.clone()))
         .with_state(state)
@@ -217,7 +223,11 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         public_catalog: cfg.public_catalog.clone(),
         public_orders: cfg.public_orders.clone(),
         stock_webhook: Arc::new(cfg.stock_webhook.clone()),
+        provisioning_key: cfg.provisioning.key.clone().filter(|k| !k.is_empty()),
     };
+    if state.provisioning_key.is_some() {
+        tracing::info!("provisioning endpoint enabled (POST /admin/v1/tenants)");
+    }
     if state.stock_webhook.enabled && !state.stock_webhook.target_url.is_empty() {
         tracing::info!(
             target = %state.stock_webhook.target_url,
@@ -770,6 +780,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         stock_webhook: pharma_core::config::StockWebhookConfig::default(),
         crl: pharma_core::config::CrlConfig::default(),
         cors: pharma_core::config::CorsConfig::default(),
+        provisioning: pharma_core::config::ProvisioningConfig::default(),
     }
 }
 
@@ -787,6 +798,7 @@ fn build_cors_layer(origins: &[String]) -> tower_http::cors::CorsLayer {
         .allow_methods([
             Method::GET,
             Method::POST,
+            Method::PUT,
             Method::PATCH,
             Method::DELETE,
             Method::OPTIONS,
@@ -891,6 +903,7 @@ mod tests {
             public_catalog: pharma_core::config::PublicCatalogConfig::default(),
             public_orders: pharma_core::config::PublicOrdersConfig::default(),
             stock_webhook: Arc::new(stock_webhook::StockWebhookConfig::default()),
+            provisioning_key: None,
         }
     }
 

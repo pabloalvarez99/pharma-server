@@ -110,12 +110,45 @@ const FIELDS: Record<"tenant" | "email" | "password" | "server", FieldId> = {
   password: { input: "f-password", err: "e-password" },
 };
 
+/** Prefill from the URL query, used by the web signup hand-off (SP4): after
+ *  provisioning a tenant, the license-server redirects here with
+ *  `?server=&tenant=&email=` so the operator lands with everything but the
+ *  password filled. Only reads the query in a browser with a real `location`;
+ *  desktop (Tauri) has no meaningful query and falls through to the defaults.
+ *
+ *  SECURITY: the query is attacker-controllable (a crafted link could point the
+ *  login form at a hostile server to harvest credentials). So the `server`
+ *  value is (a) accepted ONLY if it passes `validateServerUrl` — returning the
+ *  NORMALISED url, never the raw string, so garbage never reaches the DOM — and
+ *  (b) NEVER persisted at page-load. It stays in-memory for this render only;
+ *  `saveStoredServer` runs solely after a SUCCESSFUL login (see the submit
+ *  handler), matching the pre-existing trust boundary. `tenant`/`email` are
+ *  escaped at the interpolation site (they only ever fill form fields). */
+function queryPrefill(): { server?: string; tenant?: string; email?: string } {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const rawServer = q.get("server")?.trim();
+    const check = rawServer ? validateServerUrl(rawServer) : undefined;
+    return {
+      server: check && check.ok ? check.url : undefined,
+      tenant: q.get("tenant")?.trim() || undefined,
+      email: q.get("email")?.trim() || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function renderLogin(
   root: HTMLElement,
   onSuccess: (session: SessionInfo, serverUrl: string) => void,
 ): void {
-  const initialServer = resolveServer();
-  const initialTenant = storedTenant();
+  const prefill = queryPrefill();
+  const initialServer = prefill.server
+    ? { value: prefill.server, firstLaunch: false }
+    : resolveServer();
+  const initialTenant = prefill.tenant ?? storedTenant();
+  const initialEmail = prefill.email ?? DEFAULT_EMAIL;
   root.innerHTML = `
     <div class="login-stage" role="main">
       <div class="login-bg" aria-hidden="true">
@@ -188,7 +221,7 @@ export function renderLogin(
                 autocomplete="username"
                 spellcheck="false"
                 placeholder="usuario@minegocio.cl"
-                value="${DEFAULT_EMAIL}"
+                value="${escapeAttr(initialEmail)}"
                 aria-describedby="${FIELDS.email.err}"
                 required
               />
@@ -245,7 +278,7 @@ export function renderLogin(
                     name="server"
                     type="text"
                     spellcheck="false"
-                    value="${initialServer.value}"
+                    value="${escapeAttr(initialServer.value)}"
                     aria-describedby="${FIELDS.server.err}"
                   />
                   <p id="${FIELDS.server.err}" class="field-error" role="alert" hidden></p>

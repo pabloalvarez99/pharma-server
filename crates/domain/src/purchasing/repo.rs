@@ -458,6 +458,10 @@ pub async fn product_cost_price(
 struct PurchaseOrderRow {
     id: Thing,
     supplier: Thing,
+    // Defaulted: las OC creadas antes de la migración 0042 no tienen el campo
+    // persistido y deben leerse como casa matriz.
+    #[serde(default)]
+    branch: Option<Thing>,
     status: String,
     currency: String,
     total: Decimal,
@@ -499,6 +503,7 @@ fn po_dto(h: PurchaseOrderRow, items: Vec<PurchaseOrderItemRow>) -> PurchaseOrde
     PurchaseOrderDto {
         id: h.id.to_string(),
         supplier: h.supplier.to_string(),
+        branch: h.branch.map(|t| t.to_string()),
         status: h.status,
         currency: h.currency,
         total: h.total,
@@ -529,6 +534,7 @@ pub async fn create_purchase_order(
     db: &Db,
     tenant: &Thing,
     supplier: &Thing,
+    branch: Option<&Thing>,
     currency: &str,
     notes: Option<&str>,
     external_ref: Option<&str>,
@@ -542,7 +548,7 @@ pub async fn create_purchase_order(
     let mut q = String::from(
         "BEGIN; \
          CREATE type::thing('purchase_order', $poid) SET tenant=$t, \
-            supplier=$sup, status='draft', currency=$cur, total=$tot, \
+            supplier=$sup, branch=$br, status='draft', currency=$cur, total=$tot, \
             notes=$notes, external_ref=$ext RETURN AFTER; ",
     );
     for i in 0..lines.len() {
@@ -560,6 +566,7 @@ pub async fn create_purchase_order(
         .bind(("t", tenant.clone()))
         .bind(("po", po_thing))
         .bind(("sup", supplier.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("cur", currency.to_string()))
         .bind(("tot", dec_val(total)))
         .bind(("notes", notes.map(str::to_string)))
@@ -690,6 +697,7 @@ pub async fn receive_purchase_order(
     db: &Db,
     tenant: &Thing,
     po: &Thing,
+    branch: Option<&Thing>,
     admin: Option<Thing>,
     effects: &[ReceiveEffect],
 ) -> DomainResult<Option<PurchaseOrderDto>> {
@@ -699,7 +707,7 @@ pub async fn receive_purchase_order(
             "UPDATE product SET stock = stock + $q{i}, cost_price = $c{i} \
                 WHERE id = $p{i} AND tenant = $t; \
              CREATE stock_movement SET tenant=$t, product=$p{i}, delta=$q{i}, \
-                reason='purchase_receipt', admin=$adm, ref=$ref; ",
+                reason='purchase_receipt', admin=$adm, ref=$ref, branch=$br; ",
         ));
     }
     q.push_str("UPDATE purchase_order SET status='received' WHERE id=$po AND tenant=$t; ");
@@ -709,6 +717,7 @@ pub async fn receive_purchase_order(
         .query(q)
         .bind(("t", tenant.clone()))
         .bind(("po", po.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("adm", admin))
         .bind(("ref", po.to_string()));
     for (i, e) in effects.iter().enumerate() {
@@ -750,22 +759,35 @@ pub struct ReceiveBatchEffect {
     pub cost: Decimal,
 }
 
-/// Find an active `product_batch` for `(tenant, product, batch_code)` so a
-/// repeat receipt of the same lot tops up the existing row instead of
-/// creating a duplicate.
+/// Find an active `product_batch` for `(tenant, product, branch, batch_code)`
+/// so a repeat receipt of the same lot **en la misma sucursal** tops up the
+/// existing row instead of creating a duplicate.
+///
+/// La sucursal entra en la clave (migración 0042) porque el mismo `batch_code`
+/// del proveedor puede llegar a dos locales: son dos lotes FÍSICOS distintos, y
+/// colapsarlos en una fila pondría en un solo bucket unidades que están en dos
+/// lugares — el FEFO del local B consumiría las cajas que están en A.
 pub async fn find_batch(
     db: &Db,
     tenant: &Thing,
     product: &Thing,
+    branch: Option<&Thing>,
     batch_code: &str,
 ) -> DomainResult<Option<Thing>> {
+    let cond_branch = if branch.is_some() {
+        "branch = $br"
+    } else {
+        "branch = NONE"
+    };
+    let q = format!(
+        "SELECT id FROM product_batch \
+         WHERE tenant = $t AND product = $p AND batch_code = $code AND {cond_branch} LIMIT 1",
+    );
     let mut r = db
-        .query(
-            "SELECT id FROM product_batch \
-             WHERE tenant = $t AND product = $p AND batch_code = $code LIMIT 1",
-        )
+        .query(q)
         .bind(("t", tenant.clone()))
         .bind(("p", product.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("code", batch_code.to_string()))
         .await?;
     let row: Option<Thing> = r.take((0, "id"))?;
@@ -786,6 +808,7 @@ pub async fn receive_purchase_order_lines(
     db: &Db,
     tenant: &Thing,
     po: &Thing,
+    branch: Option<&Thing>,
     admin: Option<Thing>,
     final_status: &str,
     product_effects: &[ReceiveLineProductEffect],
@@ -798,7 +821,7 @@ pub async fn receive_purchase_order_lines(
             "UPDATE product SET stock = stock + $q{i}, cost_price = $c{i} \
                 WHERE id = $p{i} AND tenant = $t; \
              CREATE stock_movement SET tenant=$t, product=$p{i}, delta=$q{i}, \
-                reason='purchase_receive', admin=$adm, ref=$ref; ",
+                reason='purchase_receive', admin=$adm, ref=$ref, branch=$br; ",
         ));
     }
     for i in 0..line_effects.len() {
@@ -815,7 +838,7 @@ pub async fn receive_purchase_order_lines(
             ));
         } else {
             q.push_str(&format!(
-                "CREATE product_batch SET tenant=$t, product=$bp{i}, \
+                "CREATE product_batch SET tenant=$t, product=$bp{i}, branch=$br, \
                     batch_code=$bc{i}, expiry_date=$be{i}, stock=$bq{i}, cost=$bcost{i}; ",
             ));
         }
@@ -827,6 +850,7 @@ pub async fn receive_purchase_order_lines(
         .query(q)
         .bind(("t", tenant.clone()))
         .bind(("po", po.clone()))
+        .bind(("br", branch.cloned()))
         .bind(("adm", admin))
         .bind(("ref", po.to_string()))
         .bind(("st", final_status.to_string()));

@@ -159,6 +159,17 @@ pub enum Action {
         product_id: Option<String>,
         product_name: Option<String>,
     },
+    /// Record a payment against a customer's fiado (cuenta corriente) — reuses
+    /// `domain::credit::service::record_abono` (which validates amount > 0, that
+    /// there IS debt, and that the payment does not exceed it). `customer_id` +
+    /// `debt_before` are resolved server-side at propose time (see [`build`]);
+    /// `debt_before` is for the confirmation prose only.
+    RegistrarAbono {
+        customer_id: String,
+        customer_name: String,
+        amount: Decimal,
+        debt_before: Decimal,
+    },
 }
 
 impl Action {
@@ -177,6 +188,7 @@ impl Action {
             Action::AbrirCaja { .. } => "abrir_caja",
             Action::CrearProveedor { .. } => "crear_proveedor",
             Action::DispensarReceta { .. } => "dispensar_receta",
+            Action::RegistrarAbono { .. } => "registrar_abono",
         }
     }
 
@@ -282,6 +294,17 @@ impl Action {
                     "Registrar una receta a {patient_name} (RUT {patient_rut})."
                 ),
             },
+            Action::RegistrarAbono {
+                customer_name,
+                amount,
+                debt_before,
+                ..
+            } => format!(
+                "Registrar un abono de {} de {} (debe {}).",
+                clp(*amount),
+                customer_name,
+                clp(*debt_before),
+            ),
         }
     }
 
@@ -403,6 +426,17 @@ impl Action {
                 "patient_rut": patient_rut,
                 "product_id": product_id,
                 "product_name": product_name,
+            }),
+            Action::RegistrarAbono {
+                customer_id,
+                customer_name,
+                amount,
+                debt_before,
+            } => serde_json::json!({
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "amount": amount.to_string(),
+                "debt_before": debt_before.to_string(),
             }),
         }
     }
@@ -645,6 +679,12 @@ pub enum ActionParse {
         patient_rut: String,
         product_name: Option<String>,
     },
+    /// A "registrar abono" request (pago de fiado); `customer_name` still needs
+    /// DB resolution into a record id + current debt (see [`build`]).
+    Abono {
+        customer_name: String,
+        amount: Decimal,
+    },
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -729,6 +769,16 @@ pub fn parse_action(question: &str) -> ActionParse {
         && !q.starts_with("cual")
     {
         return parse_cancela(&q);
+    }
+
+    // Fiado payment: "abónale 5000 a doña Ana", "doña Ana me pagó 3000". Gated
+    // on a word-initial "abon*" cue (so "jabón" never trips it) or the "me pagó"
+    // form — NEVER on a bare "pago", which collides with the read intents
+    // VentasPorMetodo ("método de pago") and IvaMes ("cuánto IVA pago"). The
+    // read intent PorCobrar ("cuánto me deben") carries no abono cue either.
+    // "abono" is also fertilizer in es-CL, so a product create keeps priority.
+    if (has_abono_cue(&q) || q.contains("me pago")) && !(has_create && q.contains("producto")) {
+        return parse_abono(&q);
     }
 
     // Purchase order before everything else: "orden de compra" is unambiguous.
@@ -1311,6 +1361,143 @@ fn parse_ajuste(q: &str) -> ActionParse {
     }
 }
 
+/// True when `q` carries a word-initial "abon*" cue (abona / abónale / abono /
+/// abonar / abonó). Word-initial on purpose: "jabón" contains "abon" and must
+/// never be read as a fiado payment.
+fn has_abono_cue(q: &str) -> bool {
+    q.split(|c: char| !c.is_alphanumeric())
+        .any(|w| w.starts_with("abon"))
+}
+
+/// Parse a fiado payment: "abónale 5000 a doña Ana", "doña Ana me pagó 3000".
+/// The amount is the first digit run; the customer comes from
+/// [`capture_abono_customer`]. Missing either → a friendly es-CL nudge.
+fn parse_abono(q: &str) -> ActionParse {
+    let Some(amount) = extract_amount(q) else {
+        return ActionParse::Incomplete(
+            "¿De cuánto es el abono? Por ejemplo: «abónale 5000 a doña Ana».".into(),
+        );
+    };
+    let customer_name = capture_abono_customer(q);
+    if customer_name.is_empty() {
+        return ActionParse::Incomplete(
+            "¿Quién te pagó? Por ejemplo: «abónale 5000 a doña Ana».".into(),
+        );
+    }
+    ActionParse::Abono {
+        customer_name,
+        amount,
+    }
+}
+
+/// Customer connectors of a fiado payment, longest first so " a la " wins over
+/// " a ".
+const ABONO_CONN: &[&str] = &[" a la ", " al ", " a ", " de la ", " del ", " de "];
+
+/// Capture the customer of a fiado payment. Three forms, in order: "<cliente> me
+/// pagó 5000" (name BEFORE the cue), "abónale 5000 a <cliente>" (name after the
+/// connector that follows the amount) and "abónale a <cliente> 5000" (connector
+/// before the amount). Empty when none of them yields a name.
+fn capture_abono_customer(q: &str) -> String {
+    if let Some(p) = q.find("me pago") {
+        let head = clean_abono_name(&q[..p]);
+        if !head.is_empty() {
+            return head;
+        }
+    }
+    let tail = after_amount(q);
+    for c in ABONO_CONN {
+        if let Some(p) = tail.find(c) {
+            let name = clean_abono_name(&tail[p + c.len()..]);
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    // "abónale a doña Ana 5000": the connector sits between the cue and the
+    // amount, so scan that window instead.
+    if let Some(p) = q.find("abon") {
+        let from_cue = &q[p..];
+        let cut = from_cue
+            .find(|c: char| c.is_ascii_digit())
+            .unwrap_or(from_cue.len());
+        let window = &from_cue[..cut];
+        for c in ABONO_CONN {
+            if let Some(pp) = window.find(c) {
+                let name = clean_abono_name(&window[pp + c.len()..]);
+                if !name.is_empty() {
+                    return name;
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Slice of `q` following the first run of money digits. Empty when `q` carries
+/// no digits (or the amount ends the text).
+fn after_amount(q: &str) -> &str {
+    let bytes = q.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            return &q[i..];
+        }
+        i += 1;
+    }
+    ""
+}
+
+/// Strip imperative verbs, articles and honorifics off a captured customer name
+/// ("registra que la señora ana" → "ana"). Dropping "doña"/"don" widens the
+/// fuzzy search on purpose: the owner says "doña Ana", the DB row says "Ana
+/// Pérez", and `search_customers` matches on substring.
+fn clean_abono_name(s: &str) -> String {
+    const LEADS: &[&str] = &[
+        "registra ",
+        "registrar ",
+        "anota ",
+        "anotar ",
+        "carga ",
+        "cargar ",
+        "ingresa ",
+        "ingresar ",
+        "guarda ",
+        "guardar ",
+        "abono ",
+        "abonar ",
+        "que ",
+        "un ",
+        "una ",
+        "el ",
+        "la ",
+        "cliente ",
+        "clienta ",
+        "senora ",
+        "senor ",
+        "sra ",
+        "sr ",
+        "dona ",
+        "don ",
+    ];
+    let mut t = strip_trailing_punct(s.trim()).trim();
+    loop {
+        let before = t;
+        for lead in LEADS {
+            if let Some(x) = t.strip_prefix(lead) {
+                t = x.trim();
+            }
+        }
+        if t == before {
+            break;
+        }
+    }
+    strip_trailing_punct(t).trim().to_string()
+}
+
 /// Leading run of money digits (`0-9` and CL thousands `.`) of `s`.
 fn digits_after(s: &str) -> String {
     s.trim_start()
@@ -1872,6 +2059,57 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 product_name,
             }))
         }
+        ActionParse::Abono {
+            customer_name,
+            amount,
+        } => {
+            use domain::customers::model::CustomerSearchQuery;
+            use domain::customers::service as customers;
+            let matches = customers::search_customers(
+                db,
+                tenant,
+                CustomerSearchQuery {
+                    q: Some(customer_name.clone()),
+                },
+            )
+            .await?;
+            let Some(c) = pick_customer(&matches, &customer_name) else {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré ningún cliente que coincida con «{customer_name}». \
+                     Revisa el nombre o créalo primero."
+                )));
+            };
+            let Ok(customer_thing) = surrealdb::sql::thing(&c.id) else {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No pude identificar al cliente «{}».",
+                    c.name
+                )));
+            };
+            // The debt is read at propose time so the confirmation prose can say
+            // what the customer owes; `record_abono` re-validates at execute time
+            // (the ledger may have moved between the two steps).
+            let debt = domain::credit::repo::balance(db, tenant, &customer_thing).await?;
+            if debt <= Decimal::ZERO {
+                return Ok(BuildOutcome::Reject(format!(
+                    "{} no tiene deuda pendiente, así que no hay nada que abonar.",
+                    c.name
+                )));
+            }
+            if amount > debt {
+                return Ok(BuildOutcome::Reject(format!(
+                    "El abono de {} supera lo que {} debe ({}). Dime un monto menor o igual.",
+                    clp(amount),
+                    c.name,
+                    clp(debt),
+                )));
+            }
+            Ok(BuildOutcome::Ready(Action::RegistrarAbono {
+                customer_id: c.id.clone(),
+                customer_name: c.name.clone(),
+                amount,
+                debt_before: debt,
+            }))
+        }
     }
 }
 
@@ -1885,6 +2123,18 @@ fn pick_product<'a>(
         .iter()
         .find(|p| p.name.to_lowercase() == want)
         .or_else(|| products.first())
+}
+
+/// Prefer a case-insensitive exact name match, else the first hit.
+fn pick_customer<'a>(
+    customers: &'a [domain::customers::model::CustomerDto],
+    name: &str,
+) -> Option<&'a domain::customers::model::CustomerDto> {
+    let want = name.to_lowercase();
+    customers
+        .iter()
+        .find(|c| c.name.to_lowercase() == want)
+        .or_else(|| customers.first())
 }
 
 /// Prefer a case-insensitive exact name match, else the first hit.
@@ -1965,6 +2215,10 @@ pub async fn execute(
                 tenant,
                 NewPurchaseOrder {
                     supplier: supplier_id,
+                    // Casa matriz: el agente todavía no pregunta "¿para qué
+                    // local?". Elegir sucursal por voz es lane aparte; hasta
+                    // entonces el borrador entra donde entraba antes de 0042.
+                    branch: None,
                     currency: None,
                     notes: Some("Borrador creado por el agente".into()),
                     external_ref: None,
@@ -2220,6 +2474,8 @@ pub async fn execute(
                 user,
                 OpenSessionInput {
                     register_name: "caja-1".into(),
+                    register: None,
+                    branch: None,
                     opening_cash,
                     notes: Some("Apertura registrada por el agente".into()),
                 },
@@ -2305,6 +2561,52 @@ pub async fn execute(
                     "id": dto.id,
                     "patient_name": dto.patient_name,
                     "patient_rut": dto.patient_rut,
+                }),
+            }
+        }
+        Action::RegistrarAbono {
+            customer_id,
+            customer_name,
+            amount,
+            debt_before,
+        } => {
+            use domain::credit::service as credit;
+            let customer = surrealdb::sql::thing(&customer_id).map_err(|_| {
+                domain::DomainError::Invalid("no pude identificar al cliente del abono".into())
+            })?;
+            let entry = credit::record_abono(
+                db,
+                tenant,
+                &customer,
+                amount,
+                None,
+                Some("Registrado por el agente"),
+                actor,
+            )
+            .await?;
+            let saldo = debt_before - amount;
+            ActionOutcome {
+                action: label,
+                text: if saldo.is_zero() {
+                    format!(
+                        "Abono de {} registrado a {}: quedó al día.",
+                        clp(amount),
+                        customer_name,
+                    )
+                } else {
+                    format!(
+                        "Abono de {} registrado a {}: ahora debe {}.",
+                        clp(amount),
+                        customer_name,
+                        clp(saldo),
+                    )
+                },
+                data: serde_json::json!({
+                    "id": entry.id,
+                    "customer_id": customer_id,
+                    "customer_name": customer_name,
+                    "amount": amount.to_string(),
+                    "saldo": saldo.to_string(),
                 }),
             }
         }
@@ -2887,6 +3189,96 @@ mod tests {
             parse_action("cuánto cuesta el ibuprofeno"),
             ActionParse::NotAnAction
         );
+    }
+
+    #[test]
+    fn parse_abono_imperative_form() {
+        match parse_action("abónale 5000 a doña ana") {
+            ActionParse::Abono {
+                customer_name,
+                amount,
+            } => {
+                // normalize() folds accents; the honorific is dropped so the
+                // fuzzy search still finds "Ana Pérez".
+                assert_eq!(customer_name, "ana");
+                assert_eq!(amount, dec("5000"));
+            }
+            other => panic!("expected Abono, got {other:?}"),
+        }
+        assert!(matches!(
+            parse_action("registra un abono de 10000 de juan soto"),
+            ActionParse::Abono { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_abono_me_pago_form() {
+        match parse_action("doña ana me pagó 3000") {
+            ActionParse::Abono {
+                customer_name,
+                amount,
+            } => {
+                assert_eq!(customer_name, "ana");
+                assert_eq!(amount, dec("3000"));
+            }
+            other => panic!("expected Abono, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_abono_missing_fields_is_incomplete() {
+        // No amount, and no customer.
+        assert!(matches!(
+            parse_action("abónale a doña ana"),
+            ActionParse::Incomplete(_)
+        ));
+        assert!(matches!(
+            parse_action("abona 5000"),
+            ActionParse::Incomplete(_)
+        ));
+    }
+
+    #[test]
+    fn abono_does_not_steal_read_or_product_intents() {
+        // PorCobrar (read) carries no abono cue → read path.
+        assert_eq!(parse_action("cuánto me deben"), ActionParse::NotAnAction);
+        assert_eq!(parse_action("quién me debe"), ActionParse::NotAnAction);
+        // "pago" alone belongs to other intents (VentasPorMetodo / IvaMes).
+        assert_eq!(
+            parse_action("ventas por método de pago"),
+            ActionParse::NotAnAction
+        );
+        assert_eq!(
+            parse_action("cuánto iva pago este mes"),
+            ActionParse::NotAnAction
+        );
+        // "jabón" contains "abon" but is not a payment.
+        assert!(matches!(
+            parse_action("crea un producto jabón a $1000"),
+            ActionParse::Producto { .. }
+        ));
+        // Neither is fertilizer called "abono".
+        assert!(matches!(
+            parse_action("crea un producto abono a $2500"),
+            ActionParse::Producto { .. }
+        ));
+    }
+
+    #[test]
+    fn abono_summary_is_es_cl_prose() {
+        let a = Action::RegistrarAbono {
+            customer_id: "customer:x".into(),
+            customer_name: "Ana Pérez".into(),
+            amount: dec("5000"),
+            debt_before: dec("12000"),
+        };
+        assert_eq!(a.label(), "registrar_abono");
+        assert!(
+            a.summary().contains("Registrar un abono de"),
+            "got {}",
+            a.summary()
+        );
+        assert!(a.summary().contains("Ana Pérez"));
     }
 
     #[test]

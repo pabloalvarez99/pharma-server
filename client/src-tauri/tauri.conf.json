@@ -37,6 +37,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "android": {
+      "minSdkVersion": 24
+    },
     "shortDescription": "Launcher de escritorio para pharma-server",
     "longDescription": "Cliente de escritorio estilo launcher: login contra pharma-server, estado de licencia/tier y servidor, y acceso al shell ERP."
   },

@@ -2,6 +2,7 @@
 //! submodule that exposes `router()`. `api` orchestrates only: extract
 //! claims/tenant, call `domain::*::service`, map `DomainError` → envelope.
 
+pub mod admin_web;
 pub mod agent;
 pub mod agent_orders;
 pub mod assist;
@@ -11,7 +12,9 @@ pub use backup::{backup_now, prune_backups, BackupReport};
 pub mod branches;
 pub mod cash_register;
 pub mod catalog;
+pub mod compliance;
 pub mod config;
+pub mod credit;
 pub mod customers;
 pub mod dashboard;
 pub mod dte;
@@ -21,10 +24,12 @@ pub mod license;
 pub mod prescriptions;
 pub mod public_catalog;
 pub mod public_orders;
+pub mod public_web;
 pub mod purchasing;
 pub mod rubro;
 pub mod sales;
 pub mod seed;
+pub mod stock;
 pub mod stock_movements;
 
 use axum::Router;
@@ -35,7 +40,10 @@ pub fn router(state: AppState) -> Router<AppState> {
     catalog::router(state.clone())
         .merge(inventory::router(state.clone()))
         .merge(stock_movements::router(state.clone()))
+        .merge(stock::router(state.clone()))
         .merge(customers::router(state.clone()))
+        .merge(credit::router(state.clone()))
+        .merge(compliance::router(state.clone()))
         .merge(config::router(state.clone()))
         .merge(prescriptions::router(state.clone()))
         .merge(purchasing::router(state.clone()))
@@ -54,5 +62,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(rubro::router(state.clone()))
         .merge(public_catalog::router(state.clone()))
         .merge(public_orders::router(state.clone()))
+        .merge(public_web::router(state.clone()))
+        .merge(admin_web::router(state.clone()))
         .merge(agent::router(state))
 }

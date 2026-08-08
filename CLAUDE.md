@@ -45,6 +45,36 @@
 > **Aparato de referencia para pruebas** (si no se probó acá, no está probado):
 > 2 GB de RAM, Android 8 o menor, pantalla 720p, almacenamiento casi lleno.
 
+> ## 🌟 META GENERAL DEL PROYECTO (founder, 2026-07-23) — leer SIEMPRE, aplica a TODO el trabajo
+> **Un ERP de nivel de gran empresa, tan profesional y completo como el de las grandes,
+> pero accesible para CUALQUIER microempresa chilena** — la que hoy se maneja con
+> cuaderno, desde el celular, con internet. **El agente IA es la interfaz principal**: en
+> vez de tener que hacer las cosas ella misma, la dueña le HABLA al agente y le pide que
+> haga todo (vender, fiar, cobrar, reponer, sacar el IVA, ver quién le debe, etc.). El
+> ERP es la infraestructura invisible detrás del agente.
+> **Superficies objetivo — TODAS de primera clase**: web/PWA · desktop Windows nativo ·
+> **app nativa Android + iOS** (el celular es el dispositivo primario del usuario real).
+> El cliente ya es Tauri 2 → mismo frontend a móvil nativo; construir pensando en móvil
+> (táctil, pantalla chica, una mano) desde el diseño, no como afterthought.
+> **Vara de calidad = las grandes empresas** (Defontana, Bsale, Nubox…): muy profesional,
+> muy completo, cero dead-ends, confiable con plata real. Pero **gratis / freemium** y
+> **hablándole al agente**, no navegando menús. Cada cosa que se construya se mide contra:
+> "¿una microempresaria en su celular, sin manual, le pide esto al agente y funciona como
+> en un ERP caro?". Esta meta NO caduca — enmarca toda decisión de producto y técnica.
+
+> ## 🏗️ ETAPA REAL: ~1% COMPLETO — CONSTRUIR PROFUNDIDAD, NO PULIR SUPERFICIE (founder, 2026-07-21)
+> **El proyecto recién lleva ~1%.** La meta ahora NO es infra, dominios ni pulido de
+> puerta de entrada, sino **hacer el producto MUCHO más completo y profundo**: features
+> reales de ERP con hondura de producto vendible (no MVPs superficiales). El **dominio /
+> link público NO es prioridad** (diferido; `nip.io` + `vercel.app` bastan por ahora —
+> no invertir tiempo en `rutbusiness.cl`/DNS/branding-de-URL). Cada lane debe SUMAR
+> capacidad y profundidad de negocio real (inventario, POS, compras, caja, recetas, SII,
+> reportes, multi-sucursal, fiado, agente…), cubriendo casos reales de dueños chilenos de
+> punta a punta, no dejar módulos a medias. Regla de decisión: ante "¿pulo lo que hay o
+> construyo lo que falta?", **construir lo que falta** hasta que el ERP sea completo. La
+> vara de calidad UX/producto sigue vigente para lo que se construye, pero el driver es
+> **completitud y profundidad**, no acabado cosmético de la superficie actual.
+
 > ## 🎯 GOAL DEL PROYECTO — RUTBUSINESS (norte, fijado 2026-06-16 por founder)
 > **Dar a CADA negocio chileno —cualquier rubro, identificado por su RUT— un ERP
 > gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
@@ -90,6 +120,42 @@
 > (7) **accesible + táctil** (contraste AA, teclado total, tipografía legible, modo touch
 > POS); (8) **confianza** (toasts de cada acción, estados loading/empty/error producidos,
 > NUNCA pantalla en blanco). Ultra-plan: [`docs/strategy/intuitive-ux-master-plan.md`](./docs/strategy/intuitive-ux-master-plan.md).
+
+> ## 🇨🇱 VISIÓN RUTAGENT — DEL CUADERNO AL ERP, HABLANDO (founder, Coquimbo, 2026-07-26)
+> **Que cualquier chileno con un cuaderno y un celular pueda, en 5 minutos y sin pagar
+> nada, tener el mismo ERP que una gran empresa — hablándole a un agente en vez de
+> aprender un sistema.** El usuario real NO es "una PYME": es la señora del almacén que
+> fía en un cuaderno, el feriante de Coquimbo/La Serena, la repostera que vende por
+> WhatsApp/Instagram, el que recién parte y no puede pagar Bsale/Nubox ni un contador.
+> Denominador común: **smartphone + WhatsApp + cuaderno + miedo a la complejidad.**
+> **El competidor real es el cuaderno**, no Defontana — y el cuaderno gana en instantáneo,
+> confiable, habla chileno, gratis. Cualquier ERP que exija *aprender un ERP* ya perdió.
+> Entonces: no reemplazamos el cuaderno con un sistema, lo reemplazamos con **un cuaderno
+> con superpoderes que habla chileno** — el agente ES el cuaderno; el ERP es la tinta
+> invisible.
+> **5 principios no-negociables**: (1) **agente-first, no menú-first** — la puerta es una
+> frase (*"fié 5 lucas a la señora Rosa"*, *"¿quién me debe?"*), el agente cierra el loop
+> completo del negocio de barrio; (2) **cero fricción de entrada = el producto** — web sin
+> instalar, alta con RUT en 30s, tienda sembrada por rubro, PWA tolerante a internet malo,
+> NUNCA tarjeta de crédito; (3) **puente analógico→digital: importar el cuaderno con una
+> FOTO** — foto de la hoja (fiados/productos/precios) y el agente lo carga; es el acto de
+> adopción killer; (4) **formalización como REGALO, no amenaza** — boleta electrónica SII +
+> IVA/F29 + inicio de actividades, gratis y fácil; el agente es el contador que no podían
+> pagar; cada informal formalizado es el impacto social; (5) **profundidad que se gana la
+> confianza — cero módulos a medias** — ledgers inmutables, plata sin bugs, GATE + DoD,
+> vara = las grandes / precio = cero.
+> **Impacto — Coquimbo primero**: sembrar en una ciudad (ferias, caletas, almacenes de
+> barrio) con negocios reales; crecer por **boca a boca de barrio** (corre por confianza,
+> como el fiado) + aliados locales (municipalidad, Sercotec, cámara, Prodemu). Meta: que
+> empezar un negocio formal en Chile no necesite plata, contador ni saber de sistemas —
+> solo un RUT, un celular y una frase. Y desde Coquimbo, todo Chile.
+> **Regla de oro / vara de todo**: *"¿esto acerca a la señora Rosa, en su celular, sin
+> manual, a tener el ERP de una gran empresa gratis?"* Si no, no va.
+> Ultra-plan completo: [`docs/strategy/rutagent-vision-microempresa-cl.md`](./docs/strategy/rutagent-vision-microempresa-cl.md).
+> Vectores de profundidad candidatos (V4+): boleta SII gratis punta-a-punta (mayor impacto
+> social) · importar-cuaderno-por-foto/OCR (mayor impacto de adopción) · pagos transferencia
+> + apps · puente WhatsApp · mermas/vencimientos por local · agente coach financiero · modo
+> feria/offline.
 
 Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
 **Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.

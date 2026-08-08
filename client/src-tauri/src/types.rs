@@ -203,6 +203,12 @@ pub struct CashSession {
     pub id: String,
     pub user: String,
     pub register_name: String,
+    /// Caja física y sucursal de la sesión (V2, migración 0041). Ausentes en
+    /// sesiones abiertas antes de la migración y en cajas sueltas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub opening_cash: String,
     pub opening_notes: Option<String>,
     pub closing_cash_counted: Option<String>,
@@ -289,6 +295,9 @@ pub struct CustomerOrder {
 pub struct PurchaseOrder {
     pub id: String,
     pub supplier: String,
+    /// Local que recibe la mercadería (V2.1). Ausente = casa matriz.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub status: String,
     pub currency: String,
     pub total: String,
@@ -531,6 +540,10 @@ pub struct ProductDetail {
 pub struct Batch {
     pub id: String,
     pub product: String,
+    /// Sucursal donde está el lote físico (migración 0042). Ausente = casa
+    /// matriz / negocio de un solo local.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     pub batch_code: String,
     pub expiry_date: String,
     pub stock: i64,
@@ -549,6 +562,12 @@ pub struct NearExpiryRow {
     pub product_name: String,
     pub batch_id: String,
     pub batch_code: String,
+    /// Local donde está el lote y su nombre resuelto (migración 0042). Ausentes
+    /// en casa matriz: la alerta dice a qué local ir.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
     pub expiry_date: String,
     pub stock: i64,
     pub days_to_expiry: i64,
@@ -634,4 +653,93 @@ pub struct AssistAnswer {
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal: Option<AgentProposal>,
+}
+
+// --- fiado / cuenta corriente ----------------------------------------------
+
+/// Mirrors `crates/domain/src/credit/model.rs::LedgerEntryDto`. Money crosses
+/// the wire as a STRING (`amount`).
+#[derive(Serialize, Deserialize)]
+pub struct LedgerEntry {
+    pub id: String,
+    /// `cargo` (el cliente debe) | `abono` (pagó).
+    pub kind: String,
+    pub amount: String,
+    #[serde(default)]
+    pub order: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+/// Mirrors `credit/model.rs::CustomerAccountDto` — estado de cuenta del cliente.
+#[derive(Serialize, Deserialize)]
+pub struct CustomerAccount {
+    pub customer: String,
+    /// `total_charged - total_paid`. Positivo = el cliente debe.
+    pub balance: String,
+    pub total_charged: String,
+    pub total_paid: String,
+    pub entries: Vec<LedgerEntry>,
+}
+
+// --- libro de compras / IVA (compliance V3) ---------------------------------
+
+/// Mirrors `domain/compliance/model.rs::PurchaseBookRow`. Money as STRING.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseBookRow {
+    pub purchase_order: String,
+    pub tipo: i32,
+    #[serde(default)]
+    pub folio: Option<String>,
+    pub supplier_name: String,
+    #[serde(default)]
+    pub supplier_rut: Option<String>,
+    pub date: String,
+    pub neto: String,
+    pub iva: String,
+    pub total: String,
+    /// `false` = neto/IVA derivados del total (falta capturar la factura real).
+    pub declared: bool,
+}
+
+/// Mirrors `compliance/model.rs::PurchaseBook`.
+#[derive(Serialize, Deserialize)]
+pub struct PurchaseBook {
+    pub period: String,
+    pub rows: Vec<PurchaseBookRow>,
+    pub total_neto: String,
+    pub total_iva: String,
+    pub total: String,
+    pub pending_declaration: usize,
+}
+
+/// Mirrors `compliance/model.rs::IvaSummary` — la cifra que va al F29.
+#[derive(Serialize, Deserialize)]
+pub struct IvaSummary {
+    pub period: String,
+    pub iva_debito: String,
+    pub iva_credito: String,
+    pub iva_a_pagar: String,
+    pub ventas_neto: String,
+    pub compras_neto: String,
+}
+
+/// Mirrors `credit/model.rs::DebtorRow` — un cliente con deuda vigente.
+#[derive(Serialize, Deserialize)]
+pub struct DebtorRow {
+    pub customer: String,
+    pub name: String,
+    #[serde(default)]
+    pub phone: Option<String>,
+    pub balance: String,
+    pub last_movement: String,
+}
+
+/// Mirrors `credit/model.rs::DebtorsReport` — "¿cuánto me deben?".
+#[derive(Serialize, Deserialize)]
+pub struct DebtorsReport {
+    pub total_por_cobrar: String,
+    pub debtor_count: usize,
+    pub rows: Vec<DebtorRow>,
 }

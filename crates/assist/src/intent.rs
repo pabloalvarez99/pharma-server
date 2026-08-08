@@ -27,6 +27,11 @@ pub enum Intent {
     ComparativaMes,
     /// Sales broken down by payment method (cash vs card), month-to-date.
     VentasPorMetodo,
+    /// Ingresos de HOY por método de pago (migración 0043 suma transferencia).
+    /// `Some(bucket)` cuando la pregunta nombra un método concreto
+    /// (`transferencia` / `efectivo` / `tarjeta` / `fiado`), `None` = desglose
+    /// completo del día.
+    IngresosPorMetodo(Option<String>),
     /// Batches expiring soon / already expired (next 30 days).
     PorVencer,
     /// Batches expiring within the next 7 days.
@@ -51,6 +56,10 @@ pub enum Intent {
     MargenProducto(String),
     /// Month-to-date expenses (total + breakdown by category).
     GastosMes,
+    /// Fiado — cuánto le deben al negocio y quién (cuentas por cobrar).
+    PorCobrar,
+    /// IVA del mes: débito (ventas) − crédito (compras) = a pagar (F29).
+    IvaMes,
     /// Products at/below their low-stock threshold (reorder hints).
     StockBajo,
     /// Inventory headline figures (SKUs, value, low/out of stock).
@@ -85,6 +94,7 @@ impl Intent {
             Intent::ComparativaDia => "ventas_vs_ayer",
             Intent::ComparativaMes => "ventas_vs_mes_pasado",
             Intent::VentasPorMetodo => "ventas_metodo_pago",
+            Intent::IngresosPorMetodo(_) => "ingresos_metodo_pago",
             Intent::PorVencer => "por_vencer",
             Intent::PorVencerSemana => "por_vencer_semana",
             Intent::StockProducto(_) => "stock_producto",
@@ -97,6 +107,8 @@ impl Intent {
             Intent::MargenMes => "margen_mes",
             Intent::MargenProducto(_) => "margen_producto",
             Intent::GastosMes => "gastos_mes",
+            Intent::PorCobrar => "por_cobrar",
+            Intent::IvaMes => "iva_mes",
             Intent::StockBajo => "stock_bajo",
             Intent::ResumenInventario => "resumen_inventario",
             Intent::ResumenDia => "resumen_dia",
@@ -252,6 +264,40 @@ pub fn parse(question: &str) -> Intent {
     // ("efectivo vs tarjeta" carries the "vs" cue) and the cash-drawer branch
     // ("efectivo"/"tarjeta" alone are cash cues). A method question is one that
     // names the *concept* of payment method, or contrasts cash AND card.
+    // Ingresos de HOY por método (V4 pagos). Va ANTES del desglose mensual
+    // porque es más específico: nombra un método concreto o pregunta por lo que
+    // "entró" hoy. `transferencia` es palabra larga y sin colisiones (a
+    // diferencia del caso `iva`, que exigió límite de palabra).
+    {
+        let nombra_transferencia =
+            contains_any(&q, &["transferencia", "transferencias", "transfer"]);
+        let entro_hoy = contains_any(&q, &["me entro", "entro por", "ingreso", "ingresos"]);
+        if nombra_transferencia
+            || (entro_hoy && contains_any(&q, &["efectivo", "tarjeta", "fiado"]))
+        {
+            let bucket = if nombra_transferencia {
+                Some("transferencia")
+            } else if contains_any(&q, &["efectivo", "cash"]) {
+                Some("efectivo")
+            } else if contains_any(&q, &["tarjeta", "debito", "credito"]) {
+                Some("tarjeta")
+            } else if contains_any(&q, &["fiado"]) {
+                Some("fiado")
+            } else {
+                None
+            };
+            // "efectivo vs transferencia" pide comparar, no un solo bucket.
+            let comparando = contains_any(&q, &[" vs ", " vs.", "versus", " y ", " o "])
+                && contains_any(&q, &["efectivo", "tarjeta", "fiado"])
+                && nombra_transferencia;
+            return Intent::IngresosPorMetodo(if comparando {
+                None
+            } else {
+                bucket.map(|b| b.to_string())
+            });
+        }
+    }
+
     if contains_any(
         &q,
         &[
@@ -282,6 +328,35 @@ pub fn parse(question: &str) -> Intent {
     }
 
     // Expenses — "gastos del mes", "cuánto gasté". Distinct vocabulary from
+    // Fiado / cuentas por cobrar — "¿cuánto me deben?" es la pregunta diaria del
+    // que fía. Va antes que gastos/ventas: "me deben" no colisiona con esas.
+    if contains_any(
+        &q,
+        &[
+            "fiado",
+            "fie ",
+            "fian",
+            "me deben",
+            "quien debe",
+            "quien me debe",
+            "por cobrar",
+            "deudor",
+            "deuda",
+        ],
+    ) {
+        return Intent::PorCobrar;
+    }
+
+    // IVA / F29. OJO: "iva" como substring aparece dentro de palabras comunes
+    // ("activa", "motiva"), así que se exige límite de palabra (espacio previo o
+    // inicio de la pregunta) en vez de un `contains` pelado.
+    if q == "iva"
+        || q.starts_with("iva ")
+        || contains_any(&q, &[" iva", "f29", "impuesto", "formulario 29"])
+    {
+        return Intent::IvaMes;
+    }
+
     // sales; safe to test early.
     if contains_any(
         &q,
@@ -611,6 +686,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn por_cobrar_synonyms() {
+        for q in [
+            "cuanto me deben",
+            "¿cuánto me deben?",
+            "quien me debe",
+            "cuentas por cobrar",
+            "cuanto fiado tengo",
+            "deudores",
+            "quien tiene deuda",
+        ] {
+            assert_eq!(parse(q), Intent::PorCobrar, "q={q}");
+        }
+    }
+
+    #[test]
+    fn iva_synonyms() {
+        for q in [
+            "iva",
+            "iva del mes",
+            "cuanto iva pago",
+            "cuanto impuesto pago este mes",
+            "f29",
+            "formulario 29",
+        ] {
+            assert_eq!(parse(q), Intent::IvaMes, "q={q}");
+        }
+    }
+
+    /// "iva" vive dentro de palabras comunes ("activa", "motiva"): el matcher
+    /// exige límite de palabra, así que estas NO deben caer en IvaMes.
+    #[test]
+    fn iva_does_not_match_words_containing_iva() {
+        for q in ["cuantos clientes activa tengo", "promocion motiva"] {
+            assert_ne!(parse(q), Intent::IvaMes, "q={q}");
+        }
+    }
+
+    #[test]
     fn ventas_hoy_synonyms() {
         for q in [
             "ventas hoy",
@@ -847,6 +960,32 @@ mod tests {
             assert_eq!(parse(q), Intent::VentasPorMetodo, "q={q}");
         }
         // "efectivo en caja" is a cash question, not a method breakdown.
+        assert_eq!(parse("efectivo en caja"), Intent::CajaActual);
+    }
+
+    #[test]
+    fn ingresos_por_metodo_transferencia() {
+        // Pregunta por un método puntual → bucket capturado.
+        for q in [
+            "¿cuánto me entró por transferencia hoy?",
+            "cuanto llevo en transferencias",
+            "ventas por transferencia",
+        ] {
+            assert_eq!(
+                parse(q),
+                Intent::IngresosPorMetodo(Some("transferencia".into())),
+                "q={q}"
+            );
+        }
+        // Comparar dos métodos → desglose completo, sin bucket.
+        assert_eq!(
+            parse("efectivo vs transferencia"),
+            Intent::IngresosPorMetodo(None)
+        );
+        // El desglose mensual clásico NO se lo roba la lane nueva.
+        assert_eq!(parse("ventas por método de pago"), Intent::VentasPorMetodo);
+        assert_eq!(parse("efectivo vs tarjeta"), Intent::VentasPorMetodo);
+        // Y una pregunta de caja sigue siendo de caja.
         assert_eq!(parse("efectivo en caja"), Intent::CajaActual);
     }
 

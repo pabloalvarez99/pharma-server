@@ -72,6 +72,31 @@ pub struct SalesReportFilters {
     pub to: Option<DateTime<Utc>>,
 }
 
+/// Ingresos del período desglosados por **cómo entró la plata** (migración 0043
+/// suma `pos_transferencia` al POS).
+///
+/// Se reporta por MONTO, que es lo que el dueño pregunta ("¿cuánto me entró por
+/// transferencia?"). Una venta mixta (`pos_mixed`) reparte su `cash_amount` a
+/// efectivo y su `card_amount` a tarjeta — la plata entró por dos vías y
+/// atribuirla a una sola mentiría —, y por eso cuenta en el `orders` de ambos
+/// buckets a los que aportó monto. La suma de `amount` sobre todos los buckets
+/// es el ingreso del período: **fiado incluido**, porque una venta a cuenta es
+/// ingreso devengado aunque todavía no haya plata en la mano (el reporte lo
+/// separa justamente para que se vea).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SalesByMethodRow {
+    /// Bucket estable para máquinas: `efectivo` | `tarjeta` | `transferencia` |
+    /// `fiado` | `otro`.
+    pub method: String,
+    /// Etiqueta es-CL lista para pantalla ("Transferencia").
+    pub label: String,
+    /// Ventas que aportaron a este bucket (una mixta cuenta en los dos).
+    pub orders: i64,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub amount: Decimal,
+}
+
 /// Inventory-turnover row over the window. `turnover` = `qty_sold /
 /// current_stock`. The server keeps no historical stock snapshots, so
 /// *current* `product.stock` is used as the denominator proxy (documented
@@ -151,6 +176,10 @@ pub struct NearExpiryFilters {
     /// Lookahead window in days (default 30). Batches expiring on or before
     /// `now + days` — including already-expired ones — are returned.
     pub days: Option<i64>,
+    /// Sucursal donde está el lote (migración 0042). Misma gramática que
+    /// `BatchFilters::branch`: ausente = todos los locales (el dueño mira el
+    /// negocio entero), `"none"` = sólo casa matriz, `branch:<key>` = ese local.
+    pub branch: Option<String>,
 }
 
 /// One soon-to-expire (or already-expired) product batch with on-hand stock.
@@ -161,6 +190,13 @@ pub struct NearExpiryRow {
     pub product_name: String,
     pub batch_id: String,
     pub batch_code: String,
+    /// Sucursal donde está FÍSICAMENTE el lote (migración 0042). `None` = casa
+    /// matriz. Es el dato que hace accionable la alerta: dice a qué local hay
+    /// que ir a sacar el frasco.
+    pub branch: Option<String>,
+    /// Nombre de la sucursal, resuelto para que la UI no tenga que cruzar.
+    /// `None` en casa matriz.
+    pub branch_name: Option<String>,
     /// Expiry date (UTC).
     pub expiry_date: DateTime<Utc>,
     pub stock: i64,

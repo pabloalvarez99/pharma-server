@@ -212,9 +212,19 @@ pub async fn fulfill(db: &Db, tenant: &Thing, id: &str) -> DomainResult<AgentOrd
         if prod.stock < qty {
             return Err(DomainError::InsufficientStock);
         }
-        let fefo =
-            crate::inventory::service::plan_fefo_optional(db, tenant, &prod.id.to_string(), qty)
-                .await?;
+        // Sucursal `None` = casa matriz: el fulfillment federado despacha desde
+        // ahí, que es el mismo bucket al que pega su `stock_movement` (no lleva
+        // `branch`). Consumir lotes de casa matriz mantiene alineados el lote y
+        // la cantidad; despachar por sucursal es materia de la lane de
+        // federación multi-local, no de ésta.
+        let fefo = crate::inventory::service::plan_fefo_optional(
+            db,
+            tenant,
+            &prod.id.to_string(),
+            qty,
+            None,
+        )
+        .await?;
         plan.push((prod.id, qty, fefo));
     }
 

@@ -272,3 +272,155 @@ async fn within_days_window_widens_to_pull_far_lots() {
     let wide = run_near_expiry_scan(&db, 365).await.unwrap();
     assert_eq!(codes(&wide), vec!["SOON", "FAR"]);
 }
+
+// --- lotes por sucursal (migración 0042) -----------------------------------
+
+/// Seed a batch that lives in a given branch (`None` = casa matriz).
+async fn seed_batch_in(
+    db: &Surreal<Db>,
+    tenant: &str,
+    product: &str,
+    branch: Option<&str>,
+    code: &str,
+    expiry: &str,
+    stock: i64,
+) {
+    let br = branch.unwrap_or("NONE");
+    let q = format!(
+        "CREATE product_batch SET tenant = {tenant}, product = {product}, branch = {br}, \
+         batch_code = $code, expiry_date = {expiry}, stock = $stock, active = true;"
+    );
+    db.query(q)
+        .bind(("code", code.to_string()))
+        .bind(("stock", stock))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cada_alerta_trae_la_sucursal_del_lote() {
+    let db = setup().await;
+    db.query("CREATE branch:a SET tenant = tenant:t1, name = 'Local A'; CREATE branch:b SET tenant = tenant:t1, name = 'Local B';")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    // Mismo producto, misma ventana: lo único que los distingue es el local.
+    seed_batch_in(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        Some("branch:a"),
+        "EN_A",
+        "time::now() + 5d",
+        3,
+    )
+    .await;
+    seed_batch_in(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        Some("branch:b"),
+        "EN_B",
+        "time::now() + 6d",
+        4,
+    )
+    .await;
+
+    let alerts = run_near_expiry_scan(&db, 30).await.unwrap();
+
+    assert_eq!(alerts.len(), 2);
+    let a = alerts.iter().find(|x| x.lot == "EN_A").unwrap();
+    let b = alerts.iter().find(|x| x.lot == "EN_B").unwrap();
+    assert_eq!(
+        a.branch.as_deref(),
+        Some("branch:a"),
+        "la alerta del lote de A dice A"
+    );
+    assert_eq!(
+        b.branch.as_deref(),
+        Some("branch:b"),
+        "la alerta del lote de B dice B"
+    );
+}
+
+#[tokio::test]
+async fn lote_sin_sucursal_cae_en_casa_matriz() {
+    let db = setup().await;
+    // Un negocio de un solo local (o un instalado pre-0042) no estampa `branch`:
+    // la alerta tiene que salir igual, con `None` = casa matriz, sin inventar
+    // una sucursal.
+    seed_batch(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        "SIN_LOCAL",
+        "time::now() + 3d",
+        2,
+        true,
+    )
+    .await;
+
+    let alerts = run_near_expiry_scan(&db, 30).await.unwrap();
+
+    assert_eq!(codes(&alerts), vec!["SIN_LOCAL"]);
+    assert_eq!(alerts[0].branch, None, "sin branch = casa matriz");
+}
+
+#[tokio::test]
+async fn dos_locales_del_mismo_tenant_no_se_mezclan_en_el_conteo() {
+    let db = setup().await;
+    db.query("CREATE branch:a SET tenant = tenant:t1, name = 'Local A'; CREATE branch:b SET tenant = tenant:t1, name = 'Local B';")
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+    seed_batch_in(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        Some("branch:a"),
+        "A1",
+        "time::now() + 2d",
+        1,
+    )
+    .await;
+    seed_batch_in(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        Some("branch:a"),
+        "A2",
+        "time::now() + 9d",
+        1,
+    )
+    .await;
+    seed_batch_in(
+        &db,
+        "tenant:t1",
+        "product:p1",
+        Some("branch:b"),
+        "B1",
+        "time::now() + 4d",
+        1,
+    )
+    .await;
+
+    let alerts = run_near_expiry_scan(&db, 30).await.unwrap();
+
+    // El digest agrupa por (tenant, local): 2 grupos, 2 lotes en A y 1 en B.
+    // Se verifica sobre las alertas (el log no es observable desde el test).
+    let en_a = alerts
+        .iter()
+        .filter(|x| x.branch.as_deref() == Some("branch:a"))
+        .count();
+    let en_b = alerts
+        .iter()
+        .filter(|x| x.branch.as_deref() == Some("branch:b"))
+        .count();
+    assert_eq!((en_a, en_b), (2, 1));
+    // Orden global intacto: el más urgente primero, sea de donde sea.
+    assert_eq!(codes(&alerts), vec!["A1", "B1", "A2"]);
+}

@@ -8,6 +8,15 @@ pub struct CashSessionDto {
     pub id: String,
     pub user: String,
     pub register_name: String,
+    /// Caja física de la sesión (`register:<key>`, migración 0032/0041), si el
+    /// cajero eligió una. `null` = caja suelta identificada sólo por nombre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub register: Option<String>,
+    /// Sucursal donde está abierta la caja (`branch:<key>`). `null` = casa
+    /// matriz / negocio de un solo local. La venta que no manda sucursal
+    /// descuenta de ESTA.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub opening_cash: Decimal,
@@ -31,6 +40,14 @@ pub struct CashSessionDto {
 pub struct OpenSessionInput {
     #[serde(default = "default_register_name")]
     pub register_name: String,
+    /// Caja física (`register:<key>`). Si viene, la sucursal de la sesión sale
+    /// de `register.branch` y `register_name` se completa con su nombre.
+    #[serde(default)]
+    pub register: Option<String>,
+    /// Sucursal explícita (`branch:<key>`) cuando no se elige una caja física.
+    /// Ignorada si `register` viene (la caja manda: está físicamente en un local).
+    #[serde(default)]
+    pub branch: Option<String>,
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub opening_cash: Decimal,

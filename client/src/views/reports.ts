@@ -18,13 +18,18 @@ import {
   stockRotation,
   nearExpiry,
   listProducts,
+  ivaSummary,
+  libroCompras,
+  debtorsReport,
+  type DebtorRow,
+  type PurchaseBookRow,
   type DailySalesRow,
   type TopProductRow,
   type DailyMarginRow,
   type StockRotationRow,
   type NearExpiryRow,
 } from "../api";
-import { clp, num } from "../format";
+import { clp, num, fecha } from "../format";
 import { emptyState, errorState } from "./ui";
 import { buildInsights, priceMap, type Insight } from "./reports-insights";
 import {
@@ -42,6 +47,7 @@ import {
   rotationDisplay,
   buildTopExport,
   buildRotationExport,
+  buildLibroExport,
   buildReportsJson,
   type LoadedReports,
 } from "./reports-helpers";
@@ -93,6 +99,25 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
       </div>
 
       <div class="table-card rb-card">
+        <h3 class="section-title rb-display">Por cobrar (fiado)</h3>
+        <div id="rep-cobrar">${tableSkeleton(4)}</div>
+      </div>
+
+      <h3 class="section-title rb-display">IVA del mes (F29)</h3>
+      <div id="rep-iva" class="kpi-grid">${kpiSkeleton(4)}</div>
+
+      <div class="table-card rb-card">
+        <div class="card-head">
+          <h3 class="section-title rb-display">Libro de compras</h3>
+          <div class="card-actions" id="rep-libro-actions" hidden>
+            <button class="btn btn-ghost btn-sm" type="button" data-export="libro" data-fmt="csv">CSV</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-export="libro" data-fmt="json">JSON</button>
+          </div>
+        </div>
+        <div id="rep-libro">${tableSkeleton(6)}</div>
+      </div>
+
+      <div class="table-card rb-card">
         <div class="card-head">
           <h3 class="section-title rb-display">Rotación de stock</h3>
           <div class="card-actions" id="rep-rotation-actions" hidden>
@@ -120,7 +145,9 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
       const bundle =
         which === "top"
           ? loaded.top && buildTopExport(loaded.top)
-          : loaded.rotation && buildRotationExport(loaded.rotation);
+          : which === "libro"
+            ? loaded.libro && buildLibroExport(loaded.libro)
+            : loaded.rotation && buildRotationExport(loaded.rotation);
       if (bundle) downloadBundle(which!, fmt, bundle);
     });
   });
@@ -131,6 +158,133 @@ export function renderReports(host: HTMLElement, serverUrl: string): void {
   void loadTop(host, serverUrl, loaded);
   void loadInventory(host.querySelector<HTMLElement>("#rep-inv")!, serverUrl, loaded);
   void loadRotation(host, serverUrl, loaded);
+  void loadDebtors(host.querySelector<HTMLElement>("#rep-cobrar")!, serverUrl);
+  void loadIva(host.querySelector<HTMLElement>("#rep-iva")!, serverUrl);
+  void loadLibroCompras(host, serverUrl, loaded);
+}
+
+/** "¿Cuánto me deben?" — total por cobrar + quién debe, mayor primero. Es la
+ *  pregunta diaria del dueño que fía; hasta ahora sólo se veía cliente por
+ *  cliente en su ficha. */
+async function loadDebtors(el: HTMLElement, serverUrl: string): Promise<void> {
+  try {
+    const rep = await debtorsReport(serverUrl);
+    if (rep.rows.length === 0) {
+      el.innerHTML = emptyState({
+        title: "Nadie te debe",
+        hint: "Cuando fíes una venta el saldo del cliente aparece acá.",
+      });
+      return;
+    }
+    el.innerHTML = `
+      <div class="kpi-grid kpi-grid-tight rep-cobrar-kpis">
+        <div class="kpi"><span class="kpi-label">Total por cobrar</span><strong class="rb-num">${clp(rep.total_por_cobrar)}</strong></div>
+        <div class="kpi"><span class="kpi-label">Clientes con deuda</span><strong class="rb-num">${num(rep.debtor_count)}</strong></div>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Cliente</th><th>Teléfono</th><th>Último mov.</th><th class="num">Debe</th></tr></thead>
+        <tbody>${rep.rows.map(debtorRow).join("")}</tbody>
+      </table>
+    `;
+  } catch (err) {
+    el.innerHTML = errorState(asMessage(err));
+  }
+}
+
+function debtorRow(d: DebtorRow): string {
+  return `
+    <tr>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${d.phone ? escapeHtml(d.phone) : "<span class=\"muted\">—</span>"}</td>
+      <td>${escapeHtml(fecha(d.last_movement))}</td>
+      <td class="num rb-num">${clp(d.balance)}</td>
+    </tr>
+  `;
+}
+
+/** Resumen IVA del mes: débito (ventas) − crédito (compras) = a pagar. Panel
+ *  independiente: si el server no lo expone (o el rol no alcanza) se muestra el
+ *  error del server sin tumbar el resto de Reportes. */
+async function loadIva(el: HTMLElement, serverUrl: string): Promise<void> {
+  try {
+    const s = await ivaSummary(serverUrl);
+    const aPagar = Number(s.iva_a_pagar);
+    // Positivo = le toca pagar; negativo = remanente a favor del negocio.
+    const saldoLabel = aPagar >= 0 ? "IVA a pagar" : "Remanente a favor";
+    const saldoValue = clp(aPagar >= 0 ? s.iva_a_pagar : String(Math.abs(aPagar)));
+    el.innerHTML = `
+      <div class="kpi"><span class="kpi-label">Débito (ventas)</span><strong class="rb-num">${clp(s.iva_debito)}</strong></div>
+      <div class="kpi"><span class="kpi-label">Crédito (compras)</span><strong class="rb-num">${clp(s.iva_credito)}</strong></div>
+      <div class="kpi"><span class="kpi-label">${saldoLabel}</span><strong class="rb-num">${saldoValue}</strong></div>
+      <div class="kpi"><span class="kpi-label">Ventas netas</span><strong class="rb-num">${clp(s.ventas_neto)}</strong></div>
+    `;
+  } catch (err) {
+    el.innerHTML = errorState(asMessage(err));
+  }
+}
+
+/** Libro de compras del mes. Las filas sin factura capturada se marcan para que
+ *  el dueño sepa qué completar antes de llevar el F29. */
+async function loadLibroCompras(
+  host: HTMLElement,
+  serverUrl: string,
+  loaded: LoadedReports,
+): Promise<void> {
+  const el = host.querySelector<HTMLElement>("#rep-libro")!;
+  try {
+    const book = await libroCompras(serverUrl);
+    loaded.libro = book;
+    if (book.rows.length === 0) {
+      el.innerHTML = emptyState({
+        title: "Sin compras este mes",
+        hint: "Cuando recepciones una orden de compra aparecerá acá.",
+      });
+      return;
+    }
+    const pending =
+      book.pending_declaration > 0
+        ? `<p class="muted rep-libro-note">${book.pending_declaration} documento(s) sin factura capturada — el neto y el IVA están estimados del total.</p>`
+        : "";
+    el.innerHTML = `
+      ${pending}
+      <table class="data-table">
+        <thead>
+          <tr><th>Fecha</th><th>Proveedor</th><th>Folio</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Total</th></tr>
+        </thead>
+        <tbody>${book.rows.map(libroRow).join("")}</tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3"><strong>Totales</strong></td>
+            <td class="num rb-num"><strong>${clp(book.total_neto)}</strong></td>
+            <td class="num rb-num"><strong>${clp(book.total_iva)}</strong></td>
+            <td class="num rb-num"><strong>${clp(book.total)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+    host.querySelector<HTMLElement>("#rep-libro-actions")?.removeAttribute("hidden");
+  } catch (err) {
+    el.innerHTML = errorState(asMessage(err));
+  }
+}
+
+function libroRow(r: PurchaseBookRow): string {
+  return `
+    <tr>
+      <td>${escapeHtml(fecha(r.date))}</td>
+      <td>${escapeHtml(r.supplier_name)}${
+        r.supplier_rut ? `<span class="cell-sub muted">${escapeHtml(r.supplier_rut)}</span>` : ""
+      }</td>
+      <td>${
+        r.folio
+          ? escapeHtml(r.folio)
+          : `<span class="pill pill-warn">estimado</span>`
+      }</td>
+      <td class="num rb-num">${clp(r.neto)}</td>
+      <td class="num rb-num">${clp(r.iva)}</td>
+      <td class="num rb-num">${clp(r.total)}</td>
+    </tr>
+  `;
 }
 
 /** The headline strip: the reasons the dueño opens the app daily. Loads its own

@@ -229,6 +229,10 @@ pub async fn import_movements(
 pub(crate) struct BatchQuery {
     #[serde(default)]
     product: Option<String>,
+    /// Acota a una sucursal (migración 0042). `"none"` = sólo casa matriz;
+    /// ausente = todos los locales.
+    #[serde(default)]
+    branch: Option<String>,
     #[serde(default)]
     only_available: Option<bool>,
     #[serde(default)]
@@ -243,6 +247,7 @@ impl From<BatchQuery> for BatchFilters {
     fn from(q: BatchQuery) -> Self {
         Self {
             product: q.product,
+            branch: q.branch,
             only_available: q.only_available,
             expiring_within_days: q.expiring_within_days,
             limit: q.limit,
