@@ -175,6 +175,9 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.mlkit.barcode.scanning)
+    // Encode de QR para la tarjeta de rescate (ADR-0022). Solo `core`, sin
+    // wrappers de cámara: el escaneo ya lo hace ML Kit.
+    implementation(libs.zxing.core)
 
     debugImplementation(libs.compose.ui.tooling)
 

@@ -53,6 +53,8 @@ androidxProfileinstaller = "1.4.1"
 # POS que no escanea no es un POS: se paga el peso.
 camerax = "1.4.2"
 mlkitBarcode = "17.3.0"
+# Solo encode (tarjeta de rescate). No trae UI Android; ~0.5 MB.
+zxingCore = "3.5.3"
 
 ktor = "3.5.2"
 serializationJson = "1.9.0"
@@ -82,6 +84,7 @@ camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "ca
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxingCore" }
 
 compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "composeUi" }
 compose-ui = { module = "androidx.compose.ui:ui", version.ref = "composeUi" }

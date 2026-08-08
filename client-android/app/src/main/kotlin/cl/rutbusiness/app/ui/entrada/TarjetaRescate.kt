@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import cl.rutbusiness.app.entrada.matrizQrRescate
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.HUELLA_SIZE
 import cl.rutbusiness.core.backup.claveDeDemostracion
@@ -127,34 +128,56 @@ fun TarjetaRescate(
             }
 
             if (qrPayload != null) {
-                RbCard(title = "Código para el QR / PDF") {
+                RbCard(title = "Código QR de rescate") {
                     Text(
-                        text = "Cuando imprimamos la tarjeta, este texto va en el " +
-                            "código. Hoy podés copiarlo al cuaderno si querés.",
+                        text = "Solo los bloques del código (no las 12 palabras). " +
+                            "Podés escanearlo o copiar el texto al cuaderno. " +
+                            "No lo mandes por WhatsApp.",
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                     )
-                    // Huella visual: se ve como código; NO es QR escaneable.
-                    val grilla = remember(qrPayload) { huellaVisualDelPayload(qrPayload) }
+                    // QR real (ZXing). Si falla el encode, huella visual de respaldo.
+                    val matrizQr = remember(qrPayload) { matrizQrRescate(qrPayload) }
+                    val grillaHuella = remember(qrPayload) {
+                        huellaVisualDelPayload(qrPayload)
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = dimens.space2),
                         contentAlignment = Alignment.Center,
                     ) {
-                        HuellaVisualCanvas(
-                            grilla = grilla,
-                            oscuro = colors.textPrimary,
-                            claro = colors.surface,
-                            modifier = Modifier
-                                .size(168.dp)
-                                .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
-                                .padding(6.dp),
-                        )
+                        if (matrizQr != null) {
+                            MatrizCodigoCanvas(
+                                grilla = matrizQr,
+                                oscuro = colors.textPrimary,
+                                claro = colors.surface,
+                                modifier = Modifier
+                                    .size(200.dp)
+                                    .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
+                                    .padding(8.dp)
+                                    .background(colors.surface),
+                            )
+                        } else {
+                            HuellaVisualCanvas(
+                                grilla = grillaHuella,
+                                oscuro = colors.textPrimary,
+                                claro = colors.surface,
+                                modifier = Modifier
+                                    .size(168.dp)
+                                    .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
+                                    .padding(6.dp),
+                            )
+                        }
                     }
                     Text(
-                        text = "Huella visual del código (no es un QR escaneable). " +
-                            "El texto de abajo es lo que importa si lo copiás.",
+                        text = if (matrizQr != null) {
+                            "QR escaneable (bloques). Las 12 palabras siguen " +
+                                "siendo solo del cuaderno."
+                        } else {
+                            "Huella visual (el QR no se pudo dibujar). " +
+                                "Copiá el texto de abajo."
+                        },
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                         modifier = Modifier.padding(top = dimens.space2),
@@ -223,9 +246,8 @@ fun TarjetaRescate(
             }
 
             Text(
-                text = "El QR escaneable y el PDF llegan después. " +
-                    "Hoy alcanza con copiar este texto al cuaderno " +
-                    "(y mirar la huella para reconocer la tarjeta).",
+                text = "El PDF de una página llega después. " +
+                    "Hoy: palabras en el cuaderno + QR de bloques en pantalla.",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -275,18 +297,42 @@ private fun HuellaVisualCanvas(
     claro: Color,
     modifier: Modifier = Modifier,
 ) {
+    MatrizCodigoCanvas(
+        grilla = grilla,
+        oscuro = oscuro,
+        claro = claro,
+        modifier = modifier,
+        sizeFija = HUELLA_SIZE,
+    )
+}
+
+/**
+ * Matriz booleana (QR ZXing o huella) dibujada a celda por celda.
+ */
+@Composable
+private fun MatrizCodigoCanvas(
+    grilla: Array<BooleanArray>,
+    oscuro: Color,
+    claro: Color,
+    modifier: Modifier = Modifier,
+    sizeFija: Int? = null,
+) {
+    val filas = sizeFija ?: grilla.size
+    val cols = sizeFija ?: (grilla.firstOrNull()?.size ?: 1)
     Canvas(modifier = modifier.aspectRatio(1f)) {
-        val n = HUELLA_SIZE.toFloat()
-        val cell = size.minDimension / n
-        // Fondo claro.
+        val cellW = size.minDimension / cols.toFloat()
+        val cellH = size.minDimension / filas.toFloat()
         drawRect(color = claro, size = size)
-        for (y in 0 until HUELLA_SIZE) {
-            for (x in 0 until HUELLA_SIZE) {
-                if (grilla[y][x]) {
+        val yMax = minOf(filas, grilla.size)
+        for (y in 0 until yMax) {
+            val row = grilla[y]
+            val xMax = minOf(cols, row.size)
+            for (x in 0 until xMax) {
+                if (row[x]) {
                     drawRect(
                         color = oscuro,
-                        topLeft = Offset(x * cell, y * cell),
-                        size = Size(cell, cell),
+                        topLeft = Offset(x * cellW, y * cellH),
+                        size = Size(cellW, cellH),
                     )
                 }
             }

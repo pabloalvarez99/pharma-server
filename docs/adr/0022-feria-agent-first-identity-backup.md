@@ -96,7 +96,7 @@ Shipped in AFK loop (no secrets in repo):
 | Piece | Status |
 |-------|--------|
 | RubroPack feria + Android nav agent_home | done |
-| Tarjeta rescate + CSPRNG words/blocks + visual fingerprint | done (QR scannable later) |
+| Tarjeta rescate + CSPRNG words/blocks + ZXing QR (bloques) | done (PDF still later) |
 | PBKDF2-HMAC-SHA256 210k + AES-256-GCM envelope `RB1` | done (Argon2id later) |
 | Snapshot `pending_sales` + prepare from offline queue | done |
 | `POST/GET /api/v1/user-backup` + lab memory store | done (`RUTBUSINESS_USER_BACKUP_MEMORY=1`) |

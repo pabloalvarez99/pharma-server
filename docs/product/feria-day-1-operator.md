@@ -65,7 +65,7 @@ Si anotar una venta o ver una deuda tarda más que el lápiz, es un bug de produ
 
 ## Fuera de scope aún
 
-- Dibujo QR (ZXing) / PDF de la tarjeta de rescate
+- PDF de una página de la tarjeta de rescate (QR en pantalla: ZXing, listo)
 - Bucket real (ops del capitán)
 - Google OAuth end-to-end (consola + secrets del capitán)
 - Seed demo feria corrida en lab (código seed sí)
