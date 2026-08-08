@@ -32,7 +32,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import android.content.Intent
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,6 +78,7 @@ fun TarjetaRescate(
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     var copiado by remember { mutableStateOf(false) }
     val qrPayload = remember(clave, tenantSlug) {
         payloadQrRescate(tenantSlug, clave.bloques)
@@ -263,6 +266,25 @@ fun TarjetaRescate(
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
                     modifier = Modifier.padding(top = dimens.space2),
+                )
+                RbButton(
+                    label = "Compartir a una nota (no WhatsApp)",
+                    onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, "RutBusiness - tarjeta de rescate")
+                            putExtra(Intent.EXTRA_TEXT, textoPagina)
+                        }
+                        context.startActivity(
+                            Intent.createChooser(
+                                send,
+                                "Guardá en Notas. No mandes por chat.",
+                            ),
+                        )
+                    },
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = dimens.space1),
                 )
             }
 
