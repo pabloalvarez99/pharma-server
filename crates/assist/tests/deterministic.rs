@@ -333,9 +333,16 @@ async fn ventas_por_metodo_breaks_down_cash_card() {
     let a = ask(&db, &tenant, "ventas por método de pago").await;
     assert_eq!(a.intent, "ventas_metodo_pago");
     let data = a.data.unwrap();
-    assert_eq!(data["cash"], "5000");
-    assert_eq!(data["card"], "0");
-    assert_eq!(data["cash_pct"], "100");
+    // El desglose es una lista de buckets, no un par fijo cash/card: desde
+    // fiado (0039) y transferencia (0043) hay más de dos métodos, y presentar
+    // sólo dos como el 100% del mes miente. Sólo se sembró efectivo, así que
+    // hay exactamente un bucket y se lleva el total entero.
+    assert_eq!(data["revenue"], "5000");
+    let methods = data["methods"].as_array().expect("methods es un arreglo");
+    assert_eq!(methods.len(), 1, "sólo se sembró efectivo: {methods:?}");
+    assert_eq!(methods[0]["method"], "efectivo");
+    assert_eq!(methods[0]["amount"], "5000");
+    assert_eq!(methods[0]["pct"], "100");
 }
 
 #[tokio::test]
