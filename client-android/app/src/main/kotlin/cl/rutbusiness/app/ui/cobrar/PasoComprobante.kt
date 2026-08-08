@@ -9,6 +9,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.impresora.TarjetaDeImpresion
+import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.pos.ComprobanteDto
 import cl.rutbusiness.core.pos.MedioDePago
@@ -59,6 +61,18 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                     color = RbTheme.colors.textSecondary,
                 )
             }
+        }
+
+        // La boleta va **antes** de "Cobrar otra venta" y nunca lo tapa: la
+        // impresora es lo siguiente que se hace, pero la venta ya está cobrada
+        // y ningún problema de papel puede dejar a la cajera sin poder seguir.
+        // Si nadie proveyó la impresora, esto simplemente no se dibuja.
+        impresoraViewModel()?.let { impresora ->
+            TarjetaDeImpresion(
+                vm = impresora,
+                ordenId = comprobante?.orderId,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         if (vm.puntosGanados > 0) {
