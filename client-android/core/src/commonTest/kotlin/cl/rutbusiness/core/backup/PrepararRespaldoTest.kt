@@ -58,14 +58,19 @@ class PrepararRespaldoTest {
     }
 
     @Test
-    fun `cifrado listo cambia el copy`() {
+    fun `sin material pide la llave del cuaderno`() {
         val r = prepararRespaldoDesdeCola(
             tenantId = "puesto",
             cola = listOf(venta("a")),
             createdAtUnix = 100L,
             cifradoListo = true,
         ).getOrThrow()
-        assertTrue(r.mensaje.contains("cifrar", ignoreCase = true))
+        assertTrue(
+            r.mensaje.contains("palabras", ignoreCase = true) ||
+                r.mensaje.contains("bloques", ignoreCase = true),
+            r.mensaje,
+        )
+        assertEquals(null, r.sobre)
     }
 
     @Test

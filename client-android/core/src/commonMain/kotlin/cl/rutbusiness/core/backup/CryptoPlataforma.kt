@@ -4,11 +4,12 @@ package cl.rutbusiness.core.backup
  * Primitivas de cripto del respaldo (ADR-0022).
  *
  * `expect`/`actual`: Android usa `javax.crypto` (AES-GCM + SHA-256 +
- * SecureRandom). Sin Keystore: la llave del feriante es la del **cuaderno**,
- * no la del hardware.
+ * PBKDF2-HMAC-SHA256 + SecureRandom). Sin Keystore: la llave del feriante
+ * es la del **cuaderno**, no la del hardware.
  *
- * Argon2id (KDF del format v1) **no** vive acá todavía: se deriva la llave
- * fuera y se pasa a [cifrarSobreV1] / [descifrarSobreV1].
+ * KDF actual en sobre v1: **PBKDF2-HMAC-SHA256** (disponible en el JDK sin
+ * NDK). Argon2id es el objetivo de producto cuando haya lib multiplatform;
+ * el header del sobre dice el algoritmo real (`pbkdf2-hmac-sha256`).
  */
 internal expect object CryptoPlataforma {
     fun randomBytes(n: Int): ByteArray
@@ -18,6 +19,16 @@ internal expect object CryptoPlataforma {
      */
     fun aesGcmEncrypt(key: ByteArray, nonce: ByteArray, plain: ByteArray): ByteArray
     fun aesGcmDecrypt(key: ByteArray, nonce: ByteArray, cipherAndTag: ByteArray): ByteArray
+    /**
+     * PBKDF2-HMAC-SHA256 → [outLen] bytes (típicamente 32).
+     * [iterations] >= 100_000 en producción (OWASP).
+     */
+    fun pbkdf2HmacSha256(
+        password: ByteArray,
+        salt: ByteArray,
+        iterations: Int,
+        outLen: Int,
+    ): ByteArray
 }
 
 /** Hex minúscula (salt/nonce/sha en el wire). */

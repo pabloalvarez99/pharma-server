@@ -48,16 +48,19 @@ pub struct RecoveryMaterialPublic {
 // --- format v1 crypto parameters (client-side; documented here for parity) ----
 
 /// KDF algorithm name on the wire / in the envelope header.
-pub const KDF_ALG: &str = "argon2id";
+///
+/// Client Android today: **PBKDF2-HMAC-SHA256** (no NDK). Argon2id remains the
+/// product target when a multiplatform lib lands; the envelope always labels
+/// the real algorithm.
+pub const KDF_ALG: &str = "pbkdf2-hmac-sha256";
 
-/// Memory cost (KiB) for Argon2id v1. ~64 MiB — phones of the floor (1–2 GB)
-/// can afford a background derive; do not raise without a format bump.
+/// Memory cost (KiB) for future Argon2id; ignored by PBKDF2 (still serialized).
 pub const KDF_MEMORY_KIB: u32 = 65_536;
 
-/// Time cost (iterations) for Argon2id v1.
-pub const KDF_ITERATIONS: u32 = 3;
+/// PBKDF2 iterations (OWASP ≥ 210_000 for SHA-256).
+pub const KDF_ITERATIONS: u32 = 210_000;
 
-/// Parallelism for Argon2id v1.
+/// Parallelism for future Argon2id; ignored by PBKDF2.
 pub const KDF_PARALLELISM: u32 = 1;
 
 /// Derived key length (bytes) → AES-256-GCM.
@@ -295,7 +298,7 @@ mod tests {
     fn format_version_is_stable_v1() {
         assert_eq!(BACKUP_FORMAT_VERSION, 1);
         assert_eq!(SNAPSHOT_FORMAT_VERSION, 1);
-        assert_eq!(KDF_ALG, "argon2id");
+        assert_eq!(KDF_ALG, "pbkdf2-hmac-sha256");
         assert_eq!(AEAD_ALG, "aes-256-gcm");
         assert_eq!(USER_BACKUP_UPLOAD_PATH, "/api/v1/user-backup");
         assert_eq!(SNAPSHOT_SECTION_PENDING_SALES, "pending_sales");

@@ -1,7 +1,9 @@
 # Respaldo cifrado con llave del usuario (feria / ADR-0022)
 
-Estado: **contrato v1 + API stub** (2026-08-08). Validación de upload y
-payload QR listos; bucket y Argon2id/AES-GCM en cliente aún no cableados.
+Estado: **contrato v1 + cifrado cliente + upload/restore cableados** (2026-08-08).
+PBKDF2-HMAC-SHA256 + AES-256-GCM reales en Android; `POST /api/v1/user-backup`
+sube ciphertext (server `accepted:false` sin bucket). Restore local por frase
++ sobre base64. Bucket y Argon2id siguen pendientes.
 
 ## Objetivo
 
@@ -26,23 +28,30 @@ usuario el blob es basura. **No hay recuperación de clave por soporte.**
 | Paso | Quién | Qué |
 |------|-------|-----|
 | Empaquetar snapshot offline | Cliente | `SnapshotBackupV1` JSON (`snapshot_version=1`): ventas en cola + secciones |
-| KDF | Cliente | Argon2id: m=65536 KiB, t=3, p=1 → 32 B (**pendiente lib**; provisional test-only SHA) |
+| KDF | Cliente | **PBKDF2-HMAC-SHA256** 210k iter → 32 B (hoy). Argon2id = objetivo futuro |
 | Cifrar | Cliente | **AES-256-GCM real** (`CifrarSobre.kt` + `CryptoPlataforma` Android) |
 | Sobre wire | Cliente | `RB1\n` + header JSON + ciphertext\|\|tag |
-| Subir | Cliente → `POST /api/v1/user-backup` | `UploadEncryptedBackupRequest` (meta + base64) |
+| Subir | Cliente → `POST /api/v1/user-backup` | `UserBackupApi.subirSobre` (meta + base64) |
 | Validar | Server | sha256 + size + format_version (puro) |
 | Guardar | Server | Blob opaco en bucket (**stub:** `accepted: false` hasta bucket) |
+| Restore local | Cliente | `restaurarDesdeSobre` / UI "Abrir un respaldo" en cola offline |
 
 Parámetros en `domain::user_backup`, `SobreCifrado.kt`, `CifrarSobre.kt`, `SnapshotBackup.kt`.
 
 **Snapshot plaintext (antes de AEAD):** `pending_sales` (cola offline) es la
 sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
 
-## Flujo restore (futuro)
+## Flujo restore
+
+**Hoy (local):** en la cola offline → "Abrir un respaldo" con llave + base64
+del sobre (prefill del último preparado). `restaurarDesdeSobre` re-deriva
+con salt del header y abre el snapshot. **Aún no** rehidrata la cola de ventas.
+
+**Siguiente:**
 
 1. Login Google / identidad del tenant.
-2. Usuario ingresa frase o bloques de la tarjeta.
-3. Cliente descarga blob, descifra, rehidrata Surreal/local store.
+2. Descargar blob listado (`GET /api/v1/user-backup`).
+3. Rehidratar `pending_sales` en `ColaDeVentas`.
 4. Fallo de frase = error claro, sin "¿olvidaste tu clave?".
 
 ## Código ancla
@@ -54,8 +63,10 @@ sección day-1. Fiado/catálogo entran como `sections` opacas en v1.1.
 | API stub | `crates/api/src/v1/user_backup.rs` → `POST/GET /api/v1/user-backup` |
 | Android clave UI | `client-android/core/.../backup/ClaveDelNegocio.kt` |
 | Android sobre v1 | `client-android/core/.../backup/SobreCifrado.kt` |
-| Android AES-GCM | `client-android/core/.../backup/CifrarSobre.kt` + `CryptoPlataforma` |
+| Android AES-GCM + PBKDF2 | `CifrarSobre.kt` + `CryptoPlataforma` + `derivarClaveDeMaterial` |
 | Android snapshot v1 | `client-android/core/.../backup/SnapshotBackup.kt` |
+| Preparar / restaurar | `PrepararRespaldo.kt`, `RestaurarRespaldo.kt` |
+| Cliente upload | `UserBackupApi.kt` + wire en `ContenedorDeDestinos` / `PantallaDeCola` |
 | Material recovery parse | `client-android/core/.../backup/MaterialRecuperacion.kt` |
 | Pantalla rescate + payload QR + texto página | `client-android/app/.../entrada/TarjetaRescate.kt` |
 | QR payload | `rutbusiness-rescue:v1:<tenant>:<8 bloques>` |

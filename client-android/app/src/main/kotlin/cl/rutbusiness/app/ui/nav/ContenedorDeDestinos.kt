@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -23,13 +24,22 @@ import cl.rutbusiness.app.ui.offline.PantallaDeCola
 import cl.rutbusiness.app.ui.offline.hayConexion
 import cl.rutbusiness.app.ui.offline.ventasEnCola
 import cl.rutbusiness.app.ui.rubro.packActual
+import cl.rutbusiness.core.backup.UserBackupApi
+import cl.rutbusiness.core.backup.envelopeToBase64
+import cl.rutbusiness.core.backup.mensajeErrorMaterial
+import cl.rutbusiness.core.backup.mensajeTrasSubida
+import cl.rutbusiness.core.backup.parsearMaterialRecuperacion
 import cl.rutbusiness.core.backup.prepararRespaldoDesdeCola
+import cl.rutbusiness.core.backup.restaurarDesdeTextos
+import cl.rutbusiness.core.net.Resultado
+import cl.rutbusiness.core.session.SessionRepository
+import kotlinx.coroutines.launch
 
 /**
  * El armazón de la navegación: qué pestaña está elegida, qué se dibuja arriba
  * de la barra, y qué hace el botón físico de atrás.
  *
- * No conoce ninguna pantalla — recibe [contenido] y le pasa el destino. Eso no
+ * No conoce ninguna pantalla - recibe [contenido] y le pasa el destino. Eso no
  * es abstracción por gusto: es lo que deja probar la parte que **puede
  * romperse** (que el estado de una pestaña sobreviva al cambio a otra) sin
  * levantar un servidor ni un carrito real. `NavegacionTest` monta este mismo
@@ -51,10 +61,16 @@ internal fun ContenedorDeDestinos(
      * de login o el id del JWT; si falta, se usa un placeholder local.
      */
     tenantId: String? = null,
+    /**
+     * Sesión activa para subir el sobre cifrado (nunca plaintext). Opcional
+     * en tests de navegación sin red.
+     */
+    sesion: SessionRepository? = null,
     contenido: @Composable (Destino) -> Unit,
 ) {
     var destino by rememberSaveable { mutableStateOf(inicial) }
     val estados = rememberSaveableStateHolder()
+    val alcance = rememberCoroutineScope()
 
     // El estado de la conexión y la cola de ventas viven arriba de las
     // pestañas porque no son de ninguna: la dueña tiene que ver "sin conexión"
@@ -66,6 +82,8 @@ internal fun ContenedorDeDestinos(
     var viendoCola by rememberSaveable { mutableStateOf(false) }
     // No saveable: es un mensaje efímero de la última preparación.
     var estadoRespaldo by remember { mutableStateOf<EstadoRespaldoUi?>(null) }
+    var ultimoSobreBase64 by remember { mutableStateOf<String?>(null) }
+    var subiendoRespaldo by remember { mutableStateOf(false) }
     val pack = packActual()
 
     // Atrás desde una pestaña secundaria vuelve al inicio en vez de cerrar la
@@ -124,34 +142,124 @@ internal fun ContenedorDeDestinos(
                     onIntentarAhora = { offline.despachador.intentarAhora() },
                     onDescartar = { clave -> offline.cola.descartar(clave) },
                     onCerrar = { viendoCola = false },
-                    // Feria (o cualquiera): preparar snapshot de la cola sin
-                    // subir plaintext. Cifrado real = siguiente carril.
-                    onPrepararRespaldo = {
-                        val prep = prepararRespaldoDesdeCola(
-                            tenantId = tenantId?.takeIf { it.isNotBlank() } ?: "local",
-                            cola = cola,
-                            createdAtUnix = offline.reloj() / 1000L,
-                            rubro = pack.rubro,
-                            cifradoListo = false,
-                        )
-                        estadoRespaldo = prep.fold(
+                    // Feria: PBKDF2 + AES-GCM en el aparato; sube solo ciphertext.
+                    onPrepararRespaldo = { materialRaw ->
+                        val material = if (materialRaw.isBlank()) {
+                            null
+                        } else {
+                            val parsed = parsearMaterialRecuperacion(materialRaw)
+                            if (parsed.isFailure) {
+                                estadoRespaldo = EstadoRespaldoUi(
+                                    mensaje = mensajeErrorMaterial(materialRaw),
+                                    bytes = 0,
+                                    ventas = 0,
+                                )
+                                null
+                            } else {
+                                parsed.getOrThrow()
+                            }
+                        }
+                        // Parse falló → ya se seteo el mensaje; no rearmar.
+                        if (materialRaw.isNotBlank() && material == null) {
+                            // leave estadoRespaldo as set above
+                        } else {
+                            val prep = prepararRespaldoDesdeCola(
+                                tenantId = tenantId?.takeIf { it.isNotBlank() } ?: "local",
+                                cola = cola,
+                                createdAtUnix = offline.reloj() / 1000L,
+                                rubro = pack.rubro,
+                                materialRecuperacion = material,
+                            )
+                            prep.fold(
+                                onSuccess = { ok ->
+                                    val b64 = ok.sobre?.let { envelopeToBase64(it.envelopeBytes) }
+                                    if (b64 != null) ultimoSobreBase64 = b64
+                                    estadoRespaldo = EstadoRespaldoUi(
+                                        mensaje = ok.mensaje,
+                                        bytes = ok.sobre?.envelopeBytes?.size
+                                            ?: ok.bytesPlaintext,
+                                        ventas = ok.ventasEnCola,
+                                    )
+                                    // Intentar subir ciphertext si hay sesión y red.
+                                    val sobre = ok.sobre
+                                    if (sobre != null && sesion != null && conectado) {
+                                        subiendoRespaldo = true
+                                        alcance.launch {
+                                            try {
+                                                val api = sesion.apiActiva()
+                                                if (api == null) {
+                                                    estadoRespaldo = EstadoRespaldoUi(
+                                                        mensaje = ok.mensaje +
+                                                            " · Sin sesión para subir; " +
+                                                            "el cifrado quedó en el teléfono.",
+                                                        bytes = sobre.envelopeBytes.size,
+                                                        ventas = ok.ventasEnCola,
+                                                    )
+                                                    return@launch
+                                                }
+                                                when (
+                                                    val r = UserBackupApi(api).subirSobre(sobre)
+                                                ) {
+                                                    is Resultado.Ok -> {
+                                                        estadoRespaldo = EstadoRespaldoUi(
+                                                            mensaje = mensajeTrasSubida(
+                                                                ok,
+                                                                r.valor,
+                                                            ),
+                                                            bytes = sobre.envelopeBytes.size,
+                                                            ventas = ok.ventasEnCola,
+                                                        )
+                                                    }
+                                                    is Resultado.Falla -> {
+                                                        estadoRespaldo = EstadoRespaldoUi(
+                                                            mensaje = ok.mensaje +
+                                                                " · No se pudo subir: " +
+                                                                r.error.userMessage +
+                                                                " El sobre cifrado sigue acá.",
+                                                            bytes = sobre.envelopeBytes.size,
+                                                            ventas = ok.ventasEnCola,
+                                                        )
+                                                    }
+                                                }
+                                            } finally {
+                                                subiendoRespaldo = false
+                                            }
+                                        }
+                                    }
+                                },
+                                onFailure = {
+                                    estadoRespaldo = EstadoRespaldoUi(
+                                        mensaje = "No se pudo armar el paquete: ${it.message}",
+                                        bytes = 0,
+                                        ventas = 0,
+                                    )
+                                },
+                            )
+                        }
+                    },
+                    onRestaurarRespaldo = { materialRaw, sobreB64 ->
+                        val r = restaurarDesdeTextos(materialRaw, sobreB64)
+                        estadoRespaldo = r.fold(
                             onSuccess = {
                                 EstadoRespaldoUi(
                                     mensaje = it.mensaje,
-                                    bytes = it.bytesPlaintext,
+                                    bytes = 0,
                                     ventas = it.ventasEnCola,
                                 )
                             },
                             onFailure = {
                                 EstadoRespaldoUi(
-                                    mensaje = "No se pudo armar el paquete: ${it.message}",
+                                    mensaje = it.message
+                                        ?: "No se pudo abrir el respaldo.",
                                     bytes = 0,
                                     ventas = 0,
                                 )
                             },
                         )
                     },
+                    ultimoSobreBase64 = ultimoSobreBase64,
                     estadoRespaldo = estadoRespaldo,
+                    subiendoRespaldo = subiendoRespaldo,
                 )
             } else {
                 estados.SaveableStateProvider(destino.name) {

@@ -9,18 +9,23 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.offline.VentaEnCola
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbEmptyState
+import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.coroutines.launch
-// EstadoRespaldoUi vive en este mismo package.
 
 /**
  * Las ventas que todavía no llegaron al sistema del negocio.
@@ -55,13 +60,27 @@ fun PantallaDeCola(
     onDescartar: suspend (String) -> Unit,
     onCerrar: () -> Unit,
     modifier: Modifier = Modifier,
-    /** Feria / ADR-0022: armar snapshot de la cola sin subir plaintext. */
-    onPrepararRespaldo: (() -> Unit)? = null,
+    /**
+     * Feria / ADR-0022: armar (y cifrar con la llave del cuaderno) el snapshot.
+     * El texto es la frase o los bloques; vacío = solo empaquetar sin cifrar.
+     */
+    onPrepararRespaldo: ((materialCuaderno: String) -> Unit)? = null,
+    /**
+     * Restaurar local: material + sobre base64 (último preparado o pegado).
+     */
+    onRestaurarRespaldo: ((materialCuaderno: String, sobreBase64: String) -> Unit)? = null,
+    /** Base64 del último sobre armado en este teléfono (prefill restore). */
+    ultimoSobreBase64: String? = null,
     estadoRespaldo: EstadoRespaldoUi? = null,
+    subiendoRespaldo: Boolean = false,
 ) {
     val dimens = RbTheme.dimens
     val alcance = rememberCoroutineScope()
     val esperando = cola.count { it.esperando }
+    var materialCuaderno by remember { mutableStateOf("") }
+    var sobrePegado by remember(ultimoSobreBase64) {
+        mutableStateOf(ultimoSobreBase64.orEmpty())
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
@@ -75,7 +94,7 @@ fun PantallaDeCola(
             onBack = onCerrar,
         )
 
-        if (cola.isEmpty() && onPrepararRespaldo == null) {
+        if (cola.isEmpty() && onPrepararRespaldo == null && onRestaurarRespaldo == null) {
             RbEmptyState(
                 title = "No hay ninguna esperando",
                 hint = "Todas las ventas que cobraste ya llegaron al sistema del negocio.",
@@ -94,16 +113,29 @@ fun PantallaDeCola(
                     RbCard(title = "Respaldo del día") {
                         Text(
                             text = "Arma un paquete con las ventas de este " +
-                                "teléfono. Se cifra con tu llave del cuaderno " +
-                                "antes de subir (cuando el cifrado esté listo).",
+                                "teléfono. Con las palabras de tu tarjeta se " +
+                                "cifra en el aparato; nosotros no las vemos.",
                             style = RbTheme.typography.body,
                             color = RbTheme.colors.textSecondary,
                         )
+                        RbTextField(
+                            value = materialCuaderno,
+                            onValueChange = { materialCuaderno = it },
+                            label = "Llave del cuaderno",
+                            placeholder = "12 palabras o 8 bloques",
+                            imeAction = ImeAction.Done,
+                            modifier = Modifier.padding(top = dimens.space2),
+                        )
                         RbButton(
-                            label = "Preparar respaldo",
-                            onClick = onPrepararRespaldo,
+                            label = if (subiendoRespaldo) {
+                                "Cifrando / enviando..."
+                            } else {
+                                "Preparar respaldo"
+                            },
+                            onClick = { onPrepararRespaldo(materialCuaderno) },
                             variant = RbButtonVariant.Secondary,
                             fillWidth = true,
+                            enabled = !subiendoRespaldo,
                             modifier = Modifier.padding(top = dimens.space2),
                         )
                         estadoRespaldo?.let { est ->
@@ -121,6 +153,45 @@ fun PantallaDeCola(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            if (onRestaurarRespaldo != null) {
+                item {
+                    RbCard(title = "Abrir un respaldo") {
+                        Text(
+                            text = "Si tenés el paquete cifrado y la llave del " +
+                                "cuaderno, se abre acá en el teléfono. " +
+                                "Nadie en la nube puede hacerlo por vos.",
+                            style = RbTheme.typography.body,
+                            color = RbTheme.colors.textSecondary,
+                        )
+                        RbTextField(
+                            value = materialCuaderno,
+                            onValueChange = { materialCuaderno = it },
+                            label = "Llave del cuaderno",
+                            placeholder = "12 palabras o 8 bloques",
+                            imeAction = ImeAction.Next,
+                            modifier = Modifier.padding(top = dimens.space2),
+                        )
+                        RbTextField(
+                            value = sobrePegado,
+                            onValueChange = { sobrePegado = it },
+                            label = "Paquete cifrado",
+                            placeholder = "Base64 del sobre (o el último preparado)",
+                            imeAction = ImeAction.Done,
+                            modifier = Modifier.padding(top = dimens.space2),
+                        )
+                        RbButton(
+                            label = "Abrir respaldo",
+                            onClick = {
+                                onRestaurarRespaldo(materialCuaderno, sobrePegado)
+                            },
+                            variant = RbButtonVariant.Secondary,
+                            fillWidth = true,
+                            modifier = Modifier.padding(top = dimens.space2),
+                        )
                     }
                 }
             }

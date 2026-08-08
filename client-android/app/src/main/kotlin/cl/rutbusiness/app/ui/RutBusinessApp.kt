@@ -127,6 +127,7 @@ private fun ConSesion(sesion: SessionRepository, estado: EstadoSesion.Activa) {
 
     ContenedorDeDestinos(
         tenantId = estado.me?.tenantId,
+        sesion = sesion,
     ) { destino ->
         when (destino) {
             Destino.Agente -> AssistRoute(sesion = sesion)

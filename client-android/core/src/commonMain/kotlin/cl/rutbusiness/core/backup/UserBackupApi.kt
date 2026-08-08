@@ -31,10 +31,49 @@ class UserBackupApi(private val api: ApiFactory) {
         }.exigirExito(api.baseUrl).body()
     }
 
+    /**
+     * Sube un [SobreCifradoV1] ya armado en el cliente.
+     * El server puede contestar `accepted: false` sin bucket - mensaje honesto.
+     */
+    suspend fun subirSobre(sobre: SobreCifradoV1): Resultado<RespuestaSubida> =
+        subir(
+            meta = metaWireDesdeSobre(sobre),
+            ciphertextBase64 = envelopeToBase64(sobre.envelopeBytes),
+        )
+
     suspend fun listar(): Resultado<List<MetaBackupWire>> = llamar(api) {
         api.http.get("${api.baseUrl}$USER_BACKUP_UPLOAD_PATH")
             .exigirExito(api.baseUrl)
             .body()
+    }
+}
+
+/** Meta de wire desde el sobre local (sin tocar la frase). */
+fun metaWireDesdeSobre(sobre: SobreCifradoV1): MetaBackupWire {
+    val m = sobre.meta
+    return MetaBackupWire(
+        tenantId = m.tenantId,
+        formatVersion = m.formatVersion,
+        ciphertextSha256Hex = m.ciphertextSha256Hex,
+        sizeBytes = m.sizeBytes,
+        uploadedAtUnix = m.uploadedAtUnix,
+        label = m.label,
+    )
+}
+
+/**
+ * Copy honesta de la respuesta de subida (nunca promete nube si accepted=false).
+ */
+fun mensajeTrasSubida(prep: PreparacionRespaldo, resp: RespuestaSubida): String {
+    val base = prep.mensaje
+    return when {
+        resp.accepted ->
+            "$base · Guardado en la nube (id ${resp.backupId ?: "ok"}). " +
+                "La llave del cuaderno sigue siendo tuya."
+        else ->
+            "$base · El server recibió el sobre cifrado pero " +
+                "aún no tiene bucket: ${resp.reason ?: "accepted=false"}. " +
+                "En este teléfono el cifrado ya está listo."
     }
 }
 

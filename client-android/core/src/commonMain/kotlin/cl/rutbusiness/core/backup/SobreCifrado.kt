@@ -13,10 +13,16 @@ package cl.rutbusiness.core.backup
  */
 
 const val FORMAT_VERSION: Int = 1
-const val KDF_ALG: String = "argon2id"
+/**
+ * KDF real en el cliente hoy. Argon2id sigue siendo el objetivo de producto
+ * (domain docs); el header del sobre dice **siempre** el algoritmo usado.
+ */
+const val KDF_ALG: String = "pbkdf2-hmac-sha256"
 const val AEAD_ALG: String = "aes-256-gcm"
+/** Solo aplica a Argon2id; en PBKDF2 se ignora (se serializa por compat). */
 const val KDF_MEMORY_KIB: Int = 65_536
-const val KDF_ITERATIONS: Int = 3
+/** PBKDF2 iterations (OWASP ≥ 210_000 para SHA-256). */
+const val KDF_ITERATIONS: Int = 210_000
 const val KDF_PARALLELISM: Int = 1
 
 /** Path documentado: `POST /api/v1/user-backup`. */

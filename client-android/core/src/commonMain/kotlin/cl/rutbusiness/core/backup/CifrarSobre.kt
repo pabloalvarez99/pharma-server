@@ -203,12 +203,8 @@ fun envelopeToBase64(envelope: ByteArray): String = Base64.encode(envelope)
 fun base64ToEnvelope(b64: String): ByteArray = Base64.decode(b64)
 
 /**
- * Material de frase/bloques → 32 bytes **provisional** (NO es Argon2id).
- *
- * Solo para tests de integración del AEAD y demos locales. El header debe
- * etiquetar `kdf` distinto de [KDF_ALG] si se usa esto en un sobre real.
- *
- * `SHA-256(salt || UTF-8(material))` — barato y determinista.
+ * Material de frase/bloques → 32 bytes vía SHA-256(salt||material).
+ * Solo tests de AEAD. **No** usar en sobre real (header mentiría).
  */
 fun derivarClaveProvisional(material: String, salt: ByteArray): ByteArray {
     require(salt.size == KDF_SALT_LEN)
@@ -216,5 +212,33 @@ fun derivarClaveProvisional(material: String, salt: ByteArray): ByteArray {
     return CryptoPlataforma.sha256(raw)
 }
 
-/** `true` cuando exista impl real de Argon2id con params v1. Hoy: false. */
+/**
+ * Frase o bloques del cuaderno → llave AES-256 (32 B) con PBKDF2-HMAC-SHA256.
+ *
+ * [salt] 16 bytes (se guardan en el header del sobre). Determinista: misma
+ * frase + mismo salt = misma llave (restore).
+ */
+fun derivarClaveDeMaterial(
+    material: MaterialRecuperacion,
+    salt: ByteArray,
+    iterations: Int = KDF_ITERATIONS,
+): ByteArray {
+    require(salt.size == KDF_SALT_LEN) { "salt ${KDF_SALT_LEN} bytes" }
+    require(iterations >= 100_000) { "iterations de producción >= 100k" }
+    val password = when (material) {
+        is MaterialRecuperacion.Frase -> material.unida()
+        is MaterialRecuperacion.Bloques -> material.unidos()
+    }
+    return CryptoPlataforma.pbkdf2HmacSha256(
+        password = password.encodeToByteArray(),
+        salt = salt,
+        iterations = iterations,
+        outLen = AES_KEY_LEN,
+    )
+}
+
+/** KDF usable en producción (PBKDF2). Argon2id = carril futuro. */
+const val KDF_LISTO: Boolean = true
+
+/** `true` cuando exista Argon2id nativo. Hoy: false (usamos PBKDF2). */
 const val ARGON2ID_LISTO: Boolean = false

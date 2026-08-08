@@ -5,10 +5,10 @@ import cl.rutbusiness.core.offline.VentaEnCola
 /**
  * Prepara un snapshot de la cola offline.
  *
- * Sin [claveAes32]: solo arma el JSON (no sube plaintext).
- * Con [claveAes32]: cifra AES-GCM (sobre v1) y deja el envelope listo para
- * `POST /api/v1/user-backup`. Argon2id (frase → clave) sigue pendiente;
- * la clave de 32 B la provee el caller (tests o KDF futuro).
+ * - Sin material ni clave: solo arma JSON (no sube plaintext).
+ * - Con [materialRecuperacion]: PBKDF2 → AES-GCM → sobre v1 listo para
+ *   `POST /api/v1/user-backup` (server puede devolver accepted:false sin bucket).
+ * - Con [claveAes32] (tests): cifra directo sin KDF.
  */
 data class PreparacionRespaldo(
     val snapshot: SnapshotBackupV1,
@@ -23,7 +23,7 @@ data class PreparacionRespaldo(
     val mensaje: String,
     /** `true` cuando hay algo que valga la pena respaldar (al menos 1 venta). */
     val hayContenido: Boolean,
-    /** Sobre cifrado si se pasó [claveAes32]; si no, null. */
+    /** Sobre cifrado si hubo material/clave; si no, null. */
     val sobre: SobreCifradoV1? = null,
 )
 
@@ -35,13 +35,15 @@ fun prepararRespaldoDesdeCola(
     cola: List<VentaEnCola>,
     createdAtUnix: Long,
     rubro: String? = null,
-    /**
-     * Si true y no hay clave, el mensaje dice "listo para cifrar".
-     * Si hay [claveAes32], se cifra de verdad.
-     */
-    cifradoListo: Boolean = ARGON2ID_LISTO,
-    /** Llave AES-256 (32 B). Null = no cifrar todavía. */
+    /** @deprecated Usar material + KDF. */
+    cifradoListo: Boolean = KDF_LISTO,
+    /** Llave AES-256 (32 B) ya derivada. Null = no cifrar salvo material. */
     claveAes32: ByteArray? = null,
+    /**
+     * Frase o bloques del cuaderno. Si hay ventas, se deriva la llave con
+     * PBKDF2 y se cifra. No se guarda ni se manda al server.
+     */
+    materialRecuperacion: MaterialRecuperacion? = null,
 ): Result<PreparacionRespaldo> {
     val tenant = tenantId.ifBlank { "local" }
     val snap = armarSnapshotDesdeCola(
@@ -55,14 +57,24 @@ fun prepararRespaldoDesdeCola(
     val hay = cola.isNotEmpty()
 
     var sobre: SobreCifradoV1? = null
-    if (claveAes32 != null && hay) {
+    if (hay && materialRecuperacion != null) {
+        val salt = CryptoPlataforma.randomBytes(KDF_SALT_LEN)
+        val key = derivarClaveDeMaterial(materialRecuperacion, salt)
+        sobre = cifrarSobreV1(
+            key = key,
+            plaintext = bytes,
+            tenantId = tenant,
+            uploadedAtUnix = createdAtUnix,
+            salt = salt,
+            kdfLabel = KDF_ALG,
+        ).getOrElse { return Result.failure(it) }
+    } else if (hay && claveAes32 != null) {
         sobre = cifrarSobreV1(
             key = claveAes32,
             plaintext = bytes,
             tenantId = tenant,
             uploadedAtUnix = createdAtUnix,
-            // Si Argon2 no está, no mentimos en el header.
-            kdfLabel = if (ARGON2ID_LISTO) KDF_ALG else "raw-key",
+            kdfLabel = "raw-key",
         ).getOrElse { return Result.failure(it) }
     }
 
@@ -72,15 +84,14 @@ fun prepararRespaldoDesdeCola(
                 "Cuando cobres sin señal, aparecen acá."
         sobre != null ->
             "Cifrado listo: ${cola.size} venta(s) · sobre ${sobre.envelopeBytes.size} bytes " +
-                "(AES-GCM). Aún falta el bucket para subirlo. " +
+                "(PBKDF2 + AES-GCM). Aún falta el bucket para subirlo. " +
                 "La llave del cuaderno sigue siendo tuya."
         cifradoListo ->
-            "Listo para cifrar y subir: ${cola.size} venta(s), ${bytes.size} bytes. " +
-                "La llave del cuaderno sigue siendo tuya."
+            "Escribí las 12 palabras o los 8 bloques de tu tarjeta y tocá " +
+                "Preparar de nuevo. ${cola.size} venta(s), ${bytes.size} bytes listos."
         else ->
             "Paquete armado: ${cola.size} venta(s) · ${bytes.size} bytes. " +
-                "AES-GCM ya está en el cliente; falta Argon2id (frase→llave) " +
-                "y el bucket. **No se sube nada en claro.**"
+                "**No se sube nada en claro.**"
     }
     return Result.success(
         PreparacionRespaldo(
