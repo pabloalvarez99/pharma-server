@@ -138,7 +138,7 @@ static PACKS: &[RubroPack] = &[
                 kind: "money",
             },
         ],
-        seed_vertical: None,
+        seed_vertical: Some("feria"),
         coming_soon: &[
             "Venta por peso en el celular",
             "Recordatorios de quién te debe",
@@ -478,6 +478,7 @@ mod tests {
             "tienda",
             "servicios",
             "restaurant",
+            "feria",
         ];
         for p in PACKS {
             if let Some(sv) = p.seed_vertical {

@@ -438,10 +438,10 @@ Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz)
   tu protocolo.`) → tomar siguiente tarea del status board. Re-entra barato (charter
   corto + status board + solo sus archivos), sin re-derivar el repo. Regla: PR abierto
   o ~80k tokens → `/clear` + re-bootstrap.
-- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; farmacia = beachhead, no
-  límite) → [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
-  Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
-  `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
+- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; **feria = foco
+  adopción 2026-08**, farmacia = vertical profundo, no beachhead de producto) →
+  [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+  Datos demo: `pharma seed-demo --tenant <slug> --vertical feria|pharmacy|minimarket`.
 
 ### Catálogo de rubros (onboarding "elige tu rubro")
 
@@ -449,9 +449,9 @@ Al primer inicio el operador elige su **rubro** de un catálogo (no solo
 farmacia/minimarket). Guardar en `admin_setting business.vertical`. La UI gatea
 features por rubro (ej: recetas/controlados solo farmacia). Detalle + plan en
 [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md). Catálogo v1
-(taxonomía reusada de **DSS**): `farmacia`·`minimarket`·`restaurant`·`cafe`·`tienda`·
-`belleza`·`servicios`·`otro`. Pack seed hoy: farmacia ✅, minimarket ✅; resto se
-agrega al validar el rubro (disciplina anti-framework). Valor interno EN, UI ES
+(taxonomía reusada de **DSS**): `feria`·`farmacia`·`minimarket`·`restaurant`·`cafe`·
+`tienda`·`belleza`·`servicios`·`otro`. Pack seed: feria ✅, farmacia ✅, minimarket ✅;
+resto se agrega al validar el rubro. Valor interno EN o clave de catálogo, UI ES
 (mapear es→en al llamar seed-demo).
 
 ### Integración DSS (storefront) + cliente universal cross-platform

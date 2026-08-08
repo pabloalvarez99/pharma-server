@@ -97,6 +97,9 @@ pub enum SeedVertical {
     /// insumos físicos en el mismo catálogo. La señal por-ítem de "es físico" es
     /// `batch_code` no vacío.
     Restaurant,
+    /// Feria / calle (ADR-0022): verdura, fruta, atados. Sin clínica. Stock
+    /// blando (nombres vendibles); lotes con vencimiento corto tipo puesto.
+    Feria,
 }
 
 impl SeedVertical {
@@ -113,8 +116,9 @@ impl SeedVertical {
             "restaurant" | "restaurante" | "restorant" | "comida" | "food" | "cocina" => {
                 Ok(Self::Restaurant)
             }
+            "feria" | "calle" | "puesto" | "ambulante" => Ok(Self::Feria),
             other => Err(DomainError::Invalid(format!(
-                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda|servicios|restaurant)"
+                "vertical desconocido: «{other}» (use pharmacy|minimarket|cafe|tienda|servicios|restaurant|feria)"
             ))),
         }
     }
@@ -127,6 +131,7 @@ impl SeedVertical {
             Self::Tienda => "tienda",
             Self::Servicios => "servicios",
             Self::Restaurant => "restaurant",
+            Self::Feria => "feria",
         }
     }
 }
@@ -269,6 +274,193 @@ fn tienda_suppliers() -> Vec<DemoSupplier> {
             rut: "78.221.770-K",
             contact_name: "Ventas Librería Norte",
             contact_phone: "+56 9 7012 3456",
+        },
+    ]
+}
+
+/// Terminal Lo Valledor / mayorista de feria (demo).
+fn feria_suppliers() -> Vec<DemoSupplier> {
+    vec![
+        DemoSupplier {
+            name: "Mayorista Lo Valledor demo",
+            rut: "76.100.200-1",
+            contact_name: "Ventas feria",
+            contact_phone: "+56 9 8123 4567",
+        },
+        DemoSupplier {
+            name: "Huerta Central demo",
+            rut: "76.100.201-K",
+            contact_name: "Pedidos huerta",
+            contact_phone: "+56 9 8765 4321",
+        },
+        DemoSupplier {
+            name: "Frutas del Norte demo",
+            rut: "76.100.202-8",
+            contact_name: "Despacho fruta",
+            contact_phone: "+56 9 8456 7890",
+        },
+    ]
+}
+
+/// Pack feria: lo que se grita en el puesto. Nombres cortos que el agente
+/// entiende ("tomates", "cilantro"). Sin clínica. Precios en pesos del día.
+fn feria_pack() -> Vec<SeedItem> {
+    vec![
+        SeedItem {
+            name: "Tomates",
+            barcode: "7806000100011",
+            price: 2000,
+            cost: 900,
+            stock: 80,
+            expiry_in_days: 5,
+            batch_code: "TOM-PUESTO",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Cilantro",
+            barcode: "7806000100028",
+            price: 500,
+            cost: 200,
+            stock: 40,
+            expiry_in_days: 3,
+            batch_code: "CIL-PUESTO",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("atado"),
+        },
+        SeedItem {
+            name: "Papa",
+            barcode: "7806000100035",
+            price: 1200,
+            cost: 500,
+            stock: 120,
+            expiry_in_days: 14,
+            batch_code: "PAP-PUESTO",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Cebolla",
+            barcode: "7806000100042",
+            price: 900,
+            cost: 350,
+            stock: 60,
+            expiry_in_days: 20,
+            batch_code: "CEB-PUESTO",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Limón",
+            barcode: "7806000100059",
+            price: 1500,
+            cost: 600,
+            stock: 50,
+            expiry_in_days: 10,
+            batch_code: "LIM-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Palta",
+            barcode: "7806000100066",
+            price: 3500,
+            cost: 1800,
+            stock: 30,
+            expiry_in_days: 4,
+            batch_code: "PAL-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("unidad"),
+        },
+        SeedItem {
+            name: "Lechuga",
+            barcode: "7806000100073",
+            price: 800,
+            cost: 300,
+            stock: 25,
+            expiry_in_days: 3,
+            batch_code: "LEC-PUESTO",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("unidad"),
+        },
+        SeedItem {
+            name: "Zanahoria",
+            barcode: "7806000100080",
+            price: 1000,
+            cost: 400,
+            stock: 45,
+            expiry_in_days: 12,
+            batch_code: "ZAN-PUESTO",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Plátano",
+            barcode: "7806000100097",
+            price: 1100,
+            cost: 450,
+            stock: 55,
+            expiry_in_days: 6,
+            batch_code: "PLA-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Manzana",
+            barcode: "7806000100103",
+            price: 1800,
+            cost: 700,
+            stock: 40,
+            expiry_in_days: 15,
+            batch_code: "MAN-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Zapallo",
+            barcode: "7806000100110",
+            price: 800,
+            cost: 300,
+            stock: 35,
+            expiry_in_days: 25,
+            batch_code: "ZAP-PUESTO",
+            supplier_idx: 0,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("kg"),
+        },
+        SeedItem {
+            name: "Perejil",
+            barcode: "7806000100127",
+            price: 400,
+            cost: 150,
+            stock: 30,
+            expiry_in_days: 3,
+            batch_code: "PER-PUESTO",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("atado"),
         },
     ]
 }
@@ -1271,6 +1463,7 @@ fn pack_for(v: SeedVertical) -> Vec<SeedItem> {
         SeedVertical::Tienda => tienda_pack(),
         SeedVertical::Servicios => servicios_pack(),
         SeedVertical::Restaurant => restaurant_pack(),
+        SeedVertical::Feria => feria_pack(),
     }
 }
 
@@ -1282,6 +1475,7 @@ fn suppliers_for(v: SeedVertical) -> Vec<DemoSupplier> {
         SeedVertical::Tienda => tienda_suppliers(),
         SeedVertical::Servicios => servicios_suppliers(),
         SeedVertical::Restaurant => restaurant_suppliers(),
+        SeedVertical::Feria => feria_suppliers(),
     }
 }
 
@@ -1296,6 +1490,7 @@ fn all_demo_supplier_names() -> Vec<String> {
         .chain(tienda_suppliers())
         .chain(servicios_suppliers())
         .chain(restaurant_suppliers())
+        .chain(feria_suppliers())
         .map(|s| s.name.to_string())
         .collect()
 }
@@ -1650,14 +1845,15 @@ mod tests {
     use super::*;
 
     /// Todos los verticales con pack demo. Fuente única para los tests que
-    /// barren los cuatro rubros.
-    const ALL_VERTICALS: [SeedVertical; 6] = [
+    /// barren los rubros.
+    const ALL_VERTICALS: [SeedVertical; 7] = [
         SeedVertical::Pharmacy,
         SeedVertical::Minimarket,
         SeedVertical::Cafe,
         SeedVertical::Tienda,
         SeedVertical::Servicios,
         SeedVertical::Restaurant,
+        SeedVertical::Feria,
     ];
 
     #[test]
@@ -1702,7 +1898,24 @@ mod tests {
             SeedVertical::parse("  peluquería ").unwrap(),
             SeedVertical::Servicios
         );
+        assert_eq!(SeedVertical::parse("feria").unwrap(), SeedVertical::Feria);
+        assert_eq!(SeedVertical::parse("Calle").unwrap(), SeedVertical::Feria);
+        assert_eq!(SeedVertical::parse("puesto").unwrap(), SeedVertical::Feria);
         assert!(SeedVertical::parse("casino").is_err());
+    }
+
+    #[test]
+    fn feria_pack_is_produce_no_clinical() {
+        let pack = feria_pack();
+        assert!(pack.len() >= 6, "feria necesita un puesto creíble");
+        for item in &pack {
+            assert!(item.laboratory.is_none(), "{} sin laboratorio", item.name);
+            assert!(item.active_ingredient.is_none());
+            assert!(!item.batch_code.is_empty());
+        }
+        let names: Vec<&str> = pack.iter().map(|i| i.name).collect();
+        assert!(names.contains(&"Tomates"));
+        assert!(names.contains(&"Cilantro"));
     }
 
     #[test]
