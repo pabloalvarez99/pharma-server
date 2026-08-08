@@ -1,0 +1,26 @@
+-- pharma-server 0044: índice de nombre para ordenar el catálogo sin escanearlo.
+--
+-- `GET /api/v1/products` ordena por `name`. SurrealDB 2.6 sólo puede servir un
+-- ORDER BY desde un índice cuando el campo ordenado es la PRIMERA columna del
+-- índice (`idx/planner/tree.rs::eval_order` exige `id_col == 0`). Todos los
+-- índices de `product` empiezan por `tenant`, así que ninguno calificaba: el
+-- planner elegía `product_tenant_active`, leía las 3.020 filas del tenant con
+-- sus valores completos y recién ahí se quedaba con 40 (colector
+-- `MemoryOrderedLimit`). Medido en release con 3.000 productos: 101 ms de
+-- consulta para devolver 40 filas.
+--
+-- Con este índice el planner itera el rango de nombres ya ordenado y corta al
+-- llegar a 40 (ver `catalog/repo.rs::list_products_opts`): 101 ms -> 2,5 ms,
+-- mismas filas y mismo orden.
+--
+-- No lleva `tenant`: si lo llevara, `name` quedaría en la columna 1 y el
+-- planner volvería a ignorarlo. El filtro de tenant se evalúa por fila durante
+-- el recorrido, así que el resultado sigue siendo estrictamente tenant-scoped;
+-- en una instalación con varios tenants el recorrido visita filas ajenas y las
+-- descarta, costo proporcional a la cantidad de tenants (una instalación es un
+-- negocio, no un SaaS multi-cliente).
+--
+-- Sólo agrega un índice: no toca el esquema ni los datos. Un tenant vivo lo
+-- absorbe al arrancar (3.000 productos = ~75 ms de construcción) sin reimportar.
+
+DEFINE INDEX product_name ON product FIELDS name;

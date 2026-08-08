@@ -475,7 +475,7 @@ pub async fn barcodes_of_products(
 pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<i64> {
     let mut r = db
         .query(
-            "SELECT math::sum(stock) AS total FROM product \
+            "SELECT math::sum(stock) AS total FROM product WITH INDEX product_tenant_parent \
              WHERE tenant = $t AND parent_id = $p AND active = true \
              GROUP ALL",
         )
@@ -500,9 +500,14 @@ pub async fn children_agg_by_parents(
     if parents.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
+    // `WITH INDEX` obligatorio: entre `product_tenant_parent` y
+    // `product_tenant_active` el planner elige recorriendo un HashMap, así que
+    // la misma consulta a veces salía por `active` y leía el catálogo entero
+    // (medido: 0,3 ms con el índice correcto, 58 ms con el otro, alternando).
+    // Esta consulta corre en CADA página de productos.
     let mut r = db
         .query(
-            "SELECT parent_id, stock FROM product \
+            "SELECT parent_id, stock FROM product WITH INDEX product_tenant_parent \
              WHERE tenant = $t AND parent_id INSIDE $ps AND active = true",
         )
         .bind(("t", tenant.clone()))
@@ -629,10 +634,13 @@ pub async fn list_variants(
     tenant: &Thing,
     parent: &Thing,
 ) -> DomainResult<Vec<ProductDto>> {
+    // Mismo empate de índices que en `children_agg_by_parents`: sin pinear, el
+    // planner a veces recorre `product_tenant_active` y lee todo el catálogo
+    // para devolver las (pocas) variantes de un padre.
     let mut r = db
         .query(
-            "SELECT * FROM product WHERE tenant = $t AND parent_id = $p \
-             AND active = true ORDER BY name",
+            "SELECT * FROM product WITH INDEX product_tenant_parent \
+             WHERE tenant = $t AND parent_id = $p AND active = true ORDER BY name",
         )
         .bind(("t", tenant.clone()))
         .bind(("p", parent.clone()))
@@ -659,8 +667,11 @@ pub async fn delete_barcodes_of_product(
 pub async fn has_active_variants(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<bool> {
     let mut r = db
         .query(
-            "SELECT id FROM product WHERE tenant = $t AND parent_id = $p \
-             AND active = true LIMIT 1",
+            // Camino del escáner del POS (`find_by_barcode`): mismo empate de
+            // índices, mismo riesgo de leer el catálogo entero para responder
+            // "¿tiene variantes?".
+            "SELECT id FROM product WITH INDEX product_tenant_parent \
+             WHERE tenant = $t AND parent_id = $p AND active = true LIMIT 1",
         )
         .bind(("t", tenant.clone()))
         .bind(("p", parent.clone()))
@@ -748,10 +759,40 @@ pub async fn list_products_opts(
     if !include_variants {
         conds.push("parent_id = NONE".to_string());
     }
+    // Elegir el índice a mano, no dejárselo al planner.
+    //
+    // Cada condición de acá matchea un índice compuesto distinto que arranca
+    // con `tenant` (`product_tenant_active`, `product_tenant_parent`,
+    // `product_tenant_stock`, …). SurrealDB 2.6 desempata recorriendo un
+    // HashMap (`idx::planner::tree::CompoundIndexes`), así que la MISMA
+    // consulta sale con un plan distinto entre corridas. Medido en release con
+    // 3.000 productos: la página de stock bajo daba 2 ms con
+    // `product_tenant_stock` y 84-140 ms cuando le tocaba
+    // `product_tenant_active` — que ignora el filtro selectivo, lee las 3.000
+    // filas y recién ahí ordena en memoria. Alternaba corrida a corrida.
+    //
+    // Pinear el índice del filtro más selectivo vuelve el plan determinístico.
+    // La página sin filtros (el camino caliente del POS) usa `product_name`
+    // (migración 0044): recorre el índice ya ordenado y corta en el LIMIT sin
+    // ordenar nada en memoria — 90 ms → 2,1 ms.
+    let with_clause = if f.search.is_some() {
+        // `CONTAINS` no lo sirve ningún índice: el recorrido de tabla es el
+        // plan real y es estable. Pinear acá no ayudaría.
+        ""
+    } else if f.low_stock.is_some() {
+        " WITH INDEX product_tenant_stock"
+    } else if f.category.is_some() {
+        " WITH INDEX product_tenant_category"
+    } else {
+        // Página sin filtro selectivo: el camino caliente de la pantalla
+        // Cobrar del POS (`?active=true&limit=40`).
+        " WITH INDEX product_name"
+    };
     let limit = f.limit.unwrap_or(100).min(500);
     let offset = f.offset.unwrap_or(0);
     let q = format!(
-        "SELECT * FROM product WHERE {} ORDER BY name LIMIT {} START {}",
+        "SELECT * FROM product{} WHERE {} ORDER BY name LIMIT {} START {}",
+        with_clause,
         conds.join(" AND "),
         limit,
         offset
@@ -780,8 +821,13 @@ pub async fn list_products_opts(
 }
 
 pub async fn get_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<Option<ProductDto>> {
+    // `FROM $id` es lectura directa por clave. Con `FROM product WHERE id = $id`
+    // el planner no reconoce el id como clave: sale por `product_tenant_active`
+    // y recorre el catálogo hasta encontrarlo (medido: 10 ms con 3.000
+    // productos, contra 0,1 ms por clave). El `WHERE tenant` se mantiene: sin
+    // él un id de otro tenant sería legible.
     let mut r = db
-        .query("SELECT * FROM product WHERE id = $id AND tenant = $t LIMIT 1")
+        .query("SELECT * FROM $id WHERE tenant = $t")
         .bind(("id", id.clone()))
         .bind(("t", tenant.clone()))
         .await?;
