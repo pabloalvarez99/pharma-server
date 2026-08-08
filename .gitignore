@@ -40,3 +40,8 @@ dist-updater/
 
 # Sandbox smoke artifacts (logs, install.log, verdicts) — transient, never committed.
 installer/sandbox/out/
+
+# Solo esta maquina: notas, scratch, rescates y credenciales. NUNCA a git.
+# Estaba documentado en el README como "gitignored" pero la entrada no existia:
+# un `git add .` se llevaba local/credenciales-rescatadas/ al historial.
+local/
