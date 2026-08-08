@@ -22,12 +22,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +75,8 @@ fun TarjetaRescate(
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val clipboard = LocalClipboardManager.current
+    var copiado by remember { mutableStateOf(false) }
     val qrPayload = remember(clave, tenantSlug) {
         payloadQrRescate(tenantSlug, clave.bloques)
     }
@@ -234,14 +241,28 @@ fun TarjetaRescate(
                 }
             }
 
-            // Página de texto lista para copiar al cuaderno / nota (sin PDF
-            // ni lib de QR todavía). Mismas palabras + payload del código.
+            // Página de texto lista para copiar al cuaderno / nota.
+            // El PDF llega después; el portapapeles cubre day-1.
             RbCard(title = "Texto para el cuaderno (una página)") {
                 Text(
                     text = textoPagina,
                     style = RbTheme.typography.label,
                     color = colors.textPrimary,
                     fontFamily = FontFamily.Monospace,
+                )
+                RbButton(
+                    label = if (copiado) {
+                        "Copiado. Pegalo en una nota y anotalo"
+                    } else {
+                        "Copiar texto al portapapeles"
+                    },
+                    onClick = {
+                        clipboard.setText(AnnotatedString(textoPagina))
+                        copiado = true
+                    },
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = dimens.space2),
                 )
             }
 
