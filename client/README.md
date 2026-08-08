@@ -68,7 +68,8 @@ código de UI aparte** y el shim `src/web-transport/` NO se usa acá — en móv
 
 | Pieza | Versión verificada | Cómo |
 |---|---|---|
-| JDK | Temurin 17.0.19 | `JAVA_HOME` debe apuntar al JDK |
+| JDK | Temurin 17.0.19 / MS OpenJDK 17.0.20 | `JAVA_HOME` debe apuntar al JDK |
+| **MSVC Build Tools** | VS 2022 BuildTools 17.14 + workload VCTools | ver "El linker MSVC" más abajo — sin esto no compila **nada** |
 | Android SDK cmdline-tools | latest | `sdkmanager` en `$ANDROID_HOME/cmdline-tools/latest/bin` |
 | platform + build-tools | android-34 / 34.0.0 | `sdkmanager "platforms;android-34" "build-tools;34.0.0"` |
 | **NDK** | 27.2.12479018 | `sdkmanager "ndk;27.2.12479018"` — sin esto `tauri android init` falla |
@@ -78,14 +79,62 @@ código de UI aparte** y el shim `src/web-transport/` NO se usa acá — en móv
 Variables de entorno (permanentes, `setx` o Panel de control):
 
 ```powershell
-setx ANDROID_HOME "C:\Users\<user>\Android\Sdk"
-setx NDK_HOME     "C:\Users\<user>\Android\Sdk\ndk\27.2.12479018"
+# Si el SDK vino con Android Studio el path real es AppData\Local, no ~\Android
+setx ANDROID_HOME "C:\Users\<user>\AppData\Local\Android\Sdk"
+setx NDK_HOME     "C:\Users\<user>\AppData\Local\Android\Sdk\ndk\27.2.12479018"
 setx JAVA_HOME    "C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot"
 ```
 
 `tauri android init` aborta con `failed to ensure Android environment: Skipping
 Android Studio command line tools installation` cuando **falta `NDK_HOME`** — el
 mensaje habla de cmdline-tools pero la causa real es el NDK.
+
+### El linker MSVC (falla que no menciona Android)
+
+Cross-compilar a Android igual compila los **build scripts y proc-macros para el
+host**, y el host es `x86_64-pc-windows-msvc`. Sin MSVC el build muere con:
+
+```
+error: linker `link.exe` not found
+```
+
+Instalar (también lo necesita `cargo run -p api`, así que no es deuda del carril
+móvil):
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools `
+  --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+`where link.exe` **nunca** responde: `link.exe` sólo entra al PATH dentro de un
+shell de `vcvars64.bat`. No es síntoma de nada — rustc lo resuelve solo vía
+vswhere. Verificar así en su lugar:
+
+```powershell
+"fn main(){}" | Set-Content probe.rs; rustc probe.rs   # linkea = MSVC OK
+```
+
+### `cargo` directo al target Android no funciona
+
+`cargo build --target x86_64-linux-android` falla con
+`failed to find tool "x86_64-linux-android-clang"`: quien inyecta CC/AR/linker
+del NDK es el wrapper. Siempre `npm run android:build` / `android:dev`, nunca
+`cargo` a mano.
+
+### El APK sale sin firmar
+
+`tauri android build --apk` deja `app-universal-release-unsigned.apk`, y
+`adb install` lo rechaza. Para probar en emulador, firmar con el debug keystore:
+
+```powershell
+$bt = "$env:ANDROID_HOME\build-tools\34.0.0"
+& "$bt\zipalign.exe" -p -f 4 app-universal-release-unsigned.apk aligned.apk
+& "$bt\apksigner.bat" sign --ks "$env:USERPROFILE\.android\debug.keystore" `
+  --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android `
+  --out rutbusiness-signed.apk aligned.apk
+```
+
+Para Play Store va keystore propio, no el de debug.
 
 ### Correr en emulador
 
@@ -101,12 +150,24 @@ npm run android:dev
 
 `npm run android:build` corta el APK (`--apk`; usar `--aab` para Play Store).
 
+`npm run android:build -- --target x86_64` corta un solo ABI (el del emulador) y
+tarda la mitad; sin `--target` compila los 4.
+
+Verificado 2026-08-06 (AVD `rutbusiness`, android-34 google_apis x86_64): APK
+x86_64 de **17.5 MB** en **10m35s** en frío; login contra `10.0.2.2:8080` y POS
+listando el seed `minimarket`.
+
 **Aceleración por hardware (Windows)**: el emulador x86_64 necesita **WHPX**
 (feature `HypervisorPlatform`). Si en la máquina está Hyper-V activo pero WHPX
-apagado, el emulador no arranca. Verificar y activar (requiere **reboot**):
+apagado, el emulador no arranca. Chequeo rápido, sin elevación:
 
 ```powershell
-Get-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform   # State
+& "$env:ANDROID_HOME\emulator\emulator-check.exe" accel   # "WHPX … installed and usable"
+```
+
+Si no está, activarlo pide consola elevada y **reboot**:
+
+```powershell
 Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
 ```
 
@@ -121,6 +182,38 @@ escribir:
 ```
 http://10.0.2.2:8095        # server local del PC en el puerto 8095
 ```
+
+El botón **Probar conexión** de la pantalla de login confirma la ruta antes de
+tipear credenciales: verde "Servidor accesible" = el `10.0.2.2` resuelve.
+
+Levantar el server para esta prueba (desde la raíz del worktree):
+
+```powershell
+$env:PHARMA_ALLOW_INSECURE_JWT = "1"   # dev: el secreto JWT es el placeholder
+$env:PHARMA__DB__PATH = "<worktree>\data\surreal"
+cargo run -p api
+```
+
+`PHARMA__DB__PATH` **absoluto no es opcional**: con path relativo el server lo
+ancla a `C:\ProgramData\PharmaServer\data\surreal` (dir de instalación) y abre
+una base vacía distinta de la que sembró el CLI — el login da "Credenciales
+inválidas" con el usuario recién creado. El log lo dice:
+`db path anchored to install data dir`.
+
+Datos y usuario para la prueba:
+
+```powershell
+cargo run -p cli -- migrate
+cargo run -p cli -- tenant-create "Principal" --slug principal
+cargo run -p cli -- seed-demo --tenant principal --vertical minimarket
+$env:PHARMA_PASSWORD = "<pass>"        # nunca commitear el valor
+cargo run -p cli -- user-create --tenant principal --email pos@principal.cl --roles owner
+```
+
+El campo **SUCURSAL** de la pantalla de login es el slug del tenant (default
+`principal`). Crear los usuarios **antes** de arrancar el server: el CLI y el
+server abren handles separados de la misma base embebida y el server no ve
+escrituras posteriores a su arranque.
 
 `localhost:8095` da "no se pudo conectar". En **teléfono físico** en la misma
 WiFi, la URL es la IP LAN del server (ej. `http://192.168.1.20:8095`) y el
