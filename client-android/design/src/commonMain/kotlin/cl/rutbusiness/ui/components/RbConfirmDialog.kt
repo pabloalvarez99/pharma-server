@@ -1,0 +1,117 @@
+package cl.rutbusiness.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbHeading
+
+/**
+ * A confirmation dialog.
+ *
+ * Ported from `.modal` / `.modal-confirm` in `styles.css`, with the parts that
+ * would break on the reference device removed:
+ *
+ * - **No `backdrop-filter: blur(4px)`.** A full-screen blur is a per-frame GPU
+ *   pass, and this is a 2 GB device. A plain scrim separates the layers just as
+ *   well.
+ * - **No `width: min(420px, 100%)` equivalent as a fixed size.** The dialog
+ *   fills the available width minus a gutter, so at 200% scale it has room.
+ * - **The body scrolls.** This is the one place a font scale can genuinely run
+ *   out of screen: a two-line question plus two 56dp buttons at 200% is taller
+ *   than a 720p phone. Scrolling the body keeps the buttons reachable instead
+ *   of pushing them off the bottom, which is the "botón inalcanzable" failure
+ *   the acceptance criteria name.
+ * - **Buttons stack vertically**, full width. A side-by-side pair at 200% gives
+ *   each label about eight characters before it wraps into a mess, and stacked
+ *   full-width targets are easier to hit anyway.
+ *
+ * The destructive action is the *second* button, below cancel. Putting the
+ * irreversible one under the thumb's resting position is how accidents happen.
+ *
+ * @param destructive paints the confirm button as [RbButtonVariant.Destructive].
+ *   Use it whenever the action cannot be undone - anulando una venta, borrando
+ *   un producto.
+ */
+@Composable
+fun RbConfirmDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    cancelLabel: String = "Cancelar",
+    destructive: Boolean = false,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.scrim)
+                .padding(dimens.space3),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.border, colors.outlineStrong, shape)
+                    .verticalScroll(rememberScrollState())
+                    .padding(dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            ) {
+                Text(
+                    text = title,
+                    style = RbTheme.typography.heading,
+                    color = colors.textPrimary,
+                    modifier = Modifier.rbHeading(),
+                )
+                Text(
+                    text = message,
+                    style = RbTheme.typography.body,
+                    color = colors.textSecondary,
+                )
+
+                RbButton(
+                    label = cancelLabel,
+                    onClick = onDismiss,
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                )
+                RbButton(
+                    label = confirmLabel,
+                    onClick = onConfirm,
+                    variant = if (destructive) {
+                        RbButtonVariant.Destructive
+                    } else {
+                        RbButtonVariant.Primary
+                    },
+                    fillWidth = true,
+                )
+            }
+        }
+    }
+}

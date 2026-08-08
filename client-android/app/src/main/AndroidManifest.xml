@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        Impresora térmica de boleta por Bluetooth.
+
+        Dos caminos, porque el aparato objetivo es viejo y puede estar de
+        cualquiera de los dos lados: hasta Android 11 (API 30) el permiso es
+        BLUETOOTH y se concede al instalar; desde Android 12 (API 31) es
+        BLUETOOTH_CONNECT y hay que pedirlo en pantalla. `maxSdkVersion` en el
+        viejo evita pedirle a Android 12+ un permiso que ahí ya no existe.
+
+        BLUETOOTH_SCAN NO se declara, a propósito: es el permiso de *descubrir*
+        aparatos, y la app nunca escanea — sólo lee las impresoras que el
+        teléfono ya tiene emparejadas desde los ajustes del sistema. Pedirlo
+        mostraría "buscar dispositivos cercanos" en una app de boletas, que es
+        exactamente la clase de permiso que hace desconfiar; y no escanear es
+        además lo que mantiene la radio dormida en un teléfono con poca batería.
+
+        ACCESS_FINE_LOCATION tampoco: sólo hace falta para descubrir, nunca para
+        conectarse a algo ya emparejado.
+
+        La impresora es opcional: `required="false"` para que la app siga
+        instalándose en un teléfono sin radio Bluetooth.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <!--
+        Escáner de código de barras. El permiso se pide en el momento en que la
+        cajera toca "Escanear", nunca al abrir la app.
+
+        `required="false"` a propósito: sin eso Google Play esconde la app de
+        todo aparato sin cámara, y cobrar tipeando el código funciona igual. La
+        cámara suma, no condiciona.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <application
+        android:name=".RutBusinessApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RutBusiness">
+
+        <!--
+            `windowSoftInputMode` lleva dos cosas y las dos hacen falta.
+
+            `adjustResize` es el que hace que el teclado empuje el contenido en
+            vez de taparlo, y de él dependen los `imePadding()` de las pantallas
+            con campos de plata.
+
+            `stateHidden` se sumó porque sin él Android **restaura** el teclado
+            que estaba abierto la vez anterior: la app se abría con medio panel
+            tapado por las teclas. En la pantalla del agente eso esconde
+            justamente las sugerencias tocables, que son lo único que la dueña
+            tiene para empezar sin escribir nada.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.RutBusiness"
+            android:windowSoftInputMode="adjustResize|stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
