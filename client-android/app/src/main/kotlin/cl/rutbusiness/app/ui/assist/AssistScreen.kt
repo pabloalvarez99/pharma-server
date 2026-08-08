@@ -259,7 +259,7 @@ private val SUGERENCIAS = listOf(
  */
 private val SUGERENCIAS_FERIA = listOf(
     "Vendí 2 kg de tomates",
-    "Don Juan debe 5000",
+    "Anota 2 kg de tomates fiado a Don Juan",
     "¿Cuánto vendí hoy?",
     "Fiado 1 atado de cilantro a doña Ana",
     "¿Quién me debe plata?",

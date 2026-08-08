@@ -966,6 +966,13 @@ pub fn parse_action(question: &str) -> ActionParse {
         return parsed;
     }
 
+    // Feria notebook form: "Don Juan debe 5000" / "me debe 5000 don Juan".
+    // Not a full sale (no product) — nudge to the fiar_venta shape the ERP
+    // can execute. Before abono so "debe" is not confused with "pagó".
+    if let Some(parsed) = parse_deuda_feria_nudge(&q, question) {
+        return parsed;
+    }
+
     // Fiado payment: "abónale 5000 a doña Ana", "doña Ana me pagó 3000". Gated
     // on a word-initial "abon*" cue (so "jabón" never trips it) or the "me pagó"
     // form — NEVER on a bare "pago", which collides with the read intents
@@ -1858,6 +1865,80 @@ fn has_fiado_cue(q: &str) -> bool {
         .any(|w| w.starts_with("fiad") || FIAR_VERBS.contains(&w))
         || q.contains("a cuenta")
         || q.contains("la libreta")
+}
+
+/// Feria notebook: "Don Juan debe 5000" — name + debe + money, no product.
+/// We refuse to invent a SKU; we teach the full fiar_venta phrase instead.
+fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
+    // Questions stay on the read path ("¿quién me debe?").
+    if q.starts_with("quien")
+        || q.starts_with("cuanto")
+        || q.starts_with("cuánt")
+        || q.contains("quien me debe")
+        || q.contains("cuanto me deben")
+        || q.contains("cuanto me debe")
+        || q.contains("me deben")
+    {
+        return None;
+    }
+    // Need a "debe" token (not "debemos" stock talk) and a money amount.
+    let has_debe = q.split(|c: char| !c.is_alphanumeric()).any(|w| w == "debe" || w == "deben");
+    if !has_debe {
+        return None;
+    }
+    // Pull first money-looking run of digits.
+    let amount = {
+        let mut found = None;
+        for tok in q.split_whitespace() {
+            let digits: String = tok.chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.len() >= 3 {
+                if let Some(m) = parse_money(&digits) {
+                    found = Some(m);
+                    break;
+                }
+            }
+        }
+        found?
+    };
+    // Name: prefer text before "debe", else after honorifics in the raw string.
+    let name = {
+        let before = q.split(" debe").next().unwrap_or("").trim();
+        let cleaned = before
+            .trim_start_matches("don ")
+            .trim_start_matches("dona ")
+            .trim_start_matches("doña ")
+            .trim_start_matches("sr ")
+            .trim_start_matches("sra ")
+            .trim_start_matches("me ")
+            .trim();
+        if cleaned.is_empty() || cleaned.chars().all(|c| c.is_ascii_digit()) {
+            // "me debe 5000 don juan" — tail after money.
+            if let Some(idx) = raw.to_lowercase().find("debe") {
+                let tail = raw[idx..].split_whitespace().skip(2).collect::<Vec<_>>().join(" ");
+                let t = clean_abono_name(&tail);
+                if t.is_empty() {
+                    return Some(ActionParse::Incomplete(
+                        "¿A quién se lo fío y qué le vendiste? Por ejemplo: «anota 2 kg de \
+                         tomates fiado a Don Juan»."
+                            .into(),
+                    ));
+                }
+                titlecase(&t)
+            } else {
+                return Some(ActionParse::Incomplete(
+                    "¿A quién se lo fío y qué le vendiste? Por ejemplo: «anota 2 kg de \
+                     tomates fiado a Don Juan»."
+                        .into(),
+                ));
+            }
+        } else {
+            titlecase(cleaned)
+        }
+    };
+    Some(ActionParse::Incomplete(format!(
+        "Anoté que {name} debería unos ${amount}, pero necesito qué le vendiste. \
+         Por ejemplo: «anota 2 kg de tomates fiado a {name}»."
+    )))
 }
 
 /// Byte offset just past the verb that opens a sale, plus what kind of verb it
@@ -4618,6 +4699,20 @@ mod tests {
         assert_eq!(lines, vec![linea("cilantro", 1)]);
         assert_eq!(cliente.as_deref(), Some("Ana"));
         assert!(fiado);
+    }
+
+    /// Cuaderno: "Don Juan debe 5000" enseña, no inventa un SKU.
+    #[test]
+    fn parse_deuda_feria_nudge_pide_producto() {
+        match parse_action("Don Juan debe 5000") {
+            ActionParse::Incomplete(msg) => {
+                assert!(msg.contains("Juan") || msg.contains("juan"), "{msg}");
+                assert!(msg.contains("fiado") || msg.contains("vendiste"), "{msg}");
+            }
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+        // Preguntas de lectura no se roban.
+        assert_eq!(parse_action("¿quién me debe?"), ActionParse::NotAnAction);
     }
 
     #[test]
