@@ -6,8 +6,10 @@
 //! `*::service` layer. A property failure here is a real domain bug — never
 //! weaken the assertion to go green; fix the formula or report it.
 //!
-//! Money is `rust_decimal::Decimal` (CLP, integer pesos in practice). Stock is
-//! `i64` units.
+//! Money is `rust_decimal::Decimal`. El redondeo NO se asume: las funciones
+//! que redondean reciben los decimales de la moneda del tenant
+//! ([`crate::money::Currency::decimals`]), 0 para CLP y 2 para USD/EUR/MXN.
+//! Stock is `i64` units.
 
 use rust_decimal::Decimal;
 
@@ -70,18 +72,40 @@ pub fn cash_change(cash: Decimal, total: Decimal) -> Decimal {
     cash - total
 }
 
-/// IVA breakdown of an **IVA-inclusive** boleta total (Chile convention:
-/// shelf prices already include tax). Returns `(net, iva)` with
-/// `net + iva == total` **exactly** by construction. `iva_percent == 0`
-/// (exempt rubro) yields `(total, 0)`.
-pub fn iva_breakdown(total_inclusive: Decimal, iva_percent: u8) -> (Decimal, Decimal) {
-    if iva_percent == 0 {
+/// Tax breakdown of a **tax-inclusive** total (shelf prices already include
+/// tax — convención de Chile y de la mayoría del retail del mundo). Returns
+/// `(net, tax)` with `net + tax == total` **exactly** by construction.
+/// `tax_percent == 0` (rubro exento) yields `(total, 0)`.
+///
+/// `decimals` is the currency's minor-unit exponent
+/// ([`crate::money::Currency::decimals`]): 0 para CLP, 2 para USD/EUR/MXN. Es
+/// un parámetro y no una constante porque el redondeo es aritmética, no
+/// formato: con `round_dp(0)` sobre USD, `12.50` se convierte en `12` y el
+/// negocio pierde 50 centavos por línea.
+///
+/// El neto se redondea y el impuesto sale por diferencia — nunca al revés.
+/// Redondear ambos por separado rompe `net + tax == total`, que es la
+/// identidad sobre la que se arma cualquier declaración de impuestos.
+pub fn tax_breakdown(
+    total_inclusive: Decimal,
+    tax_percent: Decimal,
+    decimals: u32,
+) -> (Decimal, Decimal) {
+    if tax_percent.is_zero() {
         return (total_inclusive, Decimal::ZERO);
     }
-    let rate = Decimal::from(100i64 + iva_percent as i64) / Decimal::from(100i64);
-    let net = (total_inclusive / rate).round_dp(0);
-    let iva = total_inclusive - net;
-    (net, iva)
+    let rate = (Decimal::from(100i64) + tax_percent) / Decimal::from(100i64);
+    let net = (total_inclusive / rate).round_dp(decimals);
+    let tax = total_inclusive - net;
+    (net, tax)
+}
+
+/// IVA breakdown for a Chilean tenant: [`tax_breakdown`] fijado en CLP
+/// (0 decimales). "IVA" es el nombre chileno del impuesto; las capas genéricas
+/// usan `tax_breakdown` con la [`crate::money::MoneyConfig`] del tenant.
+#[inline]
+pub fn iva_breakdown(total_inclusive: Decimal, iva_percent: u8) -> (Decimal, Decimal) {
+    tax_breakdown(total_inclusive, Decimal::from(iva_percent), 0)
 }
 
 // --- cash drawer (apertura / arqueo / cierre) ------------------------------

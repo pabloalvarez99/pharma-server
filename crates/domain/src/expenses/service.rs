@@ -338,6 +338,7 @@ pub async fn sales_daily(
 ///     `otro` en vez de desaparecer (el reporte nunca miente por omisión).
 ///   * `pos_fiado` → bucket propio: es ingreso devengado, todavía sin plata en
 ///     la mano.
+///
 /// Devuelve sólo los buckets con movimiento, ordenados de mayor a menor monto.
 pub async fn sales_by_method(
     db: &Db,

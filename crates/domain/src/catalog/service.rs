@@ -732,7 +732,10 @@ pub async fn public_store(db: &Db, tenant: &Thing, slug: &str) -> DomainResult<P
     Ok(PublicStoreDto {
         name,
         slug: slug.to_string(),
-        currency: "CLP".to_string(),
+        currency: crate::settings::currency(db, tenant)
+            .await?
+            .code()
+            .to_string(),
         whatsapp_e164: web_setting(db, tenant, WEB_WHATSAPP_KEY).await?,
         address_line: web_setting(db, tenant, WEB_ADDRESS_KEY).await?,
         hours_label: web_setting(db, tenant, WEB_HOURS_KEY).await?,

@@ -80,9 +80,11 @@ struct PoRow {
 /// Libro de compras del período. Una OC entra por la fecha de su FACTURA cuando
 /// está declarada (lo que exige el SII); si no, por su última actualización
 /// (proxy de la recepción). Cuando el operador no declaró neto/IVA se derivan
-/// del total al 19% y la fila queda marcada `declared = false`.
+/// del total a la tasa del tenant (19% por default) y la fila queda marcada
+/// `declared = false`.
 pub async fn purchase_book(db: &Db, tenant: &Thing, period: &str) -> DomainResult<PurchaseBook> {
     let (start, end) = period_bounds(period)?;
+    let money = crate::settings::money_config(db, tenant).await?;
     let mut r = db
         .query(
             // `doc_date` = fecha de factura si el operador la capturó, si no la
@@ -118,7 +120,7 @@ pub async fn purchase_book(db: &Db, tenant: &Thing, period: &str) -> DomainResul
         let (neto, iva, declared) = match (row.invoice_neto, row.invoice_iva) {
             (Some(n), Some(i)) => (n, i, true),
             _ => {
-                let (n, i) = crate::invariants::iva_breakdown(doc_total, 19);
+                let (n, i) = money.tax_breakdown(doc_total);
                 (n, i, false)
             }
         };
@@ -164,6 +166,7 @@ struct SaleTotalRow {
 /// Las ventas del POS son IVA-incluido, así que el débito se desglosa del total.
 pub async fn iva_summary(db: &Db, tenant: &Thing, period: &str) -> DomainResult<IvaSummary> {
     let (start, end) = period_bounds(period)?;
+    let money = crate::settings::money_config(db, tenant).await?;
     let mut r = db
         .query(
             "SELECT total, created_at FROM order \
@@ -180,7 +183,7 @@ pub async fn iva_summary(db: &Db, tenant: &Thing, period: &str) -> DomainResult<
         if s.created_at < start || s.created_at >= end {
             continue;
         }
-        let (n, i) = crate::invariants::iva_breakdown(s.total, 19);
+        let (n, i) = money.tax_breakdown(s.total);
         ventas_neto += n;
         iva_debito += i;
     }

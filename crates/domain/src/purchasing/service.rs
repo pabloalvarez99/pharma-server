@@ -9,7 +9,7 @@ use surrealdb::sql::Thing;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::errors::{DomainError, DomainResult};
-use crate::money::CURRENCY_CLP;
+use crate::money::Currency;
 
 use super::model::*;
 use super::repo;
@@ -46,14 +46,16 @@ fn parse_thing(s: &str) -> DomainResult<Thing> {
     surrealdb::sql::thing(s).map_err(|_| DomainError::Invalid(format!("id inválido: {s}")))
 }
 
-/// Round a weighted-average cost to whole CLP. Money in this system is integer
-/// pesos everywhere (catalog prices, boleta totals, `invariants::iva_breakdown`
-/// rounds with `round_dp(0)`), so the WAC `cost_price` must too: a fractional
-/// cost (e.g. `(10·100 + 30·150)/40 = 137.5`) would make every reported margin
-/// `revenue − qty·cost` drift off the integer-peso books and stop being veraz.
-/// Same rounding strategy as `iva_breakdown` for consistency.
-fn wac_round_clp(cost: Decimal) -> Decimal {
-    cost.round_dp(0)
+/// Round a weighted-average cost to the tenant's currency minor unit.
+///
+/// El costo tiene que vivir en la misma granularidad que los precios y los
+/// totales: si no, cada margen reportado (`revenue − qty·cost`) se corre
+/// respecto de los libros y deja de ser veraz. En CLP eso es peso entero
+/// (`(10·100 + 30·150)/40 = 137.5` → `138`); en USD son centavos, y redondear
+/// a entero ahí sería inventar plata. Misma estrategia que
+/// [`crate::invariants::tax_breakdown`], por consistencia.
+fn wac_round(cost: Decimal, currency: &Currency) -> Decimal {
+    currency.round(cost)
 }
 
 fn parse_typed(s: &str, table: &str) -> DomainResult<Thing> {
@@ -182,7 +184,11 @@ pub async fn create_price(
         Some(s) if !s.is_empty() => Some(resolve_product(db, tenant, s).await?),
         _ => None,
     };
-    let currency = input.currency.as_deref().unwrap_or(CURRENCY_CLP);
+    let tenant_currency = crate::settings::currency(db, tenant).await?;
+    let currency = input
+        .currency
+        .as_deref()
+        .unwrap_or_else(|| tenant_currency.code());
     repo::create_price(
         db,
         tenant,
@@ -269,7 +275,11 @@ pub async fn create_purchase_order(
         ));
     }
     let supplier = resolve_supplier(db, tenant, &input.supplier).await?;
-    let currency = input.currency.as_deref().unwrap_or(CURRENCY_CLP);
+    let tenant_currency = crate::settings::currency(db, tenant).await?;
+    let currency = input
+        .currency
+        .as_deref()
+        .unwrap_or_else(|| tenant_currency.code());
 
     let mut lines = Vec::with_capacity(input.items.len());
     let mut total = Decimal::ZERO;
@@ -407,6 +417,8 @@ pub async fn receive_purchase_order(
         )));
     }
 
+    let currency = crate::settings::currency(db, tenant).await?;
+
     // Aggregate catalogued lines per product so a PO with two lines on the
     // same product still produces one WAC recompute + one stock_movement.
     use std::collections::BTreeMap;
@@ -432,16 +444,19 @@ pub async fn receive_purchase_order(
                 DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
             })?;
         let line_avg_cost = cost_sum / Decimal::from(add_qty);
-        let new_cost = wac_round_clp(match old_cost_opt {
-            // No prior cost → first receipt seeds the cost with the line
-            // average; otherwise old_cost weight would dilute to zero.
-            None => line_avg_cost,
-            Some(_) if old_stock <= 0 => line_avg_cost,
-            Some(old_cost) => {
-                let total_qty = Decimal::from(old_stock + add_qty);
-                (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
-            }
-        });
+        let new_cost = wac_round(
+            match old_cost_opt {
+                // No prior cost → first receipt seeds the cost with the line
+                // average; otherwise old_cost weight would dilute to zero.
+                None => line_avg_cost,
+                Some(_) if old_stock <= 0 => line_avg_cost,
+                Some(old_cost) => {
+                    let total_qty = Decimal::from(old_stock + add_qty);
+                    (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
+                }
+            },
+            &currency,
+        );
         effects.push(repo::ReceiveEffect {
             product: pid,
             add_qty,
@@ -630,6 +645,7 @@ pub async fn receive_purchase_order_lines(
     }
 
     // WAC per product (same base rule as the one-shot receive path).
+    let currency = crate::settings::currency(db, tenant).await?;
     let mut product_effects = Vec::with_capacity(prod_buckets.len());
     for (_k, (pid, add_qty, cost_sum)) in prod_buckets {
         let (old_stock, old_cost_opt) = repo::product_stock_cost(db, tenant, &pid)
@@ -638,14 +654,17 @@ pub async fn receive_purchase_order_lines(
                 DomainError::Invalid(format!("producto no existe en este tenant: {pid}"))
             })?;
         let line_avg_cost = cost_sum / Decimal::from(add_qty);
-        let new_cost = wac_round_clp(match old_cost_opt {
-            None => line_avg_cost,
-            Some(_) if old_stock <= 0 => line_avg_cost,
-            Some(old_cost) => {
-                let total_qty = Decimal::from(old_stock + add_qty);
-                (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
-            }
-        });
+        let new_cost = wac_round(
+            match old_cost_opt {
+                None => line_avg_cost,
+                Some(_) if old_stock <= 0 => line_avg_cost,
+                Some(old_cost) => {
+                    let total_qty = Decimal::from(old_stock + add_qty);
+                    (Decimal::from(old_stock) * old_cost + cost_sum) / total_qty
+                }
+            },
+            &currency,
+        );
         product_effects.push(repo::ReceiveLineProductEffect {
             product: pid,
             add_qty,
