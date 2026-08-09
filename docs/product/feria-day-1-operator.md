@@ -10,8 +10,10 @@ ADR: [0022](../adr/0022-feria-agent-first-identity-backup.md).
 3. **Login** - card **Con tu cuenta de Google** (stub: copy feria, botón
    "Continuar con Google" explica que aún no está cableado) + dirección del
    computador + negocio + correo/clave (camino real hoy).
-4. **Tarjeta de rescate** (solo si eligió feria) - 12 palabras / 8 bloques.
-   "Ya la anoté en el cuaderno" o seguir (no recomendado).
+4. **Tarjeta de rescate** (solo si eligió feria) - 12 palabras / 8 bloques +
+   QR de bloques. Acciones: copiar texto, compartir a notas, **Imprimir o
+   guardar PDF** (HTML A4 + PrintManager). Luego "Ya la anoté" o seguir
+   (no recomendado).
 5. **Home = Agente** - chips:
    - «Vendí 2 kg de tomates»
    - «Don Juan debe 5000»
@@ -65,7 +67,11 @@ Si anotar una venta o ver una deuda tarda más que el lápiz, es un bug de produ
 
 ## Fuera de scope aún
 
-- PDF de una página de la tarjeta de rescate (QR en pantalla: ZXing, listo)
 - Bucket real (ops del capitán)
 - Google OAuth end-to-end (consola + secrets del capitán)
-- Seed demo feria corrida en lab (código seed sí)
+- Argon2id multiplataforma (hoy PBKDF2 honesto en header)
+
+## Listo en main (tarjeta + seed)
+
+- PDF / imprimir una página (HTML + PrintManager + SVG QR de bloques)
+- Seed `feria`: verdura/fruta + huevos (bandeja) + naranja (malla) + atados

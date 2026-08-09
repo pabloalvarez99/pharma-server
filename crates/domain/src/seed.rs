@@ -462,6 +462,46 @@ fn feria_pack() -> Vec<SeedItem> {
             active_ingredient: None,
             presentation: Some("atado"),
         },
+        // Unidades que el agente feria entiende (bandeja / docena / malla).
+        SeedItem {
+            name: "Huevos",
+            barcode: "7806000100134",
+            price: 4500,
+            cost: 2800,
+            stock: 24,
+            expiry_in_days: 12,
+            batch_code: "HUE-PUESTO",
+            supplier_idx: 1,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("bandeja"),
+        },
+        SeedItem {
+            name: "Naranja",
+            barcode: "7806000100141",
+            price: 2500,
+            cost: 1000,
+            stock: 40,
+            expiry_in_days: 10,
+            batch_code: "NAR-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("malla"),
+        },
+        SeedItem {
+            name: "Frutilla",
+            barcode: "7806000100158",
+            price: 3000,
+            cost: 1500,
+            stock: 20,
+            expiry_in_days: 3,
+            batch_code: "FRU-PUESTO",
+            supplier_idx: 2,
+            laboratory: None,
+            active_ingredient: None,
+            presentation: Some("bandeja"),
+        },
     ]
 }
 
@@ -1916,6 +1956,17 @@ mod tests {
         let names: Vec<&str> = pack.iter().map(|i| i.name).collect();
         assert!(names.contains(&"Tomates"));
         assert!(names.contains(&"Cilantro"));
+        assert!(names.contains(&"Huevos"));
+        assert!(names.contains(&"Naranja"));
+        let presentations: Vec<&str> = pack
+            .iter()
+            .filter_map(|i| i.presentation)
+            .collect();
+        // Unidades del asistente feria (ADR-0022 assist chips).
+        assert!(presentations.contains(&"atado"));
+        assert!(presentations.contains(&"kg"));
+        assert!(presentations.contains(&"bandeja"));
+        assert!(presentations.contains(&"malla"));
     }
 
     #[test]
