@@ -37,9 +37,10 @@ use serde::Serialize;
 use surrealdb::sql::Thing;
 
 use db::Db;
+use domain::settings;
 use domain::DomainResult;
 
-use crate::deterministic::clp;
+use crate::money::Money;
 use crate::intent::normalize;
 
 /// How long a `confirm_token` stays valid after it is issued. Short by design:
@@ -241,7 +242,10 @@ impl Action {
     }
 
     /// One-line es-CL summary the UI shows before the owner confirms.
-    pub fn summary(&self) -> String {
+    ///
+    /// `m` es la moneda del tenant: la confirmación tiene que decir la misma
+    /// plata que va a cobrar. Ver [`crate::money`].
+    pub fn summary(&self, m: &Money) -> String {
         match self {
             Action::RegistrarGasto {
                 description,
@@ -249,7 +253,7 @@ impl Action {
                 ..
             } => format!(
                 "Registrar un gasto de {} por «{}».",
-                clp(*amount),
+                m.fmt(*amount),
                 description
             ),
             Action::CrearOrdenCompraDraft {
@@ -263,7 +267,7 @@ impl Action {
                 supplier_name,
                 quantity,
                 product_name,
-                clp(*unit_cost),
+                m.fmt(*unit_cost),
             ),
             Action::CrearCliente { name, rut, .. } => match rut {
                 Some(r) => format!("Registrar al cliente «{name}» (RUT {r})."),
@@ -272,7 +276,7 @@ impl Action {
             Action::CrearProductoRapido { name, price, stock } => format!(
                 "Crear el producto «{}» a {} ({} {} de stock inicial).",
                 name,
-                clp(*price),
+                m.fmt(*price),
                 stock,
                 if *stock == 1 { "unidad" } else { "unidades" },
             ),
@@ -284,8 +288,8 @@ impl Action {
             } => format!(
                 "Cambiar el precio de {} de {} a {}.",
                 product_name,
-                clp(*old_price),
-                clp(*new_price),
+                m.fmt(*old_price),
+                m.fmt(*new_price),
             ),
             Action::CerrarCaja {
                 register_name,
@@ -295,9 +299,9 @@ impl Action {
             } => format!(
                 "Cerrar la caja «{}» con {} contados (esperado {}, {}).",
                 register_name,
-                clp(*counted),
-                clp(*expected),
-                diff_text(*counted - *expected),
+                m.fmt(*counted),
+                m.fmt(*expected),
+                diff_text(*counted - *expected, m),
             ),
             Action::AjustarStock {
                 product_name,
@@ -315,15 +319,15 @@ impl Action {
                 "Recibir una orden de compra ({} {}) por {}: sube el stock y la deja como recibida.",
                 items,
                 if *items == 1 { "producto" } else { "productos" },
-                clp(*total),
+                m.fmt(*total),
             ),
             Action::CancelarOrdenCompra { total, .. } => format!(
                 "Cancelar una orden de compra (borrador) por {}.",
-                clp(*total),
+                m.fmt(*total),
             ),
             Action::AbrirCaja { opening_cash } => format!(
                 "Abrir la caja con un fondo inicial de {}.",
-                clp(*opening_cash),
+                m.fmt(*opening_cash),
             ),
             Action::CrearProveedor { name, rut, .. } => match rut {
                 Some(r) => format!("Registrar al proveedor «{name}» (RUT {r})."),
@@ -349,9 +353,9 @@ impl Action {
                 ..
             } => format!(
                 "Registrar un abono de {} de {} (debe {}).",
-                clp(*amount),
+                m.fmt(*amount),
                 customer_name,
-                clp(*debt_before),
+                m.fmt(*debt_before),
             ),
             // A sale moves stock AND money, so the confirmation prompt is the
             // owner's only defence against a mis-heard product or quantity: it
@@ -365,8 +369,8 @@ impl Action {
                 warnings,
                 ..
             } => {
-                let mut s = format!("Vender:\n{}\n", venta_lineas_text(lines));
-                s.push_str(&format!("Total a cobrar: {} en efectivo.", clp(*total)));
+                let mut s = format!("Vender:\n{}\n", venta_lineas_text(lines, m));
+                s.push_str(&format!("Total a cobrar: {} en efectivo.", m.fmt(*total)));
                 if let Some(c) = customer_name {
                     s.push_str(&format!("\nSe la anoto a {c}."));
                 }
@@ -381,12 +385,12 @@ impl Action {
                 warnings,
                 ..
             } => {
-                let mut s = format!("Fiar:\n{}\n", venta_lineas_text(lines));
+                let mut s = format!("Fiar:\n{}\n", venta_lineas_text(lines, m));
                 s.push_str(&format!(
                     "Total: {}. Queda fiado a {} (hoy debe {}).",
-                    clp(*total),
+                    m.fmt(*total),
                     customer_name,
-                    clp(*debt_before),
+                    m.fmt(*debt_before),
                 ));
                 s.push_str(&warnings_text(warnings));
                 s
@@ -565,7 +569,7 @@ impl Action {
 /// One "- 2 × Paracetamol 500 mg a $990 c/u = $1.980" per line. The line total
 /// comes from `domain::invariants::line_total` — the same formula the sale
 /// itself uses — so the prompt can never quote a number the till disagrees with.
-fn venta_lineas_text(lines: &[VentaLinea]) -> String {
+fn venta_lineas_text(lines: &[VentaLinea], m: &Money) -> String {
     lines
         .iter()
         .map(|l| {
@@ -573,8 +577,8 @@ fn venta_lineas_text(lines: &[VentaLinea]) -> String {
                 "- {} × {} a {} c/u = {}",
                 l.quantity,
                 l.product_name,
-                clp(l.unit_price),
-                clp(domain::invariants::line_total(l.unit_price, l.quantity)),
+                m.fmt(l.unit_price),
+                m.fmt(domain::invariants::line_total(l.unit_price, l.quantity)),
             )
         })
         .collect::<Vec<_>>()
@@ -623,13 +627,13 @@ fn stock_target(old: i64, set: Option<i64>, delta: Option<i64>) -> i64 {
 
 /// es-CL phrasing of a drawer difference (`counted − expected`): exact, surplus,
 /// or short. Shared by the proposal summary and the executed outcome.
-fn diff_text(diff: Decimal) -> String {
+fn diff_text(diff: Decimal, m: &Money) -> String {
     if diff.is_zero() {
         "calza exacto".to_string()
     } else if diff.is_sign_positive() {
-        format!("sobran {}", clp(diff))
+        format!("sobran {}", m.fmt(diff))
     } else {
-        format!("faltan {}", clp(diff.abs()))
+        format!("faltan {}", m.fmt(diff.abs()))
     }
 }
 
@@ -706,8 +710,10 @@ impl ActionStore {
     }
 
     /// Issue a token for `action`, scoped to `tenant`, with the default TTL.
-    pub fn propose(&self, action: Action, tenant: &Thing) -> ActionProposal {
-        self.propose_with_ttl(action, tenant, TOKEN_TTL_SECS)
+    /// `m` es la moneda del tenant: la lee el resumen que se le muestra al
+    /// dueño antes de confirmar.
+    pub fn propose(&self, action: Action, tenant: &Thing, m: &Money) -> ActionProposal {
+        self.propose_with_ttl(action, tenant, m, TOKEN_TTL_SECS)
     }
 
     /// Issue a token with an explicit TTL (seconds). A non-positive `ttl_secs`
@@ -717,13 +723,14 @@ impl ActionStore {
         &self,
         action: Action,
         tenant: &Thing,
+        m: &Money,
         ttl_secs: i64,
     ) -> ActionProposal {
         let token = uuid::Uuid::new_v4().to_string();
         let expires_at = Utc::now() + Duration::seconds(ttl_secs);
         let proposal = ActionProposal {
             name: action.label(),
-            summary: action.summary(),
+            summary: action.summary(m),
             params: action.params(),
             confirm_token: token.clone(),
             expires_at,
@@ -2385,6 +2392,9 @@ pub enum BuildOutcome {
 /// resolving an OC supplier *name* into a record id (a read); expense building
 /// is pure (validation is deferred to the domain service at execute time).
 pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult<BuildOutcome> {
+    // La moneda del tenant, para los rechazos que citan un monto. Ver
+    // `crate::money`.
+    let m = Money::from(settings::currency(db, tenant).await?);
     match parsed {
         ActionParse::NotAnAction => Ok(BuildOutcome::NotAnAction),
         ActionParse::Incomplete(hint) => Ok(BuildOutcome::Reject(hint)),
@@ -2772,9 +2782,9 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
             if amount > debt {
                 return Ok(BuildOutcome::Reject(format!(
                     "El abono de {} supera lo que {} debe ({}). Dime un monto menor o igual.",
-                    clp(amount),
+                    m.fmt(amount),
                     c.name,
-                    clp(debt),
+                    m.fmt(debt),
                 )));
             }
             Ok(BuildOutcome::Ready(Action::RegistrarAbono {
@@ -3113,6 +3123,8 @@ pub async fn execute(
     actor: Option<&Thing>,
     action: Action,
 ) -> DomainResult<ActionOutcome> {
+    // La moneda del tenant, para la prosa del resultado. Ver `crate::money`.
+    let m = Money::from(settings::currency(db, tenant).await?);
     let label = action.label();
     let outcome = match action {
         Action::RegistrarGasto {
@@ -3144,7 +3156,7 @@ pub async fn execute(
                 text: format!(
                     "Gasto registrado: «{}» por {}.",
                     dto.description,
-                    clp(dto.amount)
+                    m.fmt(dto.amount)
                 ),
                 data: serde_json::json!({
                     "id": dto.id,
@@ -3191,7 +3203,7 @@ pub async fn execute(
                     supplier_name,
                     quantity,
                     product_name,
-                    clp(dto.total),
+                    m.fmt(dto.total),
                 ),
                 data: serde_json::json!({
                     "id": dto.id,
@@ -3258,7 +3270,7 @@ pub async fn execute(
             .await?;
             ActionOutcome {
                 action: label,
-                text: format!("Producto «{}» creado a {}.", dto.name, clp(dto.price)),
+                text: format!("Producto «{}» creado a {}.", dto.name, m.fmt(dto.price)),
                 data: serde_json::json!({
                     "id": dto.id,
                     "name": dto.name,
@@ -3290,8 +3302,8 @@ pub async fn execute(
                 text: format!(
                     "Precio de {} actualizado: de {} a {}.",
                     dto.name,
-                    clp(old_price),
-                    clp(dto.price),
+                    m.fmt(old_price),
+                    m.fmt(dto.price),
                 ),
                 data: serde_json::json!({
                     "id": dto.id,
@@ -3325,9 +3337,9 @@ pub async fn execute(
                 text: format!(
                     "Caja «{}» cerrada: contaste {}, esperado {}; {}.",
                     register_name,
-                    clp(counted),
-                    clp(expected),
-                    diff_text(diff),
+                    m.fmt(counted),
+                    m.fmt(expected),
+                    diff_text(diff, &m),
                 ),
                 data: serde_json::json!({
                     "id": summary.session.id,
@@ -3439,7 +3451,7 @@ pub async fn execute(
                 text: format!(
                     "Caja «{}» abierta con un fondo de {}.",
                     dto.register_name,
-                    clp(opening_cash)
+                    m.fmt(opening_cash)
                 ),
                 data: serde_json::json!({
                     "id": dto.id,
@@ -3543,15 +3555,15 @@ pub async fn execute(
                 text: if saldo.is_zero() {
                     format!(
                         "Abono de {} registrado a {}: quedó al día.",
-                        clp(amount),
+                        m.fmt(amount),
                         customer_name,
                     )
                 } else {
                     format!(
                         "Abono de {} registrado a {}: ahora debe {}.",
-                        clp(amount),
+                        m.fmt(amount),
                         customer_name,
-                        clp(saldo),
+                        m.fmt(saldo),
                     )
                 },
                 data: serde_json::json!({
@@ -3587,7 +3599,7 @@ pub async fn execute(
             let mut text = format!(
                 "Venta lista: {}. Total {}, en efectivo.",
                 venta_detalle(&lines),
-                clp(resp.order.total),
+                m.fmt(resp.order.total),
             );
             if resp.loyalty_points_awarded > 0 {
                 if let Some(c) = customer_name.as_deref() {
@@ -3641,9 +3653,9 @@ pub async fn execute(
             let mut text = format!(
                 "Fiado anotado: {}. Total {}. {} ahora debe {}.",
                 venta_detalle(&lines),
-                clp(resp.order.total),
+                m.fmt(resp.order.total),
                 customer_name,
-                clp(saldo),
+                m.fmt(saldo),
             );
             text.push_str(&outcome_warnings(&resp.interaction_warnings));
             ActionOutcome {
@@ -4388,11 +4400,11 @@ mod tests {
         };
         assert_eq!(a.label(), "registrar_abono");
         assert!(
-            a.summary().contains("Registrar un abono de"),
+            a.summary(&Money::default()).contains("Registrar un abono de"),
             "got {}",
-            a.summary()
+            a.summary(&Money::default())
         );
-        assert!(a.summary().contains("Ana Pérez"));
+        assert!(a.summary(&Money::default()).contains("Ana Pérez"));
     }
 
     #[test]
@@ -4404,7 +4416,7 @@ mod tests {
             amount: dec("1000"),
             payment_method: "cash".into(),
         };
-        let p = store.propose(action.clone(), &tenant());
+        let p = store.propose(action.clone(), &tenant(), &Money::default());
         assert_eq!(store.len(), 1);
         assert_eq!(store.consume(&p.confirm_token, &tenant()), Ok(action));
         assert_eq!(store.len(), 0, "token removed on consume");
@@ -4424,7 +4436,7 @@ mod tests {
             amount: dec("1000"),
             payment_method: "cash".into(),
         };
-        let p = store.propose(action, &tenant());
+        let p = store.propose(action, &tenant(), &Money::default());
         let other = Thing::from(("tenant", "b"));
         // Wrong tenant cannot consume, and does NOT burn the token.
         assert_eq!(
@@ -4445,7 +4457,7 @@ mod tests {
             amount: dec("1000"),
             payment_method: "cash".into(),
         };
-        let p = store.propose_with_ttl(action, &tenant(), -1);
+        let p = store.propose_with_ttl(action, &tenant(), &Money::default(), -1);
         assert_eq!(
             store.consume(&p.confirm_token, &tenant()),
             Err(ActError::Expired)
@@ -4673,7 +4685,7 @@ mod tests {
             customer_name: None,
             warnings: vec![],
         };
-        let s = a.summary();
+        let s = a.summary(&Money::default());
         assert!(s.contains("2 × Paracetamol 500 mg"), "{s}");
         assert!(s.contains("$990 c/u"), "{s}");
         assert!(s.contains("= $1.980"), "{s}");
@@ -4692,7 +4704,7 @@ mod tests {
             debt_before: dec("5000"),
             warnings: vec!["Warfarina + Ibuprofeno (riesgo crítico). Sangrado.".into()],
         };
-        let s = a.summary();
+        let s = a.summary(&Money::default());
         assert!(s.contains("1 × Alcohol Gel a $2.500 c/u"), "{s}");
         assert!(s.contains("Total: $2.500"), "{s}");
         assert!(s.contains("Queda fiado a Juan Pérez"), "{s}");

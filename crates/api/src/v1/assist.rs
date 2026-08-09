@@ -113,7 +113,11 @@ async fn ask(
             BuildOutcome::NotAnAction => unreachable!("guarded by parse_action above"),
             BuildOutcome::Reject(msg) => Ok(Json(Answer::note(msg))),
             BuildOutcome::Ready(action) => {
-                let proposal = assist::store().propose(action, &tenant);
+                // El resumen que se confirma tiene que estar escrito en la
+                // moneda del tenant, no en pesos chilenos por defecto.
+                let money =
+                    assist::Money::from(domain::settings::currency(db.as_ref(), &tenant).await?);
+                let proposal = assist::store().propose(action, &tenant, &money);
                 Ok(Json(Answer::proposal(proposal)))
             }
         };

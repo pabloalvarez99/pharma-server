@@ -502,3 +502,83 @@ async fn tenant_isolation_blocks_cross_reads() {
 
     assert_eq!(parse("ventas hoy"), Intent::VentasHoy);
 }
+
+/// Un negocio que cobra en dólares tiene que leer dólares.
+///
+/// El agente formateaba con un helper fijo de pesos chilenos, así que un tenant
+/// en USD veía el número correcto con la etiqueta equivocada: «$5.000» donde su
+/// sistema cobró USD 5.000,00. La aritmética nunca estuvo mal — la etiqueta sí,
+/// y en una app que muestra plata una etiqueta que miente es un bug de
+/// confianza. La moneda ya era por tenant (`domain::money`); acá se comprueba
+/// que la prosa del agente la usa.
+#[tokio::test]
+async fn a_usd_tenant_reads_its_answers_in_usd() {
+    let (db, tenant, user) = setup().await;
+    domain::settings::set_currency(&db, &tenant, "USD")
+        .await
+        .unwrap();
+    seed_sales(&db, &tenant, &user).await;
+
+    let a = ask(&db, &tenant, "¿cuánto vendí hoy?").await;
+    // El monto es el mismo de siempre; lo que cambia es cómo se escribe.
+    assert_eq!(a.data.as_ref().unwrap()["revenue"], "5000");
+    assert!(
+        a.text.contains("USD 5.000,00"),
+        "un tenant en USD no puede leer pesos: {}",
+        a.text
+    );
+    assert!(
+        !a.text.contains("$5.000"),
+        "la etiqueta de pesos chilenos no puede sobrevivir: {}",
+        a.text
+    );
+
+    // Y el tenant chileno de al lado sigue leyendo exactamente lo de antes.
+    let cl: Thing = db
+        .query("CREATE tenant SET name='CL', slug='cl' RETURN id")
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let user_cl: Thing = db
+        .query("CREATE user SET tenant=$t, email='cl@t.l', password='x', roles=['admin'] RETURN id")
+        .bind(("t", cl.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    seed_sales(&db, &cl, &user_cl).await;
+    let a_cl = ask(&db, &cl, "¿cuánto vendí hoy?").await;
+    assert!(
+        a_cl.text.contains("$5.000") && !a_cl.text.contains("USD"),
+        "el tenant chileno no cambia: {}",
+        a_cl.text
+    );
+}
+
+/// La confirmación de una acción de escritura muestra plata, así que también
+/// tiene que hablar la moneda del tenant: es el texto que el dueño lee JUSTO
+/// antes de autorizar el movimiento.
+#[tokio::test]
+async fn a_usd_tenant_confirms_write_actions_in_usd() {
+    use assist::{build, BuildOutcome, Money};
+
+    let (db, tenant, _user) = setup().await;
+    domain::settings::set_currency(&db, &tenant, "USD")
+        .await
+        .unwrap();
+
+    let parsed = assist::parse_action("registra un gasto de 12500 en arriendo");
+    let action = match build(&db, &tenant, parsed).await.unwrap() {
+        BuildOutcome::Ready(a) => a,
+        _ => panic!("esperaba una acción lista"),
+    };
+    let money = Money::from(domain::settings::currency(&db, &tenant).await.unwrap());
+    let summary = action.summary(&money);
+    assert!(
+        summary.contains("USD 12.500,00"),
+        "la confirmación tiene que estar en la moneda del tenant: {summary}"
+    );
+}

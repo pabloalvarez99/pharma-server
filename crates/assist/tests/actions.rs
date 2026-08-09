@@ -6,7 +6,7 @@
 
 use std::str::FromStr;
 
-use assist::{build, execute, parse_action, Action, ActionParse, ActionStore, BuildOutcome};
+use assist::{build, execute, parse_action, Action, ActionParse, ActionStore, BuildOutcome, Money};
 use domain::cash_register::model::OpenSessionInput;
 use domain::cash_register::service as caja;
 use domain::catalog::model::{NewProduct, ProductFilters};
@@ -80,7 +80,7 @@ async fn propose_does_not_write_then_confirm_executes_and_audits() {
         BuildOutcome::Ready(a) => a,
         _ => panic!("expected Ready, got a reject/none"),
     };
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     let before = expenses::list_expenses(&db, &tenant, ExpenseFilters::default())
         .await
@@ -142,7 +142,7 @@ async fn oc_draft_resolves_supplier_and_creates_draft() {
         _ => panic!("expected Ready"),
     };
     assert!(matches!(action, Action::CrearOrdenCompraDraft { .. }));
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     // Nothing created on propose.
     let before = purchasing::list_purchase_orders(&db, &tenant, PurchaseOrderFilters::default())
@@ -185,7 +185,7 @@ async fn expired_token_cannot_execute() {
         amount: dec("1000"),
         payment_method: "cash".into(),
     };
-    let proposal = store.propose_with_ttl(action, &tenant, -1);
+    let proposal = store.propose_with_ttl(action, &tenant, &Money::default(), -1);
     assert!(store.consume(&proposal.confirm_token, &tenant).is_err());
 
     let expenses = expenses::list_expenses(&db, &tenant, ExpenseFilters::default())
@@ -211,7 +211,7 @@ async fn token_from_one_tenant_cannot_execute_for_another() {
         amount: dec("1000"),
         payment_method: "cash".into(),
     };
-    let proposal = store.propose(action, &tenant_a);
+    let proposal = store.propose(action, &tenant_a, &Money::default());
     // Tenant B presents A's token: rejected.
     assert!(store.consume(&proposal.confirm_token, &tenant_b).is_err());
     // A can still use it.
@@ -241,7 +241,7 @@ async fn crear_cliente_propose_no_write_then_confirm_executes_and_audits() {
         _ => panic!("expected Ready"),
     };
     assert!(matches!(action, Action::CrearCliente { .. }));
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     let before = customers::list_customers(&db, &tenant, CustomerFilters::default())
         .await
@@ -275,7 +275,7 @@ async fn crear_producto_propose_no_write_then_confirm_executes_and_audits() {
         _ => panic!("expected Ready"),
     };
     assert!(matches!(action, Action::CrearProductoRapido { .. }));
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     let before = catalog::list_products(&db, &tenant, ProductFilters::default())
         .await
@@ -349,7 +349,7 @@ async fn ajustar_precio_resolves_product_and_updates_price() {
         }
         _ => panic!("expected AjustarPrecio"),
     }
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     // Propose must not change the price.
     let before = catalog::list_products(&db, &tenant, ProductFilters::default())
@@ -437,7 +437,7 @@ async fn abono_resolves_customer_and_records_payment() {
         }
         _ => panic!("expected RegistrarAbono"),
     }
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
 
     // Propose must not touch the ledger.
     assert_eq!(
@@ -606,7 +606,7 @@ async fn venta_propose_no_escribe_nada_y_confirmar_ejecuta() {
         other => panic!("expected Vender, got {other:?}"),
     }
     // La propuesta le muestra a la dueña todo lo que tiene que revisar.
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
     assert_eq!(proposal.name, "vender");
     assert!(proposal.summary.contains("2 × Paracetamol 500 mg"));
     assert!(proposal.summary.contains("$990 c/u"));
@@ -662,10 +662,10 @@ async fn venta_sin_confirmacion_nunca_escribe() {
 
     // Propuesta viva, jamás confirmada.
     let action = ready(&db, &tenant, "vendeme 2 paracetamol").await;
-    let _proposal = store.propose(action, &tenant);
+    let _proposal = store.propose(action, &tenant, &Money::default());
     // Propuesta que expira antes de confirmarse.
     let action = ready(&db, &tenant, "vendeme 2 paracetamol").await;
-    let expired = store.propose_with_ttl(action, &tenant, -1);
+    let expired = store.propose_with_ttl(action, &tenant, &Money::default(), -1);
     assert!(store.consume(&expired.confirm_token, &tenant).is_err());
 
     assert_eq!(
@@ -701,7 +701,7 @@ async fn fiar_venta_carga_la_cuenta_del_cliente() {
         }
         other => panic!("expected FiarVenta, got {other:?}"),
     }
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
     assert_eq!(proposal.name, "fiar_venta");
     assert!(proposal.summary.contains("Queda fiado a Juan"));
     assert!(proposal.summary.contains("hoy debe $5.000"));
@@ -853,7 +853,7 @@ async fn venta_avisa_interacciones_antes_y_despues_de_confirmar() {
         }
         other => panic!("expected Vender, got {other:?}"),
     }
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
     assert!(
         proposal.summary.contains("Ojo:"),
         "la dueña tiene que leer la interacción ANTES de confirmar: {}",
@@ -880,7 +880,7 @@ async fn venta_por_voz_deja_el_mismo_rastro_que_la_pantalla() {
     seed_sellable(&db, &tenant, "Alcohol Gel", "2500", 4, None).await;
 
     let action = ready(&db, &tenant, "vendeme 2 alcohol gel").await;
-    let proposal = store.propose(action, &tenant);
+    let proposal = store.propose(action, &tenant, &Money::default());
     let action = store.consume(&proposal.confirm_token, &tenant).unwrap();
     execute(&db, &tenant, Some(&user), action).await.unwrap();
 
