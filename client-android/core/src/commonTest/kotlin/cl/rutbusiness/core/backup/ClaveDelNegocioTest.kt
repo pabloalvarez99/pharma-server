@@ -7,12 +7,12 @@ import kotlin.test.assertTrue
 class ClaveDelNegocioTest {
 
     @Test
-    fun `demo tiene 12 palabras y 8 bloques de 4`() {
+    fun `demo tiene 12 palabras y 5 bloques de 4`() {
         val c = claveDeDemostracion()
-        assertEquals(12, c.palabras.size)
-        assertEquals(8, c.bloques.size)
+        assertEquals(PALABRAS_FRASE, c.palabras.size)
+        assertEquals(BLOQUES_TARJETA, c.bloques.size)
         assertTrue(c.bloques.all { it.length == 4 })
-        assertTrue(c.fraseCompleta().split(" ").size == 12)
+        assertTrue(c.fraseCompleta().split(" ").size == PALABRAS_FRASE)
         assertTrue(c.bloquesCompletos().contains("-"))
     }
 

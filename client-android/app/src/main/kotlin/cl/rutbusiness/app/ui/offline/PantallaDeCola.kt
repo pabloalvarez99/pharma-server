@@ -134,7 +134,7 @@ fun PantallaDeCola(
                             value = materialCuaderno,
                             onValueChange = { materialCuaderno = it },
                             label = "Llave del cuaderno",
-                            placeholder = "12 palabras o 8 bloques",
+                            placeholder = "12 palabras o 5 bloques",
                             imeAction = ImeAction.Done,
                             modifier = Modifier.padding(top = dimens.space2),
                         )
@@ -183,7 +183,7 @@ fun PantallaDeCola(
                             value = materialCuaderno,
                             onValueChange = { materialCuaderno = it },
                             label = "Llave del cuaderno",
-                            placeholder = "12 palabras o 8 bloques",
+                            placeholder = "12 palabras o 5 bloques",
                             imeAction = ImeAction.Next,
                             modifier = Modifier.padding(top = dimens.space2),
                         )

@@ -15,19 +15,19 @@ class MaterialRecuperacionTest {
     }
 
     @Test
-    fun `ocho bloques con guion`() {
-        val b = "AB3K-9F2Q-M7NP-4RST-WXY2-HJKL-QRST-VBNM"
+    fun `cinco bloques con guion`() {
+        val b = "AB3K-9F2Q-M7NP-4RST-WXY2"
         val m = parsearMaterialRecuperacion(b).getOrThrow() as MaterialRecuperacion.Bloques
-        assertEquals(8, m.bloques.size)
+        assertEquals(BLOQUES_TARJETA, m.bloques.size)
         assertEquals("AB3K", m.bloques[0])
     }
 
     @Test
     fun `payload qr`() {
-        val bloques = listOf("AB3K", "9F2Q", "M7NP", "4RST", "WXY2", "HJKL", "QRST", "VBNM")
+        val bloques = listOf("AB3K", "9F2Q", "M7NP", "4RST", "WXY2")
         val payload = payloadQrRescate("puesto", bloques)!!
         val m = parsearMaterialRecuperacion(payload).getOrThrow() as MaterialRecuperacion.Bloques
-        assertEquals(8, m.bloques.size)
+        assertEquals(BLOQUES_TARJETA, m.bloques.size)
     }
 
     @Test

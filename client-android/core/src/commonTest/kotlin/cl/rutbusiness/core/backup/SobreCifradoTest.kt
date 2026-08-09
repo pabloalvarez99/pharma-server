@@ -35,7 +35,7 @@ class SobreCifradoTest {
 
     @Test
     fun `qr rescate roundtrip`() {
-        val bloques = listOf("AB3K", "9F2Q", "M7NP", "4RST", "WXY2", "HJKL", "QRST", "VBNM")
+        val bloques = listOf("AB3K", "9F2Q", "M7NP", "4RST", "WXY2")
         val payload = assertNotNull(payloadQrRescate("Puesto-Rosa", bloques))
         assertTrue(payload.startsWith("rutbusiness-rescue:v1:puesto-rosa:"))
         val (slug, blocks) = assertNotNull(parsearPayloadQrRescate(payload))

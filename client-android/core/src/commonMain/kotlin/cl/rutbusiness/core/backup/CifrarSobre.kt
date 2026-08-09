@@ -216,7 +216,21 @@ fun derivarClaveProvisional(material: String, salt: ByteArray): ByteArray {
  * Frase o bloques del cuaderno → llave AES-256 (32 B) con PBKDF2-HMAC-SHA256.
  *
  * [salt] 16 bytes (se guardan en el header del sobre). Determinista: misma
- * frase + mismo salt = misma llave (restore).
+ * clave + mismo salt = misma llave (restore).
+ *
+ * **El KDF corre sobre la semilla canónica, nunca sobre el texto que se ve en
+ * pantalla.** Es lo que hace que las 12 palabras y los 5 bloques abran el mismo
+ * sobre: los dos decodifican a los mismos 84 bits (ver [ClaveDelNegocio]).
+ *
+ * Antes se usaba el string mostrado —`"mesa pan …"` o `"AB3K-9F2Q-…"`— como
+ * contraseña. Como son strings distintos daban llaves distintas: cifrar con la
+ * frase y restaurar con el QR (que lleva bloques) devolvía un respaldo que no
+ * abre, sin ningún aviso. La semilla canónica elimina esa clase de error, no la
+ * mitiga.
+ *
+ * Falla si el material no decodifica (palabra fuera del vocabulario, bloque mal
+ * copiado): vale más un mensaje concreto acá que un "no se pudo descifrar" doce
+ * pantallas después.
  */
 fun derivarClaveDeMaterial(
     material: MaterialRecuperacion,
@@ -225,16 +239,24 @@ fun derivarClaveDeMaterial(
 ): ByteArray {
     require(salt.size == KDF_SALT_LEN) { "salt ${KDF_SALT_LEN} bytes" }
     require(iterations >= 100_000) { "iterations de producción >= 100k" }
-    val password = when (material) {
-        is MaterialRecuperacion.Frase -> material.unida()
-        is MaterialRecuperacion.Bloques -> material.unidos()
-    }
+    val semilla = semillaDeMaterial(material).getOrThrow()
     return CryptoPlataforma.pbkdf2HmacSha256(
-        password = password.encodeToByteArray(),
+        password = semilla,
         salt = salt,
         iterations = iterations,
         outLen = AES_KEY_LEN,
     )
+}
+
+/**
+ * Material tipeado o escaneado → semilla canónica de [BYTES_SEMILLA] bytes.
+ *
+ * Único punto donde frase y bloques convergen. Todo lo que derive llave tiene
+ * que pasar por acá.
+ */
+fun semillaDeMaterial(material: MaterialRecuperacion): Result<ByteArray> = when (material) {
+    is MaterialRecuperacion.Frase -> semillaDesdeFrase(material.palabras)
+    is MaterialRecuperacion.Bloques -> semillaDesdeBloques(material.bloques)
 }
 
 /** KDF usable en producción (PBKDF2). Argon2id = carril futuro. */

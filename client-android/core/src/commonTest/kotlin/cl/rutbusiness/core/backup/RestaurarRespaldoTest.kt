@@ -9,12 +9,11 @@ import kotlin.test.assertTrue
 
 class RestaurarRespaldoTest {
 
-    private val frase = MaterialRecuperacion.Frase(
-        listOf(
-            "uno", "dos", "tres", "cuatro", "cinco", "seis",
-            "siete", "ocho", "nueve", "diez", "once", "doce",
-        ),
-    )
+    // Una clave REAL de la tarjeta: la frase tiene que ser del vocabulario y
+    // cuadrar con los bloques, porque el KDF corre sobre la semilla canónica y
+    // no sobre el texto. Palabras inventadas ya no derivan llave, a propósito.
+    private val clave = claveDeDemostracion()
+    private val frase = MaterialRecuperacion.Frase(clave.palabras)
 
     private fun venta() = VentaEnCola(
         clave = "k-restore",
@@ -58,11 +57,10 @@ class RestaurarRespaldoTest {
             createdAtUnix = 100L,
             materialRecuperacion = frase,
         ).getOrThrow()
+        // Otra clave válida, no basura: prueba que un sobre no se abre con la
+        // frase de OTRO negocio, que es el caso real.
         val mala = MaterialRecuperacion.Frase(
-            listOf(
-                "otro", "dos", "tres", "cuatro", "cinco", "seis",
-                "siete", "ocho", "nueve", "diez", "once", "doce",
-            ),
+            generarClaveDelNegocio(ByteArray(BYTES_SEMILLA) { (it * 3 + 1).toByte() }).palabras,
         )
         val r = restaurarDesdeSobre(mala, prep.sobre!!.envelopeBytes)
         assertTrue(r.isFailure)

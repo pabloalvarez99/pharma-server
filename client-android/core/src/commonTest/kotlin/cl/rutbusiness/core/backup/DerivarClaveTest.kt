@@ -8,12 +8,11 @@ import kotlin.test.assertTrue
 
 class DerivarClaveTest {
 
-    private val frase = MaterialRecuperacion.Frase(
-        listOf(
-            "uno", "dos", "tres", "cuatro", "cinco", "seis",
-            "siete", "ocho", "nueve", "diez", "once", "doce",
-        ),
-    )
+    // Una clave REAL de la tarjeta: la frase tiene que ser del vocabulario y
+    // cuadrar con los bloques, porque el KDF corre sobre la semilla canónica y
+    // no sobre el texto. Palabras inventadas ya no derivan llave, a propósito.
+    private val clave = claveDeDemostracion()
+    private val frase = MaterialRecuperacion.Frase(clave.palabras)
 
     @Test
     fun `misma frase y salt dan la misma llave`() {

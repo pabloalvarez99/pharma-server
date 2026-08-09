@@ -32,14 +32,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import android.content.Intent
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import cl.rutbusiness.app.entrada.PaginaRescatePrint
 import cl.rutbusiness.app.entrada.matrizQrRescate
 import cl.rutbusiness.core.backup.ClaveDelNegocio
 import cl.rutbusiness.core.backup.HUELLA_SIZE
@@ -81,7 +78,7 @@ fun TarjetaRescate(
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val clipboard = LocalClipboardManager.current
-    val context = LocalContext.current
+    val compartir = LocalCompartirTarjeta.current
     var copiado by remember { mutableStateOf(false) }
     val qrPayload = remember(clave, tenantSlug) {
         payloadQrRescate(tenantSlug, clave.bloques)
@@ -275,29 +272,24 @@ fun TarjetaRescate(
                     fillWidth = true,
                     modifier = Modifier.padding(top = dimens.space2),
                 )
-                RbButton(
+                // Sin plataforma detrás (preview, test, iOS todavía) el botón no
+                // se dibuja: vale más que falte a que exista y no haga nada.
+                if (compartir != null) RbButton(
                     label = "Compartir a una nota (no WhatsApp)",
                     onClick = {
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "RutBusiness - tarjeta de rescate")
-                            putExtra(Intent.EXTRA_TEXT, textoPagina)
-                        }
-                        context.startActivity(
-                            Intent.createChooser(
-                                send,
-                                "Guardá en Notas. No mandes por chat.",
-                            ),
+                        compartir.compartirTexto(
+                            asunto = "RutBusiness - tarjeta de rescate",
+                            texto = textoPagina,
                         )
                     },
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
                     modifier = Modifier.padding(top = dimens.space1),
                 )
-                RbButton(
+                if (compartir != null) RbButton(
                     label = "Imprimir o guardar PDF",
                     onClick = {
-                        PaginaRescatePrint.imprimirOGuardarPdf(context, htmlPagina)
+                        compartir?.imprimirHtml(htmlPagina)
                     },
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,

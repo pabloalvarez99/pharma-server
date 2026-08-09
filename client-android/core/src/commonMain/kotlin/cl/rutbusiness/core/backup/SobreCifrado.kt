@@ -86,11 +86,11 @@ private fun esSha256Hex(s: String): Boolean =
 /**
  * Payload del QR / línea imprimible de la tarjeta de rescate.
  *
- * `rutbusiness-rescue:v1:<tenant>:<BLOQUE>-…` (8 bloques de 4).
+ * `rutbusiness-rescue:v1:<tenant>:<BLOQUE>-…` (5 bloques de 4).
  * Las 12 palabras **no** van en el QR (fácil de fotografiar y reenviar).
  */
 fun payloadQrRescate(tenantSlug: String, bloques: List<String>): String? {
-    if (bloques.size != 8 || bloques.any { it.length != 4 }) return null
+    if (bloques.size != BLOQUES_TARJETA || bloques.any { it.length != LARGO_BLOQUE }) return null
     val slug = tenantSlug.trim().lowercase()
     if (slug.isEmpty()) return null
     return "rutbusiness-rescue:v1:$slug:${bloques.joinToString("-")}"
@@ -106,6 +106,6 @@ fun parsearPayloadQrRescate(raw: String): Pair<String, String>? {
     val slug = rest.substring(0, sep).lowercase()
     val blocks = rest.substring(sep + 1)
     val parts = blocks.split('-', ' ').filter { it.isNotEmpty() }
-    if (parts.size != 8 || parts.any { it.length != 4 }) return null
+    if (parts.size != BLOQUES_TARJETA || parts.any { it.length != LARGO_BLOQUE }) return null
     return slug to blocks
 }

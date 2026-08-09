@@ -2,6 +2,7 @@ package cl.rutbusiness.app.ui.entrada
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
@@ -37,7 +38,17 @@ class TarjetaRescateTest {
         val payload = payloadQrRescate(slug, clave.bloques)!!
         var listo = false
 
+        // Doble de plataforma: sin él los botones de compartir e imprimir no
+        // se dibujan (ver `CompartirTarjeta`), y de paso se puede afirmar que
+        // el texto que sale de la app es el de la tarjeta y no otra cosa.
+        val compartido = mutableListOf<String>()
+        val fake = object : CompartirTarjeta {
+            override fun compartirTexto(asunto: String, texto: String) { compartido += texto }
+            override fun imprimirHtml(html: String) { compartido += html }
+        }
+
         compose.setContent {
+            CompositionLocalProvider(LocalCompartirTarjeta provides fake) {
             RbTheme(darkTheme = true, reducedMotion = true) {
                 Box(Modifier.fillMaxSize()) {
                     TarjetaRescate(
@@ -46,6 +57,7 @@ class TarjetaRescateTest {
                         tenantSlug = slug,
                     )
                 }
+            }
             }
         }
         compose.waitForIdle()
@@ -64,5 +76,13 @@ class TarjetaRescateTest {
             .performClick()
         compose.waitForIdle()
         assertTrue(listo)
+
+        // Compartir manda el texto de la tarjeta, con las palabras adentro:
+        // es lo que la dueña pega en su nota.
+        compose.onNodeWithText("Compartir a una nota", substring = true)
+            .performScrollTo()
+            .performClick()
+        compose.waitForIdle()
+        assertTrue(compartido.any { it.contains(clave.palabras.first()) })
     }
 }
