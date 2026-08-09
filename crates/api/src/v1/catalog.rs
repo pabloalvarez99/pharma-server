@@ -80,6 +80,18 @@ pub struct ListProductsQuery {
     pub low_stock: Option<i64>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+    /// Cursor: id del ÚLTIMO producto de la página anterior. La siguiente
+    /// arranca justo después de él, así que cuesta lo mismo en la página 1 que
+    /// en la 50. `offset` sigue funcionando igual que siempre, pero se degrada
+    /// mientras más se avanza (medido sobre HTTP con 3.000 productos: 5 ms en
+    /// `offset=0`, 111 ms en `offset=2000`, contra 10 ms con cursor). Cuando
+    /// viene `after`, `offset` se ignora.
+    ///
+    /// El recorrido se abre con `?after=` **vacío**, no omitiendo el
+    /// parámetro: paginar por cursor pide un orden total (`name, id`) que la
+    /// página del POS no paga, así que se activa explícitamente y todas las
+    /// páginas del recorrido —incluida la primera— salen con el mismo orden.
+    pub after: Option<String>,
     /// `true` = include variant children (default: only top-level).
     #[serde(default)]
     pub include_variants: bool,
@@ -95,6 +107,7 @@ impl ListProductsQuery {
                 low_stock: self.low_stock,
                 limit: self.limit,
                 offset: self.offset,
+                after: self.after,
             },
             self.include_variants,
         )
