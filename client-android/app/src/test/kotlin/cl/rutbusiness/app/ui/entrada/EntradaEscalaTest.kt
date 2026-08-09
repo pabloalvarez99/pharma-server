@@ -153,6 +153,69 @@ class EntradaEscalaTest {
         assertTrue("el primer uso dice $encontradas", encontradas.isEmpty())
     }
 
+    // --- la elección de camino ----------------------------------------------
+
+    private fun mostrarPuerta(
+        escala: Float,
+        yaEntroAlgunaVez: Boolean = false,
+        onCrear: () -> Unit = {},
+        onEntrar: () -> Unit = {},
+    ) {
+        compose.setContent {
+            ConEscala(escala) {
+                Puerta(
+                    yaEntroAlgunaVez = yaEntroAlgunaVez,
+                    onCrear = onCrear,
+                    onEntrar = onEntrar,
+                    onVerExplicacion = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    /**
+     * Los dos caminos están, y los dos se pueden tocar.
+     *
+     * Es la pantalla que arregla el problema de origen: la app abría en un
+     * formulario que pedía una dirección de servidor que quien la bajó de la
+     * tienda no tiene de dónde sacar. Si alguno de los dos botones desaparece o
+     * queda fuera de alcance, vuelve ese problema.
+     */
+    @Test
+    fun `los dos caminos se ven y se tocan al 100 por ciento`() {
+        mostrarPuerta(1.0f)
+        revisarLosDosCaminos(1.0f)
+    }
+
+    @Test
+    fun `los dos caminos se ven y se tocan al 200 por ciento`() {
+        mostrarPuerta(2.0f)
+        revisarLosDosCaminos(2.0f)
+    }
+
+    private fun revisarLosDosCaminos(escala: Float) {
+        compose.onNodeWithText("Crear mi negocio").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Entrar a mi negocio").performScrollTo().assertIsDisplayed()
+        revisarTactiles("${escala}x, la puerta")
+        revisarQueNadaSeCorte("${escala}x, la puerta")
+    }
+
+    @Test
+    fun `cada camino lleva a donde dice`() {
+        var creando = false
+        var entrando = false
+        mostrarPuerta(1.0f, onCrear = { creando = true }, onEntrar = { entrando = true })
+
+        compose.onNodeWithText("Crear mi negocio").performClick()
+        compose.waitForIdle()
+        assertTrue("«Crear mi negocio» no lleva al alta", creando)
+
+        compose.onNodeWithText("Entrar a mi negocio").performClick()
+        compose.waitForIdle()
+        assertTrue("«Entrar a mi negocio» no lleva al formulario", entrando)
+    }
+
     // --- el formulario ------------------------------------------------------
 
     private fun mostrarFormulario(

@@ -36,6 +36,26 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+
+        // A dónde apunta "Crear mi negocio". Ver `ui/alta/Nube.kt`.
+        //
+        // Es un dato de la compilación y **no** una constante en el código
+        // fuente, a propósito: una dirección de producción escrita en un .kt es
+        // una decisión que nadie tomó y que después nadie puede cambiar sin
+        // recompilar el mundo. Acá se pasa explícito al armar el APK:
+        //
+        //     ./gradlew :app:assembleRelease -Prb.urlNube=https://api.rutbusiness.cl
+        //
+        // Vacío por defecto — que es lo que hay en el repo — el alta pregunta
+        // dónde está el computador del negocio en vez de inventarse un destino.
+        // Nada de esto es un secreto: es una dirección pública, la misma que
+        // cualquiera ve en el tráfico de la app. La clave de aprovisionamiento
+        // NO viaja acá ni a ninguna parte del APK (ver `ui/alta/AltaApi.kt`).
+        buildConfigField(
+            "String",
+            "URL_NUBE",
+            "\"${providers.gradleProperty("rb.urlNube").getOrElse("")}\"",
+        )
     }
 
     // PISO DE HARDWARE (regla 2): NUNCA un APK universal. Un teléfono con 8 GB
@@ -80,6 +100,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Sólo por `URL_NUBE`. AGP lo apaga por defecto desde 8.0.
+        buildConfig = true
     }
 
     packaging {

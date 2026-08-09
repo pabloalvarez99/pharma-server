@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.alta.AltaRoute
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
@@ -36,12 +37,29 @@ import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * La puerta de entrada: la explicación del primer uso, y después el formulario.
+ * Dónde está parada la app antes de que haya sesión.
  *
- * Quién decide cuál de las dos se ve: la bandera de [PreferenciasDeEntrada],
+ * Tres lugares y no dos: al camino de "ya tengo un negocio" se le sumó el de
+ * crearlo. Un booleano habría alcanzado para dos, pero el tercero llegó y con
+ * un booleano el que se pierde siempre es el nuevo.
+ */
+private enum class LugarDeLaEntrada { Puerta, Alta, Formulario }
+
+/**
+ * La puerta de entrada: la explicación del primer uso, la elección de camino, y
+ * después el camino elegido.
+ *
+ * Quién decide si se ve la explicación: la bandera de [PreferenciasDeEntrada],
  * que se prende con el primer login que funciona. Quien ya entró alguna vez
- * nunca más ve la explicación, ni siquiera después de cerrar sesión — a esa
- * altura ya sabe lo que dice.
+ * nunca más la ve, ni siquiera después de cerrar sesión — a esa altura ya sabe
+ * lo que dice.
+ *
+ * La elección de camino ([Puerta]) sí se ve siempre. Se evaluó saltársela para
+ * quien ya entró antes, y no: eso obliga a esconder "crear mi negocio" en
+ * alguna parte del formulario, y la persona que compró un teléfono nuevo o
+ * reinstaló la app queda otra vez frente a un campo que no sabe llenar. La
+ * pantalla cuesta un toque y en ella el botón grande ya es el que le
+ * corresponde a cada uno.
  */
 @Composable
 fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
@@ -64,13 +82,44 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
     // Arranca en la explicación sólo si este teléfono nunca entró. Sin
     // servicios de plataforma —una prueba de otra pantalla— se salta: montar
     // una bienvenida que nadie pidió rompería esas pruebas sin proteger a nadie.
-    var explicando by rememberSaveable(servicios) {
-        mutableStateOf(servicios?.preferencias?.yaEntroAlgunaVez() == false)
+    val yaEntro = servicios?.preferencias?.yaEntroAlgunaVez() ?: true
+    var explicando by rememberSaveable(servicios) { mutableStateOf(!yaEntro) }
+
+    // Sin servicios de plataforma se entra derecho al formulario, que es lo que
+    // esperan las pruebas de esta pantalla escritas antes de que existiera la
+    // elección de camino.
+    var lugar by rememberSaveable(servicios) {
+        mutableStateOf(
+            if (servicios == null) LugarDeLaEntrada.Formulario else LugarDeLaEntrada.Puerta,
+        )
     }
 
     if (explicando) {
         PrimerUso(onListo = { explicando = false })
         return
+    }
+
+    when (lugar) {
+        LugarDeLaEntrada.Puerta -> {
+            Puerta(
+                yaEntroAlgunaVez = yaEntro,
+                onCrear = { lugar = LugarDeLaEntrada.Alta },
+                onEntrar = { lugar = LugarDeLaEntrada.Formulario },
+                onVerExplicacion = { explicando = true },
+            )
+            return
+        }
+
+        LugarDeLaEntrada.Alta -> {
+            AltaRoute(
+                sesion = sesion,
+                onVolver = { lugar = LugarDeLaEntrada.Puerta },
+                onIrAEntrar = { lugar = LugarDeLaEntrada.Formulario },
+            )
+            return
+        }
+
+        LugarDeLaEntrada.Formulario -> Unit
     }
 
     FormularioDeEntrada(
@@ -94,6 +143,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
         onProbar = vm::probarConexion,
         onEntrar = vm::entrar,
         onVerExplicacion = { explicando = true },
+        onVolver = { lugar = LugarDeLaEntrada.Puerta },
     )
 }
 
@@ -143,6 +193,12 @@ internal fun FormularioDeEntrada(
     onProbar: () -> Unit,
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
+    /**
+     * Volver a la elección de camino. `null` cuando no hay a dónde volver —una
+     * prueba que monta el formulario solo—, y entonces la barra no muestra la
+     * flecha en vez de mostrar una que no hace nada.
+     */
+    onVolver: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
@@ -170,6 +226,7 @@ internal fun FormularioDeEntrada(
         RbTopBar(
             title = "Entrar a tu negocio",
             subtitle = "Una sola vez: después la app se acuerda",
+            onBack = onVolver?.takeIf { !ocupado },
         )
 
         Column(

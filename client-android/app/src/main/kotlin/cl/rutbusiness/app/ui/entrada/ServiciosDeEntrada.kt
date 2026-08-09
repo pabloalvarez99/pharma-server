@@ -43,6 +43,22 @@ interface PreferenciasDeEntrada {
 class ServiciosDeEntrada(
     val red: RedDelTelefono,
     val preferencias: PreferenciasDeEntrada,
+    /**
+     * La dirección a la que apunta "Crear mi negocio", o `null` cuando este APK
+     * no trae ninguna.
+     *
+     * Viene de `BuildConfig.URL_NUBE`, o sea de cómo se compiló el APK, y no de
+     * una constante en el código (ver `app/build.gradle.kts`). Entra por acá y
+     * no leyendo `BuildConfig` desde la pantalla por la misma razón que la red
+     * y las preferencias: debajo de [cl.rutbusiness.app.ui.RutBusinessApp] no
+     * hay nada de Android ni de este módulo de aplicación, y eso es lo que deja
+     * la capa de UI compilable para iOS sin tocarla.
+     *
+     * No es un secreto y no puede serlo: es una dirección pública, la misma que
+     * cualquiera ve mirando el tráfico de la app. Ninguna clave viaja en el APK
+     * — ver el encabezado de `ui/alta/AltaApi.kt`.
+     */
+    val nube: String? = null,
 )
 
 /**

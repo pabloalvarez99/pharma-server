@@ -83,6 +83,13 @@ class AppContainer(context: Context) {
     val entrada = ServiciosDeEntrada(
         red = RedDelTelefonoAndroid(context.applicationContext),
         preferencias = PreferenciasDeEntradaAndroid(context.applicationContext),
+        // A dónde apunta "Crear mi negocio". Se decide al compilar
+        // (`-Prb.urlNube=...`), no acá: ver el comentario en
+        // `app/build.gradle.kts`. Vacío significa que este APK no trae nube, y
+        // entonces el alta pregunta dónde guardar en vez de inventar un
+        // destino; se traduce a `null` acá, una sola vez, para que ninguna
+        // pantalla tenga que acordarse de que "" y null son lo mismo.
+        nube = BuildConfig.URL_NUBE.takeIf { it.isNotBlank() },
     )
 
     private val scope = CoroutineScope(SupervisorJob())
