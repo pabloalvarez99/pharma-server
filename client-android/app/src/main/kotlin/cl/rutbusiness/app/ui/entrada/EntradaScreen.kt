@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.alta.AltaRoute
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.IdentidadGoogle
@@ -43,12 +44,29 @@ import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.coroutines.launch
 
 /**
- * La puerta de entrada: la explicación del primer uso, y después el formulario.
+ * Dónde está parada la app antes de que haya sesión.
  *
- * Quién decide cuál de las dos se ve: la bandera de [PreferenciasDeEntrada],
+ * Tres lugares y no dos: al camino de "ya tengo un negocio" se le sumó el de
+ * crearlo. Un booleano habría alcanzado para dos, pero el tercero llegó y con
+ * un booleano el que se pierde siempre es el nuevo.
+ */
+private enum class LugarDeLaEntrada { Puerta, Alta, Formulario }
+
+/**
+ * La puerta de entrada: la explicación del primer uso, la elección de camino, y
+ * después el camino elegido.
+ *
+ * Quién decide si se ve la explicación: la bandera de [PreferenciasDeEntrada],
  * que se prende con el primer login que funciona. Quien ya entró alguna vez
- * nunca más ve la explicación, ni siquiera después de cerrar sesión — a esa
- * altura ya sabe lo que dice.
+ * nunca más la ve, ni siquiera después de cerrar sesión — a esa altura ya sabe
+ * lo que dice.
+ *
+ * La elección de camino ([Puerta]) sí se ve siempre. Se evaluó saltársela para
+ * quien ya entró antes, y no: eso obliga a esconder "crear mi negocio" en
+ * alguna parte del formulario, y la persona que compró un teléfono nuevo o
+ * reinstaló la app queda otra vez frente a un campo que no sabe llenar. La
+ * pantalla cuesta un toque y en ella el botón grande ya es el que le
+ * corresponde a cada uno.
  */
 @Composable
 fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
@@ -71,14 +89,22 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
     // Arranca en la explicación sólo si este teléfono nunca entró. Sin
     // servicios de plataforma —una prueba de otra pantalla— se salta: montar
     // una bienvenida que nadie pidió rompería esas pruebas sin proteger a nadie.
-    val primeraVez = servicios?.preferencias?.yaEntroAlgunaVez() == false
-    var explicando by rememberSaveable(servicios) {
-        mutableStateOf(primeraVez)
-    }
+    val yaEntro = servicios?.preferencias?.yaEntroAlgunaVez() ?: true
+    var explicando by rememberSaveable(servicios) { mutableStateOf(!yaEntro) }
+
     // Tras el copy: elegir rubro (feria first) si aún no hay preferencia.
     var eligiendoRubro by rememberSaveable(servicios) {
         mutableStateOf(
-            primeraVez && servicios?.preferencias?.rubroElegido() == null,
+            !yaEntro && servicios?.preferencias?.rubroElegido() == null,
+        )
+    }
+
+    // Sin servicios de plataforma se entra derecho al formulario, que es lo que
+    // esperan las pruebas de esta pantalla escritas antes de que existiera la
+    // elección de camino.
+    var lugar by rememberSaveable(servicios) {
+        mutableStateOf(
+            if (servicios == null) LugarDeLaEntrada.Formulario else LugarDeLaEntrada.Puerta,
         )
     }
 
@@ -101,12 +127,39 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
         return
     }
 
+    // El rubro se elige antes que el camino a propósito: "crear mi negocio"
+    // necesita saber si es feria para el copy, y volver de la Puerta a la
+    // elección de rubro sería devolver a alguien a una pregunta ya contestada.
     val identidad: IdentidadGoogle =
         servicios?.identidadGoogle ?: IdentidadGoogleNoCableada
     val rubroEsFeria = servicios?.preferencias?.rubroElegido() == "feria"
     val scope = rememberCoroutineScope()
     var avisoGoogle by remember { mutableStateOf<String?>(null) }
     var pidiendoGoogle by remember { mutableStateOf(false) }
+
+    when (lugar) {
+        LugarDeLaEntrada.Puerta -> {
+            Puerta(
+                yaEntroAlgunaVez = yaEntro,
+                onCrear = { lugar = LugarDeLaEntrada.Alta },
+                onEntrar = { lugar = LugarDeLaEntrada.Formulario },
+                onVerExplicacion = { explicando = true },
+            )
+            return
+        }
+
+        LugarDeLaEntrada.Alta -> {
+            AltaRoute(
+                sesion = sesion,
+                onVolver = { lugar = LugarDeLaEntrada.Puerta },
+                onIrAEntrar = { lugar = LugarDeLaEntrada.Formulario },
+            )
+            return
+        }
+
+        LugarDeLaEntrada.Formulario -> Unit
+    }
+
 
     FormularioDeEntrada(
         url = vm.url,
@@ -179,6 +232,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                 pidiendoGoogle = false
             }
         },
+        onVolver = { lugar = LugarDeLaEntrada.Puerta }.takeIf { servicios != null },
     )
 }
 
@@ -228,6 +282,12 @@ internal fun FormularioDeEntrada(
     onProbar: () -> Unit,
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
+    /**
+     * Volver a la elección de camino. `null` cuando no hay a dónde volver —una
+     * prueba que monta el formulario solo—, y entonces la barra no muestra la
+     * flecha en vez de mostrar una que no hace nada.
+     */
+    onVolver: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     /** Copy feria (ADR-0022): Google como camino preferido en el puesto. */
     rubroEsFeria: Boolean = false,
@@ -262,6 +322,7 @@ internal fun FormularioDeEntrada(
         RbTopBar(
             title = if (rubroEsFeria) "Entrar a tu puesto" else "Entrar a tu negocio",
             subtitle = "Una sola vez: después la app se acuerda",
+            onBack = onVolver?.takeIf { !ocupado },
         )
 
         Column(

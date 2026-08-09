@@ -1,0 +1,115 @@
+package cl.rutbusiness.app.ui.alta
+
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+
+/**
+ * El catálogo de rubros de la app contra el del server, campo por campo.
+ *
+ * [RUBROS] es una copia de `crates/domain/src/rubro.rs`, y existe porque el
+ * alta ocurre antes de tener sesión: el único endpoint que sirve el catálogo
+ * (`GET /api/v1/rubro-pack`) pide JWT y además devuelve un solo pack. Sin este
+ * archivo, la copia se desincroniza el día que alguien agregue un rubro en el
+ * server, y el síntoma sería una app que ofrece un rubro que el server rechaza
+ * con un 400 — o peor, que no ofrece el rubro nuevo y nadie se entera.
+ *
+ * Se lee el `.rs` con expresiones regulares y no se invoca ningún generador: es
+ * una tabla de ocho filas con tres textos cada una, y montar generación de
+ * código para eso costaría más de lo que cuesta cualquier desincronización que
+ * pueda ocurrir.
+ */
+class RubrosTest {
+
+    /**
+     * `crates/domain/src/rubro.rs`, relativo al directorio del módulo (que es
+     * donde Gradle corre las pruebas: `client-android/app`).
+     */
+    private val fuente = File("../../crates/domain/src/rubro.rs")
+
+    private data class PackDelServer(val clave: String, val etiqueta: String, val frase: String)
+
+    /**
+     * Saca las filas de `static PACKS`.
+     *
+     * Cada pack abre con `rubro: "x"` y sigue con `label:` y `tagline:` en ese
+     * orden. Los `label:` de los `AttrField` vienen después del `tagline:`, así
+     * que tomar el primero de cada uno tras el `rubro:` es exacto.
+     */
+    private fun leerElServer(): List<PackDelServer> {
+        val lineas = fuente.readLines()
+        val packs = mutableListOf<PackDelServer>()
+        var i = 0
+        val clave = Regex("""^\s*rubro:\s*"([^"]+)"""")
+        val etiqueta = Regex("""^\s*label:\s*"([^"]+)"""")
+        val frase = Regex("""^\s*tagline:\s*"([^"]+)"""")
+
+        while (i < lineas.size) {
+            val c = clave.find(lineas[i])
+            if (c == null) { i += 1; continue }
+            var e: String? = null
+            var f: String? = null
+            var j = i + 1
+            while (j < lineas.size && (e == null || f == null)) {
+                if (e == null) etiqueta.find(lineas[j])?.let { e = it.groupValues[1] }
+                if (f == null) frase.find(lineas[j])?.let { f = it.groupValues[1] }
+                j += 1
+            }
+            packs += PackDelServer(c.groupValues[1], e.orEmpty(), f.orEmpty())
+            i = j
+        }
+        return packs
+    }
+
+    /**
+     * El repo entero está presente o no hay contra qué comparar.
+     *
+     * Se salta y no falla cuando el crate no está: eso pasa si alguien saca el
+     * módulo Android del monorepo, y en ese escenario no hay desincronización
+     * posible porque no hay dos copias.
+     */
+    private fun exigirElCrate() {
+        assumeTrue(
+            "no se encontró ${fuente.absolutePath}; nada que comparar",
+            fuente.isFile,
+        )
+    }
+
+    @Test
+    fun `el catalogo de la app es exactamente el del server`() {
+        exigirElCrate()
+        val delServer = leerElServer()
+
+        assertTrue("no se pudo leer ningún pack de ${fuente.path}", delServer.isNotEmpty())
+        assertEquals(
+            "sobran o faltan rubros respecto de rubro.rs",
+            delServer.map { it.clave },
+            RUBROS.map { it.clave },
+        )
+        delServer.zip(RUBROS).forEach { (server, app) ->
+            assertEquals("etiqueta distinta para ${server.clave}", server.etiqueta, app.etiqueta)
+            assertEquals("frase distinta para ${server.clave}", server.frase, app.frase)
+        }
+    }
+
+    /**
+     * `otro` tiene que existir y tiene que ir al final.
+     *
+     * Es la caída de [AltaViewModel.crear] cuando por alguna razón no hay rubro
+     * elegido, y es también la regla del pivote del server: el rubro por
+     * defecto es el genérico, **nunca** farmacia
+     * (`DEFAULT_RUBRO` en `rubro.rs`).
+     */
+    @Test
+    fun `el generico es el ultimo y no es farmacia`() {
+        assertEquals("otro", RUBROS.last().clave)
+    }
+
+    /** Ocho claves distintas: una repetida haría invisible a la de abajo. */
+    @Test
+    fun `no hay claves repetidas`() {
+        assertEquals(RUBROS.size, RUBROS.map { it.clave }.toSet().size)
+    }
+}
