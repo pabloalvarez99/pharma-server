@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,6 +10,190 @@ plugins {
     // ... is not found" — algo que ningún test de UI ve, porque la UI no
     // serializa. Lo encontró `AssistApiEnVivoTest` hablando con un server real.
     alias(libs.plugins.kotlin.serialization)
+}
+
+// ---------------------------------------------------------------------------
+// Versión
+//
+// `versionName` (lo que lee una persona) se sube a mano en `version.properties`
+// cuando cambia lo que la app hace. `versionCode` (lo que mira Play Store para
+// saber qué es más nuevo) NO se toca a mano: sale de la cantidad de commits.
+//
+// Play rechaza para siempre un `versionCode` repetido y no deja bajarlo. Atarlo
+// al historial de git lo hace subir solo — nadie tiene que acordarse — y dos
+// builds del mismo commit dan el mismo número, que es lo que hace reproducible
+// un artefacto.
+// ---------------------------------------------------------------------------
+
+/** Corre git en el repo y devuelve su salida, o `null` si no hay git ni repo. */
+fun gitDice(vararg argumentos: String): String? = try {
+    val proceso = ProcessBuilder(listOf("git") + argumentos)
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+    val salida = proceso.inputStream.bufferedReader().readText().trim()
+    if (proceso.waitFor() == 0) salida else null
+} catch (_: Exception) {
+    null
+}
+
+/**
+ * `RB_VERSION_CODE` existe para el único caso en que contar commits miente: un
+ * CI que clona con `depth=1` ve un solo commit y publicaría `versionCode = 1`
+ * encima de una versión más alta. El día que haya CI Android, o clona completo
+ * o pasa el número.
+ */
+val versionCodeDeEsteBuild: Int = run {
+    val forzado = System.getenv("RB_VERSION_CODE")?.trim().orEmpty()
+    if (forzado.isNotEmpty()) {
+        return@run forzado.toIntOrNull()
+            ?: throw GradleException("RB_VERSION_CODE=\"$forzado\" no es un entero.")
+    }
+    val commits = gitDice("rev-list", "--count", "HEAD")?.toIntOrNull()
+        ?: throw GradleException(
+            "No se pudo contar los commits con git, así que no hay versionCode. " +
+                "Si estás construyendo fuera de un clon de git, pasá RB_VERSION_CODE=<entero>.",
+        )
+    commits
+}
+
+val versionNameDeEsteBuild: String = run {
+    val archivo = rootProject.file("version.properties")
+    if (!archivo.isFile) {
+        throw GradleException("Falta client-android/version.properties.")
+    }
+    val propiedades = Properties().apply { archivo.inputStream().use { load(it) } }
+    val base = propiedades.getProperty("versionName")?.trim().orEmpty()
+    if (base.isEmpty()) {
+        throw GradleException("Falta `versionName` en client-android/version.properties.")
+    }
+    // El número entre paréntesis es lo único que distingue dos builds de la
+    // misma versión, y es lo que se ve en Ajustes > Aplicaciones del teléfono.
+    // Sin él, dos APK sideloadeados de commits distintos son indistinguibles
+    // mirando el aparato, que es justo lo que hay que poder hacer al probar.
+    "$base ($versionCodeDeEsteBuild)"
+}
+
+// ---------------------------------------------------------------------------
+// Firma de release — REGLA 3, no negociable
+//
+// El keystore y sus claves viven FUERA del repo. Dos fuentes, en este orden:
+//
+//   1. `client-android/keystore.properties` — gitignorado.
+//      Plantilla en `keystore.properties.ejemplo`.
+//   2. Variables de entorno: RB_KEYSTORE_FILE, RB_KEYSTORE_PASSWORD,
+//      RB_KEY_ALIAS, RB_KEY_PASSWORD.
+//
+// Si no hay ninguna, el build de release FALLA con el motivo escrito. Nunca cae
+// a la firma de debug: un APK firmado con la clave de debug se instala igual y
+// parece sano, pero después no se puede actualizar con el APK de verdad porque
+// la firma no coincide — y eso se descubre en el teléfono de la dueña, con la
+// app instalada, no acá.
+// ---------------------------------------------------------------------------
+
+val archivoDeFirma = rootProject.file("keystore.properties")
+
+val propiedadesDeFirma = Properties().apply {
+    if (archivoDeFirma.isFile) archivoDeFirma.inputStream().use { load(it) }
+}
+
+fun datoDeFirma(propiedad: String, variableDeEntorno: String): String? =
+    (propiedadesDeFirma.getProperty(propiedad) ?: System.getenv(variableDeEntorno))
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+
+val rutaDelKeystore = datoDeFirma("storeFile", "RB_KEYSTORE_FILE")
+val claveDelKeystore = datoDeFirma("storePassword", "RB_KEYSTORE_PASSWORD")
+val aliasDeLaClave = datoDeFirma("keyAlias", "RB_KEY_ALIAS")
+// Lo habitual es que la clave del alias sea la misma que la del keystore;
+// `keytool -genkeypair` acepta ese caso con Enter.
+val claveDeLaClave = datoDeFirma("keyPassword", "RB_KEY_PASSWORD") ?: claveDelKeystore
+
+/** Ruta relativa: se resuelve contra `client-android/`, no contra el cwd. */
+val keystoreDeRelease = rutaDelKeystore?.let { ruta ->
+    file(ruta).let { if (it.isAbsolute) it else rootProject.file(ruta) }
+}
+
+val comoConfigurarLaFirma = """
+    |Poné los datos en client-android/keystore.properties (gitignorado):
+    |
+    |    storeFile=C:/ruta/FUERA/del/repo/rutbusiness-release.jks
+    |    storePassword=<la clave del keystore>
+    |    keyAlias=rutbusiness
+    |    keyPassword=<la clave del alias, si es distinta>
+    |
+    |...o en las variables de entorno RB_KEYSTORE_FILE, RB_KEYSTORE_PASSWORD,
+    |RB_KEY_ALIAS y RB_KEY_PASSWORD.
+    |
+    |Para crear un keystore de desarrollo:
+    |    pwsh client-android/scripts/crear-keystore-dev.ps1
+    |
+    |REGLA 3: ni el keystore ni su clave entran a git, al vault, ni a Notion.
+    |Se archiva el puntero (dónde está y cómo obtenerla), nunca el valor.
+""".trimMargin()
+
+val motivoSinFirma: String? = when {
+    rutaDelKeystore == null || claveDelKeystore == null || aliasDeLaClave == null ->
+        "El build de release no tiene firma configurada y NO cae a firma de debug.\n\n" +
+            comoConfigurarLaFirma
+    keystoreDeRelease?.isFile != true ->
+        "El keystore de release no existe en la ruta configurada:\n" +
+            "    $keystoreDeRelease\n\n" +
+            comoConfigurarLaFirma
+    else -> null
+}
+
+/**
+ * Corta el build de release antes de empaquetar si no hay firma.
+ *
+ * Sin esto AGP produce en silencio un `app-...-release-unsigned.apk` que
+ * `adb install` rechaza más tarde con un error que no dice nada de keystores.
+ */
+val exigirFirmaDeRelease = tasks.register("exigirFirmaDeRelease") {
+    group = "verification"
+    description = "Falla si el build de release no encuentra el keystore."
+    val motivo = motivoSinFirma
+    doLast {
+        if (motivo != null) throw GradleException(motivo)
+    }
+}
+
+tasks.configureEach {
+    val empaquetaRelease = (name.startsWith("package") || name.startsWith("bundle")) &&
+        name.contains("Release")
+    if (empaquetaRelease) dependsOn(exigirFirmaDeRelease)
+}
+
+// ---------------------------------------------------------------------------
+// APK por ABI vs. AAB: no se pueden pedir en la misma corrida
+//
+// El AAB ya parte por ABI adentro — es su razón de ser — así que `splits.abi`
+// sólo tiene sentido en el camino APK. AGP no acepta los dos juntos y aborta con
+// "Multiple shrunk-resources files found ... Please disable building multiple
+// APKs when building an Android app bundle" (issuetracker 402800800).
+//
+// Entonces `splits.abi` se apaga cuando la corrida es de bundle. El peligro de
+// eso es silencioso: con los splits apagados, `assembleRelease` produciría un
+// APK universal, que es exactamente lo que el piso de hardware prohíbe. Por eso
+// pedir las dos cosas juntas no se resuelve a medias, se rechaza.
+// ---------------------------------------------------------------------------
+
+val tareasPedidas = gradle.startParameter.taskNames.map { it.substringAfterLast(':') }
+val pideBundle = tareasPedidas.any { it.startsWith("bundle") }
+val pideApk = tareasPedidas.any { it.startsWith("assemble") || it.startsWith("install") }
+
+if (pideBundle && pideApk) {
+    throw GradleException(
+        """
+        |No se pueden construir el AAB y los APK en la misma corrida: AGP no deja
+        |combinar `splits.abi` con el bundle, y apagar los splits produciría un APK
+        |universal — prohibido por el piso de hardware.
+        |
+        |Corré las dos, una después de la otra:
+        |    ./gradlew assembleRelease
+        |    ./gradlew bundleRelease
+        """.trimMargin(),
+    )
 }
 
 android {
@@ -31,8 +217,10 @@ android {
         // a correr bien— es mal negocio.
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // Ver el bloque "Versión" arriba: el código sale de git, el nombre de
+        // `version.properties`. Ninguno se edita acá.
+        versionCode = versionCodeDeEsteBuild
+        versionName = versionNameDeEsteBuild
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -43,10 +231,33 @@ android {
     // solo; esto cubre el camino APK (`assembleRelease`, sideload, QA).
     splits {
         abi {
-            isEnable = true
+            // Apagado sólo cuando la corrida es de bundle; ver el bloque de
+            // arriba. En el camino APK siempre está prendido.
+            isEnable = !pideBundle
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = false
+        }
+    }
+
+    signingConfigs {
+        // Sólo se crea si hay datos: si no, `release` queda sin `signingConfig`
+        // y `exigirFirmaDeRelease` corta el build antes de empaquetar.
+        if (motivoSinFirma == null) {
+            create("release") {
+                storeFile = keystoreDeRelease
+                storePassword = claveDelKeystore
+                keyAlias = aliasDeLaClave
+                keyPassword = claveDeLaClave
+                // v1 (JAR signing) hace falta de verdad: el esquema v2 llegó con
+                // Android 7.0 y el piso de hardware es Android 6.0 (minSdk 23).
+                // Sin v1 el APK no instala en el aparato objetivo.
+                enableV1Signing = true
+                enableV2Signing = true
+                // v3 sólo suma: es el esquema que permite rotar la clave sin
+                // perder la identidad de la app en Android 9+.
+                enableV3Signing = true
+            }
         }
     }
 
@@ -55,6 +266,7 @@ android {
             isMinifyEnabled = false
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
