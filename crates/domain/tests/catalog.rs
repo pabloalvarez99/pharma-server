@@ -317,6 +317,286 @@ async fn plain_page_is_name_ordered_paged_and_active_filtered() {
     assert_eq!(page(Some(false), 40, 0).await, vec!["Borrado"]);
 }
 
+/// La búsqueda por texto pasó de tres `CONTAINS` con `OR` (recorrido de tabla)
+/// a una sola condición sobre el índice full-text `product_search` (migración
+/// 0045). Estas aserciones fijan lo que el usuario ve, que es lo único que no
+/// puede cambiar: qué encuentra, en qué orden y de qué tenant.
+#[tokio::test]
+async fn text_search_matches_name_ingredient_and_external_id() {
+    let (db, t) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let other: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+
+    let mut panadol = new_product("Panadol 500 mg", "1990");
+    panadol.active_ingredient = Some("Paracetamol".into());
+    panadol.external_id = Some("SKU-00042".into());
+    service::create_product(&db, &t, panadol).await.unwrap();
+
+    let mut advil = new_product("Advil 400 mg", "2490");
+    advil.active_ingredient = Some("Ibuprofeno".into());
+    advil.external_id = Some("SKU-00043".into());
+    service::create_product(&db, &t, advil).await.unwrap();
+
+    // Mismo nombre en el otro tenant: la búsqueda nunca puede cruzarlo.
+    let mut ajeno = new_product("Panadol 500 mg", "1990");
+    ajeno.active_ingredient = Some("Paracetamol".into());
+    service::create_product(&db, &other, ajeno).await.unwrap();
+
+    let find = |term: &str| {
+        let db = db.clone();
+        let t = t.clone();
+        let term = term.to_string();
+        async move {
+            service::list_products(
+                &db,
+                &t,
+                ProductFilters {
+                    search: Some(term),
+                    limit: Some(40),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect::<Vec<_>>()
+        }
+    };
+
+    // Por nombre, completo y por prefijo — la cajera busca mientras tipea.
+    assert_eq!(find("Panadol").await, vec!["Panadol 500 mg"]);
+    assert_eq!(find("pana").await, vec!["Panadol 500 mg"]);
+    assert_eq!(find("p").await, vec!["Panadol 500 mg"]);
+    // Sin importar mayúsculas.
+    assert_eq!(find("PANADOL").await, vec!["Panadol 500 mg"]);
+    // Por principio activo, que no está en el nombre.
+    assert_eq!(find("paracetamol").await, vec!["Panadol 500 mg"]);
+    assert_eq!(find("ibupro").await, vec!["Advil 400 mg"]);
+    // Por código externo.
+    assert_eq!(find("SKU-00042").await, vec!["Panadol 500 mg"]);
+    // Un término que no está no inventa filas.
+    assert!(find("amoxicilina").await.is_empty());
+    // Y el resultado sigue ordenado por nombre cuando hay varios.
+    assert_eq!(
+        find("mg").await,
+        vec!["Advil 400 mg", "Panadol 500 mg"],
+        "varios resultados salen ordenados por nombre"
+    );
+}
+
+/// El precio de que la búsqueda use índice: pasa de subcadena en cualquier
+/// posición a prefijo de palabra. Se deja escrito para que el día que alguien
+/// lo note sepa que es una decisión y no una regresión — una subcadena
+/// arbitraria no la sirve ninguna estructura ordenada (ver migración 0045).
+#[tokio::test]
+async fn text_search_is_word_prefix_not_arbitrary_substring() {
+    let (db, t) = setup().await;
+    service::create_product(&db, &t, new_product("Paracetamol 500", "990"))
+        .await
+        .unwrap();
+
+    let find = |term: &str| {
+        let db = db.clone();
+        let t = t.clone();
+        let term = term.to_string();
+        async move {
+            service::list_products(
+                &db,
+                &t,
+                ProductFilters {
+                    search: Some(term),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .len()
+        }
+    };
+
+    // Prefijo de palabra: sí.
+    assert_eq!(find("para").await, 1);
+    // Palabra suelta del medio del nombre: sí, el tokenizador la separa.
+    assert_eq!(find("500").await, 1);
+    // Subcadena que empieza en medio de una palabra: ya no.
+    assert_eq!(find("cetamol").await, 0);
+}
+
+/// Paginación por cursor (`ProductFilters::after`): la salida al `OFFSET`, que
+/// recorre desde el principio del catálogo cada vez.
+///
+/// Lo que se prueba acá no es la velocidad sino que dé EXACTAMENTE lo mismo que
+/// el offset, incluido el caso que rompe un cursor ingenuo: dos productos con
+/// el mismo nombre partidos por el corte de página. `name` no es único (el que
+/// se sufija es el slug), así que un cursor que sólo mire el nombre se saltaría
+/// al segundo homónimo.
+#[tokio::test]
+async fn cursor_pagination_matches_offset_even_with_duplicate_names() {
+    let (db, t) = setup().await;
+
+    // "Igual" ×3: los tres nombres idénticos caen dentro de una misma página de
+    // 2, así que el corte pasa justo por el medio del grupo.
+    for name in ["Alfa", "Igual", "Igual", "Igual", "Zeta"] {
+        service::create_product(&db, &t, new_product(name, "100"))
+            .await
+            .unwrap();
+    }
+
+    let by_offset = service::list_products(
+        &db,
+        &t,
+        ProductFilters {
+            limit: Some(40),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(by_offset.len(), 5);
+
+    // Recorrer todo el catálogo de a 2 usando sólo el cursor. La primera página
+    // se pide con `after = Some("")`: es lo que abre el recorrido.
+    let mut by_cursor = Vec::new();
+    let mut after: Option<String> = Some(String::new());
+    loop {
+        let page = service::list_products(
+            &db,
+            &t,
+            ProductFilters {
+                limit: Some(2),
+                after: after.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        after = Some(page.last().unwrap().id.clone());
+        by_cursor.extend(page);
+        assert!(by_cursor.len() <= 5, "el cursor está repitiendo filas");
+    }
+
+    // Mismas filas y mismos nombres en el mismo orden. Los homónimos entre sí
+    // pueden quedar en otro lugar dentro de su propio grupo — el orden dentro
+    // del grupo no está definido para la página normal — pero ninguno se
+    // repite ni se pierde.
+    assert_eq!(
+        by_cursor.iter().map(|p| &p.name).collect::<Vec<_>>(),
+        by_offset.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+    let mut vistos = by_cursor.iter().map(|p| &p.id).collect::<Vec<_>>();
+    let mut esperados = by_offset.iter().map(|p| &p.id).collect::<Vec<_>>();
+    vistos.sort();
+    esperados.sort();
+    assert_eq!(
+        vistos, esperados,
+        "el cursor tiene que devolver exactamente las mismas filas, sin repetir ni saltear \
+         ninguno de los homónimos"
+    );
+
+    // El cursor no rompe los demás filtros: sigue siendo una página normal.
+    let filtrada = service::list_products(
+        &db,
+        &t,
+        ProductFilters {
+            active: Some(true),
+            limit: Some(40),
+            after: Some(by_offset[0].id.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        filtrada.iter().map(|p| &p.name).collect::<Vec<_>>(),
+        vec!["Igual", "Igual", "Igual", "Zeta"]
+    );
+}
+
+/// El cursor y la búsqueda se combinan: con `search` no acelera nada (el plan
+/// lo manda el índice full-text) pero tiene que seguir cortando en el lugar
+/// correcto, o el cliente que pagina resultados se queda en la página 1.
+#[tokio::test]
+async fn cursor_also_works_while_searching() {
+    let (db, t) = setup().await;
+    for name in ["Advil 200", "Advil 400", "Advil 600", "Panadol 500"] {
+        service::create_product(&db, &t, new_product(name, "100"))
+            .await
+            .unwrap();
+    }
+
+    let page = |after: Option<String>| {
+        let db = db.clone();
+        let t = t.clone();
+        async move {
+            service::list_products(
+                &db,
+                &t,
+                ProductFilters {
+                    search: Some("advil".into()),
+                    limit: Some(2),
+                    after,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    let p1 = page(None).await;
+    assert_eq!(
+        p1.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        vec!["Advil 200", "Advil 400"]
+    );
+    let p2 = page(Some(p1.last().unwrap().id.clone())).await;
+    assert_eq!(
+        p2.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        vec!["Advil 600"],
+        "la segunda página de una búsqueda sigue después del cursor"
+    );
+    assert!(page(Some(p2.last().unwrap().id.clone())).await.is_empty());
+}
+
+/// Un cursor que no es de este tenant no puede ser una ventana a su catálogo, y
+/// tampoco puede degradar en silencio a "página 1": eso le mostraría al cliente
+/// filas repetidas creyendo que avanzó.
+#[tokio::test]
+async fn cursor_from_another_tenant_is_rejected() {
+    let (db, t) = setup().await;
+    let mut r = db
+        .query("CREATE tenant SET name = 'Otra', slug = 'otra' RETURN id")
+        .await
+        .unwrap();
+    let other: Thing = r.take::<Option<Thing>>((0, "id")).unwrap().unwrap();
+
+    service::create_product(&db, &t, new_product("Propio", "100"))
+        .await
+        .unwrap();
+    let ajeno = service::create_product(&db, &other, new_product("Ajeno", "100"))
+        .await
+        .unwrap();
+
+    for cursor in [ajeno.id.as_str(), "product:no_existe", "no-es-un-id"] {
+        let err = service::list_products(
+            &db,
+            &t,
+            ProductFilters {
+                after: Some(cursor.to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(err.is_err(), "el cursor '{cursor}' debió ser rechazado");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // BUG-perf-001: product_stats pre-computed view (migration 0029) replaces the
 // O(n) full-scan aggregate. These lock in that the maintained view returns the

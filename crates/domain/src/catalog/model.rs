@@ -228,6 +228,23 @@ pub struct ProductFilters {
     pub low_stock: Option<i64>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+    /// Cursor: id of the LAST product of the previous page. `Some("")` opens
+    /// the walk (first page), `None` = classic `offset` paging.
+    ///
+    /// Es la forma barata de avanzar: `offset` recorre desde el principio del
+    /// catálogo cada vez y se degrada mientras más se avanza, mientras que el
+    /// cursor arranca el recorrido en el nombre del producto que el cliente ya
+    /// tiene. Cuando viene `after`, `offset` se ignora.
+    ///
+    /// La primera página se pide con `Some("")` y no con `None` a propósito: el
+    /// cursor necesita un orden total (`name, id`) y la página del POS no puede
+    /// pagarlo, así que pedirlo es explícito. Todas las páginas del recorrido
+    /// —incluida la primera— tienen que salir con el mismo orden o el corte no
+    /// cierra. Ver [`crate::catalog::repo::list_products_opts`].
+    ///
+    /// Con `search` el cursor sigue siendo correcto pero no acelera nada: ahí
+    /// el plan lo manda el índice full-text.
+    pub after: Option<String>,
 }
 
 // --- public storefront (Free Web PR1, ADR-0020) ----------------------------
