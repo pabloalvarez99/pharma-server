@@ -2,6 +2,7 @@ package cl.rutbusiness.core.session
 
 import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.net.ApiFactory
+import cl.rutbusiness.core.net.AvisoDeSesion
 import cl.rutbusiness.core.net.ReporteDeRed
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.net.ServerUrl
@@ -58,12 +59,30 @@ class SessionRepository(
     private var factory: ApiFactory? = null
     private var restaurada = false
 
-    /** Cliente HTTP apuntando a [baseUrl], reusado mientras la URL no cambie. */
+    /**
+     * Cliente HTTP apuntando a [baseUrl], reusado mientras la URL no cambie.
+     *
+     * Acá se cablea el 401: **toda** llamada que salga de esta sesión cierra la
+     * sesión sola si el server dice que el token no sirve. Es el único lugar
+     * donde hay que acordarse, y por eso el único donde se puede olvidar.
+     */
     fun apiPara(baseUrl: String): ApiFactory {
         val actual = factory
         if (actual != null && actual.baseUrl == baseUrl) return actual
         actual?.close()
-        return ApiFactory(baseUrl, red) { token }.also { factory = it }
+        return ApiFactory(baseUrl, red, sesionVencida = alVencer) { token }
+            .also { factory = it }
+    }
+
+    /**
+     * Sólo se cierra lo que estaba abierto. Un 401 del propio login no es una
+     * sesión que venció -es una contraseña que no era-, y ahí `salir()` sería
+     * borrar el token de nadie y pisar el estado de la pantalla de entrada.
+     */
+    private val alVencer = object : AvisoDeSesion {
+        override suspend fun vencio() {
+            if (_estado.value is EstadoSesion.Activa) salir()
+        }
     }
 
     /**
@@ -123,12 +142,16 @@ class SessionRepository(
     /**
      * Confirma contra el server que el token guardado sigue sirviendo. Solo un
      * 401 cierra la sesión; que el server esté apagado no la toca.
+     *
+     * El 401 no se maneja acá: esta llamada sale por [apiPara], igual que todas
+     * las demás, y ahí ya está cableado. Repetirlo en este `when` sería la
+     * misma línea escrita dos veces, que es como empezó el problema.
      */
     suspend fun confirmarSesion() {
         val activa = _estado.value as? EstadoSesion.Activa ?: return
         when (val r = AuthApi(apiPara(activa.baseUrl)).me()) {
             is Resultado.Ok -> _estado.value = activa.copy(me = r.valor)
-            is Resultado.Falla -> if (r.error is AppError.SesionExpirada) salir()
+            is Resultado.Falla -> Unit
         }
     }
 

@@ -38,6 +38,14 @@ class ApiFactory(
      * cabecera `Idempotency-Key`- sin levantar un server.
      */
     motor: HttpClientEngine = defaultHttpClientEngine(),
+    /**
+     * Quién se entera de que el server contestó 401. Por defecto nadie: los
+     * tests y las herramientas no tienen sesión que cerrar.
+     *
+     * Va después de [motor] para no correr a [tokenProvider] del último lugar:
+     * las llamadas `ApiFactory(url, red, motor) { token }` siguen compilando.
+     */
+    val sesionVencida: AvisoDeSesion = AvisoDeSesion.Nulo,
     private val tokenProvider: () -> String?,
 ) {
     /** URL canónica contra la que habla esta instancia. */

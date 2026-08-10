@@ -178,10 +178,6 @@ class AssistViewModel(
                         // permiso—, que es justo lo que dice `retryLabel`.
                         preguntaParaReintentar = limpia.takeIf { copy.retryLabel != null },
                     )
-                    // Igual que caja, cobrar, fiado y resumen: un token vencido
-                    // cierra la sesión y la app se va sola a la entrada. Esta
-                    // pantalla era la única que se quedaba mostrando el cartel.
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
             pensando = false

@@ -203,7 +203,6 @@ class FiadoViewModel(
 
                 is Lectura.Falla -> {
                     error = lectura.error.aCopy("quién te debe")
-                    if (lectura.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
 
@@ -241,7 +240,6 @@ class FiadoViewModel(
                 is Resultado.Ok -> cuenta = r.valor
                 is Resultado.Falla -> {
                     errorDeAccion = r.error.aCopy("la cuenta de ${elegido?.name.orEmpty()}")
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
             cargandoCuenta = false
@@ -343,7 +341,6 @@ class FiadoViewModel(
 
                 is Resultado.Falla -> {
                     errorDeAccion = copyDeAbonoFallido(r.error)
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                     recargarCuenta()
                 }
             }
