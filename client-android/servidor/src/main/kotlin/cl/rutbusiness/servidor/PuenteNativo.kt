@@ -2,9 +2,7 @@ package cl.rutbusiness.servidor
 
 /**
  * Puente JNI del server embebido. Solo ciclo de vida / probes (ADR-0021).
- *
- * H3: un string. H4+: probe KV y arranque/parada cuando el seam de `api` esté
- * en main.
+ * Nada de dominio: la app habla HTTP al puerto local después de arrancar.
  */
 object PuenteNativo {
     init {
@@ -17,4 +15,14 @@ object PuenteNativo {
      */
     @JvmStatic
     external fun nativeSaludo(): String
+
+    /**
+     * H4: abre SurrealKV en [rutaAbsoluta], escribe un marker, cierra, reabre y
+     * lee. Devuelve `"PROBE OK marker=… bytes=…"` o `"PROBE FAIL …"`.
+     *
+     * La ruta debe ser absoluta dentro del sandbox de la app
+     * (p. ej. `context.filesDir.resolve("surreal-probe").absolutePath`).
+     */
+    @JvmStatic
+    external fun nativeProbe(rutaAbsoluta: String): String
 }

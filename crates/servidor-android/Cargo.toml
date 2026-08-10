@@ -16,7 +16,12 @@ path = "src/lib.rs"
 [dependencies]
 # Grafo de producción (H2 size) + force-link de `api::run`.
 api = { path = "../api" }
+# H4: mismo camino de producción que el server (`db::connect` + SurrealKV).
+db = { path = "../db" }
+pharma-core = { path = "../core" }
 tokio = { workspace = true }
-# JNI solo para ciclo de vida / probe (H3+). Sin `invocation`: no hay libjvm
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+# JNI solo para ciclo de vida / probes (H3+). Sin `invocation`: no hay libjvm
 # en el proceso de la app Android; el runtime lo pone el ART.
 jni = { version = "0.21", default-features = false }

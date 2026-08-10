@@ -5970,8 +5970,12 @@ dependencies = [
 name = "servidor-android"
 version = "0.1.28"
 dependencies = [
+ "anyhow",
  "api",
+ "db",
  "jni",
+ "pharma-core",
+ "serde",
  "tokio",
 ]
 
