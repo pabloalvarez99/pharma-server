@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,6 +18,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.catalogo.CatalogoRoute
+import cl.rutbusiness.app.ui.catalogo.LocalAbrirCatalogo
 import cl.rutbusiness.app.ui.offline.EstadoRespaldoUi
 import cl.rutbusiness.app.ui.offline.FranjaDeConexion
 import cl.rutbusiness.app.ui.offline.LocalOffline
@@ -85,6 +88,10 @@ internal fun ContenedorDeDestinos(
     val conectado = hayConexion()
     val cola = ventasEnCola()?.value.orEmpty()
     var viendoCola by rememberSaveable { mutableStateOf(false) }
+    // "Lo que vendo" se abre encima de cualquier pestaña, igual que la cola: es
+    // algo que se hace **mientras** se está cobrando —"esto no lo tengo
+    // cargado"— y no un lugar donde uno se queda.
+    var viendoCatalogo by rememberSaveable { mutableStateOf(false) }
     // No saveable: es un mensaje efímero de la última preparación.
     var estadoRespaldo by remember { mutableStateOf<EstadoRespaldoUi?>(null) }
     var ultimoSobreBase64 by remember { mutableStateOf<String?>(null) }
@@ -114,6 +121,18 @@ internal fun ContenedorDeDestinos(
     // tarde es el que gana, así que atrás cierra primero la lista de la cola
     // -que es lo último que se abrió- y recién después cambia de pestaña.
     BackHandler(enabled = viendoCola) { viendoCola = false }
+
+    // Y el del catálogo después, por lo mismo. El paso de adentro -el formulario
+    // de alta- registra el suyo más profundo todavía, así que atrás deshace en
+    // orden: primero el formulario, después la pantalla, después la pestaña.
+    BackHandler(enabled = viendoCatalogo) { viendoCatalogo = false }
+
+    // Identidad estable: `LocalAbrirCatalogo` es `static`, así que un lambda
+    // nuevo en cada recomposición invalidaría el subárbol entero -o sea, la
+    // pantalla que se está usando- por nada.
+    val abrirCatalogo: (() -> Unit)? = remember(sesion) {
+        if (sesion == null) null else ({ viendoCatalogo = true })
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         FranjaDeConexion(
@@ -373,9 +392,22 @@ internal fun ContenedorDeDestinos(
                     estadoRespaldo = estadoRespaldo,
                     subiendoRespaldo = subiendoRespaldo,
                 )
+            } else if (viendoCatalogo && sesion != null) {
+                // Tapa el destino y **no** la barra de pestañas, igual que la
+                // cola: cargar una cosa en medio de una venta no puede sacar a
+                // la dueña de donde estaba. Al cerrarla vuelve a la misma
+                // pantalla con el carrito intacto, porque el `ViewModel` de
+                // Cobrar cuelga del `Activity` y el `SaveableStateProvider`
+                // devuelve lo demás.
+                CatalogoRoute(
+                    sesion = sesion,
+                    onCerrar = { viendoCatalogo = false },
+                )
             } else {
-                estados.SaveableStateProvider(destino.name) {
-                    contenido(destino)
+                CompositionLocalProvider(LocalAbrirCatalogo provides abrirCatalogo) {
+                    estados.SaveableStateProvider(destino.name) {
+                        contenido(destino)
+                    }
                 }
             }
         }

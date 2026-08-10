@@ -72,6 +72,13 @@ private fun CobrarScreen(vm: CobrarViewModel) {
     // es "Nueva venta", que además limpia la clave de idempotencia.
     BackHandler(enabled = vm.paso == PasoDeCobro.Pago, onBack = vm::volverABuscar)
 
+    // Y desde el monto suelto, atrás vuelve a buscar sin poner nada: es el
+    // "no, mejor no" de alguien que abrió el cobro rápido por error.
+    BackHandler(
+        enabled = vm.paso == PasoDeCobro.MontoSuelto,
+        onBack = vm::cancelarMontoSuelto,
+    )
+
     // Reimprimir se pide todo el tiempo y casi nunca justo después de cobrar:
     // se cortó el papel, salió corrida, el cliente volvió a pedirla. Por eso
     // vive en el paso de Buscar, que es donde la cajera está parada cuando no
@@ -121,6 +128,7 @@ private fun CobrarScreen(vm: CobrarViewModel) {
                 RbTopBar(
                     title = when (vm.paso) {
                         PasoDeCobro.Buscar -> "Cobrar"
+                        PasoDeCobro.MontoSuelto -> "Cobro rápido"
                         PasoDeCobro.Pago -> "Cómo paga"
                         // Sin red la venta quedó guardada, no cobrada en el sistema.
                         // "Listo" ahí sería la palabra equivocada.
@@ -129,10 +137,15 @@ private fun CobrarScreen(vm: CobrarViewModel) {
                     },
                     subtitle = when (vm.paso) {
                         PasoDeCobro.Buscar -> "Busca el producto y agrégalo"
+                        PasoDeCobro.MontoSuelto -> "Sin buscar nada"
                         PasoDeCobro.Pago -> "Revisa lo que lleva y elige el pago"
                         PasoDeCobro.Comprobante -> null
                     },
-                    onBack = if (vm.paso == PasoDeCobro.Pago) vm::volverABuscar else null,
+                    onBack = when (vm.paso) {
+                        PasoDeCobro.Pago -> vm::volverABuscar
+                        PasoDeCobro.MontoSuelto -> vm::cancelarMontoSuelto
+                        else -> null
+                    },
                     actions = {
                         if (vm.paso == PasoDeCobro.Buscar) {
                             // `FlowRow` y **no** `RbChipRow`: ese componente hace
@@ -191,6 +204,7 @@ private fun CobrarScreen(vm: CobrarViewModel) {
             // emulador API 23 con el teclado arriba.
             when (vm.paso) {
                 PasoDeCobro.Buscar -> PasoBuscar(vm, modifier = Modifier.weight(1f))
+                PasoDeCobro.MontoSuelto -> PasoMontoSuelto(vm, modifier = Modifier.weight(1f))
                 PasoDeCobro.Pago -> PasoPago(vm, modifier = Modifier.weight(1f))
                 PasoDeCobro.Comprobante -> PasoComprobante(vm, modifier = Modifier.weight(1f))
             }

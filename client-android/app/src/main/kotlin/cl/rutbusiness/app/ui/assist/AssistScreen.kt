@@ -24,6 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import cl.rutbusiness.app.ui.catalogo.abrirCatalogo
+import cl.rutbusiness.app.ui.catalogo.copyCatalogo
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -61,12 +63,33 @@ fun AssistScreen(
         if (vm.mensajes.isNotEmpty()) lista.animateScrollToItem(vm.mensajes.lastIndex)
     }
 
+    val abrirLoQueVendo = abrirCatalogo()
+    val copyDelCatalogo = copyCatalogo(packActual())
+
     Column(modifier = modifier.fillMaxSize()) {
-        // Sin acción de "Productos": el catálogo ya no se alcanza desde acá.
-        // Buscar un producto vive dentro de Cobrar, que ahora está a una
-        // pestaña de distancia, y dejar el botón sería un segundo camino al
+        // **Buscar** un producto sigue sin estar acá: eso vive dentro de Cobrar,
+        // a una pestaña de distancia, y repetirlo sería un segundo camino al
         // mismo lugar — de los que enseñan mal, porque compiten con la barra.
-        RbTopBar(title = "Pídele a tu negocio")
+        //
+        // **Cargar** lo que se vende es otra cosa, y hasta ahora no estaba en
+        // ninguna parte: el único camino al catálogo pasaba por el escáner, que
+        // en feria está apagado a propósito. Un negocio recién abierto entra por
+        // esta pantalla y tiene que poder cargar su primera cosa desde acá, sin
+        // que nadie le explique dónde mirar.
+        RbTopBar(
+            title = "Pídele a tu negocio",
+            actions = if (abrirLoQueVendo == null) {
+                null
+            } else {
+                {
+                    RbButton(
+                        label = copyDelCatalogo.titulo,
+                        onClick = abrirLoQueVendo,
+                        variant = RbButtonVariant.Secondary,
+                    )
+                }
+            },
+        )
 
         LazyColumn(
             state = lista,

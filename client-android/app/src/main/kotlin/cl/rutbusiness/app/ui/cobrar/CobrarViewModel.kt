@@ -6,7 +6,17 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.diag.Latencia
+// El alta de productos ya no vive detrás del escáner: es del catálogo, y el
+// escáner es uno de sus dos usuarios (`ui/catalogo/ProductosApi.kt`).
+import cl.rutbusiness.app.ui.catalogo.asegurarVentaSuelta
+import cl.rutbusiness.app.ui.catalogo.crearProducto
+import cl.rutbusiness.app.ui.catalogo.pegarCodigo
+import cl.rutbusiness.app.ui.catalogo.sinVentaSuelta
+import cl.rutbusiness.app.ui.catalogo.ventaSueltaEn
 import cl.rutbusiness.app.ui.common.aCopy
+import cl.rutbusiness.app.ui.common.esMasQueCero
+import cl.rutbusiness.app.ui.common.montoParaElServidor
+import cl.rutbusiness.app.ui.common.soloPlata
 import cl.rutbusiness.app.ui.offline.ServiciosOffline
 import cl.rutbusiness.app.ui.offline.soloCache
 import cl.rutbusiness.app.ui.scanner.AntiRebote
@@ -33,8 +43,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 
-/** Los tres momentos de una venta. */
-enum class PasoDeCobro { Buscar, Pago, Comprobante }
+/**
+ * Los momentos de una venta.
+ *
+ * [MontoSuelto] es un desvío de [Buscar] y no un paso más de la secuencia: se
+ * entra a escribir un número y se sale con la línea puesta. Está en el mismo
+ * `enum` porque es una pantalla completa —el teclado numérico al 200% no deja
+ * lugar para nada más— y no un panel encima de la búsqueda.
+ */
+enum class PasoDeCobro { Buscar, MontoSuelto, Pago, Comprobante }
 
 class CobrarViewModel(
     private val sesion: SessionRepository,
@@ -76,6 +93,20 @@ class CobrarViewModel(
     // --- carrito ------------------------------------------------------------
 
     var carrito by mutableStateOf(Carrito())
+        private set
+
+    // --- monto suelto --------------------------------------------------------
+
+    /** Lo que se está escribiendo en el cobro rápido. */
+    var montoSuelto by mutableStateOf("")
+        private set
+
+    /** `true` mientras se busca o se crea el producto centinela. */
+    var preparandoMontoSuelto by mutableStateOf(false)
+        private set
+
+    /** Qué está mal con lo escrito, o qué falló al armar la línea. */
+    var errorMontoSuelto by mutableStateOf<String?>(null)
         private set
 
     // --- pago ---------------------------------------------------------------
@@ -272,7 +303,9 @@ class CobrarViewModel(
 
             when (val r = ProductRepository(api).buscar(texto)) {
                 is Resultado.Ok -> {
-                    resultados = r.valor
+                    // Sin el centinela de los montos sueltos: es plomería, y una
+                    // fila a $0 en medio de la búsqueda se agrega sin querer.
+                    resultados = sinVentaSuelta(r.valor)
                     // La lista que se ve es de ahora. Se anota igual, porque si
                     // la señal se corta en el próximo minuto ésta es la hora
                     // que hay que mostrar.
@@ -307,8 +340,10 @@ class CobrarViewModel(
      */
     private fun filtrarLocal(texto: String): List<ProductDto> {
         val buscado = sinAcentos(texto)
-        if (buscado.isEmpty()) return catalogoLocal
-        return catalogoLocal.filter { producto ->
+        // El centinela vive en `catalogoLocal` para poder cobrar montos sueltos
+        // sin señal, pero nunca se muestra como resultado.
+        if (buscado.isEmpty()) return sinVentaSuelta(catalogoLocal)
+        return sinVentaSuelta(catalogoLocal).filter { producto ->
             sinAcentos(producto.name).contains(buscado) ||
                 producto.barcode?.contains(buscado) == true ||
                 producto.slug.contains(buscado)
@@ -340,6 +375,98 @@ class CobrarViewModel(
 
     fun cantidadEnCarrito(productoId: String): Int =
         carrito.items.firstOrNull { it.productoId == productoId }?.cantidad ?: 0
+
+    // --- monto suelto --------------------------------------------------------
+
+    /**
+     * Abre el cobro rápido, con el monto que ya hubiera cargado.
+     *
+     * Que arranque con lo que ya está puesto es la mitad de la función: la otra
+     * forma de entrar acá es "me equivoqué, eran $2.500".
+     */
+    fun abrirMontoSuelto() {
+        montoSuelto = montoSueltoEnElCarrito() ?: ""
+        errorMontoSuelto = null
+        paso = PasoDeCobro.MontoSuelto
+    }
+
+    fun cambiarMontoSuelto(valor: String) {
+        // Mismo filtro que el resto de la plata: el teclado numérico de algunos
+        // fabricantes deja meter símbolos, y un "$" llega al server como un
+        // decimal inválido.
+        montoSuelto = soloPlata(valor)
+        errorMontoSuelto = null
+    }
+
+    fun cancelarMontoSuelto() {
+        errorMontoSuelto = null
+        paso = PasoDeCobro.Buscar
+    }
+
+    /**
+     * Deja el monto escrito como una línea del carrito y va a cobrar.
+     *
+     * Va derecho al paso de pago porque en el puesto ese monto **es** la venta:
+     * volver a la búsqueda sería devolver a la dueña a una lista que no pensaba
+     * usar. Si además está vendiendo otras cosas, el carrito quedó igual y atrás
+     * la trae de vuelta.
+     */
+    fun confirmarMontoSuelto() {
+        if (preparandoMontoSuelto) return
+        val escrito = montoSuelto.trim()
+        val paraElServidor = montoParaElServidor(escrito)
+
+        errorMontoSuelto = when {
+            escrito.isEmpty() -> "Escribe cuánto vas a cobrar."
+            paraElServidor == null -> "Ese monto no se entiende. Escribe sólo números."
+            !esMasQueCero(escrito) -> "El monto tiene que ser mayor que cero."
+            else -> null
+        }
+        if (errorMontoSuelto != null || paraElServidor == null) return
+
+        val api = sesion.apiActiva() ?: return
+
+        // Sin señal y sin haberlo usado nunca no hay a qué producto colgar la
+        // línea, y el server no acepta líneas sin producto. Se dice así, con lo
+        // que se puede hacer al respecto, en vez de un "no pudimos conectar" que
+        // mandaría a revisar la señal cuando el problema es otro.
+        val enElTelefono = ventaSueltaEn(catalogoLocal)
+        if (enElTelefono == null && !hayConexion) {
+            errorMontoSuelto = "La primera vez que cobres un monto suelto necesitas señal. " +
+                "Después te funciona aunque no haya."
+            return
+        }
+
+        preparandoMontoSuelto = true
+        viewModelScope.launch {
+            when (val r = asegurarVentaSuelta(api, catalogoLocal)) {
+                is Resultado.Ok -> {
+                    carrito = carrito.conMontoSuelto(r.valor, paraElServidor)
+                    invalidarClave()
+                    // Queda en el catálogo de memoria para que la próxima -y la
+                    // primera sin señal- no tenga que salir a la red.
+                    if (ventaSueltaEn(catalogoLocal) == null) {
+                        catalogoLocal = catalogoLocal + r.valor
+                    }
+                    montoSuelto = ""
+                    preparandoMontoSuelto = false
+                    paso = PasoDeCobro.Pago
+                }
+
+                is Resultado.Falla -> {
+                    errorMontoSuelto = r.error.userMessage
+                    preparandoMontoSuelto = false
+                    if (r.error is AppError.SesionExpirada) sesion.salir()
+                }
+            }
+        }
+    }
+
+    /** El monto suelto que ya está en el carrito, si hay. */
+    fun montoSueltoEnElCarrito(): String? {
+        val centinela = ventaSueltaEn(catalogoLocal) ?: return null
+        return carrito.items.firstOrNull { it.productoId == centinela.id }?.precioUnitario
+    }
 
     // --- escáner ------------------------------------------------------------
 
