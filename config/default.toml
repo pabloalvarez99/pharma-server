@@ -71,3 +71,41 @@ hmac_secret = ""
 url = ""
 # Cron "sec min hour day month weekday" (UTC). Empty = every 6h.
 schedule = ""
+
+[user_backup]
+# Respaldo cifrado del usuario en bucket propio (ADR-0022 / ADR-0023).
+# El server sólo ve ciphertext: nada de acá alcanza para leer un respaldo.
+#
+#   none    valida y no guarda (default; una instalación on-prem no manda los
+#           bytes de su dueño a la nube de nadie sin que lo pida)
+#   memory  lab: vive en el proceso y muere con él
+#   s3      R2 u otro S3-compatible
+backend = "none"
+bucket = ""
+# R2: https://<account_id>.r2.cloudflarestorage.com
+endpoint = ""
+# R2 firma con region "auto".
+region = "auto"
+# NUNCA commitear valores acá. Inyectar por entorno:
+#   PHARMA__USER_BACKUP__ACCESS_KEY_ID
+#   PHARMA__USER_BACKUP__SECRET_ACCESS_KEY
+access_key_id = ""
+secret_access_key = ""
+prefix = "user-backup/"
+# Cuotas — sin esto la cuenta de costo del ADR-0023 es ficción. Los defaults
+# salen de lo medido: un sábado de feria son 65,8 KB y la cola al tope 108 KB.
+max_envelope_bytes = 4194304
+max_versions_per_tenant = 5
+# Los PUT (Class A) son el 96% de la factura, no los bytes: esto es control de
+# costo antes que de abuso.
+#
+# Son dos límites porque hacen cosas distintas. El piso frena la ráfaga pero no
+# acota el gasto: 900 s dejan pasar 96 subidas por día, que a 1.000.000 de
+# usuarios son US$ 157.680/año. El tope diario es el que pone el techo — con 6
+# el peor caso queda en US$ 9.855/año, y la app real sube una vez.
+min_seconds_between_uploads = 900
+max_uploads_per_day = 6
+retention_days = 400
+# Rescate sin JWT para el teléfono nuevo. Apagarlo deja a quien perdió el
+# teléfono sin forma de volver.
+rescue_enabled = true

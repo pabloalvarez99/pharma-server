@@ -14,31 +14,48 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Cliente del backup cifrado del feriante (ADR-0022).
+ * Cliente del backup cifrado del feriante (ADR-0022 / ADR-0023).
  *
- * Distinto del admin tar.gz. Sube **solo** ciphertext + meta. Hasta que el
- * bucket exista, el server contesta `accepted: false` con razón clara.
+ * Distinto del admin tar.gz. Sube **solo** ciphertext + meta. Un nodo sin
+ * bucket configurado contesta `accepted: false` con la razón, no inventa nube.
  */
 class UserBackupApi(private val api: ApiFactory) {
 
     suspend fun subir(
         meta: MetaBackupWire,
         ciphertextBase64: String,
+        retrievalHashHex: String? = null,
     ): Resultado<RespuestaSubida> = llamar(api) {
         api.http.post("${api.baseUrl}$USER_BACKUP_UPLOAD_PATH") {
             contentType(ContentType.Application.Json)
-            setBody(PedidoSubida(meta = meta, ciphertextBase64 = ciphertextBase64))
+            setBody(
+                PedidoSubida(
+                    meta = meta,
+                    ciphertextBase64 = ciphertextBase64,
+                    retrievalHashHex = retrievalHashHex,
+                ),
+            )
         }.exigirExito(api.baseUrl).body()
     }
 
     /**
      * Sube un [SobreCifradoV1] ya armado en el cliente.
-     * El server puede contestar `accepted: false` sin bucket - mensaje honesto.
+     *
+     * [retrievalHashHex] es `SHA-256(prueba_retiro)` (ver [PruebaDeRetiro]).
+     * Mandarlo es lo que después deja bajar este sobre desde un teléfono nuevo,
+     * sin sesión. Es opcional en el cable para no romper apps ya instaladas,
+     * pero la app que puede calcularlo **debería** mandarlo siempre: sin él el
+     * respaldo sólo se baja desde el aparato que lo subió, que es justamente el
+     * que se pierde.
      */
-    suspend fun subirSobre(sobre: SobreCifradoV1): Resultado<RespuestaSubida> =
+    suspend fun subirSobre(
+        sobre: SobreCifradoV1,
+        retrievalHashHex: String? = null,
+    ): Resultado<RespuestaSubida> =
         subir(
             meta = metaWireDesdeSobre(sobre),
             ciphertextBase64 = envelopeToBase64(sobre.envelopeBytes),
+            retrievalHashHex = retrievalHashHex,
         )
 
     suspend fun listar(): Resultado<List<MetaBackupWire>> = llamar(api) {
@@ -58,7 +75,51 @@ class UserBackupApi(private val api: ApiFactory) {
             .exigirExito(api.baseUrl)
             .body()
     }
+
+    /**
+     * Teléfono nuevo: baja el sobre más reciente **sin sesión**, presentando la
+     * prueba derivada de la tarjeta del cuaderno.
+     *
+     * Esta es la única llamada del respaldo que se hace con un [ApiFactory] sin
+     * token — y tiene que poder hacerse así, porque quien la necesita no tiene
+     * cómo conseguir uno.
+     *
+     * El server contesta **404 para todo lo que falla**: slug que no existe,
+     * prueba que no calza, negocio sin respaldos. No hay forma de distinguirlos
+     * desde acá, y es a propósito. Lo que la app le dice a la dueña tiene que
+     * cubrir los tres casos a la vez (ver [mensajeRescateFallido]).
+     */
+    suspend fun rescatar(
+        tenantSlug: String,
+        pruebaHex: String,
+    ): Resultado<DescargaBackupWire> = llamar(api) {
+        api.http.post("${api.baseUrl}$USER_BACKUP_RESCUE_PATH") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                PedidoRescate(
+                    tenantSlug = PruebaDeRetiro.normalizarSlug(tenantSlug),
+                    retrievalProofHex = pruebaHex.trim().lowercase(),
+                ),
+            )
+        }.exigirExito(api.baseUrl).body()
+    }
 }
+
+/**
+ * Qué se le dice a alguien cuyo rescate volvió 404.
+ *
+ * El server no distingue las causas a propósito, así que el mensaje tampoco
+ * puede fingir que sabe cuál fue. Lo que sí puede hacer es enumerar las tres
+ * cosas revisables, en orden de probabilidad, en vez de dejar un "no
+ * encontrado" que no le dice a nadie qué hacer.
+ */
+fun mensajeRescateFallido(tenantSlug: String): String =
+    "No encontramos un respaldo con esos datos. Revisá tres cosas: " +
+        "que el nombre del negocio sea exactamente el de la tarjeta " +
+        "(\"${PruebaDeRetiro.normalizarSlug(tenantSlug)}\"), " +
+        "que no falte ninguna palabra ni letra, y que este negocio haya " +
+        "alcanzado a subir un respaldo alguna vez. " +
+        "Nadie más que vos puede abrirlo, así que tampoco podemos buscarlo por vos."
 
 @Serializable
 data class DescargaBackupWire(
@@ -112,6 +173,19 @@ data class MetaBackupWire(
 private data class PedidoSubida(
     val meta: MetaBackupWire,
     @SerialName("ciphertext_base64") val ciphertextBase64: String,
+    /** `SHA-256(prueba_retiro)`. Nunca la prueba, y nunca la semilla. */
+    @SerialName("retrieval_hash_hex") val retrievalHashHex: String? = null,
+)
+
+@Serializable
+private data class PedidoRescate(
+    @SerialName("tenant_slug") val tenantSlug: String,
+    /**
+     * La prueba **sí** va entera acá — es su único uso, y el server la hashea
+     * para compararla contra lo que guardó. De la prueba no se llega a la llave
+     * del sobre: son ramas distintas de la misma derivación.
+     */
+    @SerialName("retrieval_proof_hex") val retrievalProofHex: String,
 )
 
 @Serializable

@@ -23,17 +23,18 @@ import kotlinx.serialization.json.booleanOrNull
  * — que es de donde el server saca el subtotal (`sales::service`, suma de
  * `unit_price * quantity`).
  *
- * **Lo que esto es: un rodeo, no la solución.** La solución de verdad es que
- * `NewProduct` acepte `physical_stock: false`, como ya existe en la base
- * (migración 0031) y usa el seed de servicios: un producto que no descuenta
- * inventario nunca choca contra el chequeo de stock y el centinela deja de
- * necesitar mantenimiento. Hoy no hay forma de pedirlo por la API pública —
- * `catalog::repo::set_physical_stock` sólo lo llama el seed— y ese archivo está
- * en el carril de otro agente. Queda anotado en el digest.
+ * **El centinela no tiene inventario.** Nace `physical_stock = false` y
+ * `stock = 0` (`NewProduct.physical_stock`, migración 0031). Eso no es un
+ * detalle de ahorro: un ítem sin inventario no choca nunca contra el chequeo de
+ * stock, así que **su stock no se mueve jamás** y no hay nada que reponer. Antes
+ * nacía con un colchón de 100.000 unidades que cada venta bajaba en uno, y había
+ * que rellenarlo cada tanto con una llamada que además podía dar 403 si quien
+ * estaba en la caja no era admin.
  *
- * Mientras tanto: el centinela nace con [STOCK_INICIAL] unidades y se repone
- * cuando baja de [STOCK_MINIMO]. A cien ventas sueltas por día eso da años, y la
- * reposición es una llamada más que además puede fallar sin romper la venta.
+ * Y sobre todo: en cero **sin** el flag, el centinela aparecería como "sin
+ * stock" en las alertas y en el tablero — un producto que la dueña no cargó,
+ * gritando un problema que no existe. El colchón lo tapaba por accidente, no por
+ * diseño.
  */
 
 /** Cómo se llama el centinela. Se ve en el comprobante, así que se lee. */
@@ -47,12 +48,6 @@ const val NOMBRE_VENTA_SUELTA: String = "Venta suelta"
  * alguien lo renombre la app crearía un segundo centinela sin darse cuenta.
  */
 const val CLAVE_VENTA_SUELTA: String = "rb_venta_suelta"
-
-/** Con cuánto stock nace. */
-private const val STOCK_INICIAL = 100_000
-
-/** Cuándo se repone. */
-private const val STOCK_MINIMO = 1_000
 
 /** Cuántos candidatos se miran al buscarlo por nombre. */
 private const val CANDIDATOS = 10
@@ -74,12 +69,17 @@ fun ventaSueltaEn(productos: List<ProductDto>): ProductDto? =
  * El centinela, buscándolo primero y creándolo si no está.
  *
  * [enElTelefono] es el catálogo que ya está en memoria —el que Cobrar guarda para
- * vender sin señal—. Se mira **antes** que la red: si el centinela ya se usó
- * alguna vez, está ahí, y entonces cobrar un monto suelto funciona sin conexión
- * como cualquier otra venta. Quien llame sin señal y sin nada en el teléfono
- * tiene que decirlo con sus palabras antes de llegar acá: desde acá saldría un
- * error de red genérico, y el problema no es la red sino que todavía no se usó
- * nunca.
+ * vender sin señal—. Se mira **antes** que la red: si el centinela ya existe,
+ * está ahí, y entonces cobrar un monto suelto funciona sin conexión como
+ * cualquier otra venta.
+ *
+ * Crear pide señal, pero eso pasa **una sola vez en la vida del negocio**, así
+ * que conviene que pase cuando hay señal y no cuando hace falta cobrar. De eso
+ * se encarga quien llame: `CobrarViewModel` lo pide junto con el refresco del
+ * catálogo, que corre al abrir la pantalla y con conexión. Quien llegue acá sin
+ * señal y sin nada en el teléfono tiene que decirlo con sus palabras antes:
+ * desde acá saldría un error de red genérico, y el problema no es la red sino
+ * que todavía no se usó nunca.
  */
 suspend fun asegurarVentaSuelta(
     api: ApiFactory,
@@ -90,27 +90,17 @@ suspend fun asegurarVentaSuelta(
     return when (val encontrado = ProductRepository(api).buscar(NOMBRE_VENTA_SUELTA, CANDIDATOS)) {
         is Resultado.Falla -> encontrado
 
-        is Resultado.Ok -> {
-            val yaEsta = encontrado.valor.firstOrNull(::esVentaSuelta)
-            if (yaEsta != null) {
-                // Reponer es opcional: si la cajera no es admin el server
-                // contesta 403 y la venta tiene que salir igual.
-                if (yaEsta.stock < STOCK_MINIMO) {
-                    fijarStock(api, yaEsta.id, STOCK_INICIAL, "venta suelta: reposición")
-                }
-                Resultado.Ok(yaEsta)
-            } else {
-                crearProducto(
-                    api = api,
-                    nombre = NOMBRE_VENTA_SUELTA,
-                    // El precio del catálogo no se usa nunca: cada línea lleva el
-                    // monto que se dijo. Cero es lo honesto para "no tiene precio".
-                    precio = "0",
-                    stock = STOCK_INICIAL,
-                    extras = JsonObject(mapOf(CLAVE_VENTA_SUELTA to JsonPrimitive(true))),
-                )
-            }
-        }
+        is Resultado.Ok -> encontrado.valor.firstOrNull(::esVentaSuelta)?.let { Resultado.Ok(it) }
+            ?: crearProducto(
+                api = api,
+                nombre = NOMBRE_VENTA_SUELTA,
+                // El precio del catálogo no se usa nunca: cada línea lleva el
+                // monto que se dijo. Cero es lo honesto para "no tiene precio".
+                precio = "0",
+                stock = 0,
+                sinInventario = true,
+                extras = JsonObject(mapOf(CLAVE_VENTA_SUELTA to JsonPrimitive(true))),
+            )
     }
 }
 

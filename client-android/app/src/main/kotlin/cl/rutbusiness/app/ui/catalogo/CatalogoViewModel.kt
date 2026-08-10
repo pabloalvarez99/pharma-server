@@ -123,7 +123,6 @@ class CatalogoViewModel(
 
                 is Resultado.Falla -> {
                     errorDeLista = r.error.aCopy("lo que vendes")
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
             cargando = false
@@ -267,7 +266,6 @@ class CatalogoViewModel(
                 is Resultado.Falla -> {
                     errorAlGuardar = r.error.aCopy("lo que estabas cargando")
                     guardando = false
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
         }

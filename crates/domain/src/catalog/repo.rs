@@ -550,7 +550,8 @@ pub async fn create_product(
         .query(
             "CREATE product SET tenant = $t, name = $name, slug = $slug, \
              description = $description, price = $price, cost_price = $cost_price, \
-             stock = $stock, category = $category, image_url = $image_url, \
+             stock = $stock, physical_stock = $physical_stock, \
+             category = $category, image_url = $image_url, \
              external_id = $external_id, laboratory = $laboratory, \
              therapeutic_action = $therapeutic_action, active_ingredient = $active_ingredient, \
              prescription_type = $prescription_type, presentation = $presentation, \
@@ -563,6 +564,9 @@ pub async fn create_product(
         .bind(("price", dec_val(input.price)))
         .bind(("cost_price", dec_opt(input.cost_price)))
         .bind(("stock", input.stock))
+        // Ausente = el DEFAULT de la migración 0031. Se bindea igual en vez de
+        // armar dos queries: el valor por omisión es exactamente el de la base.
+        .bind(("physical_stock", input.physical_stock.unwrap_or(true)))
         .bind(("category", category))
         .bind(("image_url", input.image_url.clone()))
         .bind(("external_id", input.external_id.clone()))
@@ -700,8 +704,15 @@ pub async fn product_id_by_barcode(
 
 /// Set `product.physical_stock` (tenant-scoped). `false` marks an item as a
 /// service: the sale path then skips its stock check + FEFO plan (migración
-/// 0031). Used by the demo seed for the servicios vertical; `create_product`
-/// leaves the DB DEFAULT (`true`) for every normal SKU.
+/// 0031).
+///
+/// Camino de **reparación**, no de alta: lo normal es decidirlo al crear
+/// ([`NewProduct::physical_stock`]). Flipear el flag de un producto que ya tiene
+/// stock no reescribe su `product_branch_stock` (migración 0041 lo emite en el
+/// `CREATE`), así que dejarlo expuesto por la API pública desincronizaría el
+/// libro mayor por sucursal.
+///
+/// [`NewProduct::physical_stock`]: crate::catalog::model::NewProduct::physical_stock
 pub async fn set_physical_stock(
     db: &Db,
     tenant: &Thing,

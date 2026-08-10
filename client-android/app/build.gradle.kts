@@ -425,6 +425,12 @@ dependencies {
     // de un `viewModelScope.launch`, que es donde vive el comportamiento de
     // todos los ViewModel de la app. `:core` ya la usaba.
     testImplementation(libs.kotlinx.coroutines.test)
+    // Motor HTTP de mentira. Hace falta para mirar el *cuerpo* de un request y
+    // no sólo su ruta: el centinela de la venta suelta se define por lo que va
+    // adentro del POST (`physical_stock`, `stock`), y un server de socket como
+    // el de `CobrarSesionYClientesTest` sólo ve la primera línea. `:core` ya lo
+    // usaba con el mismo argumento.
+    testImplementation(libs.ktor.client.mock)
     debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)

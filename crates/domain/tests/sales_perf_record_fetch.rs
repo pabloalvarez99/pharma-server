@@ -62,6 +62,7 @@ fn np(name: &str, stock: i64, ingredient: Option<&str>) -> NewProduct {
         active_ingredient: ingredient.map(Into::into),
         prescription_type: None,
         presentation: None,
+        physical_stock: None,
         discount_percent: None,
         attrs: None,
     }

@@ -29,6 +29,12 @@ const val KDF_PARALLELISM: Int = 1
 const val USER_BACKUP_UPLOAD_PATH: String = "/api/v1/user-backup"
 
 /**
+ * `POST /api/v1/user-backup/rescue` — la única ruta del respaldo que **no**
+ * pide sesión, porque el teléfono nuevo no tiene ninguna. Ver [PruebaDeRetiro].
+ */
+const val USER_BACKUP_RESCUE_PATH: String = "/api/v1/user-backup/rescue"
+
+/**
  * Cabecera del sobre (salt/nonce en hex). Va junto al ciphertext; el server
  * no la interpreta más allá de guardar bytes opacos.
  */

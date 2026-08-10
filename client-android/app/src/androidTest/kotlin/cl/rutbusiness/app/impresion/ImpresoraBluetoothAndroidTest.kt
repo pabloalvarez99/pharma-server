@@ -1,6 +1,7 @@
 package cl.rutbusiness.app.impresion
 
 import cl.rutbusiness.app.ui.impresora.AnchoDePapel
+import cl.rutbusiness.app.ui.impresora.ConstructorDeBoleta
 import cl.rutbusiness.app.ui.impresora.EnlaceDeImpresora
 import cl.rutbusiness.app.ui.impresora.EscPos
 import cl.rutbusiness.app.ui.impresora.EstadoDePapel

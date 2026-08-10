@@ -200,7 +200,6 @@ class ResumenViewModel(
                         mostrarGuardado(api.baseUrl)
                     if (!salvado) {
                         error = r.error.aCopy("tu resumen del día")
-                        if (r.error is AppError.SesionExpirada) sesion.salir()
                     }
                     cargando = false
                     return@launch

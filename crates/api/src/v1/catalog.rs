@@ -924,6 +924,9 @@ pub async fn import_products(
             prescription_type,
             presentation,
             discount_percent,
+            // El CSV importa inventario: no hay columna para servicios y no la
+            // pide nadie. `None` deja el DEFAULT de la base (bien físico).
+            physical_stock: None,
             attrs: None,
         };
         match service::create_product(&db, &t, input).await {
