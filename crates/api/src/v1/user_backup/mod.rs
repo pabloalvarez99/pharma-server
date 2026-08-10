@@ -101,6 +101,7 @@ impl Runtime {
             max_envelope_bytes: self.cfg.max_envelope_bytes,
             max_versions_per_tenant: self.cfg.max_versions_per_tenant,
             min_seconds_between_uploads: self.cfg.min_seconds_between_uploads,
+            max_uploads_per_day: self.cfg.max_uploads_per_day,
             retention_days: self.cfg.retention_days,
         }
     }
@@ -167,7 +168,11 @@ async fn upload(
     }
 
     // Cuota de tamaño: antes de la base y antes del bucket.
-    if let Err(q) = ub::check_quota(&quota, decoded.len() as u64, now_unix(), None) {
+    let ahora = now_unix();
+    if let Err(q) = ub::check_quota(
+        &quota,
+        &ub::UploadAttempt::solo_tamano(decoded.len() as u64, ahora),
+    ) {
         return Err(quota_error(q));
     }
 
@@ -184,16 +189,24 @@ async fn upload(
     let db = db_of(&s)?;
     let tenant = tenant_of(&claims)?;
 
-    // Cuota de frecuencia — control de costo antes que de abuso: los PUT son el
-    // 96% de la factura del bucket, no los bytes.
+    // Cuotas de frecuencia — control de costo antes que de abuso: los PUT son
+    // el 96% de la factura del bucket, no los bytes. Son dos y hacen cosas
+    // distintas: el piso frena la ráfaga, el tope diario acota el gasto.
+    let dia = domain::user_backup_repo::dia_utc(chrono::Utc::now());
     let last = domain::user_backup_repo::last_upload(&db, &tenant)
+        .await
+        .map_err(ApiError::from)?;
+    let hoy = domain::user_backup_repo::uploads_hoy(&db, &tenant, &dia)
         .await
         .map_err(ApiError::from)?;
     if let Err(q) = ub::check_quota(
         &quota,
-        decoded.len() as u64,
-        now_unix(),
-        last.map(|d| d.timestamp()),
+        &ub::UploadAttempt {
+            envelope_len: decoded.len() as u64,
+            now_unix: ahora,
+            last_upload_unix: last.map(|d| d.timestamp()),
+            uploads_last_24h: hoy,
+        },
     ) {
         return Err(quota_error(q));
     }
@@ -234,6 +247,15 @@ async fn upload(
     )
     .await
     .map_err(ApiError::from)?;
+
+    // El contador se suma acá y no antes: un PUT que falló no cuesta Class A y
+    // no tiene por qué gastarle el cupo del día a la dueña.
+    if let Err(e) = domain::user_backup_repo::contar_subida(&db, &tenant, &dia).await {
+        // Que no se pueda contar no es motivo para rechazar un respaldo que ya
+        // está en el bucket. Se registra y sigue: el peor caso es una subida
+        // extra en el día, no una venta sin respaldar.
+        tracing::warn!(error = %e, "user-backup: no se pudo contar la subida del día");
+    }
 
     // Rotación: la nueva entró, la más vieja sale. En R2 `DeleteObject` es
     // gratis, así que esto no suma factura; no rotar, sí.

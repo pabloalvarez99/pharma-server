@@ -22,6 +22,11 @@ internal expect object CryptoPlataforma {
     /**
      * PBKDF2-HMAC-SHA256 → [outLen] bytes (típicamente 32).
      * [iterations] >= 100_000 en producción (OWASP).
+     *
+     * [password] son **bytes crudos**, no texto: la semilla del cuaderno no es
+     * UTF-8 y pasarla por un decode le come la entropía. La implementación de
+     * Android lo explica en detalle; si algún día hay una segunda plataforma,
+     * la regla es la misma.
      */
     fun pbkdf2HmacSha256(
         password: ByteArray,
@@ -29,6 +34,9 @@ internal expect object CryptoPlataforma {
         iterations: Int,
         outLen: Int,
     ): ByteArray
+
+    /** HMAC-SHA256. Lo usa la prueba de retiro (ver [PruebaDeRetiro]). */
+    fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray
 }
 
 /** Hex minúscula (salt/nonce/sha en el wire). */

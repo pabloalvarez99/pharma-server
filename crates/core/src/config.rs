@@ -94,6 +94,13 @@ pub struct UserBackupConfig {
     /// PUT son el 96% de la factura, no los bytes).
     #[serde(default = "default_min_seconds_between_uploads")]
     pub min_seconds_between_uploads: u64,
+    /// Techo de subidas por tenant en un día UTC. 0 = sin tope.
+    ///
+    /// El piso de segundos frena la ráfaga pero no la factura: deja pasar 96
+    /// subidas diarias, que a 1.000.000 de usuarios son US$ 157.680/año. Este
+    /// es el que acota el gasto (ver `domain::user_backup::BackupQuota`).
+    #[serde(default = "default_max_uploads_per_day")]
+    pub max_uploads_per_day: u32,
     /// Días que sobrevive un sobre sin que nadie lo toque. 0 = para siempre.
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -124,6 +131,9 @@ fn default_max_versions() -> u32 {
 fn default_min_seconds_between_uploads() -> u64 {
     15 * 60
 }
+fn default_max_uploads_per_day() -> u32 {
+    6
+}
 fn default_retention_days() -> u32 {
     400
 }
@@ -141,6 +151,7 @@ impl Default for UserBackupConfig {
             max_envelope_bytes: default_max_envelope_bytes(),
             max_versions_per_tenant: default_max_versions(),
             min_seconds_between_uploads: default_min_seconds_between_uploads(),
+            max_uploads_per_day: default_max_uploads_per_day(),
             retention_days: default_retention_days(),
             rescue_enabled: default_true(),
         }

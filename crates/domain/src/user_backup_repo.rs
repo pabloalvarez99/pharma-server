@@ -108,6 +108,64 @@ pub async fn last_upload(db: &Db, tenant: &Thing) -> DomainResult<Option<DateTim
     Ok(row.map(|x| x.uploaded_at))
 }
 
+// --- contador diario (migración 0048) -----------------------------------------
+
+/// Día UTC en `YYYY-MM-DD`, que es la clave del contador.
+pub fn dia_utc(cuando: DateTime<Utc>) -> String {
+    cuando.format("%Y-%m-%d").to_string()
+}
+
+/// Cuántos sobres subió el negocio hoy.
+///
+/// **No** se cuenta `user_backup`: la rotación borra las filas viejas, así que
+/// contar ahí topea en `max_versions_per_tenant` y el tope diario nunca se
+/// dispararía. El contador es la única evidencia que la rotación no pisa (ver
+/// el encabezado de `migrations/0048_user_backup_uso_diario.surql`).
+pub async fn uploads_hoy(db: &Db, tenant: &Thing, dia: &str) -> DomainResult<u32> {
+    let mut r = db
+        .query("SELECT subidas FROM user_backup_uso WHERE tenant = $t AND dia = $d LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .bind(("d", dia.to_string()))
+        .await?;
+    #[derive(Deserialize)]
+    struct SoloCuenta {
+        subidas: i64,
+    }
+    let row: Option<SoloCuenta> = r.take(0)?;
+    Ok(row.map(|x| x.subidas.max(0) as u32).unwrap_or(0))
+}
+
+/// Suma uno al contador del día. Se llama **después** de que el PUT salió bien.
+///
+/// Contar después y no antes es deliberado: un PUT que falla no cuesta Class A
+/// y no tiene por qué gastarle el cupo a la dueña. El costo de equivocarse para
+/// este lado es que un atacante que provoque errores de bucket no consume su
+/// propio tope — pero tampoco genera factura, que es lo que el tope protege.
+pub async fn contar_subida(db: &Db, tenant: &Thing, dia: &str) -> DomainResult<()> {
+    // UPSERT sobre el índice UNIQUE (tenant, dia): crea la fila la primera vez
+    // del día y suma en las siguientes, en una sola ida a la base.
+    db.query(
+        "UPSERT user_backup_uso SET tenant = $t, dia = $d, \
+         subidas = (subidas ?? 0) + 1 WHERE tenant = $t AND dia = $d",
+    )
+    .bind(("t", tenant.clone()))
+    .bind(("d", dia.to_string()))
+    .await?
+    .check()?;
+    Ok(())
+}
+
+/// Borra contadores más viejos que [`dia`]. La barrida de retención los limpia
+/// junto con los sobres; sin esto la tabla crece una fila por negocio por día
+/// para siempre.
+pub async fn purgar_uso_anterior_a(db: &Db, dia: &str) -> DomainResult<()> {
+    db.query("DELETE user_backup_uso WHERE dia < $d")
+        .bind(("d", dia.to_string()))
+        .await?
+        .check()?;
+    Ok(())
+}
+
 /// Un sobre del negocio por id. `None` si no existe **o si es de otro tenant**:
 /// misma respuesta a propósito, para que nadie enumere ids ajenos.
 pub async fn find_for_tenant(

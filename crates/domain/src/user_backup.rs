@@ -301,6 +301,19 @@ pub struct BackupQuota {
     /// 96% de la factura son los PUT (Class A, US$ 4,50 por millón), no los
     /// bytes. Una subida por día son US$ 1.643/año; una por hora, US$ 39.420.
     pub min_seconds_between_uploads: u64,
+    /// Techo de subidas por tenant en 24 h. 0 = sin tope.
+    ///
+    /// Existe porque [`Self::min_seconds_between_uploads`] **no acota la
+    /// factura**, y eso no se ve hasta que se hace la cuenta: un piso de 900 s
+    /// deja pasar 96 subidas por día, que a 1.000.000 de usuarios son
+    /// US$ 157.680/año en Class A. El piso frena la ráfaga; lo que frena el
+    /// gasto es este tope.
+    ///
+    /// 6/día es holgadísimo contra el uso real —la app sube una vez— y deja el
+    /// peor caso en US$ 9.855/año a 1.000.000 de usuarios. Un número que se
+    /// puede pagar es la diferencia entre "gratis para siempre" y una promesa
+    /// que alguien va a tener que romper.
+    pub max_uploads_per_day: u32,
     /// Días que sobrevive un sobre sin que nadie lo toque. 0 = para siempre.
     pub retention_days: u32,
 }
@@ -311,7 +324,39 @@ impl Default for BackupQuota {
             max_envelope_bytes: 4 * 1024 * 1024,
             max_versions_per_tenant: 5,
             min_seconds_between_uploads: 15 * 60,
+            max_uploads_per_day: 6,
             retention_days: 400,
+        }
+    }
+}
+
+/// Lo que se sabe de una subida en el momento de decidir si entra.
+///
+/// Es un struct y no cuatro parámetros sueltos porque los tres últimos son
+/// enteros y confundir dos de ellos en una llamada compila perfecto: el
+/// resultado sería una cuota que no frena nada y nadie se enteraría hasta
+/// leer la factura.
+#[derive(Debug, Clone, Copy)]
+pub struct UploadAttempt {
+    pub envelope_len: u64,
+    pub now_unix: i64,
+    /// Fecha del sobre más nuevo del tenant. `None` = primera subida.
+    pub last_upload_unix: Option<i64>,
+    /// Subidas del tenant en las últimas 24 h, sin contar ésta.
+    pub uploads_last_24h: u32,
+}
+
+impl UploadAttempt {
+    /// Lo que se puede chequear sin tocar la base: sólo el tamaño.
+    ///
+    /// El handler lo usa para cortar el sobre gigante **antes** de consultar
+    /// nada, que es el punto entero de tener la cuota de tamaño.
+    pub fn solo_tamano(envelope_len: u64, now_unix: i64) -> Self {
+        Self {
+            envelope_len,
+            now_unix,
+            last_upload_unix: None,
+            uploads_last_24h: 0,
         }
     }
 }
@@ -321,6 +366,7 @@ impl Default for BackupQuota {
 pub enum QuotaRejection {
     TooLarge { size: u64, max: u64 },
     TooSoon { wait_seconds: u64 },
+    TooManyToday { max: u32 },
 }
 
 impl QuotaRejection {
@@ -335,6 +381,11 @@ impl QuotaRejection {
                  Lo que cobraste sigue guardado en el teléfono.",
                 wait_seconds.div_ceil(60)
             ),
+            Self::TooManyToday { max } => format!(
+                "hoy ya subiste {max} respaldos, que es el tope diario. \
+                 Mañana vuelve a estar disponible. \
+                 Lo que cobraste sigue guardado en el teléfono."
+            ),
         }
     }
 
@@ -342,31 +393,33 @@ impl QuotaRejection {
     pub fn retry_after_seconds(&self) -> Option<u64> {
         match self {
             Self::TooSoon { wait_seconds } => Some(*wait_seconds),
+            // No es exacto —el tope es una ventana móvil de 24 h y el sobre más
+            // viejo puede salir antes—, pero un `Retry-After` que llega tarde
+            // es honesto y uno que llega temprano hace reintentar de gusto.
+            Self::TooManyToday { .. } => Some(24 * 60 * 60),
             Self::TooLarge { .. } => None,
         }
     }
 }
 
-/// Chequea las cuotas de una subida. `last_upload_unix` es la fecha del sobre
-/// más nuevo del tenant (`None` = primera subida).
-pub fn check_quota(
-    quota: &BackupQuota,
-    envelope_len: u64,
-    now_unix: i64,
-    last_upload_unix: Option<i64>,
-) -> Result<(), QuotaRejection> {
-    if envelope_len > quota.max_envelope_bytes {
+/// Chequea las cuotas de una subida.
+///
+/// El orden importa y es el mismo que sigue el handler: primero lo que se sabe
+/// sin I/O (tamaño), después lo que exige consultar la base. Así el sobre
+/// gigante se rechaza sin haber tocado nada.
+pub fn check_quota(quota: &BackupQuota, intento: &UploadAttempt) -> Result<(), QuotaRejection> {
+    if intento.envelope_len > quota.max_envelope_bytes {
         return Err(QuotaRejection::TooLarge {
-            size: envelope_len,
+            size: intento.envelope_len,
             max: quota.max_envelope_bytes,
         });
     }
     if quota.min_seconds_between_uploads > 0 {
-        if let Some(last) = last_upload_unix {
+        if let Some(last) = intento.last_upload_unix {
             // Un reloj de teléfono adelantado deja `elapsed` negativo. Se trata
             // como "recién subió": no se puede confiar en una fecha del futuro
             // para abrir la puerta.
-            let elapsed = now_unix.saturating_sub(last);
+            let elapsed = intento.now_unix.saturating_sub(last);
             let min = quota.min_seconds_between_uploads as i64;
             if elapsed < min {
                 return Err(QuotaRejection::TooSoon {
@@ -374,6 +427,11 @@ pub fn check_quota(
                 });
             }
         }
+    }
+    if quota.max_uploads_per_day > 0 && intento.uploads_last_24h >= quota.max_uploads_per_day {
+        return Err(QuotaRejection::TooManyToday {
+            max: quota.max_uploads_per_day,
+        });
     }
     Ok(())
 }
@@ -686,6 +744,43 @@ mod tests {
         assert_ne!(h, retrieval_hash_hex(&[8u8; 32]));
     }
 
+    /// Vector cruzado con Kotlin.
+    ///
+    /// Estos tres números están fijados igual en
+    /// `client-android/core/src/commonTest/.../PruebaDeRetiroTest.kt`, y se
+    /// calcularon con una tercera implementación independiente (Python
+    /// `hashlib`/`hmac`, 2026-08-10). La restauración desde cero funciona sólo
+    /// si el teléfono y el server derivan **exactamente** lo mismo: el teléfono
+    /// manda la prueba, el server compara contra el hash que guardó al subir.
+    /// Un byte de diferencia es un 404 para alguien que copió bien su tarjeta.
+    ///
+    /// Semilla: la de `claveDeDemostracion()` en Kotlin, ya canonicalizada
+    /// (84 bits útiles, los 4 de relleno en cero). Slug: `puesto-rosa`.
+    #[test]
+    fn el_vector_de_retiro_es_el_mismo_que_el_de_kotlin() {
+        let slug = "puesto-rosa";
+
+        assert_eq!(
+            hex_lower(&retrieval_salt(slug)),
+            "7eabebcd62983c130861a9765975fb90"
+        );
+        assert_eq!(retrieval_hmac_message(slug), "rb1-retiro:v1:puesto-rosa");
+
+        // El PBKDF2 y el HMAC corren en el teléfono, no acá: el server nunca ve
+        // la semilla. Lo que sí tiene que calzar es el hash que guarda. La
+        // prueba se decodifica por el mismo camino que usa la ruta real.
+        let proof = validate_rescue_request(&RescueBackupRequest {
+            tenant_slug: slug.into(),
+            retrieval_proof_hex:
+                "498effb6e6a30b3a07792f5e0bdca765800d06541f589ec62a9ddd38ce67e478".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            retrieval_hash_hex(&proof),
+            "8cf5c70b1ab8fcccfa038a98eaecbb5692c9d873dd17b31f7715202ff90afb89"
+        );
+    }
+
     #[test]
     fn el_rescate_valida_la_forma_antes_de_tocar_la_base() {
         let ok = RescueBackupRequest {
@@ -720,9 +815,12 @@ mod tests {
     fn la_cuota_corta_el_sobre_gigante() {
         let q = BackupQuota::default();
         // El techo real medido hoy son 108 KB: tiene que pasar holgado.
-        assert!(check_quota(&q, 108_073, 1_000, None).is_ok());
+        assert!(check_quota(&q, &UploadAttempt::solo_tamano(108_073, 1_000)).is_ok());
         assert_eq!(
-            check_quota(&q, q.max_envelope_bytes + 1, 1_000, None),
+            check_quota(
+                &q,
+                &UploadAttempt::solo_tamano(q.max_envelope_bytes + 1, 1_000)
+            ),
             Err(QuotaRejection::TooLarge {
                 size: q.max_envelope_bytes + 1,
                 max: q.max_envelope_bytes
@@ -734,8 +832,14 @@ mod tests {
     fn la_cuota_frena_la_subida_seguida_y_dice_cuanto_falta() {
         let q = BackupQuota::default();
         let last = 10_000i64;
+        let intento = |ahora: i64| UploadAttempt {
+            envelope_len: 1_000,
+            now_unix: ahora,
+            last_upload_unix: Some(last),
+            uploads_last_24h: 0,
+        };
         // Justo después: rechaza y dice el tiempo que falta.
-        let e = check_quota(&q, 1_000, last + 60, Some(last)).unwrap_err();
+        let e = check_quota(&q, &intento(last + 60)).unwrap_err();
         assert_eq!(
             e,
             QuotaRejection::TooSoon {
@@ -746,7 +850,40 @@ mod tests {
         // El mensaje no puede sonar a "perdiste la venta".
         assert!(e.message().contains("sigue guardado en el teléfono"));
         // Pasado el piso: entra.
-        assert!(check_quota(&q, 1_000, last + q.min_seconds_between_uploads as i64, Some(last)).is_ok());
+        assert!(check_quota(&q, &intento(last + q.min_seconds_between_uploads as i64)).is_ok());
+    }
+
+    /// El piso entre subidas **no** acota la factura, y ésa es la razón de que
+    /// exista el tope diario. Con 900 s de piso entran 96 PUT por día y por
+    /// tenant: a 1.000.000 de usuarios son US$ 157.680/año en Class A. Con el
+    /// tope en 6, el peor caso baja a US$ 9.855/año.
+    #[test]
+    fn el_tope_diario_es_lo_que_acota_la_factura_y_no_el_piso() {
+        let q = BackupQuota::default();
+        let separadas = |cuantas_hoy: u32| UploadAttempt {
+            envelope_len: 1_000,
+            now_unix: 100_000,
+            // Espaciadas de sobra: el piso de 900 s las deja pasar a todas.
+            last_upload_unix: Some(100_000 - 3_600),
+            uploads_last_24h: cuantas_hoy,
+        };
+        assert!(check_quota(&q, &separadas(q.max_uploads_per_day - 1)).is_ok());
+        let e = check_quota(&q, &separadas(q.max_uploads_per_day)).unwrap_err();
+        assert_eq!(
+            e,
+            QuotaRejection::TooManyToday {
+                max: q.max_uploads_per_day
+            }
+        );
+        assert!(e.message().contains("sigue guardado en el teléfono"));
+        assert_eq!(e.retry_after_seconds(), Some(86_400));
+
+        // Con el tope en cero se apaga (nodo propio que quiera subir sin freno).
+        let sin_tope = BackupQuota {
+            max_uploads_per_day: 0,
+            ..q
+        };
+        assert!(check_quota(&sin_tope, &separadas(10_000)).is_ok());
     }
 
     #[test]
@@ -756,7 +893,15 @@ mod tests {
         // "pasó mucho tiempo" convertiría un reloj mal puesto en una subida
         // ilimitada.
         let q = BackupQuota::default();
-        let r = check_quota(&q, 1_000, 1_000, Some(999_999));
+        let r = check_quota(
+            &q,
+            &UploadAttempt {
+                envelope_len: 1_000,
+                now_unix: 1_000,
+                last_upload_unix: Some(999_999),
+                uploads_last_24h: 0,
+            },
+        );
         assert!(matches!(r, Err(QuotaRejection::TooSoon { .. })), "{r:?}");
     }
 

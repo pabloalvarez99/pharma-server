@@ -73,6 +73,16 @@ pub async fn sweep_expired(
     if retention_days == 0 {
         return 0;
     }
+
+    // Los contadores diarios de ayer para atrás ya no le sirven a nadie: la
+    // cuota sólo mira el día en curso. Se limpian acá y no en su propio job
+    // porque son basura del mismo tamaño y del mismo dueño que los sobres, y un
+    // job más es una cosa más que se puede olvidar de andar.
+    let ayer = domain::user_backup_repo::dia_utc(chrono::Utc::now() - chrono::Duration::days(1));
+    if let Err(e) = domain::user_backup_repo::purgar_uso_anterior_a(db, &ayer).await {
+        tracing::warn!(error = %e, "user-backup: no se pudieron purgar los contadores viejos");
+    }
+
     let vencidos = match domain::user_backup_repo::expired(db, retention_days).await {
         Ok(v) => v,
         Err(e) => {

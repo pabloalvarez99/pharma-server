@@ -98,7 +98,13 @@ max_envelope_bytes = 4194304
 max_versions_per_tenant = 5
 # Los PUT (Class A) son el 96% de la factura, no los bytes: esto es control de
 # costo antes que de abuso.
+#
+# Son dos límites porque hacen cosas distintas. El piso frena la ráfaga pero no
+# acota el gasto: 900 s dejan pasar 96 subidas por día, que a 1.000.000 de
+# usuarios son US$ 157.680/año. El tope diario es el que pone el techo — con 6
+# el peor caso queda en US$ 9.855/año, y la app real sube una vez.
 min_seconds_between_uploads = 900
+max_uploads_per_day = 6
 retention_days = 400
 # Rescate sin JWT para el teléfono nuevo. Apagarlo deja a quien perdió el
 # teléfono sin forma de volver.

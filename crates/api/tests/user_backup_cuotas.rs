@@ -28,6 +28,12 @@ use sha2::{Digest, Sha256};
 use api::user_backup::store::MemoryStore;
 use api::user_backup::Runtime;
 
+/// Config con el **tope diario apagado**.
+///
+/// Se apaga a propósito y no se deja en su default de 6: varios de estos tests
+/// suben 5 veces seguidas, y que pasen porque 5 < 6 sería que dependan de un
+/// número que no están probando. El día que alguien baje el default, lo que
+/// tiene que ponerse rojo es el test del tope, no todos los demás.
 fn cfg(
     max_envelope_bytes: u64,
     max_versions_per_tenant: u32,
@@ -38,6 +44,7 @@ fn cfg(
         max_envelope_bytes,
         max_versions_per_tenant,
         min_seconds_between_uploads,
+        max_uploads_per_day: 0,
         retention_days,
         ..Default::default()
     }
@@ -171,6 +178,54 @@ async fn la_segunda_subida_seguida_se_frena_y_dice_cuanto_esperar() {
 
     assert_eq!(e.store.len(), 1, "la frenada no escribió un segundo objeto");
     assert_eq!(e.listar().await.len(), 1);
+}
+
+/// El tope diario es el único límite que acota la factura, y hay que probarlo
+/// **con el piso de frecuencia apagado** — porque ése es exactamente el
+/// escenario que deja pasar: subidas espaciadas, todas legales para el piso, y
+/// aun así 96 por día si nadie las cuenta.
+///
+/// El contador no puede salir de contar filas de `user_backup`: la rotación las
+/// borra. Con 2 versiones y tope de 3, la cuarta subida tiene que rebotar
+/// aunque en el índice sólo queden 2 filas. Eso es lo que este test fija.
+#[tokio::test]
+async fn el_tope_diario_frena_aunque_la_rotacion_ya_borro_las_filas() {
+    let e = montar(pharma_core::config::UserBackupConfig {
+        max_envelope_bytes: 1024 * 1024,
+        max_versions_per_tenant: 2,
+        min_seconds_between_uploads: 0,
+        max_uploads_per_day: 3,
+        retention_days: 400,
+        ..Default::default()
+    })
+    .await;
+
+    for i in 1..=3u8 {
+        let (st, body) = e.subir(&sobre(256 + i as usize, i)).await;
+        assert_eq!(st, 200, "subida {i}: {body}");
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    }
+
+    // La rotación dejó 2 filas, pero hoy se subió 3 veces.
+    assert_eq!(e.listar().await.len(), 2, "la rotación tenía que dejar 2");
+
+    let (st, body) = e.subir(&sobre(300, 9)).await;
+    assert_eq!(
+        st, 429,
+        "la cuarta del día tiene que rebotar aunque el índice muestre 2: {body}"
+    );
+    let msg = body.to_string();
+    assert!(
+        msg.contains("tope diario"),
+        "el mensaje tiene que decir que es el tope del día: {msg}"
+    );
+    assert!(
+        msg.contains("teléfono") || msg.contains("telefono"),
+        "y que lo cobrado no se perdió: {msg}"
+    );
+
+    // Y sobre todo: no escribió un cuarto objeto. El PUT es lo que se paga.
+    assert_eq!(e.store.len(), 2, "la frenada igual tocó el bucket");
 }
 
 #[tokio::test]
