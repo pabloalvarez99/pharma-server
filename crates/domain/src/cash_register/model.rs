@@ -91,8 +91,14 @@ pub struct CashMovementDto {
 pub struct CloseSummary {
     pub session: CashSessionDto,
     /// Efectivo neto de vuelto ([`crate::invariants::cash_into_drawer`]) de las
-    /// órdenes pos_cash/pos_mixed de la sesión (refunded/cancelled excluidas).
+    /// órdenes pos_cash/pos_mixed de la sesión (`cancelled` excluidas).
     /// NO es `Σ order.cash_amount`: eso es lo entregado, vuelto incluido.
+    ///
+    /// Es **bruto de devoluciones**, a propósito (migración 0049): lo que entró
+    /// al cobrar. La plata que se devolvió salió por un
+    /// `cash_movement(tipo='retiro')` y está en [`Self::movements_out`], con su
+    /// propia fecha. Comparar los dos números pide mostrar las dos líneas —
+    /// "ventas en efectivo" y "devoluciones" — nunca una sola restada.
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub cash_sales: Decimal,

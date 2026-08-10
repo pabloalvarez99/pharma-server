@@ -964,13 +964,34 @@ pub async fn create_purchase_payment(
     paid_at: Option<DateTime<Utc>>,
     created_by: Option<Thing>,
 ) -> DomainResult<PurchasePaymentDto> {
+    // Pagarle al proveedor con la plata del cajón es un RETIRO: sale de la
+    // caja, igual que un gasto. Se postea en la MISMA transacción que el pago
+    // para que un crash no deje el pago registrado sin el efecto en el cajón.
+    // Sin esto el esperado del arqueo queda por ENCIMA de los billetes que
+    // quedaron y la cajera cierra con un faltante fantasma del monto pagado.
+    //
+    // El servicio ya verificó, bajo el lock de la sesión, que la caja está
+    // abierta. Sólo `cash` toca el cajón: bank/card/transfer no.
+    let post_retiro = payment_method == "cash" && cash_session.is_some();
+    let sql = if post_retiro {
+        "BEGIN; \
+         CREATE purchase_payment SET tenant=$t, purchase_order=$po, \
+            amount=$amount, currency=$cur, payment_method=$pm, \
+            cash_session=$cs, reference=$ref, note=$note, \
+            paid_at=$paid_at, created_by=$by RETURN AFTER; \
+         CREATE cash_movement SET tenant=$t, session=$cs, tipo='retiro', \
+            amount=$amount, reason=$rsn, admin=$by; \
+         COMMIT;"
+    } else {
+        "CREATE purchase_payment SET tenant=$t, purchase_order=$po, \
+         amount=$amount, currency=$cur, payment_method=$pm, \
+         cash_session=$cs, reference=$ref, note=$note, \
+         paid_at=$paid_at, created_by=$by RETURN AFTER"
+    };
+    let reason = format!("Pago a proveedor: {po}");
     let mut r = db
-        .query(
-            "CREATE purchase_payment SET tenant=$t, purchase_order=$po, \
-             amount=$amount, currency=$cur, payment_method=$pm, \
-             cash_session=$cs, reference=$ref, note=$note, \
-             paid_at=$paid_at, created_by=$by RETURN AFTER",
-        )
+        .query(sql)
+        .bind(("rsn", reason))
         .bind(("t", tenant.clone()))
         .bind(("po", po.clone()))
         .bind(("amount", dec_val(amount)))

@@ -44,6 +44,28 @@ fn dec(s: &str) -> Decimal {
     Decimal::from_str(s).unwrap()
 }
 
+/// Desde la migración 0049 una devolución en efectivo emite un
+/// `cash_movement(tipo='retiro')` y se rechaza si no hay caja donde asentarlo —
+/// un reembolso sin asiento es plata que se va sin libro. Los tests de acá miden
+/// stock y el guard de sobre-devolución, no el arqueo, pero el mostrador real
+/// tiene la caja abierta.
+async fn abrir_caja(db: &Db, tenant: &Thing, user: &Thing) {
+    domain::cash_register::service::open_session(
+        db,
+        tenant,
+        user,
+        domain::cash_register::model::OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: Decimal::ZERO,
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+}
+
 fn np(name: &str, price: &str, stock: i64) -> NewProduct {
     NewProduct {
         name: name.into(),
@@ -694,10 +716,18 @@ async fn pos_sale_controlled_prescription_requires_doctor_data() {
     assert_eq!(err.code(), "INVALID_INPUT");
 }
 
+/// Devolver 2 de 5 vendidas: vuelve el stock, queda el movimiento, y la orden
+/// **no** se marca `refunded` — se devolvieron $6.000 de $15.000.
+///
+/// El nombre viejo era `..._marks_order_refunded_and_logs_movement` y afirmaba
+/// justo el defecto que arregla la 0049: cualquier devolución marcaba la venta
+/// entera. Con eso el cajón restaba los $15.000 completos y los reportes del día
+/// hacían desaparecer la venta.
 #[tokio::test]
-async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movement() {
+async fn refund_with_restock_returns_stock_and_logs_movement() {
     let (db, tenant, admin) = setup().await;
     let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    abrir_caja(&db, &tenant, &admin_t).await;
     let p = catalog::create_product(&db, &tenant, np("Amoxicilina 500", "3000", 30))
         .await
         .unwrap();
@@ -731,7 +761,10 @@ async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movemen
     assert_eq!(resp.devolucion.total_devuelto, dec("6000"));
     assert_eq!(resp.items.len(), 1);
     assert_eq!(resp.stock_movements.len(), 1);
-    assert!(resp.order_marked_refunded);
+    assert!(
+        !resp.order_marked_refunded,
+        "devolver 6000 de 15000 no devuelve la venta entera"
+    );
     // Restocked: 25 + 2 = 27
     assert_eq!(
         catalog::get_product(&db, &tenant, &p.id)
@@ -740,11 +773,12 @@ async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movemen
             .stock,
         27
     );
-    // Order flipped to refunded.
+    // La venta sigue viva, con lo devuelto anotado aparte.
     let (order, _items) = sales::get_order(&db, &tenant, &sale.order.id)
         .await
         .unwrap();
-    assert_eq!(order.status, "refunded");
+    assert_eq!(order.status, "paid");
+    assert_eq!(order.refunded_total, dec("6000"));
     // Listed under returns.
     let list = sales::list_refunds(&db, &tenant, DevolucionFilters::default())
         .await
@@ -756,6 +790,7 @@ async fn refund_with_restock_returns_stock_marks_order_refunded_and_logs_movemen
 async fn refund_without_restock_does_not_touch_stock_or_movements() {
     let (db, tenant, admin) = setup().await;
     let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    abrir_caja(&db, &tenant, &admin_t).await;
     let p = catalog::create_product(&db, &tenant, np("Jarabe vencido", "2000", 10))
         .await
         .unwrap();
@@ -882,6 +917,7 @@ async fn refund_restock_without_product_is_rejected() {
 async fn concurrent_refunds_never_exceed_sold_quantity() {
     let (db, tenant, admin) = setup().await;
     let admin_t = surrealdb::sql::thing(&admin).unwrap();
+    abrir_caja(&db, &tenant, &admin_t).await;
     // Sell all 10 units in one order, then fire 8 concurrent refunds of 6 each:
     // a single refund (6) fits under sold=10; a second (6+6=12) must be rejected.
     let p = catalog::create_product(&db, &tenant, np("Losartan 50", "2500", 10))
