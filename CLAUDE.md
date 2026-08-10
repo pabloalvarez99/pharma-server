@@ -1,5 +1,50 @@
 # pharma-server — Project Context
 
+> ## 📱 PISO DE HARDWARE — CELULARES VIEJOS Y LENTOS (founder, 2026-08-06) — restricción dura
+> **El usuario real puede ser una persona mayor con un celular viejo, lento y casi
+> sin espacio.** Esa es la máquina objetivo, no un caso borde. Toda decisión de
+> cliente móvil se mide contra ella; si algo solo funciona bien en un teléfono
+> nuevo, no está terminado. Reglas que se derivan y NO se negocian:
+>
+> 1. **Alcance de versión: `minSdk 23`** (Android 6.0, 2015). La app Tauri era
+>    `minSdk 24` y dejaba fuera aparatos que este producto sí quiere servir; 23
+>    los recupera casi todos.
+>    *Historial:* se fijó en 21 el 2026-08-06 y se corrigió a 23 el 2026-08-07.
+>    AndroidX dejó de soportar API 21-22 a mitad de 2025, así que sostener 21
+>    obligaba a congelar Compose, Material3 y lifecycle en versiones **sin
+>    parches de seguridad**, y a escribir a mano el cifrado del token (el
+>    Keystore de Android 5 solo guarda pares RSA) — código que nunca llegó a
+>    correr en un aparato real. Para una app que mueve plata, quedarse sin
+>    parches por llegar a teléfonos de 2014 —que además tienen 1 GB de RAM— es
+>    mal negocio. **No volver a bajar a 21 sin resolver antes esas dos cosas.**
+> 2. **Nunca APK universal.** Siempre AAB con split por ABI, o APKs por ABI. Un
+>    teléfono con 8 GB de almacenamiento no puede pagar 4 arquitecturas. Incluir
+>    `armeabi-v7a`: hay aparatos de 32 bits todavía en uso.
+> 3. **Respetar la accesibilidad del sistema, no reimplementarla.** La persona mayor
+>    ya subió el tamaño de letra en Ajustes de Android. La app tiene que obedecer
+>    eso: tipografía en `sp`, nada de tamaños fijos, y **probado al 200% de escala**
+>    sin que se rompa el layout. Igual con alto contraste, TalkBack y "reducir
+>    animaciones".
+> 4. **Objetivos táctiles ≥ 56 dp** en los flujos diarios (cobrar, fiar, cobrar
+>    deuda). El mínimo de Material es 48 dp; acá se sube porque el pulso no es el
+>    de un cajero de 25 años.
+> 5. **Presupuesto de memoria**: asumir **1–2 GB de RAM total**. Nada de cargar
+>    listas completas en memoria; virtualizar siempre. Medir RSS, no suponerlo.
+> 6. **Arranque en frío medido en el aparato lento**, no en el emulador del
+>    desarrollador. Baseline Profiles activados.
+> 7. **El servidor embebido en el teléfono es OPCIONAL, no obligatorio.** El `.so`
+>    del server pesa ~46 MB y SurrealKV necesita su RAM. En un aparato viejo eso
+>    puede no entrar. Arquitectura de dos modos, decidido por capacidad del
+>    aparato: **cliente liviano** apuntando a un server de la red o la nube, o
+>    **nodo completo** con el server adentro. La app tiene que funcionar entera en
+>    el modo liviano.
+> 8. **Datos móviles caros y lentos** son el caso normal. Offline-first no es solo
+>    para el server: la app tiene que ser usable con la red intermitente y no
+>    quemar megas.
+>
+> **Aparato de referencia para pruebas** (si no se probó acá, no está probado):
+> 2 GB de RAM, Android 8 o menor, pantalla 720p, almacenamiento casi lleno.
+
 > ## 🌟 META GENERAL DEL PROYECTO (founder, 2026-07-23) — leer SIEMPRE, aplica a TODO el trabajo
 > **Un ERP de nivel de gran empresa, tan profesional y completo como el de las grandes,
 > pero accesible para CUALQUIER microempresa chilena** — la que hoy se maneja con
@@ -16,6 +61,26 @@
 > **hablándole al agente**, no navegando menús. Cada cosa que se construya se mide contra:
 > "¿una microempresaria en su celular, sin manual, le pide esto al agente y funciona como
 > en un ERP caro?". Esta meta NO caduca — enmarca toda decisión de producto y técnica.
+
+> ## 🥬 FOCO PRINCIPAL ACTIVO — FERIA / CALLE (founder, 2026-08-08) — gana sobre beachhead farmacia
+> **Cliente objetivo prioritario:** gente que vende en la feria o en la calle, con
+> cuaderno de mil pesos, celular antiguo, poco de tecnología, sol directo, una mano
+> libre, a veces sin señal, sin código de barras ni impresora, fía mucho, a menudo
+> informal (sin SII día 1).
+>
+> **Vara de diseño no negociable: el cuaderno.** Se abre al instante, se lee al sol,
+> funciona con manos mojadas, no se cuelga. Si una pantalla es más lenta o más
+> difícil que anotar una línea a mano, **pierde**. Usá esa vara para **matar o
+> esconder** features (escáner, impresora, DTE, catálogo denso), no para sumarlas.
+>
+> **Producto day-1 para este usuario = el agente** ("vendí tres kilos de tomate a
+> dos mil") + fiado + resumen del día + offline. Pack de rubro `feria` en
+> `domain::rubro` (ADR-0022). Farmacia, minimarket, etc. **siguen siendo
+> verticales completos** del mismo ERP; ya **no** son el norte de producto ni el
+> default de onboarding. La directiva de 2026-06-16 "farmacia = beachhead" queda
+> **superada** por esta en cuanto a foco y GTM; el código multi-rubro se reutiliza.
+>
+> Detalle del plan: `C:\obsidian-mind\work\decisions\2026-08-08-plan-feria-orquestador.md`.
 
 > ## 🏗️ ETAPA REAL: ~1% COMPLETO — CONSTRUIR PROFUNDIDAD, NO PULIR SUPERFICIE (founder, 2026-07-21)
 > **El proyecto recién lleva ~1%.** La meta ahora NO es infra, dominios ni pulido de
@@ -35,7 +100,8 @@
 > gratis, offline-first, y su propio agente IA; donde el ERP se vuelve infraestructura
 > invisible detrás del agente.** 1 RUT = 1 negocio = 1 agente. Modelo: freemium MSI
 > Windows (core gratis para siempre + tiers + microtx, [ADR-0001](./docs/adr/0001-freemium-pivot.md)).
-> **Farmacia = beachhead** (primer vertical validado), NO el límite ni la marca.
+> **Feria / calle = foco GTM principal (2026-08-08).** Farmacia = vertical validado
+> histórico, NO el límite ni el norte de producto (ver bloque FOCO PRINCIPAL arriba).
 > Fin de juego: ecosistema federado donde los agentes de distintos negocios transan
 > entre sí (Ed25519 envelopes, Fase 13). Ver [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
 >
@@ -112,8 +178,8 @@
 > + apps · puente WhatsApp · mermas/vencimientos por local · agente coach financiero · modo
 > feria/offline.
 
-Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT), farmacia = primer vertical. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic.
-**Estado**: v0.1.24 · branch `feature/erp-parity` · Fases 1-7 + 10(a-d) + 11(steps 1-4) mergeadas · **MSI release** v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23, 12.30 MB; no MSI nuevo para 0.1.24 por CI billing) · ecosistema agentes COMERCIA end-to-end · **PIVOTE freemium MSI (2026-05-20)** → ver `docs/strategy/freemium-master-plan.md` · **Fase 10 license layer MVP CIERRA (PR #47)**: `crates/license` Ed25519 offline + 402 + CLI + 1 endpoint gated POC.
+Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquier negocio CL (1 RUT). Foco producto 2026-08-08 = feria/calle; farmacia y otros rubros = packs del mismo core. Single binary instalable vía MSI, axum HTTP API + SurrealDB embedded (kv-surrealkv) + Windows service. Producto **vendible**, offline-first, vendor-agnostic. Clientes en este repo: `client/` (Tauri desktop + PWA) y `client-android/` (Compose nativo).
+**Estado**: v0.1.28 · branch `main` (canónica; `feature/erp-parity` ya promovida 2026-07-19) · ERP multi-rubro en main (inventario/variants, POS, compras, caja, fiado, rubro-pack, country-pack, DTE, license, agent) · **Android Compose nativo** en `client-android/` ([ADR-0021](./docs/adr/0021-android-compose-nativo.md)) · desktop/PWA en `client/` · Free Web en `crates/api/static/` · suite workspace ~1000+ tests (audit 2026-08-08: 1019 passed) · **MSI release** histórico v0.1.23 (https://github.com/pabloalvarez99/pharma-server/releases/tag/v0.1.23) · freemium + Fase 10 license MVP + Fase 11 base mergeadas · **PIVOTE freemium MSI (2026-05-20)** → `docs/strategy/freemium-master-plan.md`.
 
 **Visión extendida (2026-05-16, actualizada 2026-05-20)** → ver [`docs/strategy/ecosystem-roadmap.md`](./docs/strategy/ecosystem-roadmap.md). Pharma-server no es solo ERP vendible; es **nodo de un ecosistema federado de agentes ERP** (farmacias, proveedores, droguerías) donde humanos reales operan cada nodo y transan vía protocolo común (Ed25519-signed JSON envelopes sobre HTTP/NATS). El modelo comercial es **freemium MSI Windows estilo LoL** (core gratis + tiers + microtx) — ver [`docs/strategy/freemium-master-plan.md`](./docs/strategy/freemium-master-plan.md) y [ADR-0001](./docs/adr/0001-freemium-pivot.md). Fase 13 = capa de confianza/marketplace B2B → ver [`docs/strategy/b2b-marketplace.md`](./docs/strategy/b2b-marketplace.md). **Posicionamiento de mercado (reframe 2026-05-27)**: el producto es *infraestructura competitiva para el independiente* frente al oligopolio (~90% Ahumada/Cruz Verde/Salcobrand), no "otro ERP" — mercado subdigitalizado (no saturado), moat de 4 capas (POS = caballo de Troya → datos agregados → poder de compra colectivo → red operacional), riesgo = distribución+confianza no técnico → ver [`docs/strategy/market-thesis.md`](./docs/strategy/market-thesis.md). **Tesis unificadora 2026-2035** (visión, moat, flywheel, AI-native, LATAM multi-país, distribución, integraciones-as-platform) → ver [`docs/strategy/latam-master-plan.md`](./docs/strategy/latam-master-plan.md).
 
@@ -121,7 +187,10 @@ Servidor Rust on-prem **multi-rubro (RutBusiness)**: ERP genérico para cualquie
 
 ## Producto / Visión comercial
 
-**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador: negocios independientes y cadenas chicas de **cualquier rubro** (farmacia, minimarket, restaurant, café, tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in. Farmacia = primer vertical validado (beachhead), no el límite.
+**Meta**: **RutBusiness** — ERP profesional **multi-rubro** para cualquier negocio chileno (1 RUT), vendible como producto on-prem (MSI freemium + tiers + soporte). Comprador prioritario: feriantes y vendedores de calle (cuaderno → celular). También
+negocios independientes de **cualquier rubro** (farmacia, minimarket, restaurant, café,
+tienda, belleza, servicios…) que quieren todo local, sin SaaS, sin cloud, sin lock-in.
+Farmacia fue el primer vertical con profundidad; feria es el foco de adopción 2026-08.
 
 Pilares de venta (no negociables):
 - **Instalación 1 click** (MSI firmado, sin dependencias externas, sin Docker, sin Postgres aparte).
@@ -369,10 +438,10 @@ Resumen rápido también en [`equipo-agentes.txt`](./equipo-agentes.txt) (raíz)
   tu protocolo.`) → tomar siguiente tarea del status board. Re-entra barato (charter
   corto + status board + solo sus archivos), sin re-derivar el repo. Regla: PR abierto
   o ~80k tokens → `/clear` + re-bootstrap.
-- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; farmacia = beachhead, no
-  límite) → [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
-  Cada lane testea ambos verticales (pharmacy + minimarket). Datos demo:
-  `pharma seed-demo --tenant <slug> --vertical pharmacy|minimarket`.
+- **Visión = RutAgentIA MULTI-RUBRO** (1 RUT = 1 agente IA; **feria = foco
+  adopción 2026-08**, farmacia = vertical profundo, no beachhead de producto) →
+  [`docs/strategy/rutagentia-vision.md`](./docs/strategy/rutagentia-vision.md).
+  Datos demo: `pharma seed-demo --tenant <slug> --vertical feria|pharmacy|minimarket`.
 
 ### Catálogo de rubros (onboarding "elige tu rubro")
 
@@ -380,9 +449,9 @@ Al primer inicio el operador elige su **rubro** de un catálogo (no solo
 farmacia/minimarket). Guardar en `admin_setting business.vertical`. La UI gatea
 features por rubro (ej: recetas/controlados solo farmacia). Detalle + plan en
 [`docs/strategy/rubro-catalog.md`](./docs/strategy/rubro-catalog.md). Catálogo v1
-(taxonomía reusada de **DSS**): `farmacia`·`minimarket`·`restaurant`·`cafe`·`tienda`·
-`belleza`·`servicios`·`otro`. Pack seed hoy: farmacia ✅, minimarket ✅; resto se
-agrega al validar el rubro (disciplina anti-framework). Valor interno EN, UI ES
+(taxonomía reusada de **DSS**): `feria`·`farmacia`·`minimarket`·`restaurant`·`cafe`·
+`tienda`·`belleza`·`servicios`·`otro`. Pack seed: feria ✅, farmacia ✅, minimarket ✅;
+resto se agrega al validar el rubro. Valor interno EN o clave de catálogo, UI ES
 (mapear es→en al llamar seed-demo).
 
 ### Integración DSS (storefront) + cliente universal cross-platform

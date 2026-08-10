@@ -475,7 +475,7 @@ pub async fn barcodes_of_products(
 pub async fn sum_children_stock(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<i64> {
     let mut r = db
         .query(
-            "SELECT math::sum(stock) AS total FROM product \
+            "SELECT math::sum(stock) AS total FROM product WITH INDEX product_tenant_parent \
              WHERE tenant = $t AND parent_id = $p AND active = true \
              GROUP ALL",
         )
@@ -500,9 +500,14 @@ pub async fn children_agg_by_parents(
     if parents.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
+    // `WITH INDEX` obligatorio: entre `product_tenant_parent` y
+    // `product_tenant_active` el planner elige recorriendo un HashMap, así que
+    // la misma consulta a veces salía por `active` y leía el catálogo entero
+    // (medido: 0,3 ms con el índice correcto, 58 ms con el otro, alternando).
+    // Esta consulta corre en CADA página de productos.
     let mut r = db
         .query(
-            "SELECT parent_id, stock FROM product \
+            "SELECT parent_id, stock FROM product WITH INDEX product_tenant_parent \
              WHERE tenant = $t AND parent_id INSIDE $ps AND active = true",
         )
         .bind(("t", tenant.clone()))
@@ -629,10 +634,13 @@ pub async fn list_variants(
     tenant: &Thing,
     parent: &Thing,
 ) -> DomainResult<Vec<ProductDto>> {
+    // Mismo empate de índices que en `children_agg_by_parents`: sin pinear, el
+    // planner a veces recorre `product_tenant_active` y lee todo el catálogo
+    // para devolver las (pocas) variantes de un padre.
     let mut r = db
         .query(
-            "SELECT * FROM product WHERE tenant = $t AND parent_id = $p \
-             AND active = true ORDER BY name",
+            "SELECT * FROM product WITH INDEX product_tenant_parent \
+             WHERE tenant = $t AND parent_id = $p AND active = true ORDER BY name",
         )
         .bind(("t", tenant.clone()))
         .bind(("p", parent.clone()))
@@ -659,8 +667,11 @@ pub async fn delete_barcodes_of_product(
 pub async fn has_active_variants(db: &Db, tenant: &Thing, parent: &Thing) -> DomainResult<bool> {
     let mut r = db
         .query(
-            "SELECT id FROM product WHERE tenant = $t AND parent_id = $p \
-             AND active = true LIMIT 1",
+            // Camino del escáner del POS (`find_by_barcode`): mismo empate de
+            // índices, mismo riesgo de leer el catálogo entero para responder
+            // "¿tiene variantes?".
+            "SELECT id FROM product WITH INDEX product_tenant_parent \
+             WHERE tenant = $t AND parent_id = $p AND active = true LIMIT 1",
         )
         .bind(("t", tenant.clone()))
         .bind(("p", parent.clone()))
@@ -725,12 +736,18 @@ pub async fn list_products_opts(
 ) -> DomainResult<Vec<ProductDto>> {
     let mut conds = vec!["tenant = $t".to_string()];
     if f.search.is_some() {
-        conds.push(
-            "(string::lowercase(name) CONTAINS $q \
-             OR string::lowercase(active_ingredient ?? '') CONTAINS $q \
-             OR external_id = $raw_q)"
-                .to_string(),
-        );
+        // Una sola condición, sobre la columna 0 del índice full-text
+        // `product_search` (migración 0045). Parece que preguntara sólo por
+        // `name`, pero el índice cubre `name`, `active_ingredient` y
+        // `external_id`: un índice SEARCH de varias columnas mete los términos
+        // de TODAS en el mismo documento, así que el match entra igual si el
+        // texto está en el principio activo o en el código externo.
+        //
+        // Antes eran tres condiciones con `OR` y dos `CONTAINS`. Ningún índice
+        // sirve una subcadena, y el `OR` además impedía cualquier plan
+        // multi-índice, así que el plan era `Iterate Table`: 78 ms p50 con
+        // 3.000 productos. Ver el detalle en la migración.
+        conds.push("name @@ $q".to_string());
     }
     if f.category.is_some() {
         conds.push("category = $cat".to_string());
@@ -748,11 +765,109 @@ pub async fn list_products_opts(
     if !include_variants {
         conds.push("parent_id = NONE".to_string());
     }
+    // Elegir el índice a mano, no dejárselo al planner.
+    //
+    // Cada condición de acá matchea un índice compuesto distinto que arranca
+    // con `tenant` (`product_tenant_active`, `product_tenant_parent`,
+    // `product_tenant_stock`, …). SurrealDB 2.6 desempata recorriendo un
+    // HashMap (`idx::planner::tree::CompoundIndexes`), así que la MISMA
+    // consulta sale con un plan distinto entre corridas. Medido en release con
+    // 3.000 productos: la página de stock bajo daba 2 ms con
+    // `product_tenant_stock` y 84-140 ms cuando le tocaba
+    // `product_tenant_active` — que ignora el filtro selectivo, lee las 3.000
+    // filas y recién ahí ordena en memoria. Alternaba corrida a corrida.
+    //
+    // Pinear el índice del filtro más selectivo vuelve el plan determinístico.
+    // La página sin filtros (el camino caliente del POS) usa `product_name`
+    // (migración 0044): recorre el índice ya ordenado y corta en el LIMIT sin
+    // ordenar nada en memoria — 90 ms → 2,1 ms.
+    let with_clause = if f.search.is_some() {
+        // Índice full-text (migración 0045). Sin pinearlo el planner prefiere
+        // el compuesto `product_tenant_active` (dos columnas le ganan a una) y
+        // vuelve a leer el catálogo entero.
+        " WITH INDEX product_search"
+    } else if f.low_stock.is_some() {
+        " WITH INDEX product_tenant_stock"
+    } else if f.category.is_some() {
+        " WITH INDEX product_tenant_category"
+    } else {
+        // Página sin filtro selectivo: el camino caliente de la pantalla
+        // Cobrar del POS (`?active=true&limit=40`).
+        " WITH INDEX product_name"
+    };
+
+    // Cursor: arrancar el recorrido del índice en el producto que el cliente ya
+    // tiene, en vez de contar filas desde el principio.
+    //
+    // `START 2000` no salta: el iterador produce las 2.040 filas con sus valores
+    // completos y recién ahí descarta 2.000. Medido en release con 3.000
+    // productos: 62 ms p50 en offset 2.000 contra 1,8 ms en la primera página, y
+    // empeora cuanto más se avanza.
+    //
+    // `name >= $after_name` sí es un rango sobre `product_name`, así que el
+    // recorrido EMPIEZA ahí y no lee nada anterior.
+    //
+    // El desempate por id existe porque `name` no es único: el que se sufija al
+    // chocar es el slug, el nombre queda repetido. Sin él, una página que corta
+    // en medio de un grupo de homónimos repite o saltea filas. Va como
+    // comparación de arreglos y no como `name > $n OR (name = $n AND id > $i)`
+    // a propósito: ese `OR` volvería el plan un `Iterate Table` (ver migración
+    // 0045). Así queda una sola condición ANDeada que el planner evalúa por
+    // fila, con el rango intacto. Es el mismo orden total que impone el
+    // `ORDER BY` de abajo, y por eso el cursor cae siempre en el corte exacto.
+    //
+    // Con `search` el cursor sigue siendo correcto pero no acelera: el plan lo
+    // manda el índice full-text y el rango de nombres queda como filtro por
+    // fila. Se acepta igual porque una búsqueda devuelve pocas filas, y porque
+    // ignorarlo en silencio dejaría al cliente paginando la página 1 para
+    // siempre.
+    let cursor = match f.after.as_deref() {
+        Some(raw) if !raw.is_empty() => Some(cursor_position(db, tenant, raw).await?),
+        _ => None,
+    };
+    if cursor.is_some() {
+        conds.push("name >= $after_name".to_string());
+        conds.push("[name, id] > [$after_name, $after_id]".to_string());
+    }
+
     let limit = f.limit.unwrap_or(100).min(500);
-    let offset = f.offset.unwrap_or(0);
+    // Con cursor no hay nada que saltar: el rango ya arranca donde corresponde.
+    let offset = if cursor.is_some() {
+        0
+    } else {
+        f.offset.unwrap_or(0)
+    };
+    // El desempate por `id` en el ORDER BY: obligatorio para el cursor, y
+    // prohibido en la página caliente del POS.
+    //
+    // Obligatorio porque `name` no es único (el que se sufija al chocar es el
+    // slug) y el recorrido del índice NO desempata los homónimos de forma
+    // reproducible: medido, el mismo grupo de tres sale en un orden por el
+    // iterador de orden y en otro por el de rango, y hasta el mismo iterador
+    // cambia según dónde arranque. Sin un orden total impuesto por la consulta,
+    // una página que corta en medio de un grupo de homónimos repite filas.
+    //
+    // Prohibido en la página normal porque ahí el orden ya lo da el índice
+    // `product_name` y pedir un segundo campo obliga a ordenar en memoria: el
+    // colector deja de cortar en el LIMIT y vuelve a leer el catálogo entero.
+    // Medido sobre HTTP con 3.000 productos, la lista del POS pasaba de 5,0 a
+    // 9,6 ms p50 — la regresión exacta que la migración 0044 había arreglado.
+    //
+    // Por eso el orden total se paga sólo donde ya se estaba ordenando en
+    // memoria igual: cuando hay búsqueda (manda el índice full-text) o cuando
+    // el cliente pidió paginación por cursor (`after` presente, aunque venga
+    // vacío para la primera página). La página del POS, que no pasa `after`,
+    // queda exactamente como estaba.
+    let order = if f.search.is_some() || f.after.is_some() {
+        "name, id"
+    } else {
+        "name"
+    };
     let q = format!(
-        "SELECT * FROM product WHERE {} ORDER BY name LIMIT {} START {}",
+        "SELECT * FROM product{} WHERE {} ORDER BY {} LIMIT {} START {}",
+        with_clause,
         conds.join(" AND "),
+        order,
         limit,
         offset
     );
@@ -760,6 +875,10 @@ pub async fn list_products_opts(
         .category
         .as_deref()
         .and_then(|s| surrealdb::sql::thing(s).ok());
+    let (after_name, after_id) = match cursor {
+        Some((n, i)) => (n, Some(i)),
+        None => (String::new(), None),
+    };
     let mut r = db
         .query(q)
         .bind(("t", tenant.clone()))
@@ -770,18 +889,44 @@ pub async fn list_products_opts(
                 .map(|s| s.to_lowercase())
                 .unwrap_or_default(),
         ))
-        .bind(("raw_q", f.search.clone().unwrap_or_default()))
         .bind(("cat", cat))
         .bind(("active", f.active.unwrap_or(true)))
         .bind(("low", f.low_stock.unwrap_or(LOW_STOCK_DEFAULT)))
+        .bind(("after_name", after_name))
+        .bind(("after_id", after_id))
         .await?;
     let rows: Vec<ProductRow> = r.take(0)?;
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn get_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<Option<ProductDto>> {
+/// Resolve a page cursor (`ProductFilters::after`) to the `(name, id)` pair the
+/// next page starts after. Read by key, tenant-scoped: un cursor de otro tenant
+/// es indistinguible de uno inexistente.
+async fn cursor_position(db: &Db, tenant: &Thing, raw: &str) -> DomainResult<(String, Thing)> {
+    let id = surrealdb::sql::thing(raw)
+        .map_err(|_| DomainError::Invalid(format!("cursor inválido '{raw}'")))?;
     let mut r = db
-        .query("SELECT * FROM product WHERE id = $id AND tenant = $t LIMIT 1")
+        .query("SELECT VALUE name FROM $id WHERE tenant = $t")
+        .bind(("id", id.clone()))
+        .bind(("t", tenant.clone()))
+        .await?;
+    let name: Option<String> = r.take(0)?;
+    match name {
+        Some(name) => Ok((name, id)),
+        None => Err(DomainError::Invalid(format!(
+            "cursor inválido '{raw}': ese producto no existe en este tenant"
+        ))),
+    }
+}
+
+pub async fn get_product(db: &Db, tenant: &Thing, id: &Thing) -> DomainResult<Option<ProductDto>> {
+    // `FROM $id` es lectura directa por clave. Con `FROM product WHERE id = $id`
+    // el planner no reconoce el id como clave: sale por `product_tenant_active`
+    // y recorre el catálogo hasta encontrarlo (medido: 10 ms con 3.000
+    // productos, contra 0,1 ms por clave). El `WHERE tenant` se mantiene: sin
+    // él un id de otro tenant sería legible.
+    let mut r = db
+        .query("SELECT * FROM $id WHERE tenant = $t")
         .bind(("id", id.clone()))
         .bind(("t", tenant.clone()))
         .await?;

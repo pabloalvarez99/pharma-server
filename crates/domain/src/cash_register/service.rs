@@ -395,17 +395,21 @@ pub async fn list_movements(
         .collect())
 }
 
-/// Read the cash side of orders that hit this session: the running total of
-/// `cash_amount` for `payment_method IN ('pos_cash','pos_mixed')` with
-/// `status NOT IN ('refunded','cancelled')` and `created_at >= opened_at`.
+/// Read the cash side of orders that hit this session: the running total of the
+/// **efectivo neto de vuelto** ([`crate::invariants::cash_into_drawer`]) for
+/// `payment_method IN ('pos_cash','pos_mixed')` with `status NOT IN
+/// ('refunded','cancelled')` and `created_at >= opened_at`.
 ///
 /// O(1) field load of the maintained `cash_sales_running` aggregate (migration
-/// 0030). Replaces the previous `math::sum(cash_amount)` scan over `order`,
+/// 0030, corregida por 0046). Replaces the previous live scan over `order`,
 /// which the planner served as a range scan over the whole shift window +
 /// per-row doc fetch — O(orders in the shift), the cierre p99 budget violation
 /// (BUG-perf-005). The field is kept exact by the `cash_sales_running_maint`
-/// event on every order CREATE/UPDATE/DELETE, so this read is byte-identical to
-/// the old scan for an open session evaluated at `now`.
+/// event on every order CREATE/UPDATE/DELETE.
+///
+/// Ojo al leer el historial: hasta 0046 el evento sumaba `cash_amount` crudo,
+/// que es lo ENTREGADO. Un `math::sum(cash_amount)` ya no es el oráculo de este
+/// campo — el oráculo es `cash_into_drawer` orden por orden.
 async fn read_cash_running(db: &Db, tenant: &Thing, session: &Thing) -> DomainResult<Decimal> {
     #[derive(Deserialize)]
     struct S {

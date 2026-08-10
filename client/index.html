@@ -2,7 +2,14 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` lets the page paint edge to edge (Android calls
+         `enableEdgeToEdge()`, so the window already extends under the system
+         bars) and is what makes `env(safe-area-inset-*)` resolve to anything
+         other than 0. Without it the header sits under the status bar. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
     <title>Pharma Client</title>
     <link rel="stylesheet" href="/src/brand.css" />

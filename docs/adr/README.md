@@ -89,10 +89,12 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0011](./0011-dte-provider-native-rust.md) | DTE (boleta/factura SII) implementado nativo en Rust | Accepted | producto, compliance, integraciones |
 | [0012](./0012-web-onprem-interop.md) | Interop web ↔ pharma-server vía HTTP only (3 patrones) | Accepted | producto, infra, protocolo, interop |
 | [0013](./0013-sync-bidireccional-stock.md) | Sync de stock núcleo→storefront (push webhook, no bloquea POS) | Accepted | interop, storefront |
-| [0014](./0014-dss-storefront-integration.md) | DSS como capa storefront por seam HTTP (no merge) | Accepted | producto, storefront, multi-rubro |
-| [0015](./0015-universal-cross-platform-client.md) | Cliente universal Tauri 2 + PWA sobre API-first | Accepted | cliente, cross-platform |
+| [0014](./0014-dss-storefront-integration.md) | DSS como capa storefront por seam HTTP (no merge) | Partially superseded by 0020 (freemium) | producto, storefront, multi-rubro |
+| [0015](./0015-universal-cross-platform-client.md) | Cliente universal Tauri 2 + PWA sobre API-first | Superseded by 0021 (Android) | cliente, cross-platform |
 | [0016](./0016-agent-assist-architecture.md) | Arquitectura del agente assist (provider trait, propose→confirm) | Accepted | agente, arquitectura |
 | [0017](./0017-byo-ai-provider.md) | BYO-AI-provider (LLM opt-in con key del dueño, default OFF) | Accepted | agente, IA |
 | [0018](./0018-cloud-multitenant-saas.md) | Tier cloud multi-tenant (web zero-install) + signup por RUT | Proposed | cloud, distribución |
-| [0019](./0019-product-surface-taxonomy.md) | Taxonomía de superficies (núcleo + operador + storefront), genérica para todo cliente | Accepted | producto, arquitectura, naming |
+| [0019](./0019-product-surface-taxonomy.md) | Taxonomía de superficies (núcleo + operador + storefront), genérica para todo cliente | Partially superseded by 0020 (principio 5) | producto, arquitectura, naming |
 | [0020](./0020-free-web-as-core.md) | Web gratis como core (1 storefront público en el tier Free) | Accepted | producto, freemium, storefront |
+| [0021](./0021-android-compose-nativo.md) | Cliente Android nativo en Jetpack Compose | Accepted | cliente, android, ux |
+| [0022](./0022-feria-agent-first-identity-backup.md) | Feria agent-first + Google + backup cifrado (llave del usuario) | Accepted | producto, feria, agente, identidad, backup |

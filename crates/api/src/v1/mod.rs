@@ -7,6 +7,7 @@ pub mod agent;
 pub mod agent_orders;
 pub mod assist;
 pub mod audit;
+pub mod auth_google;
 pub mod backup;
 pub use backup::{backup_now, prune_backups, BackupReport};
 pub mod branches;
@@ -31,6 +32,7 @@ pub mod sales;
 pub mod seed;
 pub mod stock;
 pub mod stock_movements;
+pub mod user_backup;
 
 use axum::Router;
 
@@ -60,6 +62,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(audit::router(state.clone()))
         .merge(seed::router(state.clone()))
         .merge(rubro::router(state.clone()))
+        .merge(user_backup::router(state.clone()))
+        .merge(auth_google::router(state.clone()))
         .merge(public_catalog::router(state.clone()))
         .merge(public_orders::router(state.clone()))
         .merge(public_web::router(state.clone()))

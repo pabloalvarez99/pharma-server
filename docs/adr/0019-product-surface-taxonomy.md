@@ -1,10 +1,11 @@
 # ADR-0019: Taxonomía de superficies de producto (núcleo + operador + storefront), genérica para todo cliente
 
-- **Status**: Accepted
+- **Status**: Partially superseded by [ADR-0020](./0020-free-web-as-core.md) (principio 5, cobro de "salir a la web"); Accepted for taxonomía núcleo / operador / storefront
 - **Date**: 2026-06-26
 - **Deciders**: pabloalvarez99 (fundador)
 - **Tags**: producto, arquitectura, naming, distribución, multi-rubro, storefront
 - **Plan**: [`docs/strategy/product-surfaces-master-plan.md`](../strategy/product-surfaces-master-plan.md)
+- **Superseded (partial)**: el principio 5 en la parte "se cobra salir a la web (storefront)" queda superado por [ADR-0020](./0020-free-web-as-core.md) (web gratis en Free). La taxonomía de superficies se mantiene. Cuerpo histórico sin reescribir.
 - **Extiende / unifica**:
   [ADR‑0005 core gratis / no lock‑in](./0005-core-gratis-no-locked-in.md) ·
   [ADR‑0012 web‑onprem‑interop](./0012-web-onprem-interop.md) ·

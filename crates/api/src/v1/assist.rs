@@ -104,16 +104,20 @@ async fn ask(
         // user who couldn't execute it. `/act` re-checks via the admin layer.
         if !can_write(&claims) {
             return Ok(Json(Answer::note(
-                "Solo un administrador o dueño puede registrar acciones (gastos, clientes, \
-                 productos, precios u órdenes de compra). Pídeselo a quien administra el \
-                 negocio.",
+                "Solo un administrador o dueño puede pedirme acciones (ventas, fiados, gastos, \
+                 clientes, productos, precios u órdenes de compra). Pídeselo a quien administra \
+                 el negocio; la venta por pantalla la puedes hacer igual.",
             )));
         }
         return match assist::build(db.as_ref(), &tenant, parsed).await? {
             BuildOutcome::NotAnAction => unreachable!("guarded by parse_action above"),
             BuildOutcome::Reject(msg) => Ok(Json(Answer::note(msg))),
             BuildOutcome::Ready(action) => {
-                let proposal = assist::store().propose(action, &tenant);
+                // El resumen que se confirma tiene que estar escrito en la
+                // moneda del tenant, no en pesos chilenos por defecto.
+                let money =
+                    assist::Money::from(domain::settings::currency(db.as_ref(), &tenant).await?);
+                let proposal = assist::store().propose(action, &tenant, &money);
                 Ok(Json(Answer::proposal(proposal)))
             }
         };

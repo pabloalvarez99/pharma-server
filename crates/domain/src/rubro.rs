@@ -22,6 +22,11 @@
 use serde::Serialize;
 
 /// Optional modules a rubro turns on. Mirrors the client's `RubroFeatures`.
+///
+/// Surface flags (`agent_home`, `barcode`, `printer`, `dte`, `informal_ok`) were
+/// added 2026-08-08 for the feria pivot (ADR-0022): same ERP core, different
+/// first-day UX. Older clients that only read the original four flags stay
+/// compatible if they ignore unknown JSON keys; typed clients must map all.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct RubroFeatures {
     /// Recetas + libro de controlados (Ley 20.000). Farmacia only.
@@ -33,6 +38,16 @@ pub struct RubroFeatures {
     pub physical_stock: bool,
     /// Clinical product fields (principio activo, laboratorio). Farmacia only.
     pub clinical: bool,
+    /// Agent chat is the primary home (feria / voice-first operators).
+    pub agent_home: bool,
+    /// Camera / barcode scanner in POS. Off for feria (no EAN at the puesto).
+    pub barcode: bool,
+    /// Thermal ESC/POS printer flows. Off for feria (no printer at the puesto).
+    pub printer: bool,
+    /// Electronic invoice / DTE / SII operator surfaces. Off for informal feria.
+    pub dte: bool,
+    /// Onboarding allows informal operation (no RUT empresa / no SII day-1).
+    pub informal_ok: bool,
 }
 
 /// One extra product attribute the rubro declares (stored under
@@ -86,7 +101,49 @@ const GENERIC_VOCAB: RubroVocab = RubroVocab {
 };
 
 /// The catalog. Order = onboarding grid order (beachhead first).
+/// 2026-08-08: `feria` is first — street / feria vendors are the primary focus
+/// (ADR-0022). Farmacia remains a full vertical pack, not the product north star.
 static PACKS: &[RubroPack] = &[
+    RubroPack {
+        rubro: "feria",
+        label: "Feria / Calle",
+        tagline: "Tu puesto, sin cuaderno.",
+        accent: "#f59e0b",
+        features: RubroFeatures {
+            recetas: false,
+            lotes: false,
+            // Soft stock: names and prices, not FEFO. On so "qué vendí" still
+            // maps to sellable names; off would hide inventory entirely.
+            physical_stock: true,
+            clinical: false,
+            agent_home: true,
+            barcode: false,
+            printer: false,
+            dte: false,
+            informal_ok: true,
+        },
+        vocab: RubroVocab {
+            item: "Cosa",
+            catalog: "Lo que vendo",
+        },
+        attrs: &[
+            AttrField {
+                key: "unidad",
+                label: "Se vende por",
+                kind: "text", // kg, unidad, atado, bolsa…
+            },
+            AttrField {
+                key: "precio_ref",
+                label: "Precio de referencia",
+                kind: "money",
+            },
+        ],
+        seed_vertical: Some("feria"),
+        coming_soon: &[
+            "Venta por peso en el celular",
+            "Recordatorios de quién te debe",
+        ],
+    },
     RubroPack {
         rubro: "farmacia",
         label: "Farmacia",
@@ -97,6 +154,11 @@ static PACKS: &[RubroPack] = &[
             lotes: true,
             physical_stock: true,
             clinical: true,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: GENERIC_VOCAB,
         attrs: &[
@@ -134,6 +196,11 @@ static PACKS: &[RubroPack] = &[
             lotes: true,
             physical_stock: true,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: GENERIC_VOCAB,
         attrs: &[],
@@ -150,6 +217,11 @@ static PACKS: &[RubroPack] = &[
             lotes: false,
             physical_stock: true,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: RubroVocab {
             item: "Plato",
@@ -169,6 +241,11 @@ static PACKS: &[RubroPack] = &[
             lotes: true,
             physical_stock: true,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: RubroVocab {
             item: "Producto",
@@ -191,6 +268,11 @@ static PACKS: &[RubroPack] = &[
             lotes: false,
             physical_stock: true,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: RubroVocab {
             item: "Producto",
@@ -227,6 +309,11 @@ static PACKS: &[RubroPack] = &[
             lotes: false,
             physical_stock: false,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: RubroVocab {
             item: "Servicio",
@@ -250,6 +337,11 @@ static PACKS: &[RubroPack] = &[
             lotes: false,
             physical_stock: false,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: RubroVocab {
             item: "Servicio",
@@ -269,6 +361,11 @@ static PACKS: &[RubroPack] = &[
             lotes: false,
             physical_stock: true,
             clinical: false,
+            agent_home: false,
+            barcode: true,
+            printer: true,
+            dte: true,
+            informal_ok: false,
         },
         vocab: GENERIC_VOCAB,
         attrs: &[],
@@ -381,6 +478,7 @@ mod tests {
             "tienda",
             "servicios",
             "restaurant",
+            "feria",
         ];
         for p in PACKS {
             if let Some(sv) = p.seed_vertical {
@@ -392,7 +490,26 @@ mod tests {
                 );
             }
         }
-        // Tienda siempre tiene pack demo (P1 beachhead).
+        // Tienda siempre tiene pack demo (P1 beachhead histórico).
         assert_eq!(pack_for("tienda").seed_vertical, Some("tienda"));
+    }
+
+    /// Feria = beachhead 2026-08-08 (ADR-0022): agent-first, no barcode/printer/DTE.
+    #[test]
+    fn feria_is_agent_first_and_informal() {
+        let p = pack_for("feria");
+        assert_eq!(p.rubro, "feria");
+        assert!(p.features.agent_home);
+        assert!(p.features.informal_ok);
+        assert!(!p.features.barcode);
+        assert!(!p.features.printer);
+        assert!(!p.features.dte);
+        assert!(!p.features.recetas);
+        assert!(!p.features.clinical);
+        assert!(!p.features.lotes);
+        assert!(p.features.physical_stock, "nombres vendibles, no FEFO");
+        assert_eq!(p.vocab.item, "Cosa");
+        // First in onboarding grid.
+        assert_eq!(PACKS[0].rubro, "feria");
     }
 }

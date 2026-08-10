@@ -1,9 +1,10 @@
 # ADR-0014: DSS como capa storefront de RutAgentIA (integración por seam HTTP, no merge)
 
-- **Status**: Accepted
+- **Status**: Partially superseded by [ADR-0020](./0020-free-web-as-core.md) (cláusulas freemium de storefront); Accepted for seam HTTP / arquitectura DSS
 - **Date**: 2026-06-14
 - **Deciders**: pabloalvarez99 (fundador)
 - **Tags**: producto, estrategia, interop, multi-rubro, agéntico
+- **Superseded (partial)**: las cláusulas que trataban la web/storefront como solo tier pago quedan superadas por [ADR-0020](./0020-free-web-as-core.md) (1 storefront público en Free). El seam HTTP y el no-merge de repos se mantienen. Cuerpo histórico sin reescribir.
 
 ## Context and Problem Statement
 

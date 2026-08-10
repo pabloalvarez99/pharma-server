@@ -1,9 +1,10 @@
 # ADR-0015: Cliente universal cross-platform (Tauri 2 + PWA) sobre API-first
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR-0021](./0021-android-compose-nativo.md) (Android); Accepted for desktop / web / PWA vía Tauri 2
 - **Date**: 2026-06-14
 - **Deciders**: pabloalvarez99 (fundador)
 - **Tags**: producto, cliente, cross-platform, arquitectura
+- **Superseded (partial)**: en Android, el cliente operador es Jetpack Compose nativo ([ADR-0021](./0021-android-compose-nativo.md)). El cuerpo de esta ADR se conserva como registro de lo decidido en 2026-06-14; no se reescribe.
 
 ## Context and Problem Statement
 

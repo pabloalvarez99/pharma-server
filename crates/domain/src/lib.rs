@@ -12,6 +12,7 @@ pub mod credit;
 pub mod customers;
 pub mod expenses;
 pub mod finance;
+pub mod google_identity;
 pub mod inventory;
 pub mod operations;
 pub mod prescriptions;
@@ -23,6 +24,7 @@ pub mod sales;
 pub mod seed;
 pub mod settings;
 pub mod stock;
+pub mod user_backup;
 pub mod web_keys;
 
 pub mod errors;

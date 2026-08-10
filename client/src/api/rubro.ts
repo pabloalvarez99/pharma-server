@@ -11,6 +11,12 @@ export interface PackFeatures {
   lotes: boolean;
   physical_stock: boolean;
   clinical: boolean;
+  /** Agent chat is home (feria). Older servers omit → treat as false. */
+  agent_home?: boolean;
+  barcode?: boolean;
+  printer?: boolean;
+  dte?: boolean;
+  informal_ok?: boolean;
 }
 
 /** One extra product attribute the rubro declares (`product.attrs[key]`). */

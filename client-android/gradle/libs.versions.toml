@@ -1,0 +1,125 @@
+# PISO DE HARDWARE — versiones
+#
+# `minSdk = 23` (CLAUDE.md, regla 1; decisión del founder 2026-08-07). Antes era
+# 21, y eso obligaba a congelar todo AndroidX: la librería dejó de soportar API
+# 21-22 a mitad de 2025, así que todo lo publicado después declara `minSdk 23` y
+# el manifest merger cortaba el build. Verificado leyendo el AndroidManifest de
+# cada AAR, no adivinado:
+#
+#   androidx.compose.animation:animation-core  1.9.x  -> minSdk 21
+#                                              1.10.0 -> minSdk 23
+#   androidx.compose.material3                 1.4.0  -> minSdk 21
+#   androidx.lifecycle                         2.9.4  -> minSdk 21
+#   androidx.activity                          1.11.0 -> minSdk 21
+#
+# Con 23 ese techo desaparece: se puede volver al BOM de Compose y a las
+# versiones con parches de seguridad. Las versiones de abajo son las que había
+# bajo el techo viejo y siguen funcionando; subirlas es una tarea aparte, no un
+# efecto automático de este cambio.
+
+[versions]
+agp = "8.13.2"
+# Kotlin va emparejado con el R8 que trae AGP 8.13.2. Con Kotlin 2.4.x el D8/R8
+# de este AGP no sabe leer la metadata ("Unexpected error during rewriting of
+# Kotlin metadata") y en release eso se paga en el shrinker. 2.2.21 es la última
+# línea que este AGP entiende sin ruido.
+kotlin = "2.2.21"
+
+# Compose — heredado del techo de minSdk 21 (ya no rige; se puede subir)
+composeUi = "1.9.5"
+composeMaterial3 = "1.4.0"
+
+androidxActivity = "1.11.0"
+androidxCore = "1.17.0"
+androidxLifecycle = "2.9.4"
+androidxNavigation = "2.9.8"
+androidxDatastore = "1.1.7"
+androidxProfileinstaller = "1.4.1"
+
+# Escáner de código de barras. El `minSdkVersion` se leyó del AndroidManifest
+# dentro de cada AAR, no del changelog:
+#
+#   androidx.camera:camera-*            1.4.2  -> minSdk 21
+#   com.google.mlkit:barcode-scanning   17.3.0 -> minSdk 21
+#
+# Las dos entran holgadas bajo el `minSdk 23` de la app, y seguirían entrando si
+# alguna vez vuelve a bajar.
+#
+# `barcode-scanning` es la variante **bundled**: el modelo viaja adentro del APK
+# (~2,3 MB por ABI, y acá el APK ya sale partido por ABI). La alternativa
+# `play-services-mlkit-barcode-scanning` pesa unos cientos de KB pero delega en
+# Google Play Services, que en el aparato objetivo puede estar viejo, castrado o
+# directamente no estar — y ahí el escáner no falla, simplemente nunca lee. Un
+# POS que no escanea no es un POS: se paga el peso.
+camerax = "1.4.2"
+mlkitBarcode = "17.3.0"
+# Solo encode (tarjeta de rescate). No trae UI Android; ~0.5 MB.
+zxingCore = "3.5.3"
+
+ktor = "3.5.2"
+serializationJson = "1.9.0"
+coroutines = "1.10.2"
+
+junit = "4.13.2"
+# Robolectric corre los tests de layout del design system en la JVM. 4.14.1 es
+# la primera que trae SDK 35/36; los tests igual se fijan a sdk 34, que es donde
+# vive la curva NO LINEAL de escala de letra que introdujo Android 14 — medir
+# ahí es medir lo que el usuario realmente recibe.
+robolectric = "4.14.1"
+androidxTestJunit = "1.2.1"
+espresso = "3.6.1"
+
+[libraries]
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
+androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "androidxLifecycle" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidxLifecycle" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "androidxNavigation" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "androidxDatastore" }
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "androidxProfileinstaller" }
+
+camerax-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxingCore" }
+
+compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "composeUi" }
+compose-ui = { module = "androidx.compose.ui:ui", version.ref = "composeUi" }
+compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics", version.ref = "composeUi" }
+compose-ui-text = { module = "androidx.compose.ui:ui-text", version.ref = "composeUi" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling", version.ref = "composeUi" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview", version.ref = "composeUi" }
+compose-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "composeUi" }
+compose-animation = { module = "androidx.compose.animation:animation", version.ref = "composeUi" }
+compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "composeMaterial3" }
+compose-material-icons-core = { module = "androidx.compose.material:material-icons-core", version.ref = "composeUi" }
+compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4", version.ref = "composeUi" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "composeUi" }
+
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serializationJson" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+
+junit = { module = "junit:junit", version.ref = "junit" }
+androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

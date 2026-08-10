@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  El server de RutBusiness corre on-prem: lo normal es un PC de la misma LAN
+  hablando HTTP plano (http://192.168.x.x:8080) o el emulador en 10.0.2.2.
+  Por eso el cleartext queda permitido; cuando el operador apunta a un server
+  en la nube con https la conexión sigue siendo TLS igual.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

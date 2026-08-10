@@ -1,0 +1,18 @@
+# Gradle / Android build output
+.gradle/
+build/
+*/build/
+.cxx/
+
+# Ruta local del SDK del dev — nunca se commitea
+local.properties
+
+# Firma release (regla 3: el keystore y su clave nunca entran al repo)
+*.jks
+*.keystore
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+captures/

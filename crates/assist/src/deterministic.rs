@@ -19,9 +19,11 @@ use domain::expenses::service as reports;
 use domain::inventory::service as inventory;
 use domain::prescriptions::model::PrescriptionFilters;
 use domain::prescriptions::service as prescriptions;
+use domain::settings;
 use domain::DomainResult;
 
 use crate::intent::Intent;
+use crate::money::Money;
 use crate::provider::{Answer, AssistProvider, AssistQuery};
 
 /// Deterministic, local provider. Stateless — holds no config.
@@ -31,42 +33,45 @@ pub struct Deterministic;
 #[async_trait]
 impl AssistProvider for Deterministic {
     async fn answer(&self, q: &AssistQuery<'_>) -> DomainResult<Answer> {
+        // Una sola vez por pregunta: la moneda del tenant. Todos los montos que
+        // el agente escribe salen de acá (ver `crate::money`).
+        let m = Money::from(settings::currency(q.db, q.tenant).await?);
         match &q.intent {
-            Intent::VentasHoy => ventas(q.db, q.tenant, &q.intent, today_range()).await,
-            Intent::VentasAyer => ventas(q.db, q.tenant, &q.intent, yesterday_range()).await,
-            Intent::VentasMes => ventas(q.db, q.tenant, &q.intent, month_range()).await,
-            Intent::VentasMesPasado => ventas(q.db, q.tenant, &q.intent, last_month_range()).await,
-            Intent::VentasSemana => ventas(q.db, q.tenant, &q.intent, week_range()).await,
+            Intent::VentasHoy => ventas(q.db, q.tenant, &m, &q.intent, today_range()).await,
+            Intent::VentasAyer => ventas(q.db, q.tenant, &m, &q.intent, yesterday_range()).await,
+            Intent::VentasMes => ventas(q.db, q.tenant, &m, &q.intent, month_range()).await,
+            Intent::VentasMesPasado => ventas(q.db, q.tenant, &m, &q.intent, last_month_range()).await,
+            Intent::VentasSemana => ventas(q.db, q.tenant, &m, &q.intent, week_range()).await,
             Intent::ComparativaDia => {
-                comparativa(q.db, q.tenant, &q.intent, today_range(), yesterday_range()).await
+                comparativa(q.db, q.tenant, &m, &q.intent, today_range(), yesterday_range()).await
             }
             Intent::ComparativaMes => {
-                comparativa(q.db, q.tenant, &q.intent, month_range(), last_month_range()).await
+                comparativa(q.db, q.tenant, &m, &q.intent, month_range(), last_month_range()).await
             }
-            Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &q.intent).await,
+            Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &m, &q.intent).await,
             Intent::IngresosPorMetodo(bucket) => {
-                ingresos_por_metodo(q.db, q.tenant, &q.intent, bucket.as_deref()).await
+                ingresos_por_metodo(q.db, q.tenant, &m, &q.intent, bucket.as_deref()).await
             }
             Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent, 30).await,
             Intent::PorVencerSemana => por_vencer(q.db, q.tenant, &q.intent, 7).await,
             Intent::StockProducto(term) => stock_producto(q.db, q.tenant, &q.intent, term).await,
-            Intent::CajaActual => caja_actual(q.db, q.tenant, &q.intent).await,
-            Intent::TopProductos => top_productos(q.db, q.tenant, &q.intent).await,
+            Intent::CajaActual => caja_actual(q.db, q.tenant, &m, &q.intent).await,
+            Intent::TopProductos => top_productos(q.db, q.tenant, &m, &q.intent).await,
             Intent::ClientesTop => clientes_top(q.db, q.tenant, &q.intent).await,
             Intent::BuscarCliente(term) => buscar_cliente(q.db, q.tenant, &q.intent, term).await,
             Intent::ResumenClientes => resumen_clientes(q.db, q.tenant, &q.intent).await,
-            Intent::PrecioProducto(term) => precio_producto(q.db, q.tenant, &q.intent, term).await,
-            Intent::MargenMes => margen_mes(q.db, q.tenant, &q.intent).await,
-            Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &q.intent, term).await,
-            Intent::GastosMes => gastos_mes(q.db, q.tenant, &q.intent).await,
-            Intent::PorCobrar => por_cobrar(q.db, q.tenant, &q.intent).await,
-            Intent::IvaMes => iva_mes(q.db, q.tenant, &q.intent).await,
+            Intent::PrecioProducto(term) => precio_producto(q.db, q.tenant, &m, &q.intent, term).await,
+            Intent::MargenMes => margen_mes(q.db, q.tenant, &m, &q.intent).await,
+            Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &m, &q.intent, term).await,
+            Intent::GastosMes => gastos_mes(q.db, q.tenant, &m, &q.intent).await,
+            Intent::PorCobrar => por_cobrar(q.db, q.tenant, &m, &q.intent).await,
+            Intent::IvaMes => iva_mes(q.db, q.tenant, &m, &q.intent).await,
             Intent::StockBajo => stock_bajo(q.db, q.tenant, &q.intent).await,
-            Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &q.intent).await,
-            Intent::ResumenDia => resumen_dia(q.db, q.tenant, &q.intent).await,
+            Intent::ResumenInventario => resumen_inventario(q.db, q.tenant, &m, &q.intent).await,
+            Intent::ResumenDia => resumen_dia(q.db, q.tenant, &m, &q.intent).await,
             Intent::Controlados => controlados(q.db, q.tenant, &q.intent).await,
             Intent::RecetasMes => recetas_mes(q.db, q.tenant, &q.intent).await,
-            Intent::ComprasPendientes => compras_pendientes(q.db, q.tenant, &q.intent).await,
+            Intent::ComprasPendientes => compras_pendientes(q.db, q.tenant, &m, &q.intent).await,
             Intent::Proveedores => proveedores(q.db, q.tenant, &q.intent).await,
             Intent::Ayuda => Ok(ayuda(&q.intent)),
             Intent::Unknown => Ok(unknown(&q.intent)),
@@ -79,6 +84,7 @@ impl AssistProvider for Deterministic {
 async fn ventas(
     db: &Db,
     tenant: &Thing,
+    m: &Money,
     intent: &Intent,
     range: SalesReportFilters,
 ) -> DomainResult<Answer> {
@@ -109,9 +115,9 @@ async fn ventas(
         format!(
             "{periodo} {verb} {orders} {} por {} (efectivo {}, tarjeta {}).",
             plural(orders, "venta", "ventas"),
-            clp(rev),
-            clp(cash),
-            clp(card),
+            m.fmt(rev),
+            m.fmt(cash),
+            m.fmt(card),
         )
     };
     Ok(
@@ -131,6 +137,7 @@ async fn ventas(
 async fn ingresos_por_metodo(
     db: &Db,
     tenant: &Thing,
+    m: &Money,
     intent: &Intent,
     bucket: Option<&str>,
 ) -> DomainResult<Answer> {
@@ -156,10 +163,10 @@ async fn ingresos_por_metodo(
             };
             format!(
                 "Hoy te entraron {} por {} ({}% de {} en total).",
-                clp(monto),
+                m.fmt(monto),
                 etiqueta.to_lowercase(),
                 share,
-                clp(total),
+                m.fmt(total),
             )
         };
         return Ok(Answer::new(intent, text).with_data(serde_json::json!({
@@ -175,9 +182,9 @@ async fn ingresos_por_metodo(
     }
     let detalle: Vec<String> = rows
         .iter()
-        .map(|r| format!("{} {}", r.label.to_lowercase(), clp(r.amount)))
+        .map(|r| format!("{} {}", r.label.to_lowercase(), m.fmt(r.amount)))
         .collect();
-    let text = format!("Hoy: {} — {} en total.", detalle.join(", "), clp(total));
+    let text = format!("Hoy: {} — {} en total.", detalle.join(", "), m.fmt(total));
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "total": total.to_string(),
         "methods": rows
@@ -281,6 +288,7 @@ async fn stock_producto(
             low_stock: None,
             limit: Some(5),
             offset: None,
+            after: None,
         },
     )
     .await?;
@@ -313,7 +321,7 @@ async fn stock_producto(
     })))
 }
 
-async fn caja_actual(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn caja_actual(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let sessions = caja::list_sessions(
         db,
         tenant,
@@ -336,11 +344,11 @@ async fn caja_actual(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     let text = format!(
         "En la caja «{}» deberían haber {} (apertura {} + ventas efectivo {} + ingresos {} − retiros {}).",
         s.register_name,
-        clp(expected),
-        clp(s.opening_cash),
-        clp(cash_sales),
-        clp(m_in),
-        clp(m_out),
+        m.fmt(expected),
+        m.fmt(s.opening_cash),
+        m.fmt(cash_sales),
+        m.fmt(m_in),
+        m.fmt(m_out),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "open": true,
@@ -353,7 +361,7 @@ async fn caja_actual(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
     })))
 }
 
-async fn top_productos(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn top_productos(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let rows = reports::top_products(
         db,
         tenant,
@@ -378,7 +386,7 @@ async fn top_productos(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult
                 r.rank,
                 r.product_name,
                 r.qty_sold,
-                clp(r.revenue)
+                m.fmt(r.revenue)
             )
         })
         .collect();
@@ -393,7 +401,7 @@ async fn top_productos(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult
     })))
 }
 
-async fn margen_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn margen_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let rows = reports::margins_daily(db, tenant, month_range()).await?;
     let (mut rev, mut cost) = (Decimal::ZERO, Decimal::ZERO);
     for r in &rows {
@@ -411,9 +419,9 @@ async fn margen_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
     } else {
         format!(
             "Margen del mes: {} sobre ventas de {} (costo {}), un {}%.",
-            clp(margin),
-            clp(rev),
-            clp(cost),
+            m.fmt(margin),
+            m.fmt(rev),
+            m.fmt(cost),
             pct,
         )
     };
@@ -451,7 +459,7 @@ async fn stock_bajo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
     })))
 }
 
-async fn resumen_inventario(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn resumen_inventario(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let s = catalog::stats(db, tenant).await?;
     let text = format!(
         "Tienes {} productos ({} activos), {} con stock bajo y {} agotados. Valor de inventario: {}.",
@@ -459,7 +467,7 @@ async fn resumen_inventario(db: &Db, tenant: &Thing, intent: &Intent) -> DomainR
         s.active,
         s.low_stock,
         s.out_of_stock,
-        clp(s.inventory_value),
+        m.fmt(s.inventory_value),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "total": s.total,
@@ -476,7 +484,7 @@ async fn resumen_inventario(db: &Db, tenant: &Thing, intent: &Intent) -> DomainR
 /// Ley 20.000). The Health line is data-driven: a non-pharmacy tenant simply
 /// has no controlled entries, so the same brief works for every rubro without
 /// hard-coding the vertical (RutAgent, ADR-0016).
-async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn resumen_dia(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     // Business — yesterday's sales.
     let (orders, rev, _cash, _card) = sum_sales(db, tenant, yesterday_range()).await?;
 
@@ -539,11 +547,11 @@ async fn resumen_dia(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
             "Ayer vendiste {} {} por {}.",
             orders,
             plural(orders, "venta", "ventas"),
-            clp(rev)
+            m.fmt(rev)
         )
     });
     lines.push(match &caja_line {
-        Some((reg, expected)) => format!("Caja «{reg}»: deberían haber {}.", clp(*expected)),
+        Some((reg, expected)) => format!("Caja «{reg}»: deberían haber {}.", m.fmt(*expected)),
         None => "No hay caja abierta.".to_string(),
     });
     lines.push(if reorder.rows.is_empty() {
@@ -685,7 +693,7 @@ async fn recetas_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
 
 /// Purchasing — draft purchase orders pending receipt (count + total). Pairs
 /// with the "recibe la orden de compra" action: shows what is receivable.
-async fn compras_pendientes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn compras_pendientes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     use domain::purchasing::model::PurchaseOrderFilters;
     use domain::purchasing::service as purchasing;
     let rows = purchasing::list_purchase_orders(
@@ -711,7 +719,7 @@ async fn compras_pendientes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainR
          compra» para ingresarlas al stock.",
         rows.len(),
         plural(rows.len() as i64, "orden", "órdenes"),
-        clp(total),
+        m.fmt(total),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "count": rows.len(),
@@ -770,6 +778,7 @@ async fn sum_sales(
 async fn comparativa(
     db: &Db,
     tenant: &Thing,
+    m: &Money,
     intent: &Intent,
     current: SalesReportFilters,
     previous: SalesReportFilters,
@@ -788,20 +797,20 @@ async fn comparativa(
         Some((delta / prev_rev * Decimal::from(100)).round_dp(1))
     };
     let tendencia = match pct {
-        Some(p) if p > Decimal::ZERO => format!("{} más (+{}%)", clp(delta), p),
-        Some(p) if p < Decimal::ZERO => format!("{} menos ({}%)", clp(delta.abs()), p),
+        Some(p) if p > Decimal::ZERO => format!("{} más (+{}%)", m.fmt(delta), p),
+        Some(p) if p < Decimal::ZERO => format!("{} menos ({}%)", m.fmt(delta.abs()), p),
         Some(_) => "lo mismo (0%)".to_string(),
         None if cur_rev.is_zero() => "sin datos para comparar".to_string(),
-        None => format!("{} más (no había ventas {anterior})", clp(delta)),
+        None => format!("{} más (no había ventas {anterior})", m.fmt(delta)),
     };
     let text = format!(
         "{} llevas {} en {} {}; {} fueron {} en {} {}. Vas {}.",
         capitalize(actual),
-        clp(cur_rev),
+        m.fmt(cur_rev),
         cur_orders,
         plural(cur_orders, "venta", "ventas"),
         anterior,
-        clp(prev_rev),
+        m.fmt(prev_rev),
         prev_orders,
         plural(prev_orders, "venta", "ventas"),
         tendencia,
@@ -816,7 +825,7 @@ async fn comparativa(
     })))
 }
 
-async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn ventas_por_metodo(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     // Antes esto sumaba sólo `cash_amount`/`card_amount` y presentaba los dos
     // como el 100% del mes: con fiado (0039) y transferencia (0043) esa foto
     // MIENTE (la plata que no es efectivo ni tarjeta desaparecía del desglose).
@@ -843,7 +852,7 @@ async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainRe
             format!(
                 "{} {} ({}%)",
                 r.label.to_lowercase(),
-                clp(r.amount),
+                m.fmt(r.amount),
                 share(r.amount)
             )
         })
@@ -851,7 +860,7 @@ async fn ventas_por_metodo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainRe
     let text = format!(
         "Este mes: {}, sobre {} en total.",
         detalle.join(", "),
-        clp(total),
+        m.fmt(total),
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "revenue": total.to_string(),
@@ -966,6 +975,7 @@ async fn resumen_clientes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainRes
 async fn precio_producto(
     db: &Db,
     tenant: &Thing,
+    m: &Money,
     intent: &Intent,
     term: &str,
 ) -> DomainResult<Answer> {
@@ -986,11 +996,11 @@ async fn precio_producto(
         ));
     }
     let best = &products[0];
-    let mut text = format!("{} se vende a {}.", best.name, clp(best.price));
+    let mut text = format!("{} se vende a {}.", best.name, m.fmt(best.price));
     if products.len() > 1 {
         let otros: Vec<String> = products[1..]
             .iter()
-            .map(|p| format!("{} ({})", p.name, clp(p.price)))
+            .map(|p| format!("{} ({})", p.name, m.fmt(p.price)))
             .collect();
         text.push_str(&format!(" También coinciden: {}.", otros.join(", ")));
     }
@@ -1006,6 +1016,7 @@ async fn precio_producto(
 async fn margen_producto(
     db: &Db,
     tenant: &Thing,
+    m: &Money,
     intent: &Intent,
     term: &str,
 ) -> DomainResult<Answer> {
@@ -1019,6 +1030,7 @@ async fn margen_producto(
             low_stock: None,
             limit: Some(1),
             offset: None,
+            after: None,
         },
     )
     .await?;
@@ -1035,7 +1047,7 @@ async fn margen_producto(
                 "{} se vende a {}, pero no tiene costo registrado, así que no puedo \
                  calcular el margen. Agrega el costo en el producto.",
                 p.name,
-                clp(p.price)
+                m.fmt(p.price)
             ),
         )
         .with_data(serde_json::json!({ "name": p.name, "price": p.price.to_string() })));
@@ -1049,9 +1061,9 @@ async fn margen_producto(
     let text = format!(
         "{}: se vende a {}, cuesta {}; margen unitario {} ({}%).",
         p.name,
-        clp(p.price),
-        clp(cost),
-        clp(margin),
+        m.fmt(p.price),
+        m.fmt(cost),
+        m.fmt(margin),
         pct,
     );
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
@@ -1063,7 +1075,7 @@ async fn margen_producto(
     })))
 }
 
-async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn gastos_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let range = month_range();
     let rows = reports::list_expenses(
         db,
@@ -1093,11 +1105,11 @@ async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
     let detalle: Vec<String> = cats
         .iter()
         .take(3)
-        .map(|(c, v)| format!("{c} {}", clp(*v)))
+        .map(|(c, v)| format!("{c} {}", m.fmt(*v)))
         .collect();
     let text = format!(
         "Este mes llevas {} en gastos ({} {}). Principales: {}.",
-        clp(total),
+        m.fmt(total),
         rows.len(),
         plural(rows.len() as i64, "gasto", "gastos"),
         detalle.join(", "),
@@ -1114,7 +1126,7 @@ async fn gastos_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
 
 /// "¿Cuánto me deben?" — cuentas por cobrar del fiado. Nombra a los dos que más
 /// deben (que es lo accionable) y da el total.
-async fn por_cobrar(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn por_cobrar(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let rep = domain::credit::repo::debtors(db, tenant).await?;
     if rep.rows.is_empty() {
         return Ok(
@@ -1126,11 +1138,11 @@ async fn por_cobrar(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
         .rows
         .iter()
         .take(2)
-        .map(|d| format!("{} {}", d.name, clp(d.balance)))
+        .map(|d| format!("{} {}", d.name, m.fmt(d.balance)))
         .collect();
     let text = format!(
         "Te deben {} en total, de {} {}. Los que más deben: {}.",
-        clp(rep.total_por_cobrar),
+        m.fmt(rep.total_por_cobrar),
         rep.debtor_count,
         plural(rep.debtor_count as i64, "cliente", "clientes"),
         top.join(", "),
@@ -1147,15 +1159,15 @@ async fn por_cobrar(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
 
 /// IVA del mes (F29): débito de ventas − crédito de compras. Avisa cuando hay
 /// facturas de compra sin capturar, porque ahí la cifra todavía es estimada.
-async fn iva_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answer> {
+async fn iva_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let period = chrono::Utc::now().format("%Y-%m").to_string();
     let sum = domain::compliance::repo::iva_summary(db, tenant, &period).await?;
     let book = domain::compliance::repo::purchase_book(db, tenant, &period).await?;
 
     let saldo = if sum.iva_a_pagar >= Decimal::ZERO {
-        format!("te toca pagar {}", clp(sum.iva_a_pagar))
+        format!("te toca pagar {}", m.fmt(sum.iva_a_pagar))
     } else {
-        format!("te queda {} a favor", clp(-sum.iva_a_pagar))
+        format!("te queda {} a favor", m.fmt(-sum.iva_a_pagar))
     };
     let aviso = if book.pending_declaration > 0 {
         format!(
@@ -1168,8 +1180,8 @@ async fn iva_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<Answe
     };
     let text = format!(
         "Este mes: IVA de ventas {}, IVA de compras {}. Con eso {}.{}",
-        clp(sum.iva_debito),
-        clp(sum.iva_credito),
+        m.fmt(sum.iva_debito),
+        m.fmt(sum.iva_credito),
         saldo,
         aviso,
     );
@@ -1299,23 +1311,6 @@ fn month_range() -> SalesReportFilters {
     }
 }
 
-/// Format a Decimal as Chilean pesos: rounded to whole pesos with `.` thousands
-/// separators, e.g. `Decimal(1234567) -> "$1.234.567"`.
-pub(crate) fn clp(v: Decimal) -> String {
-    let rounded = v.round();
-    let neg = rounded.is_sign_negative();
-    let digits = rounded.abs().trunc().to_string();
-    let mut out = String::new();
-    let bytes = digits.as_bytes();
-    for (i, ch) in bytes.iter().enumerate() {
-        if i > 0 && (bytes.len() - i) % 3 == 0 {
-            out.push('.');
-        }
-        out.push(*ch as char);
-    }
-    format!("{}${}", if neg { "-" } else { "" }, out)
-}
-
 fn plural<'a>(n: i64, one: &'a str, many: &'a str) -> &'a str {
     if n == 1 {
         one
@@ -1335,15 +1330,6 @@ fn capitalize(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn clp_formats_thousands() {
-        assert_eq!(clp(Decimal::from(0)), "$0");
-        assert_eq!(clp(Decimal::from(999)), "$999");
-        assert_eq!(clp(Decimal::from(1234)), "$1.234");
-        assert_eq!(clp(Decimal::from(1234567)), "$1.234.567");
-        assert_eq!(clp(Decimal::from(-5000)), "-$5.000");
-    }
 
     #[test]
     fn plural_picks_form() {

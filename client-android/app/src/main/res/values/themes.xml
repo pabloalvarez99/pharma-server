@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tema XML mínimo: solo existe para que la ventana no traiga ActionBar y para
+  pintar el fondo antes del primer frame de Compose. Los colores reales viven
+  en el design system de Compose (ui/theme/**), no acá.
+
+  `windowBackground` es `@color/rb_window_background`, que es el mismo
+  `RbColors.background` del design system. Estaba en blanco puro, y en el
+  aparato lento eso se veía: la ventana abría blanca y ~400 ms después saltaba
+  al crema #F7F4EE del tema. Un destello de dos colores en cada arranque, en la
+  app que la cajera abre veinte veces al día.
+-->
+<resources>
+    <style name="Theme.RutBusiness" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/rb_window_background</item>
+    </style>
+</resources>

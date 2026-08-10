@@ -1,0 +1,29 @@
+# Baseline Profile — piso de hardware, regla 6.
+#
+# Las clases y métodos listados acá se compilan AOT al instalar, en vez de
+# interpretarse en el primer arranque. En un teléfono lento eso es la diferencia
+# entre abrir la app y esperar mirando el fondo.
+#
+# Este perfil es de partida y está escrito a mano, con comodines sobre lo que se
+# ejecuta sí o sí en el camino de arranque: montar Compose, pintar el primer
+# frame, leer la sesión del disco y hacer la primera llamada HTTP.
+#
+# TODO(perf): reemplazarlo por uno medido con el módulo de macrobenchmark
+# corriendo el recorrido real (arranque -> login -> lista) en el aparato de
+# referencia. Un perfil medido siempre le gana a uno adivinado; este existe para
+# no arrancar sin nada.
+
+HSPLcl/rutbusiness/app/**->**(**)**
+HSPLcl/rutbusiness/core/**->**(**)**
+
+HSPLandroidx/compose/runtime/**->**(**)**
+HSPLandroidx/compose/ui/node/**->**(**)**
+HSPLandroidx/compose/ui/platform/**->**(**)**
+HSPLandroidx/compose/ui/graphics/**->**(**)**
+HSPLandroidx/compose/ui/text/**->**(**)**
+HSPLandroidx/compose/foundation/lazy/**->**(**)**
+HSPLandroidx/compose/material3/**->**(**)**
+
+HSPLkotlinx/coroutines/**->**(**)**
+HSPLkotlinx/serialization/json/**->**(**)**
+HSPLio/ktor/client/**->**(**)**

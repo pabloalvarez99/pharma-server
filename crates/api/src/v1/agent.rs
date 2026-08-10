@@ -434,10 +434,28 @@ async fn quote_request(
     }
     Ok(json!({
         "tenant": slug,
-        "currency": "CLP",
+        "currency": tenant_currency(&db, &tenant).await?,
         "lines": lines,
         "total": total,
     }))
+}
+
+/// ISO-4217 del tenant que responde (`money.currency`, CLP por default). El
+/// nodo que cotiza declara en qué moneda cobra; el que pregunta no lo asume.
+async fn tenant_currency(
+    db: &db::Db,
+    tenant: &surrealdb::sql::Thing,
+) -> Result<String, axum::response::Response> {
+    domain::settings::currency(db, tenant)
+        .await
+        .map(|c| c.code().to_string())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("currency lookup: {e}") })),
+            )
+                .into_response()
+        })
 }
 
 /// `po.create` → `po.ack`. Body:
@@ -585,7 +603,7 @@ async fn po_create(
              total=$tot, status='received', buyer_note=$note, \
              price_adjusted=$pa RETURN AFTER",
         )
-        .bind(("t", tenant))
+        .bind(("t", tenant.clone()))
         .bind(("p", peer_did.to_string()))
         .bind(("l", lines_json))
         .bind(("tot", total))
@@ -610,7 +628,7 @@ async fn po_create(
     Ok(json!({
         "order_id": order_id,
         "status": "received",
-        "currency": "CLP",
+        "currency": tenant_currency(&db, &tenant).await?,
         "total": total,
         "price_adjusted": price_adjusted,
         "lines": canonical_lines,

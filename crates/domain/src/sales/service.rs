@@ -182,10 +182,17 @@ pub async fn post_sale(
         .collect::<DomainResult<Vec<_>>>()?;
 
     // Money totals — canonical formulas in `crate::invariants` (property-tested).
-    let subtotal =
-        crate::invariants::order_subtotal(req.items.iter().map(|i| (i.unit_price, i.quantity)));
+    // Subtotal y descuento se normalizan a la moneda del tenant ANTES de restar,
+    // así `subtotal − discount == total` sigue siendo exacto en la misma
+    // granularidad en que se persiste y se cobra. En CLP (0 decimales) esto es
+    // idéntico a lo que hacía el sistema; en USD conserva los centavos que un
+    // `round_dp(0)` heredado de Chile habría borrado.
+    let currency = crate::settings::currency(db, tenant).await?;
+    let subtotal = currency.round(crate::invariants::order_subtotal(
+        req.items.iter().map(|i| (i.unit_price, i.quantity)),
+    ));
     let discount_in = req.discount.unwrap_or_default();
-    let discount = crate::invariants::clamp_discount(discount_in, subtotal);
+    let discount = currency.round(crate::invariants::clamp_discount(discount_in, subtotal));
     let total = crate::invariants::order_total(subtotal, discount);
 
     // Mixed payment cross-check
@@ -688,7 +695,10 @@ pub async fn create_web_order(
         order_id: order.id.clone(),
         pickup_code: order.pickup_code.clone().unwrap_or_default(),
         status: order.status.clone(),
-        currency: "CLP".to_string(),
+        currency: crate::settings::currency(db, tenant)
+            .await?
+            .code()
+            .to_string(),
         total: order.total.to_string(),
         expires_at: order.expires_at.unwrap_or_default(),
     };
@@ -790,6 +800,9 @@ pub async fn get_order(
 ///
 /// `change` = `cash_amount - total` for `pos_cash`, `(cash + card) - total` for
 /// `pos_mixed`, else `None` (pure card). `line_total` = `qty * unit_price`.
+///
+/// `footer_note` sale de [`crate::settings::receipt_footer_note`]: lo que este
+/// negocio configuró, o un default armado con su propio nombre.
 pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ReceiptDto> {
     let order_thing = parse_tenant_thing(id, "order")?;
     let (order, items) = repo::get_order(db, tenant, &order_thing)
@@ -797,6 +810,7 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
         .ok_or(DomainError::NotFound)?;
 
     let tenant_name = repo::tenant_name(db, tenant).await?.unwrap_or_default();
+    let footer_note = crate::settings::receipt_footer_note(db, tenant, &tenant_name).await?;
     let loyalty_points_awarded = repo::loyalty_awarded_for_order(db, tenant, &order_thing).await?;
 
     let receipt_items: Vec<ReceiptItem> = items
@@ -814,14 +828,22 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
     // (a card is never over-charged), so its vuelto is `(cash + card) − total`
     // — F-paul-pay-001: the cashier must see the vuelto on a mixed sale too, not
     // just on pos_cash. A pure-card sale settles exactly, so it has no vuelto.
+    //
+    // El vuelto se redondea a la moneda del tenant: en CLP no existe medio peso
+    // en el cajón, en USD sí existe el centavo. `round` con 0 decimales es
+    // exactamente lo que hacía el sistema cuando la moneda era una constante.
+    let currency = crate::settings::currency(db, tenant).await?;
     let change = match order.payment_method.as_str() {
         "pos_cash" => order
             .cash_amount
-            .map(|cash| crate::invariants::cash_change(cash, order.total)),
+            .map(|cash| currency.round(crate::invariants::cash_change(cash, order.total))),
         "pos_mixed" => {
             let tendered =
                 order.cash_amount.unwrap_or_default() + order.card_amount.unwrap_or_default();
-            Some(crate::invariants::cash_change(tendered, order.total))
+            Some(currency.round(crate::invariants::cash_change(
+                tendered,
+                order.total,
+            )))
         }
         _ => None,
     };
@@ -849,7 +871,10 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
         change,
         loyalty_points_awarded,
         cashier: order.sold_by_name,
-        footer_note: RECEIPT_FOOTER_NOTE.to_string(),
+        // El pie que configuró este negocio, o el que sale de su propio nombre.
+        // `tenant_name` ya está leído acá arriba: el default no cuesta una
+        // consulta más.
+        footer_note,
     })
 }
 
@@ -1075,7 +1100,19 @@ pub async fn set_setting(
     if key.is_empty() {
         return Err(DomainError::Invalid("key vacío".into()));
     }
-    repo::upsert_setting(db, tenant, key, value).await
+    // El k/v es genérico a propósito, pero las keys de plata se validan acá:
+    // es el único punto por el que entra el `PUT /api/v1/settings/{key}`, y una
+    // moneda mal escrita no se puede descubrir recién en la próxima venta.
+    let value = match key {
+        crate::money::CURRENCY_SETTING_KEY => {
+            crate::money::Currency::parse(value)?.code().to_string()
+        }
+        crate::money::TAX_RATE_SETTING_KEY => crate::money::parse_tax_percent(value)?
+            .normalize()
+            .to_string(),
+        _ => value.to_string(),
+    };
+    repo::upsert_setting(db, tenant, key, &value).await
 }
 
 #[cfg(test)]
