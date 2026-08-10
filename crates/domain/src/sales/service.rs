@@ -236,6 +236,16 @@ pub async fn post_sale(
     };
     crate::stock::service::ensure_branch(db, tenant, branch.as_ref(), "la sucursal").await?;
 
+    // Caja que se lleva el efectivo (migración 0050). Se resuelve acá, con el
+    // vendedor a mano, y se guarda en la fila: el evento del arqueo no puede
+    // scopear por caja si la orden no dice cuál la tomó.
+    //
+    // Se resuelve SIEMPRE, no sólo para `pos_cash`/`pos_mixed`. Es un hecho de
+    // la venta ("la cobró esta caja"), no una optimización del agregado, y el
+    // evento ya filtra por método de pago; escribirlo condicionalmente sólo
+    // haría que un cambio de método posterior mirara una fila sin caja.
+    let cash_session = crate::cash_register::service::sale_cash_session(db, tenant, sold_by).await?;
+
     // === Serialized, retry-on-conflict critical section (BUG-003/004) ===
     // The per-tenant lock removes the sale-vs-sale SurrealKv write-write
     // conflict (and the partial-write corruption of `product.stock` it
@@ -348,6 +358,7 @@ pub async fn post_sale(
                 sold_by_name,
                 customer.as_ref(),
                 branch.as_ref(),
+                cash_session.as_ref(),
                 &req,
                 &fefo_plans,
                 &physical,
@@ -891,34 +902,29 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
 /// Sin caja abierta ⇒ `Conflict`, no un retiro al vacío: el reembolso en
 /// efectivo es plata que sale y necesita asiento.
 ///
-/// Con MÁS de una caja abierta ⇒ `Conflict` también. `NewDevolucion` no tiene
-/// campo para elegir cuál, y adivinar sería mover plata del cajón equivocado.
-/// Es el mismo agujero que tiene hoy el evento `cash_sales_running_maint`, que
-/// le suma cada venta a TODAS las cajas abiertas del tenant (defecto conocido,
-/// territorio del carril de sucursales); acá al menos falla ruidoso.
+/// **Cuál** caja se resuelve con la misma precedencia que la de una venta
+/// ([`crate::cash_register::service::sale_cash_session`], migración 0050): la
+/// del que devuelve si tiene una, si no la única abierta del negocio, si no
+/// ninguna. La plata sale del cajón que la persona tiene adelante.
+///
+/// En 0049 esto rechazaba con "hay N cajas abiertas" en cuanto había dos, porque
+/// el sistema no tenía forma de saber de cuál sacar. Fallar ruidoso era lo
+/// correcto entonces; ahora sabemos, y mantenerlo dejaría un negocio de dos
+/// mostradores pudiendo vender pero no pudiendo devolver.
+///
+/// Sin ninguna caja ⇒ `Conflict`, no un retiro al vacío.
 async fn open_session_for_refund(
     db: &Db,
     tenant: &Thing,
+    processed_by: Option<&Thing>,
 ) -> DomainResult<(Thing, tokio::sync::OwnedMutexGuard<()>)> {
-    let mut r = db
-        .query("SELECT VALUE id FROM cash_register_session WHERE tenant = $t AND status = 'open'")
-        .bind(("t", tenant.clone()))
+    let session = crate::cash_register::service::sale_cash_session(db, tenant, processed_by)
         .await?
-        .check()?;
-    let open: Vec<Thing> = r.take(0)?;
-    let session = match open.len() {
-        0 => {
-            return Err(DomainError::Conflict(
+        .ok_or_else(|| {
+            DomainError::Conflict(
                 "no hay caja abierta: abrí la caja antes de devolver en efectivo".into(),
-            ))
-        }
-        1 => open.into_iter().next().unwrap(),
-        n => {
-            return Err(DomainError::Conflict(format!(
-                "hay {n} cajas abiertas: no se puede saber de cuál sale el efectivo"
-            )))
-        }
-    };
+            )
+        })?;
     let guard = crate::cash_register::service::session_mutation_lock(tenant, &session.to_string())
         .lock_owned()
         .await;
@@ -1156,7 +1162,7 @@ pub async fn create_refund(
     // este carril cierra.
     let mut drawer_guard = None;
     if refund_cash && total > Decimal::ZERO {
-        let (session, guard) = open_session_for_refund(db, tenant).await?;
+        let (session, guard) = open_session_for_refund(db, tenant, processed_by).await?;
         drawer_guard = Some(guard);
         effects.cash_retiro = Some((session, total));
     }

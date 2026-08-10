@@ -83,6 +83,16 @@ pub struct OrderDto {
     /// único. De acá salen los reportes de venta por local.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// Caja que se llevó el efectivo de esta venta
+    /// (`cash_register_session:<key>`), migración 0050. NONE = no había caja
+    /// abierta: la venta existe, pero no le entra a ningún arqueo.
+    ///
+    /// Lo resuelve el server al vender ([`crate::sales::service::post_sale`]),
+    /// no el cliente: el POS no manda la caja y no hace falta que la mande.
+    /// Es el mismo dato que ya se leía para deducir la sucursal — antes se
+    /// calculaba y se tiraba.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cash_session: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

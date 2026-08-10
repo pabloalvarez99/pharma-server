@@ -241,6 +241,79 @@ pub async fn open_session_branch(
     Ok(row.and_then(|r| r.branch))
 }
 
+/// Qué caja se lleva el efectivo de una venta que cobra `user` (migración 0050).
+///
+/// Existe porque `cash_sales_running_maint` no puede scopear por caja si la fila
+/// de `order` no dice cuál la tomó. Hasta 0049 el evento le aplicaba el delta a
+/// TODAS las cajas abiertas del tenant, así que con dos cajeros una venta de
+/// $5.000 le entraba a las dos.
+///
+/// **Precedencia, y las tres ramas están ahí por una razón concreta:**
+///
+/// 1. **La caja abierta del vendedor.** Es el caso exacto y el que arregla el
+///    defecto: cada cajero tiene a lo sumo una (`open_session` rechaza la
+///    segunda del mismo usuario, bajo lock por `(tenant, user)`), así que no hay
+///    ambigüedad posible.
+/// 2. **Si el vendedor no tiene y el tenant tiene EXACTAMENTE UNA abierta, esa.**
+///    No es una concesión: es el día real de la dueña que abre la caja a la
+///    mañana y del empleado que vende. Hoy esa venta le entra a la caja de la
+///    dueña —por accidente, porque el evento se las aplica a todas— y **está
+///    bien que le entre**: la plata terminó en ese cajón. Un filtro estricto por
+///    vendedor la dejaría sin caja y le inventaría un faltante del tamaño del
+///    día. Con una sola caja abierta no hay a quién más asignarla.
+/// 3. **Ninguna.** Ni el vendedor tiene caja ni hay una sola candidata. La venta
+///    existe igual; simplemente no le entra a ningún arqueo, que es la verdad:
+///    nadie abrió un cajón donde asentarla.
+///
+/// Neto: con 0 o 1 caja abierta el comportamiento es **idéntico** al de antes de
+/// 0050. Sólo cambia con 2 o más, que es exactamente donde estaba mal.
+pub async fn sale_cash_session(
+    db: &Db,
+    tenant: &Thing,
+    user: Option<&Thing>,
+) -> DomainResult<Option<Thing>> {
+    #[derive(Deserialize)]
+    struct Row {
+        id: Thing,
+    }
+    if let Some(u) = user {
+        let mut r = db
+            .query(
+                // `opened_at` en la proyección por lo mismo que en
+                // `open_session_branch`: SurrealDB exige que el campo del ORDER
+                // BY esté seleccionado ("Missing order idiom").
+                "SELECT id, opened_at FROM cash_register_session \
+                 WHERE tenant=$t AND user=$u AND status='open' \
+                 ORDER BY opened_at DESC LIMIT 1",
+            )
+            .bind(("t", tenant.clone()))
+            .bind(("u", u.clone()))
+            .await?
+            .check()?;
+        let row: Option<Row> = r.take(0)?;
+        if let Some(row) = row {
+            return Ok(Some(row.id));
+        }
+    }
+    // `LIMIT 2`, no `LIMIT 1`: hace falta distinguir "hay exactamente una" de
+    // "hay varias". Con `LIMIT 1` las dos se ven igual y elegiríamos una caja al
+    // azar, que es una forma más silenciosa del mismo bug.
+    let mut r = db
+        .query(
+            "SELECT id, opened_at FROM cash_register_session \
+             WHERE tenant=$t AND status='open' \
+             ORDER BY opened_at DESC LIMIT 2",
+        )
+        .bind(("t", tenant.clone()))
+        .await?
+        .check()?;
+    let rows: Vec<Row> = r.take(0)?;
+    if rows.len() == 1 {
+        return Ok(Some(rows.into_iter().next().unwrap().id));
+    }
+    Ok(None)
+}
+
 pub async fn list_sessions(
     db: &Db,
     tenant: &Thing,
