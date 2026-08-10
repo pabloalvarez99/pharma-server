@@ -6,7 +6,14 @@ import cl.rutbusiness.core.money.Dinero
 data class ItemCarrito(
     val productoId: String,
     val nombre: String,
-    /** El precio tal como lo mandó el server. Nunca se reescribe. */
+    /**
+     * El precio tal como lo mandó el server.
+     *
+     * Con una excepción, y sólo una: la línea de **monto suelto**, donde el
+     * precio es el que la dueña dijo en voz alta ("son $2.000") y no existe en
+     * ningún catálogo. Se escribe una vez, al armar la línea, y desde ahí es
+     * igual de inmutable que los otros. Ver [Carrito.conMontoSuelto].
+     */
     val precioUnitario: String,
     val cantidad: Int,
     /** Stock que el server informó al momento de agregarlo. */
@@ -74,6 +81,43 @@ data class Carrito(val items: List<ItemCarrito> = emptyList()) {
                 descuentaStock = producto.physicalStock,
             ),
         )
+    }
+
+    /**
+     * Deja **una** línea con un monto dicho a mano.
+     *
+     * Es la venta más común del puesto: "son $2.000, una bolsa". No hay producto
+     * que buscar porque no hay nada que cargar — el monto es toda la venta.
+     *
+     * [producto] es el centinela con el que esa línea viaja al server, que exige
+     * un producto por línea (`PosSaleItem.product` es obligatorio: "POS does not
+     * allow free items"). El monto va en `unitPrice`, que es lo que el server
+     * usa para el subtotal.
+     *
+     * **Reemplaza en vez de sumar, y eso es deliberado.** Dos líneas con el
+     * mismo producto el server las rechaza -carga los productos del pedido y
+     * compara `loaded.len()` contra la cantidad de líneas-, así que la única
+     * alternativa a reemplazar sería sumar los dos montos en uno. Sumar plata
+     * escrita a mano y mandar el resultado como si fuera un precio es la clase
+     * de cuenta que en esta app hace el server, no el teléfono; y de paso
+     * borraría de la venta que eran dos cosas. Quien escribe un segundo monto
+     * está corrigiendo el primero, y eso es lo que pasa.
+     *
+     * La cantidad no se toca: subirla con el "+" del paso de pago es legítimo
+     * -dos bolsas al mismo precio- y multiplica igual que cualquier otra línea.
+     */
+    fun conMontoSuelto(producto: ProductDto, monto: String): Carrito {
+        val linea = ItemCarrito(
+            productoId = producto.id,
+            nombre = producto.name,
+            precioUnitario = monto,
+            cantidad = 1,
+            stockConocido = producto.stock,
+            descuentaStock = producto.physicalStock,
+        )
+        val donde = items.indexOfFirst { it.productoId == producto.id }
+        if (donde < 0) return copy(items = items + linea)
+        return copy(items = items.toMutableList().also { it[donde] = linea })
     }
 
     /** Cambia la cantidad. Cero o menos saca la fila, que es lo que espera quien toca "−". */

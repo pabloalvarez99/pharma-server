@@ -20,6 +20,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.diag.Latencia
+import cl.rutbusiness.app.ui.catalogo.abrirCatalogo
+import cl.rutbusiness.app.ui.catalogo.copyCatalogo
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
@@ -59,8 +61,13 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         if (vm.carrito.unidades > 0) withFrameNanos { Latencia.cerrar("agregar al carrito") }
     }
 
-    val barcodeOk = packActual().features.barcode
+    val pack = packActual()
+    val barcodeOk = pack.features.barcode
     val copy = copyBuscarCobrar(barcodeOk)
+    // El catálogo se nombra con las palabras del pack, no con las de esta
+    // pantalla: en feria el botón dice "Agregar una cosa" y en farmacia "Agregar
+    // un producto", porque lo dice `vocab` (ADR-0022).
+    val copyDelCatalogo = copyCatalogo(pack)
     BuscarContenido(
         modifier = modifier,
         consulta = vm.consulta,
@@ -91,6 +98,16 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         },
         etiquetaBuscar = copy.etiqueta,
         placeholderBuscar = copy.placeholder,
+        // La salida del callejón sin salida. Antes, con el catálogo vacío esta
+        // pantalla decía "cuando cargues productos van a aparecer acá" y no
+        // había ningún lugar en la app donde cargarlos que no fuera el escáner
+        // -que en feria está apagado-. Ahora el vacío ofrece el camino.
+        onCargarLoQueVendo = abrirCatalogo(),
+        etiquetaCargar = copyDelCatalogo.agregar,
+        tituloSinCatalogo = copyDelCatalogo.vacioTitulo,
+        pistaSinCatalogo = copyDelCatalogo.vacioPista,
+        onMontoSuelto = vm::abrirMontoSuelto,
+        montoSueltoPuesto = vm.montoSueltoEnElCarrito()?.let { vm.moneda.formatear(it) },
         resultados = vm.resultados,
         buscando = vm.buscando,
         errorBusqueda = vm.errorBusqueda,
@@ -139,6 +156,18 @@ internal fun BuscarContenido(
     modifier: Modifier = Modifier,
     etiquetaBuscar: String = "Buscar producto",
     placeholderBuscar: String = "Nombre o código de barras",
+    /**
+     * Abre "Lo que vendo". `null` cuando desde acá no se puede -sin sesión-, y
+     * entonces la pantalla no ofrece el camino en vez de ofrecer un botón muerto.
+     */
+    onCargarLoQueVendo: (() -> Unit)? = null,
+    etiquetaCargar: String = "Agregar lo que vendo",
+    tituloSinCatalogo: String = "Todavía no hay productos",
+    pistaSinCatalogo: String = "Agrega lo que vendes con su precio y ya puedes cobrarlo.",
+    /** Abre el cobro rápido. `null` lo deja fuera de la pantalla. */
+    onMontoSuelto: (() -> Unit)? = null,
+    /** El monto suelto que ya está en el carrito, formateado. */
+    montoSueltoPuesto: String? = null,
 ) {
     val dimens = RbTheme.dimens
 
@@ -199,6 +228,28 @@ internal fun BuscarContenido(
                     modifier = Modifier.padding(top = dimens.space2),
                 )
             }
+
+            // El cobro rápido está a la vista, no escondido: "son $2.000" es la
+            // venta más común del puesto, y esconderla detrás de un menú sería
+            // poner dos toques en el camino más corto que tiene la app.
+            //
+            // Se esconde mientras se escribe, igual que el botón de la cámara y
+            // por el mismo motivo medido: son los dp que le faltan a la lista de
+            // resultados con el teclado arriba. Quien está tipeando un nombre no
+            // está por cobrar un monto suelto.
+            if (onMontoSuelto != null && !escribiendo) {
+                RbButton(
+                    label = if (montoSueltoPuesto == null) {
+                        "Cobrar un monto"
+                    } else {
+                        "Monto puesto: $montoSueltoPuesto"
+                    },
+                    onClick = onMontoSuelto,
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = dimens.space2),
+                )
+            }
         }
 
         RbDivider()
@@ -212,15 +263,20 @@ internal fun BuscarContenido(
             error = errorBusqueda,
             onRetry = onBuscarAhora,
             emptyTitle = if (consulta.isBlank()) {
-                "Todavía no hay productos"
+                tituloSinCatalogo
             } else {
                 "Nada con \"${consulta.trim()}\""
             },
             emptyHint = if (consulta.isBlank()) {
-                "Cuando cargues productos en el sistema del negocio, van a aparecer acá para cobrarlos."
+                pistaSinCatalogo
+            } else if (onCargarLoQueVendo != null) {
+                "Revisa cómo se escribe, prueba con una palabra más corta, " +
+                    "o agrégalo si todavía no está cargado."
             } else {
                 "Revisa cómo se escribe, o prueba con una palabra más corta."
             },
+            emptyActionLabel = if (onCargarLoQueVendo != null) etiquetaCargar else null,
+            onEmptyAction = onCargarLoQueVendo,
             key = { it.id },
         ) { producto ->
             FilaDeProducto(
