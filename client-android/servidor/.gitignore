@@ -1,0 +1,3 @@
+# Artefactos nativos: se generan con scripts/compilar-servidor.ps1 -Lib
+# y se copian acá. No versionar los .so (~30 MB por ABI).
+src/main/jniLibs/**/*.so

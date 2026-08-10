@@ -230,10 +230,28 @@ foreach ($t in $Targets) {
         if (Test-Path $candidate) { $artefacts = @(Get-Item $candidate) }
     }
 
+    # Rust triple → carpeta ABI de jniLibs (AGP)
+    $abi = switch ($t) {
+        'aarch64-linux-android' { 'arm64-v8a' }
+        'armv7-linux-androideabi' { 'armeabi-v7a' }
+        'x86_64-linux-android' { 'x86_64' }
+        'i686-linux-android' { 'x86' }
+        default { $null }
+    }
+
     foreach ($a in $artefacts) {
         $mb = [math]::Round($a.Length / 1MB, 2)
         Write-Host ("  OK {0}  {1} MB  ({2} bytes)" -f $a.Name, $mb, $a.Length) -ForegroundColor Green
         $built += [pscustomobject]@{ Target = $t; Path = $a.FullName; Bytes = $a.Length; MB = $mb }
+
+        # H3+: copiar .so a jniLibs del módulo Gradle :servidor (no versionado).
+        if ($Lib -and $abi -and $a.Name -like 'libservidor_android.so') {
+            $jniDir = Join-Path $raizRepo "client-android\servidor\src\main\jniLibs\$abi"
+            New-Item -ItemType Directory -Force -Path $jniDir | Out-Null
+            $dest = Join-Path $jniDir $a.Name
+            Copy-Item -Force $a.FullName $dest
+            Write-Host "  → jniLibs/$abi/$($a.Name)" -ForegroundColor Cyan
+        }
     }
     if (-not $artefacts -or $artefacts.Count -eq 0) {
         Write-Host "  WARN: build OK pero no encontré artefacto en $outDir" -ForegroundColor Yellow

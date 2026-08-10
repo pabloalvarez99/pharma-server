@@ -25,3 +25,5 @@ rootProject.name = "rutbusiness-android"
 include(":app")
 include(":core")
 include(":design")
+// Server embebido (cdylib Rust + JNI). Solo JVM; no multiplataforma.
+include(":servidor")
