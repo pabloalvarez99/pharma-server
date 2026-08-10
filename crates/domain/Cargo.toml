@@ -17,6 +17,10 @@ uuid.workspace = true
 surrealdb.workspace = true
 utoipa.workspace = true
 rust_decimal = { version = "1.37", features = ["serde-with-str"] }
+# Salt + hash de la prueba de retiro del respaldo (`user_backup`). Vive acá y no
+# en `api` porque Android tiene que derivar exactamente el mismo salt: si las
+# dos derivaciones divergen, la restauración falla el día del robo y no antes.
+sha2.workspace = true
 # Async mutex (per-tenant sale serialization) + timer (conflict backoff) for
 # the BUG-003/004 concurrency-safe sale path. Workspace tokio = full features.
 tokio.workspace = true

@@ -20,6 +20,13 @@ pub const SNAPSHOT_FORMAT_VERSION: u16 = 1;
 /// Documented path (API stub returns not-implemented until bucket is wired).
 pub const USER_BACKUP_UPLOAD_PATH: &str = "/api/v1/user-backup";
 
+/// Rescate sin sesión: `POST /api/v1/user-backup/rescue` (ADR-0023).
+///
+/// El único camino de vuelta para alguien cuyo teléfono ya no existe. No lleva
+/// JWT porque quien perdió el teléfono no tiene forma de conseguir uno; lleva
+/// la prueba de retiro derivada de la tarjeta del cuaderno.
+pub const USER_BACKUP_RESCUE_PATH: &str = "/api/v1/user-backup/rescue";
+
 /// List metadata for the tenant's opaque blobs.
 pub const USER_BACKUP_LIST_PATH: &str = "/api/v1/user-backup";
 
@@ -78,6 +85,99 @@ pub const KDF_SALT_LEN: usize = 16;
 /// Nonce length for AES-GCM (bytes).
 pub const AEAD_NONCE_LEN: usize = 12;
 
+// --- prueba de retiro (rescate sin sesión) ------------------------------------
+//
+// El problema que resuelve: `GET /api/v1/user-backup/{id}` pide JWT, y alguien
+// cuyo teléfono se perdió no tiene cómo conseguir uno. Un respaldo que sólo se
+// puede bajar desde el aparato que se rompió no es un respaldo.
+//
+// La prueba de retiro es un segundo secreto derivado del **mismo** material del
+// cuaderno, por un camino separado del de la llave de cifrado:
+//
+//   semilla            = 84 bits de la tarjeta (frase o bloques, ver Android
+//                        `ClaveDelNegocio` — las dos formas dan los mismos bits)
+//   salt_retiro        = SHA-256("rutbusiness-retiro:v1:" + tenant_slug)[..16]
+//   clave_retiro       = PBKDF2-HMAC-SHA256(semilla, salt_retiro, 210_000, 32)
+//   prueba_retiro      = HMAC-SHA256(clave_retiro, "rb1-retiro:v1:" + slug)
+//   lo que guarda el server = SHA-256(prueba_retiro)
+//
+// Tres propiedades que sostienen el diseño:
+//
+// 1. **El server nunca puede descifrar.** `prueba_retiro` sale de una cadena
+//    HMAC/PBKDF2 distinta de la llave AES, y las funciones son de una vía: con
+//    la prueba (o con su hash) no se llega a la llave del sobre.
+// 2. **El salt es determinista**, derivado del slug que está impreso en la
+//    tarjeta. Tiene que serlo: el salt de la llave de cifrado vive DENTRO del
+//    sobre, y para bajar el sobre hay que probar primero quién sos. Un salt
+//    aleatorio sería un huevo dentro de su propia gallina.
+// 3. **El margen de fuerza bruta no baja.** Si se filtra la base, el atacante
+//    tiene SHA-256(prueba) y para llegar a la semilla tiene que pasar por el
+//    mismo PBKDF2 de 210k: ~2^101 operaciones, el mismo número que protege al
+//    sobre. Por eso la prueba se estira con PBKDF2 y no con un hash simple,
+//    aunque para frenar adivinanzas online no haría falta.
+//
+// Costo: un PBKDF2 extra (~2 s en un teléfono de 2015). Se paga una vez y el
+// resultado es estable para siempre, así que el cliente lo cachea y sólo lo
+// recalcula en el teléfono nuevo — el día en que la persona está esperando
+// igual.
+
+/// Etiqueta de dominio del salt de la prueba de retiro. Cambiarla invalida
+/// todas las pruebas ya registradas: es parte del formato, no un detalle.
+pub const RETRIEVAL_SALT_PREFIX: &str = "rutbusiness-retiro:v1:";
+
+/// Etiqueta de dominio del HMAC final. Separa la prueba de cualquier otro uso
+/// futuro de `clave_retiro`.
+pub const RETRIEVAL_HMAC_LABEL_PREFIX: &str = "rb1-retiro:v1:";
+
+/// Salt (16 B) de la prueba de retiro para un slug — `SHA-256(prefijo||slug)`
+/// truncado. Determinista y público: el slug está impreso en la tarjeta.
+///
+/// Vive en `domain` para que server y Android deriven **el mismo** salt. Si
+/// divergen, la restauración falla el día del robo y no antes.
+pub fn retrieval_salt(tenant_slug: &str) -> [u8; KDF_SALT_LEN] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(RETRIEVAL_SALT_PREFIX.as_bytes());
+    h.update(normalize_slug(tenant_slug).as_bytes());
+    let full = h.finalize();
+    let mut out = [0u8; KDF_SALT_LEN];
+    out.copy_from_slice(&full[..KDF_SALT_LEN]);
+    out
+}
+
+/// Mensaje del HMAC final de la prueba de retiro.
+pub fn retrieval_hmac_message(tenant_slug: &str) -> String {
+    format!(
+        "{}{}",
+        RETRIEVAL_HMAC_LABEL_PREFIX,
+        normalize_slug(tenant_slug)
+    )
+}
+
+/// Slug canónico: minúsculas, sin espacios en los bordes. Que alguien escriba
+/// "Puesto-Rosa " en el teléfono nuevo no puede costarle el respaldo.
+pub fn normalize_slug(s: &str) -> String {
+    s.trim().to_lowercase()
+}
+
+/// `SHA-256(prueba)` en hex — lo único que el server guarda de la prueba.
+pub fn retrieval_hash_hex(proof: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(proof);
+    hex_lower(&h.finalize())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    s
+}
+
 // --- upload wire shapes -------------------------------------------------------
 
 /// Opaque backup object metadata (server sees only this + ciphertext bytes).
@@ -109,6 +209,184 @@ pub struct UploadEncryptedBackupRequest {
     pub meta: EncryptedBackupMeta,
     /// Standard base64 of the ciphertext envelope (see [`EnvelopeHeaderV1`]).
     pub ciphertext_base64: String,
+    /// `SHA-256(prueba_retiro)` en hex — habilita el rescate sin sesión.
+    ///
+    /// Opcional **a propósito**: un cliente viejo que no la manda sigue
+    /// subiendo igual, sólo que su sobre no se puede rescatar sin JWT. Hacerlo
+    /// obligatorio rompería a las apps ya instaladas, que es exactamente a
+    /// quien este carril viene a proteger.
+    ///
+    /// Nunca es la prueba en sí: el server guarda el hash y compara.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retrieval_hash_hex: Option<String>,
+}
+
+// --- rescate sin sesión -------------------------------------------------------
+
+/// `POST /api/v1/user-backup/rescue` — teléfono nuevo, sin JWT.
+///
+/// Lo que la persona tiene: la tarjeta del cuaderno (slug + palabras/bloques).
+/// El cliente deriva la prueba localmente y manda **la prueba**, nunca la
+/// semilla ni la llave.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RescueBackupRequest {
+    /// Slug del negocio, impreso en la tarjeta de rescate.
+    pub tenant_slug: String,
+    /// `prueba_retiro` en hex (32 bytes). El server hashea y compara.
+    pub retrieval_proof_hex: String,
+}
+
+/// Respuesta del rescate: el sobre más nuevo del negocio.
+///
+/// Devuelve **sólo el más nuevo** y no una lista: una lista sería un oráculo
+/// de enumeración (cuántos respaldos tiene, desde cuándo) para quien acierte
+/// un slug, y para restaurar alcanza con el último.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RescueBackupResponse {
+    pub meta: EncryptedBackupMeta,
+    pub ciphertext_base64: String,
+    pub backup_id: String,
+}
+
+/// Por qué se rechaza un rescate. **Nunca se le cuenta al cliente cuál fue**:
+/// todas salen como 404. Distinguir "ese negocio no existe" de "la prueba está
+/// mal" le regala al que prueba slugs la mitad del trabajo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RescueRejection {
+    BadSlug,
+    BadProofHex,
+    NoMatch,
+}
+
+/// Valida la forma del pedido de rescate (sin I/O). La prueba son 32 bytes en
+/// hex; cualquier otra cosa no llega ni a consultar la base.
+pub fn validate_rescue_request(req: &RescueBackupRequest) -> Result<Vec<u8>, RescueRejection> {
+    if normalize_slug(&req.tenant_slug).is_empty() {
+        return Err(RescueRejection::BadSlug);
+    }
+    let hexs = req.retrieval_proof_hex.trim();
+    if hexs.len() != 64 || !hexs.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(RescueRejection::BadProofHex);
+    }
+    let mut out = Vec::with_capacity(32);
+    let b = hexs.as_bytes();
+    for pair in b.chunks(2) {
+        let hi = (pair[0] as char).to_digit(16).ok_or(RescueRejection::BadProofHex)?;
+        let lo = (pair[1] as char).to_digit(16).ok_or(RescueRejection::BadProofHex)?;
+        out.push((hi * 16 + lo) as u8);
+    }
+    Ok(out)
+}
+
+// --- cuotas -------------------------------------------------------------------
+
+/// Límites del respaldo. Sin esto, la cuenta de costo del ADR-0023 es ficción y
+/// el endpoint es hosting gratis para internet.
+///
+/// Los defaults salen de lo **medido** (`TamanoDelSobreTest`, 2026-08-09):
+/// un sábado de feria son 65,8 KB y la cola al tope son 108 KB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupQuota {
+    /// Tope por sobre. Default 4 MiB = 38x el techo real de hoy (108 KB), con
+    /// lugar para que el snapshot crezca a llevar el negocio entero, y chico
+    /// como para que el peor caso por tenant sea finito.
+    pub max_envelope_bytes: u64,
+    /// Versiones que se conservan. La nueva entra, la más vieja sale.
+    /// 5 = una semana de feria. En R2 `DeleteObject` es gratis, así que rotar
+    /// no cuesta nada; guardar para siempre sí.
+    pub max_versions_per_tenant: u32,
+    /// Piso de tiempo entre subidas del mismo tenant.
+    ///
+    /// Es control de **costo** antes que de abuso: a 1.000.000 de usuarios el
+    /// 96% de la factura son los PUT (Class A, US$ 4,50 por millón), no los
+    /// bytes. Una subida por día son US$ 1.643/año; una por hora, US$ 39.420.
+    pub min_seconds_between_uploads: u64,
+    /// Días que sobrevive un sobre sin que nadie lo toque. 0 = para siempre.
+    pub retention_days: u32,
+}
+
+impl Default for BackupQuota {
+    fn default() -> Self {
+        Self {
+            max_envelope_bytes: 4 * 1024 * 1024,
+            max_versions_per_tenant: 5,
+            min_seconds_between_uploads: 15 * 60,
+            retention_days: 400,
+        }
+    }
+}
+
+/// Por qué una subida no entra por cuota (distinto de forma inválida).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuotaRejection {
+    TooLarge { size: u64, max: u64 },
+    TooSoon { wait_seconds: u64 },
+}
+
+impl QuotaRejection {
+    pub fn message(&self) -> String {
+        match self {
+            Self::TooLarge { size, max } => format!(
+                "el sobre pesa {size} bytes y el tope es {max}. \
+                 Si tu negocio de verdad no cabe, escribinos: es un límite nuestro, no tuyo."
+            ),
+            Self::TooSoon { wait_seconds } => format!(
+                "ya subiste un respaldo hace poco. Probá de nuevo en {} minuto(s). \
+                 Lo que cobraste sigue guardado en el teléfono.",
+                wait_seconds.div_ceil(60)
+            ),
+        }
+    }
+
+    /// Segundos que el cliente debe esperar (para `Retry-After`).
+    pub fn retry_after_seconds(&self) -> Option<u64> {
+        match self {
+            Self::TooSoon { wait_seconds } => Some(*wait_seconds),
+            Self::TooLarge { .. } => None,
+        }
+    }
+}
+
+/// Chequea las cuotas de una subida. `last_upload_unix` es la fecha del sobre
+/// más nuevo del tenant (`None` = primera subida).
+pub fn check_quota(
+    quota: &BackupQuota,
+    envelope_len: u64,
+    now_unix: i64,
+    last_upload_unix: Option<i64>,
+) -> Result<(), QuotaRejection> {
+    if envelope_len > quota.max_envelope_bytes {
+        return Err(QuotaRejection::TooLarge {
+            size: envelope_len,
+            max: quota.max_envelope_bytes,
+        });
+    }
+    if quota.min_seconds_between_uploads > 0 {
+        if let Some(last) = last_upload_unix {
+            // Un reloj de teléfono adelantado deja `elapsed` negativo. Se trata
+            // como "recién subió": no se puede confiar en una fecha del futuro
+            // para abrir la puerta.
+            let elapsed = now_unix.saturating_sub(last);
+            let min = quota.min_seconds_between_uploads as i64;
+            if elapsed < min {
+                return Err(QuotaRejection::TooSoon {
+                    wait_seconds: (min - elapsed).max(1) as u64,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Cuáles sobran tras insertar uno nuevo. Recibe los ids ordenados **del más
+/// nuevo al más viejo**, ya contando el recién subido, y devuelve los que hay
+/// que borrar del bucket.
+pub fn versions_to_evict(quota: &BackupQuota, newest_first: &[String]) -> Vec<String> {
+    let keep = quota.max_versions_per_tenant.max(1) as usize;
+    if newest_first.len() <= keep {
+        return Vec::new();
+    }
+    newest_first[keep..].to_vec()
 }
 
 /// Server → client after accepting (or rejecting) an upload.
@@ -256,7 +534,7 @@ fn eq_hex_ci(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
-            .all(|(x, y)| x.to_ascii_lowercase() == y.to_ascii_lowercase())
+            .all(|(x, y)| x.eq_ignore_ascii_case(&y))
 }
 
 /// Payload encoded in the rescue QR / printable card (no secrets of the server).
@@ -371,6 +649,128 @@ mod tests {
             validate_upload(&meta2, ct, &sha),
             Err(UploadValidationError::Sha256Mismatch)
         );
+    }
+
+    #[test]
+    fn el_salt_de_retiro_es_estable_y_por_negocio() {
+        // Estable: si este valor cambia, todas las pruebas ya registradas dejan
+        // de servir y la gente que confió en su tarjeta no puede restaurar. Es
+        // parte del formato, no un detalle de implementación.
+        let a = retrieval_salt("puesto-rosa");
+        let b = retrieval_salt("  Puesto-Rosa  ");
+        assert_eq!(a, b, "el slug se normaliza: mayúsculas y espacios no cuentan");
+        assert_ne!(
+            retrieval_salt("puesto-rosa"),
+            retrieval_salt("puesto-juan"),
+            "dos negocios no pueden compartir salt"
+        );
+        assert_eq!(a.len(), KDF_SALT_LEN);
+    }
+
+    #[test]
+    fn el_mensaje_del_hmac_lleva_el_slug_normalizado() {
+        assert_eq!(
+            retrieval_hmac_message(" Puesto-Rosa "),
+            "rb1-retiro:v1:puesto-rosa"
+        );
+    }
+
+    #[test]
+    fn la_prueba_de_retiro_solo_viaja_hasheada() {
+        let proof = [7u8; 32];
+        let h = retrieval_hash_hex(&proof);
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        // Distinta prueba, distinto hash (obvio, pero es la propiedad que hace
+        // que guardar el hash sea suficiente).
+        assert_ne!(h, retrieval_hash_hex(&[8u8; 32]));
+    }
+
+    #[test]
+    fn el_rescate_valida_la_forma_antes_de_tocar_la_base() {
+        let ok = RescueBackupRequest {
+            tenant_slug: "puesto-rosa".into(),
+            retrieval_proof_hex: "ab".repeat(32),
+        };
+        assert_eq!(validate_rescue_request(&ok).unwrap().len(), 32);
+
+        let sin_slug = RescueBackupRequest {
+            tenant_slug: "   ".into(),
+            ..ok.clone()
+        };
+        assert_eq!(
+            validate_rescue_request(&sin_slug),
+            Err(RescueRejection::BadSlug)
+        );
+
+        for malo in ["", "zz".repeat(32).as_str(), "ab".repeat(31).as_str()] {
+            let r = RescueBackupRequest {
+                tenant_slug: "puesto-rosa".into(),
+                retrieval_proof_hex: malo.into(),
+            };
+            assert_eq!(
+                validate_rescue_request(&r),
+                Err(RescueRejection::BadProofHex),
+                "prueba {malo:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn la_cuota_corta_el_sobre_gigante() {
+        let q = BackupQuota::default();
+        // El techo real medido hoy son 108 KB: tiene que pasar holgado.
+        assert!(check_quota(&q, 108_073, 1_000, None).is_ok());
+        assert_eq!(
+            check_quota(&q, q.max_envelope_bytes + 1, 1_000, None),
+            Err(QuotaRejection::TooLarge {
+                size: q.max_envelope_bytes + 1,
+                max: q.max_envelope_bytes
+            })
+        );
+    }
+
+    #[test]
+    fn la_cuota_frena_la_subida_seguida_y_dice_cuanto_falta() {
+        let q = BackupQuota::default();
+        let last = 10_000i64;
+        // Justo después: rechaza y dice el tiempo que falta.
+        let e = check_quota(&q, 1_000, last + 60, Some(last)).unwrap_err();
+        assert_eq!(
+            e,
+            QuotaRejection::TooSoon {
+                wait_seconds: q.min_seconds_between_uploads - 60
+            }
+        );
+        assert_eq!(e.retry_after_seconds(), Some(840));
+        // El mensaje no puede sonar a "perdiste la venta".
+        assert!(e.message().contains("sigue guardado en el teléfono"));
+        // Pasado el piso: entra.
+        assert!(check_quota(&q, 1_000, last + q.min_seconds_between_uploads as i64, Some(last)).is_ok());
+    }
+
+    #[test]
+    fn un_reloj_del_futuro_no_abre_la_puerta() {
+        // El teléfono del feriante puede tener la hora mal. Si el último sobre
+        // quedó fechado en el futuro, `elapsed` sería negativo; tratarlo como
+        // "pasó mucho tiempo" convertiría un reloj mal puesto en una subida
+        // ilimitada.
+        let q = BackupQuota::default();
+        let r = check_quota(&q, 1_000, 1_000, Some(999_999));
+        assert!(matches!(r, Err(QuotaRejection::TooSoon { .. })), "{r:?}");
+    }
+
+    #[test]
+    fn la_rotacion_deja_las_mas_nuevas() {
+        let q = BackupQuota {
+            max_versions_per_tenant: 3,
+            ..Default::default()
+        };
+        let ids: Vec<String> = (0..5).map(|i| format!("b{i}")).collect();
+        // Entrada ordenada del más nuevo al más viejo.
+        assert_eq!(versions_to_evict(&q, &ids), vec!["b3".to_string(), "b4".into()]);
+        assert!(versions_to_evict(&q, &ids[..3]).is_empty());
+        assert!(versions_to_evict(&q, &[]).is_empty());
     }
 
     #[test]

@@ -45,8 +45,23 @@ pub struct RateLimitState {
     pub cfg: RateLimitConfig,
     pub ip: Arc<DefaultKeyedRateLimiter<IpAddr>>,
     pub tenant: Arc<DefaultKeyedRateLimiter<String>>,
+    /// Tercer limitador, mucho más duro, para el rescate sin sesión
+    /// (`POST /api/v1/user-backup/rescue`). Ver [`RateLimitState::rescue_throttled`].
+    pub rescue: Arc<DefaultKeyedRateLimiter<String>>,
     clock: DefaultClock,
 }
+
+/// Intentos de rescate permitidos por hora y por slug de negocio.
+///
+/// Es un número bajo a propósito y no sale de la config: una dueña que estrena
+/// teléfono tipea la tarjeta una vez, y si se equivoca la tipea dos o tres. No
+/// existe el caso legítimo del que prueba veinte veces en una hora. Adivinar la
+/// prueba de retiro es 2^84 y no lo salva ningún límite, pero sí frena al que
+/// conoce el slug de un negocio real y quiere martillarlo, y le pone techo a lo
+/// que le cuesta al bucket un rescate fallido.
+const RESCUE_POR_HORA: u32 = 10;
+/// Ráfaga: los reintentos de tipeo vienen seguidos, no espaciados una hora.
+const RESCUE_BURST: u32 = 5;
 
 impl RateLimitState {
     /// Build limiters from config. Invalid (zero) values are clamped to 1 —
@@ -61,16 +76,35 @@ impl RateLimitState {
         let ip_quota = Quota::per_minute(ip_per_min).allow_burst(ip_burst);
         let tenant_quota = Quota::per_minute(tenant_per_min).allow_burst(tenant_burst);
 
+        let rescue_quota = Quota::per_hour(NonZeroU32::new(RESCUE_POR_HORA).unwrap())
+            .allow_burst(NonZeroU32::new(RESCUE_BURST).unwrap());
+
         Self {
             cfg,
             ip: Arc::new(RateLimiter::keyed(ip_quota)),
             tenant: Arc::new(RateLimiter::keyed(tenant_quota)),
+            rescue: Arc::new(RateLimiter::keyed(rescue_quota)),
             clock: DefaultClock::default(),
         }
     }
 
     fn enabled(&self) -> bool {
         self.cfg.enabled
+    }
+
+    /// `true` ⇒ este slug ya gastó sus intentos de rescate; la ruta contesta 429.
+    ///
+    /// Se cuenta **por slug** y no por IP: el que ataca un negocio conocido rota
+    /// IPs sin esfuerzo, pero el slug es el que quiere abrir y no lo puede
+    /// cambiar. El limitador por IP igual corre encima, en la capa de afuera.
+    ///
+    /// Respeta `rate_limit.enabled = false` para que un nodo que apagó el
+    /// limitado a propósito (una demo, un test) no quede con esta puerta trabada.
+    pub fn rescue_throttled(&self, slug: &str) -> bool {
+        if !self.enabled() {
+            return false;
+        }
+        self.rescue.check_key(&slug.to_string()).is_err()
     }
 }
 

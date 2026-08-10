@@ -22,6 +22,10 @@ pub mod stock_webhook;
 mod v1;
 
 pub use middleware::{audit, public_auth, rate_limit, role};
+/// El respaldo cifrado del usuario (ADR-0023). Se re-exporta porque
+/// [`build_router_with`] recibe su `Runtime` y los tests lo arman a mano; el
+/// resto de `v1` sigue privado.
+pub use v1::user_backup;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -67,6 +71,21 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState) -> Router {
+    build_router_with(state, v1::user_backup::Runtime::deshabilitado())
+}
+
+/// Igual que [`build_router`] pero con el respaldo del usuario cableado a un
+/// bucket. `run()` pasa el resuelto desde la config; los tests que ejercitan el
+/// respaldo pasan un [`v1::user_backup::store::MemoryStore`].
+///
+/// El runtime viaja por `Extension` y no en `AppState` porque es un módulo
+/// opcional: sumarlo al struct rompería las dos docenas de literales que lo
+/// construyen a mano en los tests, y el default correcto —validar sin guardar—
+/// ya es el que da [`v1::user_backup::Runtime::deshabilitado`].
+pub fn build_router_with(
+    state: AppState,
+    user_backup: Arc<v1::user_backup::Runtime>,
+) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/app", get(app_index))
@@ -76,6 +95,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(setup::router(state.clone()))
         .merge(provisioning::router())
         .merge(v1::router(state.clone()))
+        .layer(axum::Extension(user_backup))
         .layer(audit::layer(state.clone()))
         .with_state(state)
 }
@@ -225,6 +245,17 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
         stock_webhook: Arc::new(cfg.stock_webhook.clone()),
         provisioning_key: cfg.provisioning.key.clone().filter(|k| !k.is_empty()),
     };
+    // Respaldo cifrado del usuario (ADR-0023). Una config a medias degrada a
+    // `NoStore` y la ruta contesta `accepted: false` — nunca tumba el arranque.
+    let user_backup_rt = v1::user_backup::Runtime::from_config(&cfg.user_backup);
+    tracing::info!(
+        store = user_backup_rt.store.kind(),
+        guarda = user_backup_rt.store.guarda(),
+        durable = user_backup_rt.store.durable(),
+        rescate = user_backup_rt.cfg.rescue_enabled,
+        "user-backup: store resuelto"
+    );
+
     if state.provisioning_key.is_some() {
         tracing::info!("provisioning endpoint enabled (POST /admin/v1/tenants)");
     }
@@ -313,13 +344,18 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
             license: state.license.clone(),
         }
     });
+    let sweep_rt = user_backup_rt.clone();
     tokio::spawn(async move {
-        if let Err(e) = spawn_scheduler_hub(backup_job_cfg, sched_db, crl_refresh).await {
+        if let Err(e) =
+            spawn_scheduler_hub(backup_job_cfg, sched_db, crl_refresh, Some(sweep_rt)).await
+        {
             tracing::error!(error = %e, "scheduler hub failed to start");
         }
     });
 
-    let mut app = build_router(state).merge(metrics_router).layer(prom_layer);
+    let mut app = build_router_with(state, user_backup_rt)
+        .merge(metrics_router)
+        .layer(prom_layer);
     // Global CORS for cross-origin browser fronts (web companion on Vercel /
     // rutagent.cl). Off unless `cors.allowed_origins` is set — the server
     // serving its own `/app` is same-origin and never needs it (ADR-0018).
@@ -350,14 +386,21 @@ struct BackupJobCfg {
     log_retention: usize,
 }
 
+/// Barrida de retención del respaldo del usuario: 04:20, una vez al día.
+/// Después del backup nocturno (03:00) para no pelearle I/O, y a una hora en
+/// que ninguna feria está vendiendo.
+const USER_BACKUP_SWEEP_CRON: &str = "0 20 4 * * *";
+
 /// Scheduler hub. One `JobScheduler` hosts every cron-driven job:
 /// * backup (when `backup.enabled`) — snapshot + audit row + retention,
 /// * idempotency_key TTL purge (hourly, always on when a DB is present),
-/// * CRL refresh (opt-in, ADR-0006).
+/// * CRL refresh (opt-in, ADR-0006),
+/// * user-backup retention sweep (ADR-0023, when a durable store is wired).
 async fn spawn_scheduler_hub(
     backup: Option<BackupJobCfg>,
     db: Option<Arc<db::Db>>,
     crl_refresh: Option<CrlRefresh>,
+    user_backup: Option<Arc<v1::user_backup::Runtime>>,
 ) -> anyhow::Result<()> {
     let sched = tokio_cron_scheduler::JobScheduler::new().await?;
 
@@ -391,6 +434,36 @@ async fn spawn_scheduler_hub(
         let job = crl_refresh_job(crl)?;
         sched.add(job).await?;
         tracing::info!(%schedule, %url, "CRL refresh job started (ADR-0006)");
+    }
+
+    // Retención del respaldo del usuario (ADR-0023). Barre los sobres que nadie
+    // tocó en `retention_days` — los bytes de quien dejó de usar la app. Corre
+    // de madrugada y sólo si este nodo realmente guarda algo: en un on-prem con
+    // `NoStore` no hay nada que barrer.
+    if let (Some(db), Some(rt)) = (db.clone(), user_backup) {
+        if rt.store.guarda() && rt.cfg.retention_days > 0 {
+            let dias = rt.cfg.retention_days;
+            let job = tokio_cron_scheduler::Job::new_async(
+                USER_BACKUP_SWEEP_CRON,
+                move |_uuid, _l| {
+                    let db = db.clone();
+                    let rt = rt.clone();
+                    Box::pin(async move {
+                        let n = v1::user_backup::repo_ops::sweep_expired(
+                            &db,
+                            &rt.store,
+                            rt.cfg.retention_days,
+                        )
+                        .await;
+                        if n > 0 {
+                            tracing::info!(borrados = n, "user-backup: retención barrió sobres");
+                        }
+                    })
+                },
+            )?;
+            sched.add(job).await?;
+            tracing::info!(dias, "user-backup retention job started (ADR-0023)");
+        }
     }
 
     sched.start().await?;
@@ -781,6 +854,7 @@ pub fn default_config() -> pharma_core::config::AppConfig {
         crl: pharma_core::config::CrlConfig::default(),
         cors: pharma_core::config::CorsConfig::default(),
         provisioning: pharma_core::config::ProvisioningConfig::default(),
+        user_backup: pharma_core::config::UserBackupConfig::default(),
     }
 }
 

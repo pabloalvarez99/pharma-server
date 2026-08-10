@@ -9,6 +9,7 @@ name = "pharma-api"
 path = "src/main.rs"
 
 [dependencies]
+async-trait.workspace = true
 pharma-core = { path = "../core" }
 db = { path = "../db" }
 auth = { path = "../auth" }
@@ -71,6 +72,10 @@ hex.workspace = true
 jsonwebtoken.workspace = true
 # CRL refresh unit test signs ephemeral CRLs (base64 sig over canonical-JSON).
 base64.workspace = true
+# `user_backup_zero_knowledge` cifra de verdad un marcador conocido antes de
+# subirlo, para poder afirmar que ninguna ruta lo devuelve en claro. Sólo test:
+# el server nunca cifra ni descifra nada.
+aes-gcm.workspace = true
 metrics-util = { version = "0.17", features = ["debugging"] }
 # DTE endpoint tests mint a synthetic CAF + cert PEM (mirrors crates/dte tests).
 rsa = { workspace = true, features = ["pem"] }
