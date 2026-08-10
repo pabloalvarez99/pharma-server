@@ -800,6 +800,9 @@ pub async fn get_order(
 ///
 /// `change` = `cash_amount - total` for `pos_cash`, `(cash + card) - total` for
 /// `pos_mixed`, else `None` (pure card). `line_total` = `qty * unit_price`.
+///
+/// `footer_note` sale de [`crate::settings::receipt_footer_note`]: lo que este
+/// negocio configuró, o un default armado con su propio nombre.
 pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<ReceiptDto> {
     let order_thing = parse_tenant_thing(id, "order")?;
     let (order, items) = repo::get_order(db, tenant, &order_thing)
@@ -807,6 +810,7 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
         .ok_or(DomainError::NotFound)?;
 
     let tenant_name = repo::tenant_name(db, tenant).await?.unwrap_or_default();
+    let footer_note = crate::settings::receipt_footer_note(db, tenant, &tenant_name).await?;
     let loyalty_points_awarded = repo::loyalty_awarded_for_order(db, tenant, &order_thing).await?;
 
     let receipt_items: Vec<ReceiptItem> = items
@@ -867,7 +871,10 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
         change,
         loyalty_points_awarded,
         cashier: order.sold_by_name,
-        footer_note: RECEIPT_FOOTER_NOTE.to_string(),
+        // El pie que configuró este negocio, o el que sale de su propio nombre.
+        // `tenant_name` ya está leído acá arriba: el default no cuesta una
+        // consulta más.
+        footer_note,
     })
 }
 

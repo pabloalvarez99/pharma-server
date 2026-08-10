@@ -89,6 +89,75 @@ pub async fn set_tax_percent(
     Ok(parsed)
 }
 
+// --- pie de boleta ---------------------------------------------------------
+
+/// Key del pie de boleta. Vive en `admin_setting` como todo lo demás.
+pub const RECEIPT_FOOTER_SETTING_KEY: &str = "receipt.footer_note";
+
+/// Tope del pie de boleta. Una impresora térmica de 58 mm tiene 32 columnas;
+/// 80 caracteres son dos líneas y media, que es todo lo que un pie puede ser
+/// sin convertirse en un panfleto que se come el papel de cada venta.
+pub const RECEIPT_FOOTER_MAX_LEN: usize = 80;
+
+/// Lo que se imprime abajo de la boleta cuando el tenant no configuró nada.
+///
+/// Sale del **nombre del negocio que está vendiendo**, nunca de una constante.
+/// Antes era `"Gracias por su compra · Tu Farmacia"` fijo: Tu Farmacia es otro
+/// producto, así que cada feriante que imprimía una boleta estaba repartiendo
+/// publicidad ajena, con su propio papel y su propia venta.
+///
+/// Sin nombre de negocio queda sólo el agradecimiento. Un pie a medio armar
+/// («Gracias por su compra · ») se ve como un error de la app.
+pub fn default_receipt_footer(business_name: &str) -> String {
+    let name = business_name.trim();
+    if name.is_empty() {
+        "Gracias por su compra".to_string()
+    } else {
+        format!("Gracias por su compra · {name}")
+    }
+}
+
+/// El pie de boleta de este tenant: lo que configuró, o el default derivado de
+/// [`default_receipt_footer`]. Nunca falla — una boleta no se puede quedar sin
+/// imprimir porque un setting esté raro.
+pub async fn receipt_footer_note(
+    db: &Db,
+    tenant: &Thing,
+    business_name: &str,
+) -> DomainResult<String> {
+    // `read` ya filtra el vacío, así que un valor borrado vuelve al default en
+    // lugar de imprimir una línea en blanco.
+    Ok(match read(db, tenant, RECEIPT_FOOTER_SETTING_KEY).await? {
+        Some(raw) => raw.trim().to_string(),
+        None => default_receipt_footer(business_name),
+    })
+}
+
+/// Configura el pie de boleta. Vacío = volver al default (no se guarda un pie
+/// en blanco: se borra la personalización).
+///
+/// Devuelve lo que va a imprimirse de ahora en más, ya resuelto, para que la
+/// pantalla muestre el resultado y no lo que el operador tipeó.
+pub async fn set_receipt_footer_note(
+    db: &Db,
+    tenant: &Thing,
+    raw: &str,
+    business_name: &str,
+) -> DomainResult<String> {
+    let note = raw.trim();
+    if note.chars().count() > RECEIPT_FOOTER_MAX_LEN {
+        return Err(crate::errors::DomainError::Invalid(format!(
+            "el pie de boleta no puede pasar de {RECEIPT_FOOTER_MAX_LEN} caracteres"
+        )));
+    }
+    write(db, tenant, RECEIPT_FOOTER_SETTING_KEY, note).await?;
+    Ok(if note.is_empty() {
+        default_receipt_footer(business_name)
+    } else {
+        note.to_string()
+    })
+}
+
 async fn read(db: &Db, tenant: &Thing, key: &str) -> DomainResult<Option<String>> {
     Ok(crate::sales::repo::get_setting(db, tenant, key)
         .await?

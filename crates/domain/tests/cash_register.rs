@@ -552,9 +552,15 @@ fn cash_sale(product_id: &str, name: &str, price: &str) -> PosSaleRequest {
     }
 }
 
-/// The maintained `cash_sales_running` aggregate (migration 0030) must equal the
-/// old live `math::sum(cash_amount)` scan — including after a sale is refunded,
-/// the case a pre-computed view would get wrong (`surrealdb-view-update-gotcha`).
+/// The maintained `cash_sales_running` aggregate (migration 0030) must equal an
+/// independent live scan — including after a sale is refunded, the case a
+/// pre-computed view would get wrong (`surrealdb-view-update-gotcha`).
+///
+/// El oráculo NO es `math::sum(cash_amount)`: desde 0046 el agregado es el
+/// efectivo neto de vuelto. Acá las ventas se cobran exactas (`cash_sale` manda
+/// `cash_amount = precio`), así que el neto coincide con lo entregado y el scan
+/// se escribe con la fórmula neta para que siga siendo un oráculo honesto si
+/// alguien le agrega vuelto a este test.
 #[tokio::test]
 async fn cash_sales_running_matches_scan_after_refund() {
     let (db, tenant, user) = setup().await;
@@ -612,21 +618,32 @@ async fn cash_sales_running_matches_scan_after_refund() {
 
     #[derive(serde::Deserialize)]
     struct S {
-        sum: Option<Decimal>,
+        total: Decimal,
+        cash_amount: Option<Decimal>,
+        card_amount: Option<Decimal>,
     }
     let mut r = db
         .query(
-            "SELECT math::sum(cash_amount) AS sum FROM order \
+            "SELECT total, cash_amount, card_amount FROM order \
              WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] \
                AND status NOT IN ['refunded','cancelled'] \
-               AND created_at >= $a GROUP ALL",
+               AND created_at >= $a",
         )
         .bind(("t", tenant.clone()))
         .bind(("a", surrealdb::sql::Datetime::from(live2.session.opened_at)))
         .await
         .unwrap();
-    let scan: Option<S> = r.take(0).unwrap();
-    let scan_val = scan.and_then(|x| x.sum).unwrap_or(dec("0"));
+    let scan: Vec<S> = r.take(0).unwrap();
+    let scan_val: Decimal = scan
+        .into_iter()
+        .map(|o| {
+            domain::invariants::cash_into_drawer(
+                o.total,
+                o.cash_amount,
+                o.card_amount.unwrap_or(Decimal::ZERO),
+            )
+        })
+        .sum();
     assert_eq!(
         live2.cash_sales, scan_val,
         "maintained running total must equal the live scan"
@@ -853,5 +870,279 @@ async fn venta_por_transferencia_no_entra_al_efectivo_esperado() {
         close.session.discrepancia,
         Some(Decimal::ZERO),
         "el cajón cuadra: la transferencia nunca estuvo en el cajón"
+    );
+}
+
+// --- el bug de plata: el vuelto (migración 0046) ------------------------------
+
+/// Una venta con vuelto, tal como la manda el POS: `cash_amount` es lo que el
+/// cliente **entregó** ("Pagó con" en Android), no lo que se cobró.
+fn venta_con_vuelto(
+    product_id: &str,
+    name: &str,
+    price: &str,
+    metodo: &str,
+    cash: Option<&str>,
+    card: Option<&str>,
+) -> PosSaleRequest {
+    PosSaleRequest {
+        items: vec![PosSaleItem {
+            product: product_id.into(),
+            product_name: name.into(),
+            quantity: 1,
+            unit_price: dec(price),
+        }],
+        payment_method: metodo.into(),
+        cash_amount: cash.map(dec),
+        card_amount: card.map(dec),
+        discount: None,
+        customer: None,
+        customer_name: None,
+        customer_phone: None,
+        notes: None,
+        external_ref: None,
+        prescriptions: vec![],
+        branch: None,
+    }
+}
+
+/// EL BUG DE PLATA. Venta de $5.000 pagada con un billete de $10.000 sobre una
+/// apertura de $50.000: en el cajón quedan $55.000 (los otros $5.000 se fueron
+/// como vuelto). Hasta la migración 0046 el evento de 0030 sumaba `cash_amount`
+/// crudo y el arqueo pedía $60.000 — un faltante de $5.000 inventado, por venta
+/// y todos los días.
+///
+/// Este test tiene que ir contra la base con las migraciones corridas: el bug
+/// no vivía en una función pura sino en el `DEFINE EVENT` de SurrealDB, así que
+/// un test del invariante solo no lo habría atrapado nunca.
+#[tokio::test]
+async fn arqueo_descuenta_el_vuelto_de_una_venta_en_efectivo() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("50000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Palta kilo", "5000", 50))
+        .await
+        .unwrap();
+
+    let venta = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta_con_vuelto(&p.id, &p.name, "5000", "pos_cash", Some("10000"), None),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        venta.order.cash_amount,
+        Some(dec("10000")),
+        "la orden guarda lo ENTREGADO: es el dato con el que se calcula el vuelto"
+    );
+
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(
+        live.cash_sales,
+        dec("5000"),
+        "al cajón entraron 5000, no los 10000 del billete: 5000 volvieron como vuelto"
+    );
+    assert_eq!(
+        live.session.closing_cash_expected,
+        Some(dec("55000")),
+        "esperado = apertura 50000 + 5000 de venta neta"
+    );
+
+    // Contar el cajón físico: hay 55.000 y el arqueo cuadra en cero. Con el bug
+    // esta misma plata daba -5000 y el feriante salía a buscar un faltante que
+    // nunca existió.
+    let close = service::close_session(
+        &db,
+        &tenant,
+        &s.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("55000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        close.session.discrepancia,
+        Some(Decimal::ZERO),
+        "el cajón cuadra: el vuelto salió del mismo cajón"
+    );
+}
+
+/// Venta mixta: el vuelto sale del lado efectivo (a una tarjeta no se le cobra
+/// de más), así que al cajón entra `total − tarjeta`. Total 8.000 con 3.000 de
+/// tarjeta y un billete de 10.000 → entran 5.000, vuelven 5.000.
+#[tokio::test]
+async fn arqueo_de_una_venta_mixta_entra_total_menos_tarjeta() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Canasto", "8000", 50))
+        .await
+        .unwrap();
+
+    sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta_con_vuelto(
+            &p.id,
+            &p.name,
+            "8000",
+            "pos_mixed",
+            Some("10000"),
+            Some("3000"),
+        ),
+    )
+    .await
+    .unwrap();
+
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(
+        live.cash_sales,
+        dec("5000"),
+        "mixta: entran 8000 - 3000 de tarjeta = 5000; los otros 5000 del billete son vuelto"
+    );
+}
+
+/// `cash_amount` ausente en una venta en efectivo significa "no se registró lo
+/// entregado" — en Android "Pagó con" es opcional —, **no** "no entró plata".
+/// El evento de 0030 lo contaba como 0 y dejaba el arqueo por DEBAJO: el mismo
+/// bug al revés, y el que hace que al cajero le "sobre" plata.
+#[tokio::test]
+async fn arqueo_cuenta_la_venta_en_efectivo_sin_monto_entregado() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Cilantro", "700", 50))
+        .await
+        .unwrap();
+
+    sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta_con_vuelto(&p.id, &p.name, "700", "pos_cash", None, None),
+    )
+    .await
+    .unwrap();
+
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(
+        live.cash_sales,
+        dec("700"),
+        "cobró 700 en efectivo: están en el cajón aunque nadie anotara con cuánto pagó"
+    );
+}
+
+/// Devolver una venta con vuelto tiene que restar el NETO, no lo entregado. Es
+/// la rama UPDATE del evento: si resta de más, el arqueo del turno queda por
+/// debajo y aparece un faltante nuevo justo después de una devolución.
+#[tokio::test]
+async fn devolver_una_venta_con_vuelto_resta_solo_el_neto() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Tomate kilo", "1500", 50))
+        .await
+        .unwrap();
+
+    // Dos ventas de 1500, cada una pagada con 2000 → 3000 netos en el cajón.
+    for _ in 0..2 {
+        sales::post_sale(
+            &db,
+            &tenant,
+            Some(&user),
+            Some("admin"),
+            None,
+            venta_con_vuelto(&p.id, &p.name, "1500", "pos_cash", Some("2000"), None),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        service::arqueo(&db, &tenant, &s.id)
+            .await
+            .unwrap()
+            .cash_sales,
+        dec("3000")
+    );
+
+    let mut r = db
+        .query("SELECT VALUE id FROM order WHERE tenant=$t LIMIT 1")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap();
+    let ids: Vec<Thing> = r.take(0).unwrap();
+    db.query("UPDATE $o SET status='refunded'")
+        .bind(("o", ids[0].clone()))
+        .await
+        .unwrap()
+        .check()
+        .unwrap();
+
+    assert_eq!(
+        service::arqueo(&db, &tenant, &s.id)
+            .await
+            .unwrap()
+            .cash_sales,
+        dec("1500"),
+        "la devolución saca los 1500 que entraron, no los 2000 del billete"
     );
 }

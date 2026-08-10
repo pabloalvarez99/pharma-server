@@ -109,6 +109,59 @@ proptest! {
         prop_assert_eq!(change >= Decimal::ZERO, cash >= total);
     }
 
+    /// 7b. LA LEY DEL CAJÓN: lo que entra en efectivo por una venta es lo
+    ///     entregado MENOS el vuelto — nunca lo entregado a secas. Con
+    ///     `cash ≥ total` (el caso normal del mostrador) el cajón recibe
+    ///     exactamente el total, sea el billete que sea. Ese es el bug que
+    ///     hacía "faltar" plata todos los días.
+    #[test]
+    fn cash_into_drawer_is_tendered_minus_change(total in money(), extra in money()) {
+        let cash = total + extra;
+        let neto = inv::cash_into_drawer(total, Some(cash), Decimal::ZERO);
+        prop_assert_eq!(neto, total);
+        prop_assert_eq!(neto, cash - inv::cash_change(cash, total));
+    }
+
+    /// 7c. Venta mixta: el vuelto sale del lado efectivo (a una tarjeta no se
+    ///     le cobra de más), así que el cajón recibe `total − card`. Se
+    ///     construye con `cash + card ≥ total`, que es lo que valida
+    ///     `post_sale`.
+    #[test]
+    fn cash_into_drawer_mixed_leaves_total_minus_card(
+        total in money(), card in money(), extra in money()
+    ) {
+        let card = card.min(total);
+        let cash = (total - card) + extra;
+        let neto = inv::cash_into_drawer(total, Some(cash), card);
+        prop_assert_eq!(neto, total - card);
+        // El vuelto de la mixta sale entero del efectivo entregado.
+        prop_assert_eq!(cash - neto, inv::cash_change(cash + card, total));
+    }
+
+    /// 7d. Cotas duras, para cualquier dato (incluso incoherente): el cajón
+    ///     nunca recibe más de lo entregado, nunca más de lo que faltaba
+    ///     cubrir, y nunca menos que cero — una tarjeta no saca plata del cajón.
+    #[test]
+    fn cash_into_drawer_is_bounded(
+        total in money(), cash in money(), card in money()
+    ) {
+        let neto = inv::cash_into_drawer(total, Some(cash), card);
+        prop_assert!(neto >= Decimal::ZERO);
+        prop_assert!(neto <= cash);
+        prop_assert!(neto <= total);
+        prop_assert!(neto <= (total - card).max(Decimal::ZERO));
+    }
+
+    /// 7e. `cash_amount` ausente significa "no se registró lo entregado", no
+    ///     "no entró plata": el cajón recibe lo que faltaba cubrir. En Android
+    ///     el campo "Pagó con" es opcional; contarlo como 0 dejaba el arqueo
+    ///     por DEBAJO, el mismo bug al revés.
+    #[test]
+    fn cash_into_drawer_missing_tendered_is_not_zero(total in money(), card in money()) {
+        let card = card.min(total);
+        prop_assert_eq!(inv::cash_into_drawer(total, None, card), total - card);
+    }
+
     /// 8. IVA round-trip: net + iva == total exactly; iva ≥ 0; net ≤ total.
     #[test]
     fn iva_breakdown_roundtrips(total in money(), pct in prop_oneof![Just(0u8), Just(19u8)]) {

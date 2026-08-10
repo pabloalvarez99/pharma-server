@@ -265,6 +265,11 @@ pub async fn list_expenses(
 
 /// Daily sales rollup over `order`. Tenant-scoped. `refunded`/`cancelled`
 /// excluded. Returns one row per UTC date in the range, sorted ascending.
+///
+/// `cash` es el efectivo **neto de vuelto**
+/// ([`crate::invariants::cash_into_drawer`]) de las ventas que mueven efectivo,
+/// la misma definición que el arqueo del cajón: los dos números tienen que
+/// cerrar contra la misma plata.
 pub async fn sales_daily(
     db: &Db,
     tenant: &Thing,
@@ -285,7 +290,7 @@ pub async fn sales_daily(
     // Pull the rows and bucket by UTC date in Rust — datasets are small
     // (single-shop scale), totals fit fine in memory.
     let sql = format!(
-        "SELECT created_at, total, cash_amount, card_amount FROM order \
+        "SELECT created_at, payment_method, total, cash_amount, card_amount FROM order \
          WHERE {} ORDER BY created_at ASC",
         conds.join(" AND ")
     );
@@ -299,6 +304,7 @@ pub async fn sales_daily(
     #[derive(Deserialize)]
     struct R {
         created_at: DateTime<Utc>,
+        payment_method: String,
         total: Decimal,
         cash_amount: Option<Decimal>,
         card_amount: Option<Decimal>,
@@ -315,10 +321,18 @@ pub async fn sales_daily(
             cash: Decimal::ZERO,
             card: Decimal::ZERO,
         });
+        let card = r.card_amount.unwrap_or(Decimal::ZERO);
         entry.orders += 1;
         entry.revenue += r.total;
-        entry.cash += r.cash_amount.unwrap_or(Decimal::ZERO);
-        entry.card += r.card_amount.unwrap_or(Decimal::ZERO);
+        // Efectivo NETO DE VUELTO, no `cash_amount` crudo: la columna "efectivo"
+        // del día tiene que dar la misma plata que el arqueo del cajón (0046).
+        // Sólo las ventas que mueven efectivo aportan: una debito/credito/
+        // transferencia/fiado nunca llenó `cash_amount`, y si lo trae por datos
+        // viejos no es plata en el cajón.
+        if matches!(r.payment_method.as_str(), "pos_cash" | "pos_mixed") {
+            entry.cash += crate::invariants::cash_into_drawer(r.total, r.cash_amount, card);
+        }
+        entry.card += card;
     }
     Ok(by_day.into_values().collect())
 }
@@ -398,11 +412,12 @@ pub async fn sales_by_method(
             "pos_transferencia" => add("transferencia", r.total, &mut buckets),
             "pos_fiado" => add("fiado", r.total, &mut buckets),
             "pos_mixed" => {
-                let cash = r.cash_amount.unwrap_or(Decimal::ZERO);
                 let card = r.card_amount.unwrap_or(Decimal::ZERO);
-                // El efectivo de una mixta puede venir con vuelto incluido: lo
-                // que ENTRÓ al negocio es a lo sumo lo que faltaba para el total.
-                let cash_neto = cash.min((r.total - card).max(Decimal::ZERO));
+                // El efectivo de una mixta viene con el vuelto incluido: lo que
+                // ENTRÓ al negocio es a lo sumo lo que faltaba para el total.
+                // Mismo invariante que el arqueo del cajón (0046).
+                let cash_neto =
+                    crate::invariants::cash_into_drawer(r.total, r.cash_amount, card);
                 add("efectivo", cash_neto, &mut buckets);
                 add("tarjeta", card.min(r.total), &mut buckets);
                 let resto = r.total - cash_neto - card.min(r.total);

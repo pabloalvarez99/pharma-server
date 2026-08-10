@@ -88,6 +88,14 @@ class CobrarViewModel(
         private set
     var clientes by mutableStateOf<List<ClienteDto>>(emptyList())
         private set
+
+    /**
+     * Hay una lista de clientes viajando. La pantalla lo necesita para no
+     * decirle "elige el cliente" a alguien que todavía no tiene entre quiénes
+     * elegir: eso se lee como "no tengo clientes", no como "esperá".
+     */
+    var cargandoClientes by mutableStateOf(false)
+        private set
     var errorPago by mutableStateOf<RbErrorCopy?>(null)
         private set
     var cobrando by mutableStateOf(false)
@@ -160,6 +168,14 @@ class CobrarViewModel(
             buscar()
             refrescarCatalogoGuardado()
         }
+        // Los clientes del fiado se piden ACÁ, con el catálogo, y no al entrar
+        // al paso de pago. En la feria el fiado no es un extra: es cómo
+        // funciona el barrio. Pedirlos recién al tocar "Pagar" hacía que la
+        // lista estuviera viajando justo cuando la cajera elige "Fiado", con el
+        // vecino esperando — y con un catálogo grande el server tarda segundos.
+        // La ventana buena es el rato en que se arma el carrito: no cuesta
+        // nada y es la diferencia entre elegir a Juan y mirar una lista vacía.
+        cargarClientes()
     }
 
     /**
@@ -628,9 +644,20 @@ class CobrarViewModel(
         invalidarClave()
     }
 
+    /**
+     * Trae a quién se le puede fiar. Se dispara al abrir la pantalla (ver
+     * `init`) y otra vez al entrar al pago, que es el reintento: si la primera
+     * falló por señal, `clientes` sigue vacía y esta vuelve a salir.
+     *
+     * El guard mira **las dos** cosas — que no haya lista y que no haya una
+     * pedida en vuelo —. Con sólo `clientes.isNotEmpty()`, ir y volver entre
+     * buscar y pagar disparaba una llamada a `/customers` por cada viaje,
+     * encima de la que ya venía en camino.
+     */
     private fun cargarClientes() {
-        if (clientes.isNotEmpty()) return
+        if (clientes.isNotEmpty() || cargandoClientes) return
         val api = sesion.apiActiva() ?: return
+        cargandoClientes = true
         viewModelScope.launch {
             when (val r = CustomerRepository(api).listar()) {
                 is Resultado.Ok -> clientes = r.valor
@@ -639,6 +666,7 @@ class CobrarViewModel(
                 // cuando el usuario lo elige y no hay a quién fiarle.
                 is Resultado.Falla -> Unit
             }
+            cargandoClientes = false
         }
     }
 
@@ -670,6 +698,11 @@ class CobrarViewModel(
     fun impedimentoParaCobrar(): String? = when {
         carrito.vacio -> "Agrega al menos un producto."
         motivoParaNoUsar(medio) != null -> motivoParaNoUsar(medio)
+        // "Elige el cliente" delante de una lista vacía se lee como "no tienes
+        // clientes", y manda a la cajera a crear uno que ya existe. Mientras la
+        // lista viene, se dice que viene.
+        medio.exigeCliente && cliente == null && cargandoClientes ->
+            "Estamos trayendo tus clientes, un segundo."
         medio.exigeCliente && cliente == null ->
             "El fiado queda en la cuenta de alguien: elige el cliente."
         // Sin señal no se pide el monto entregado: el vuelto lo calcula el
@@ -724,6 +757,19 @@ class CobrarViewModel(
                     } else {
                         errorPago = copyDeCobroFallido(venta.error)
                         cobrando = false
+                        // El copy de sesión expirada dice "te vamos a llevar a la
+                        // pantalla de entrada", y quien lo cumple es `salir()`:
+                        // `RutBusinessApp` observa `sesion.estado` y cambia solo.
+                        // Sin esta línea el mensaje era mentira **acá y sólo
+                        // acá** — todas las demás acciones (abrir caja, anotar
+                        // movimiento, cerrar caja, abonar un fiado) ya la tenían.
+                        // Y era el peor lugar para que faltara: el cajero se
+                        // quedaba en la pantalla de cobro, con el cliente
+                        // delante, leyendo una promesa que no pasaba nunca y sin
+                        // botón para tocar (Unauthorized no lleva "Reintentar").
+                        // La venta no se cobró — el server contestó 401 —, así
+                        // que no hay plata en juego, sólo el carrito.
+                        if (venta.error is AppError.SesionExpirada) sesion.salir()
                     }
                 }
 

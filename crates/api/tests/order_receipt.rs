@@ -234,7 +234,10 @@ async fn cash_sale_receipt_includes_change() {
     assert_eq!(r["total"], "4500");
     assert_eq!(r["cash_amount"], "5000");
     assert_eq!(r["change"], "500");
-    assert_eq!(r["footer_note"], "Gracias por su compra · Tu Farmacia");
+    // El pie lleva el nombre de ESTE negocio. Estuvo clavado en
+    // "· Tu Farmacia" — otro producto — así que cada boleta impresa era
+    // publicidad ajena en papel propio.
+    assert_eq!(r["footer_note"], "Gracias por su compra · Farmacia Uno");
     assert_eq!(r["tenant_name"], "Farmacia Uno");
     // cashier = claims.sub (the user record id) threaded through the sale.
     assert!(r["cashier"].as_str().unwrap().starts_with("user:"));
@@ -456,4 +459,132 @@ async fn unauthenticated_receipt_returns_401() {
     let body = res.into_body().collect().await.unwrap().to_bytes();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["error"]["code"], "MISSING_TOKEN");
+}
+
+// --- pie de boleta por negocio ----------------------------------------------
+
+async fn put_receipt_config(app: &axum::Router, token: &str, nota: &str) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/config/receipt")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "footer_note": nota }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
+}
+
+/// El pie que no se configuró sale del nombre del negocio, y de ningún otro.
+///
+/// Estuvo clavado en `"Gracias por su compra · Tu Farmacia"`. Tu Farmacia es
+/// otro producto: un feriante que imprimía esa boleta estaba entregándole
+/// publicidad ajena a su cliente, en su propio papel y con su propia venta.
+#[tokio::test]
+async fn el_pie_por_defecto_lleva_el_nombre_del_negocio() {
+    let t = spawn_test_db().await;
+    let tenant_id =
+        seed_tenant_and_user(&t.db, "Verduras Don Juan", "donjuan", "j@dj.cl", "pw-123456").await;
+    let pid = seed_product(&t.db, &tenant_id, "Tomate kilo", "tomate", 1500, 50).await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = login(&app, "donjuan", "j@dj.cl", "pw-123456").await;
+
+    let order_id = post_sale(
+        &app,
+        &token,
+        serde_json::json!({
+            "items": [{
+                "product": pid,
+                "product_name": "Tomate kilo",
+                "quantity": 1,
+                "unit_price": "1500",
+            }],
+            "payment_method": "pos_cash",
+            "cash_amount": "2000",
+        }),
+    )
+    .await;
+
+    let (status, r) = fetch_receipt(&app, &token, &order_id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(r["footer_note"], "Gracias por su compra · Verduras Don Juan");
+    assert!(
+        !r["footer_note"].as_str().unwrap().contains("Tu Farmacia"),
+        "ninguna boleta puede nombrar un producto que no es el de este negocio"
+    );
+}
+
+/// Configurado por el negocio, la boleta imprime lo que el negocio escribió.
+#[tokio::test]
+async fn el_negocio_puede_escribir_su_propio_pie_de_boleta() {
+    let t = spawn_test_db().await;
+    let tenant_id =
+        seed_tenant_and_user(&t.db, "Verduras Don Juan", "donjuan", "j@dj.cl", "pw-123456").await;
+    let pid = seed_product(&t.db, &tenant_id, "Tomate kilo", "tomate", 1500, 50).await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = login(&app, "donjuan", "j@dj.cl", "pw-123456").await;
+
+    let (status, cfg) = put_receipt_config(&app, &token, "  Feria Lo Valledor · puesto 12  ").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cfg["footer_note"], "Feria Lo Valledor · puesto 12");
+    assert_eq!(cfg["es_default"], false);
+
+    let order_id = post_sale(
+        &app,
+        &token,
+        serde_json::json!({
+            "items": [{
+                "product": pid,
+                "product_name": "Tomate kilo",
+                "quantity": 1,
+                "unit_price": "1500",
+            }],
+            "payment_method": "pos_cash",
+            "cash_amount": "1500",
+        }),
+    )
+    .await;
+
+    let (status, r) = fetch_receipt(&app, &token, &order_id).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(r["footer_note"], "Feria Lo Valledor · puesto 12");
+}
+
+/// Borrarlo vuelve al default. Sin esto, deshacer exigiría acordarse del texto
+/// original, que nadie se acuerda.
+#[tokio::test]
+async fn vaciar_el_pie_vuelve_al_default_del_negocio() {
+    let t = spawn_test_db().await;
+    seed_tenant_and_user(&t.db, "Verduras Don Juan", "donjuan", "j@dj.cl", "pw-123456").await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = login(&app, "donjuan", "j@dj.cl", "pw-123456").await;
+
+    put_receipt_config(&app, &token, "Otra cosa").await;
+    let (status, cfg) = put_receipt_config(&app, &token, "   ").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cfg["footer_note"], "Gracias por su compra · Verduras Don Juan");
+    assert_eq!(cfg["es_default"], true);
+}
+
+/// El pie no puede convertirse en un panfleto: 32 columnas tiene una térmica de
+/// 58 mm, y el papel lo paga el negocio en cada venta.
+#[tokio::test]
+async fn un_pie_demasiado_largo_se_rechaza() {
+    let t = spawn_test_db().await;
+    seed_tenant_and_user(&t.db, "Verduras Don Juan", "donjuan", "j@dj.cl", "pw-123456").await;
+    let app = api::build_router(state_with_db(t.db.clone()));
+    let token = login(&app, "donjuan", "j@dj.cl", "pw-123456").await;
+
+    let (status, _) = put_receipt_config(&app, &token, &"x".repeat(81)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
