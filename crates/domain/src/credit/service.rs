@@ -39,6 +39,45 @@ pub async fn record_abono(
             "el abono ({amount}) supera la deuda pendiente ({debt})"
         )));
     }
+    // Abono en efectivo con caja: la plata entra al cajón, así que el arqueo
+    // tiene que verla. Se sostiene el lock de mutación de la sesión desde el
+    // chequeo de estado hasta que commitea la transacción del repo — el mismo
+    // que toman `cash_register::add_movement` y `close_session`, para que un
+    // cierre concurrente no congele el esperado justo antes de que aterrice el
+    // ingreso. Mismo patrón que `expenses::service::create_expense`.
+    let _drawer_guard = match cash_session {
+        Some(sid) => {
+            let guard = crate::cash_register::service::session_mutation_lock(
+                tenant,
+                &sid.to_string(),
+            )
+            .lock_owned()
+            .await;
+            let mut sr = db
+                .query(
+                    "SELECT status FROM cash_register_session WHERE id = $id AND tenant = $t LIMIT 1",
+                )
+                .bind(("id", sid.clone()))
+                .bind(("t", tenant.clone()))
+                .await?;
+            let status: Option<String> = sr.take((0, "status"))?;
+            match status.as_deref() {
+                Some("open") => {}
+                Some(_) => {
+                    return Err(DomainError::Conflict(
+                        "no se puede abonar en efectivo a una caja cerrada".into(),
+                    ))
+                }
+                None => {
+                    return Err(DomainError::Invalid(
+                        "la sesión de caja no existe en este tenant".into(),
+                    ))
+                }
+            }
+            Some(guard)
+        }
+        None => None,
+    };
     repo::post_abono(db, tenant, customer, amount, cash_session, note, created_by).await
 }
 

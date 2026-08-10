@@ -552,17 +552,16 @@ fn cash_sale(product_id: &str, name: &str, price: &str) -> PosSaleRequest {
     }
 }
 
-/// The maintained `cash_sales_running` aggregate (migration 0030) must equal an
-/// independent live scan — including after a sale is refunded, the case a
-/// pre-computed view would get wrong (`surrealdb-view-update-gotcha`).
+/// Venta con VUELTO: el agregado `cash_sales_running` suma lo que quedó en el
+/// cajón, no lo que el cliente entregó.
 ///
-/// El oráculo NO es `math::sum(cash_amount)`: desde 0046 el agregado es el
-/// efectivo neto de vuelto. Acá las ventas se cobran exactas (`cash_sale` manda
-/// `cash_amount = precio`), así que el neto coincide con lo entregado y el scan
-/// se escribe con la fórmula neta para que siga siendo un oráculo honesto si
-/// alguien le agrega vuelto a este test.
+/// Detector de la migración 0046. Es un detector de verdad porque las ventas
+/// se pagan con billete grande: si alguien vuelve a sumar `cash_amount` crudo,
+/// el número da 6000 en vez de 4500 y esto revienta. Cobrar exacto — como hacía
+/// la versión anterior de este test — hace que las dos fórmulas coincidan y el
+/// test no distingue nada.
 #[tokio::test]
-async fn cash_sales_running_matches_scan_after_refund() {
+async fn cash_sales_running_suma_lo_que_quedo_no_lo_que_entrego() {
     let (db, tenant, user) = setup().await;
     let s = service::open_session(
         &db,
@@ -581,9 +580,61 @@ async fn cash_sales_running_matches_scan_after_refund() {
     let p = catalog::create_product(&db, &tenant, new_product("Para 500", "1500", 50))
         .await
         .unwrap();
-    // Three cash sales (CREATE events) → 4500.
+    // Tres ventas de 1500 pagadas con 2000: entregado 6000, en el cajón 4500.
     for _ in 0..3 {
-        sales::post_sale(
+        let mut req = cash_sale(&p.id, &p.name, "1500");
+        req.cash_amount = Some(dec("2000"));
+        sales::post_sale(&db, &tenant, Some(&user), Some("admin"), None, req)
+            .await
+            .unwrap();
+    }
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
+    assert_eq!(
+        live.cash_sales,
+        dec("4500"),
+        "el vuelto sale del cajón: entraron 4500, no los 6000 entregados"
+    );
+    assert_eq!(live.cash_sales, scan_cash_sales(&db, &tenant, &live).await);
+}
+
+/// El agregado mantenido tiene que dar lo mismo que un escaneo independiente
+/// DESPUÉS de una devolución real, que es donde una vista precomputada se
+/// equivoca (`surrealdb-view-update-gotcha`).
+///
+/// Desde la 0049 el cajón es libro de caja puro: la venta se queda BRUTA en
+/// `cash_sales` y lo devuelto sale por un `cash_movement(tipo='retiro')`. Así
+/// que el test mide las dos mitades por separado, y encima el esperado, que es
+/// el número contra el que alguien cuenta billetes.
+///
+/// Es detector en las dos direcciones:
+/// * si el evento volviera a restar cuando `status='refunded'`, el agregado
+///   caería por debajo del escaneo y además se restaría dos veces con el
+///   retiro;
+/// * si el retiro no se emitiera, el esperado quedaría en 4500 con 3000 en el
+///   cajón.
+#[tokio::test]
+async fn cash_sales_bruto_y_devolucion_por_retiro_cuadran_con_el_escaneo() {
+    let (db, tenant, user) = setup().await;
+    let s = service::open_session(
+        &db,
+        &tenant,
+        &user,
+        OpenSessionInput {
+            register_name: "c1".into(),
+            register: None,
+            branch: None,
+            opening_cash: dec("0"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let p = catalog::create_product(&db, &tenant, new_product("Para 500", "1500", 50))
+        .await
+        .unwrap();
+    let mut orders = Vec::new();
+    for _ in 0..3 {
+        let v = sales::post_sale(
             &db,
             &tenant,
             Some(&user),
@@ -593,29 +644,77 @@ async fn cash_sales_running_matches_scan_after_refund() {
         )
         .await
         .unwrap();
+        orders.push(v.order.id);
     }
+    assert_eq!(
+        service::arqueo(&db, &tenant, &s.id).await.unwrap().cash_sales,
+        dec("4500")
+    );
+
+    // Devolución REAL por el camino del dominio (no un `UPDATE status` crudo:
+    // eso probaba el evento contra sí mismo y se saltaba el retiro).
+    sales::create_refund(
+        &db,
+        &tenant,
+        Some(&user),
+        NewDevolucion {
+            order: Some(orders[0].clone()),
+            tipo: "venta".into(),
+            motivo: "no le sirvió".into(),
+            notas: None,
+            items: vec![NewDevolucionItem {
+                product: Some(p.id.clone()),
+                product_name: p.name.clone(),
+                quantity: 1,
+                unit_price: dec("1500"),
+                restock: true,
+            }],
+            metodo_reembolso: Some("efectivo".into()),
+        },
+    )
+    .await
+    .unwrap();
+
     let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
-    assert_eq!(live.cash_sales, dec("4500"));
+    assert_eq!(
+        live.cash_sales,
+        dec("4500"),
+        "las tres ventas entraron; devolver no reescribe lo que ya entró"
+    );
+    assert_eq!(
+        live.movements_out,
+        dec("1500"),
+        "la devolución salió por un retiro con su propia fecha"
+    );
+    assert_eq!(
+        live.cash_sales,
+        scan_cash_sales(&db, &tenant, &live).await,
+        "el agregado mantenido tiene que dar lo mismo que el escaneo"
+    );
+    // El número que alguien va a comparar contra billetes.
+    let close = service::close_session(
+        &db,
+        &tenant,
+        &s.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("3000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        close.session.closing_cash_expected,
+        Some(dec("3000")),
+        "vendí 4500 y devolví 1500: el cajón espera 3000"
+    );
+    assert_eq!(close.session.discrepancia, Some(Decimal::ZERO));
+}
 
-    // Refund one order — sales repo does `UPDATE order SET status='refunded'`,
-    // which the event must subtract (UPDATE branch).
-    let mut r = db
-        .query("SELECT VALUE id FROM order WHERE tenant=$t LIMIT 1")
-        .bind(("t", tenant.clone()))
-        .await
-        .unwrap();
-    let ids: Vec<Thing> = r.take(0).unwrap();
-    db.query("UPDATE $o SET status='refunded'")
-        .bind(("o", ids[0].clone()))
-        .await
-        .unwrap()
-        .check()
-        .unwrap();
-
-    // Maintained drops to 3000 and equals an independent live scan byte-for-byte.
-    let live2 = service::arqueo(&db, &tenant, &s.id).await.unwrap();
-    assert_eq!(live2.cash_sales, dec("3000"));
-
+/// Escaneo independiente del efectivo de las ventas de la sesión, con la misma
+/// calificación que el evento después de la 0049 (`cancelled` afuera,
+/// `refunded` adentro) y la fórmula canónica del dominio.
+async fn scan_cash_sales(db: &Db, tenant: &Thing, live: &CloseSummary) -> Decimal {
     #[derive(serde::Deserialize)]
     struct S {
         total: Decimal,
@@ -626,16 +725,15 @@ async fn cash_sales_running_matches_scan_after_refund() {
         .query(
             "SELECT total, cash_amount, card_amount FROM order \
              WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] \
-               AND status NOT IN ['refunded','cancelled'] \
+               AND status != 'cancelled' \
                AND created_at >= $a",
         )
         .bind(("t", tenant.clone()))
-        .bind(("a", surrealdb::sql::Datetime::from(live2.session.opened_at)))
+        .bind(("a", surrealdb::sql::Datetime::from(live.session.opened_at)))
         .await
         .unwrap();
     let scan: Vec<S> = r.take(0).unwrap();
-    let scan_val: Decimal = scan
-        .into_iter()
+    scan.into_iter()
         .map(|o| {
             domain::invariants::cash_into_drawer(
                 o.total,
@@ -643,11 +741,7 @@ async fn cash_sales_running_matches_scan_after_refund() {
                 o.card_amount.unwrap_or(Decimal::ZERO),
             )
         })
-        .sum();
-    assert_eq!(
-        live2.cash_sales, scan_val,
-        "maintained running total must equal the live scan"
-    );
+        .sum()
 }
 
 /// An order in tenant A must not bump tenant B's session running total.
@@ -1079,11 +1173,25 @@ async fn arqueo_cuenta_la_venta_en_efectivo_sin_monto_entregado() {
     );
 }
 
-/// Devolver una venta con vuelto tiene que restar el NETO, no lo entregado. Es
-/// la rama UPDATE del evento: si resta de más, el arqueo del turno queda por
-/// debajo y aparece un faltante nuevo justo después de una devolución.
+/// Devolver una venta con vuelto tiene que sacar el NETO, no lo entregado: de
+/// una venta de 1500 pagada con 2000 sale 1500, no 2000. Si sale de más, el
+/// arqueo del turno queda por debajo y aparece un faltante nuevo justo después
+/// de una devolución.
+///
+/// Desde la 0049 la plata sale por un `cash_movement(tipo='retiro')` y no
+/// reescribiendo `cash_sales`, así que el test mide las dos mitades. Es la rama
+/// UPDATE del evento la que está bajo prueba: la devolución deja la orden en
+/// `status='refunded'`, y el agregado NO se tiene que mover.
+///
+/// Detector en las tres direcciones:
+/// * si el evento sumara lo entregado en vez del neto, `cash_sales` daría 4000;
+/// * si la rama UPDATE volviera a calificar por `status != 'refunded'` (la 0046),
+///   restaría 1500 de nuevo y `cash_sales` caería a 1500 — doble descuento
+///   contra el retiro;
+/// * si el retiro no se emitiera, el esperado quedaría en 3000 con 1500 en el
+///   cajón.
 #[tokio::test]
-async fn devolver_una_venta_con_vuelto_resta_solo_el_neto() {
+async fn devolver_una_venta_con_vuelto_saca_solo_el_neto() {
     let (db, tenant, user) = setup().await;
     let s = service::open_session(
         &db,
@@ -1104,8 +1212,9 @@ async fn devolver_una_venta_con_vuelto_resta_solo_el_neto() {
         .unwrap();
 
     // Dos ventas de 1500, cada una pagada con 2000 → 3000 netos en el cajón.
+    let mut orders = Vec::new();
     for _ in 0..2 {
-        sales::post_sale(
+        let v = sales::post_sale(
             &db,
             &tenant,
             Some(&user),
@@ -1115,34 +1224,69 @@ async fn devolver_una_venta_con_vuelto_resta_solo_el_neto() {
         )
         .await
         .unwrap();
+        orders.push(v.order.id);
     }
     assert_eq!(
         service::arqueo(&db, &tenant, &s.id)
             .await
             .unwrap()
             .cash_sales,
-        dec("3000")
+        dec("3000"),
+        "entraron 1500 por venta, no los 2000 del billete"
     );
 
-    let mut r = db
-        .query("SELECT VALUE id FROM order WHERE tenant=$t LIMIT 1")
-        .bind(("t", tenant.clone()))
-        .await
-        .unwrap();
-    let ids: Vec<Thing> = r.take(0).unwrap();
-    db.query("UPDATE $o SET status='refunded'")
-        .bind(("o", ids[0].clone()))
-        .await
-        .unwrap()
-        .check()
-        .unwrap();
+    // Devolución REAL por el camino del dominio. Devuelve la venta entera, así
+    // que la orden queda `status='refunded'`: es el caso exacto que la 0046
+    // usaba para restar del agregado.
+    sales::create_refund(
+        &db,
+        &tenant,
+        Some(&user),
+        NewDevolucion {
+            order: Some(orders[0].clone()),
+            tipo: "venta".into(),
+            motivo: "no le sirvió".into(),
+            notas: None,
+            items: vec![NewDevolucionItem {
+                product: Some(p.id.clone()),
+                product_name: p.name.clone(),
+                quantity: 1,
+                unit_price: dec("1500"),
+                restock: true,
+            }],
+            metodo_reembolso: Some("efectivo".into()),
+        },
+    )
+    .await
+    .unwrap();
 
+    let live = service::arqueo(&db, &tenant, &s.id).await.unwrap();
     assert_eq!(
-        service::arqueo(&db, &tenant, &s.id)
-            .await
-            .unwrap()
-            .cash_sales,
+        live.cash_sales,
+        dec("3000"),
+        "devolver no reescribe lo que ya entró: el agregado se queda bruto"
+    );
+    assert_eq!(
+        live.movements_out,
         dec("1500"),
         "la devolución saca los 1500 que entraron, no los 2000 del billete"
     );
+
+    let close = service::close_session(
+        &db,
+        &tenant,
+        &s.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("1500"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        close.session.closing_cash_expected,
+        Some(dec("1500")),
+        "entraron 3000 netos y salieron 1500: quedan 1500 contables"
+    );
+    assert_eq!(close.session.discrepancia, Some(Decimal::ZERO));
 }

@@ -216,13 +216,16 @@ async fn run_sales(day: &Day) -> (Vec<(String, i64)>, i64) {
 }
 
 /// Refund 3 distinct orders fully (single-line orders chosen so the refund is
-/// clean). Returns the cash that those refunded orders had contributed.
-async fn run_returns(day: &Day, orders: &[(String, i64)]) -> i64 {
+/// clean). Devuelve la plata efectivamente REEMBOLSADA, que desde la 0049 es lo
+/// que tiene que haber salido del cajón por `cash_movement(tipo='retiro')` — no
+/// el `cash_amount` de la orden, que incluiría el vuelto y las líneas que no se
+/// devolvieron.
+async fn run_returns(day: &Day, orders: &[(String, i64)]) -> Decimal {
     // Sales 0, 8, 16 are `s % 4 == 0` (have a customer) AND `s % 8 == 0`/etc;
     // pick single-line cash orders: s=0 (1 line), s=8 (1 line), s=16 (1 line).
-    let mut refunded_cash = 0_i64;
+    let mut refunded_cash = Decimal::ZERO;
     for &s in &[0usize, 8, 16] {
-        let (order_id, cash_paid) = &orders[s];
+        let (order_id, _cash_paid) = &orders[s];
         let idx = s % day.products.len();
         let name = format!("SKU {idx:02}");
         let price = price_of(idx).to_string();
@@ -243,7 +246,7 @@ async fn run_returns(day: &Day, orders: &[(String, i64)]) -> i64 {
         domain::sales::service::create_refund(&day.db, &day.tenant, Some(&day.user), body)
             .await
             .expect("refund");
-        refunded_cash += *cash_paid;
+        refunded_cash += price.parse::<Decimal>().unwrap();
     }
     refunded_cash
 }
@@ -498,26 +501,35 @@ async fn full_pharmacy_day_invariants_hold() {
         .parse()
         .unwrap();
     let cash_sales: Decimal = arq["cash_sales"].as_str().unwrap().parse().unwrap();
+    let movements_out: Decimal = arq["movements_out"].as_str().unwrap().parse().unwrap();
 
-    // expected == opening + cash_sales (no manual movements this day).
+    // Desde la 0049 el cajón es libro de caja puro: `cash_sales` es BRUTO (lo
+    // que entró al cobrar) y las devoluciones salen por `retiro`, con su propia
+    // fecha. El esperado es la resta de los dos, que es el único número contra
+    // el que alguien cuenta billetes.
     let opening: Decimal = OPENING.parse().unwrap();
     assert_eq!(
         expected,
-        opening + cash_sales,
-        "expected cash == opening + cash_sales (no movements)"
+        opening + cash_sales - movements_out,
+        "expected cash == opening + cash_sales − retiros"
     );
 
-    // And cash_sales == Σ cash of NON-refunded orders == gross cash − refunded
-    // orders' cash (the refund flips the whole order to 'refunded', dropping
-    // its cash out of the rollup).
+    // `cash_sales` cuadra contra el escaneo de las órdenes que movieron
+    // efectivo, `cancelled` afuera y `refunded` adentro: devolver no reescribe
+    // lo que ya había entrado.
     let live_cash = non_refunded_cash(&day).await;
     assert_eq!(
         cash_sales, live_cash,
-        "cash_sales must equal Σ cash of non-refunded orders"
+        "cash_sales must equal Σ cash of non-cancelled orders"
     );
+    // Y las devoluciones del día salieron por el cajón, una a una.
     assert!(
-        refunded_cash > 0,
-        "the 3 refunded orders had paid cash that must have dropped out"
+        refunded_cash > Decimal::ZERO,
+        "the 3 refunded orders had paid cash that must have left the drawer"
+    );
+    assert_eq!(
+        movements_out, refunded_cash,
+        "cada devolución en efectivo emitió su retiro"
     );
 }
 
@@ -582,7 +594,7 @@ async fn non_refunded_cash(day: &Day) -> Decimal {
         .query(
             "SELECT math::sum(cash_amount) AS s FROM order \
              WHERE tenant=$t AND payment_method IN ['pos_cash','pos_mixed'] \
-               AND status NOT IN ['refunded','cancelled'] GROUP ALL",
+               AND status != 'cancelled' GROUP ALL",
         )
         .bind(("t", day.tenant.clone()))
         .await

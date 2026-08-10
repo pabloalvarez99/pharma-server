@@ -370,8 +370,12 @@ fn new_product(name: &str, price: &str, stock: i64) -> NewProduct {
     }
 }
 
+// El nombre viejo prometía "excluding_refunded" y el test nunca devolvió nada.
+// Desde la 0049 esa exclusión ya ni existe: la venta parcialmente devuelta se
+// queda y lo devuelto sale por `DailySalesRow::refunds`. El caso con devolución
+// vive en tests/agregados_de_plata.rs, con caja abierta y las tres líneas.
 #[tokio::test]
-async fn sales_daily_aggregates_orders_per_utc_date_excluding_refunded() {
+async fn sales_daily_aggregates_orders_per_utc_date() {
     let (db, tenant, user) = setup().await;
     let p = catalog::create_product(&db, &tenant, new_product("P", "1000", 100))
         .await

@@ -64,6 +64,20 @@ pub struct DailySalesRow {
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub card: Decimal,
+    /// Plata devuelta ESE día (Σ `devolucion.total_devuelto`), migración 0049.
+    ///
+    /// Línea aparte y no restada de `revenue`/`cash` a propósito: el día que se
+    /// devuelve no es el día que se vendió, y una venta parcialmente devuelta
+    /// sigue siendo una venta. Neto del día = `revenue - refunds`; mostrar sólo
+    /// el neto esconde los dos hechos.
+    ///
+    /// Se fecha por la DEVOLUCIÓN, igual que el retiro del cajón, para que los
+    /// dos números cierren contra la misma plata. Fecharla por la venta
+    /// original haría mutar el reporte de ayer, que es justo lo que el arqueo
+    /// no puede permitirse.
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub refunds: Decimal,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]

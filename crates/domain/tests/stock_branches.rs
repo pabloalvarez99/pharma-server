@@ -804,6 +804,24 @@ async fn ventas_y_transferencias_concurrentes_conservan_el_invariante() {
 #[tokio::test]
 async fn devolucion_repone_en_la_sucursal_de_la_venta() {
     let (db, tenant, admin) = setup().await;
+    // Desde la 0049 una devolución en efectivo emite un
+    // `cash_movement(tipo='retiro')` y se rechaza si no hay caja donde asentarlo.
+    // Acá lo que se mide es dónde vuelve la mercadería, pero el retiro necesita
+    // libro igual.
+    domain::cash_register::service::open_session(
+        &db,
+        &tenant,
+        &admin,
+        domain::cash_register::model::OpenSessionInput {
+            register_name: "caja-1".into(),
+            register: None,
+            branch: None,
+            opening_cash: Decimal::ZERO,
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
     let p = catalog::create_product(&db, &tenant, np("Té", 50))
         .await
         .unwrap();
