@@ -98,3 +98,4 @@ Copiar para nuevas decisiones, numerar al siguiente disponible:
 | [0020](./0020-free-web-as-core.md) | Web gratis como core (1 storefront público en el tier Free) | Accepted | producto, freemium, storefront |
 | [0021](./0021-android-compose-nativo.md) | Cliente Android nativo en Jetpack Compose | Accepted | cliente, android, ux |
 | [0022](./0022-feria-agent-first-identity-backup.md) | Feria agent-first + Google + backup cifrado (llave del usuario) | Accepted | producto, feria, agente, identidad, backup |
+| [0023](./0023-respaldo-real-bucket-r2.md) | Respaldo real en R2 con cuotas costeadas y restauración desde cero sin JWT | Accepted | backup, infra, costo, seguridad, feria, android |

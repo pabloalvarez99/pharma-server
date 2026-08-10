@@ -234,10 +234,12 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "api"
 version = "0.1.28"
 dependencies = [
+ "aes-gcm",
  "agent",
  "anyhow",
  "arc-swap",
  "assist",
+ "async-trait",
  "auth",
  "axum 0.8.9",
  "axum-prometheus",
@@ -2121,6 +2123,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "surrealdb",
  "thiserror 2.0.18",
  "tokio",
