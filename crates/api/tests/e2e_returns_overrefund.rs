@@ -33,9 +33,14 @@ use surrealdb::sql::Thing;
 
 async fn setup() -> (Arc<db::Db>, Thing, String, String, TestDb) {
     let tdb = spawn_db().await;
-    let (tid, _uid, _roles) = seed_tenant_admin(&tdb.db, "farmacia-ret", "admin@ret.cl").await;
+    let (tid, uid, _roles) = seed_tenant_admin(&tdb.db, "farmacia-ret", "admin@ret.cl").await;
     let tenant = tid_thing(&tid);
     let db = tdb.db.clone();
+    // Caja abierta: desde la migración 0049 una devolución en efectivo emite un
+    // `cash_movement(tipo='retiro')` y se rechaza si no hay dónde asentarlo. Lo
+    // que mide este archivo es el guard de sobre-devolución, no el arqueo, pero
+    // el mostrador real tiene la caja abierta.
+    seed_cash_session(&db, &tenant, &tid_thing(&uid), "caja-1", "0").await;
     let pid = seed_product(&db, &tenant, "Paracetamol 500", "990", "500", 20, None).await;
 
     // Sell 5 units (stock 20 → 15).

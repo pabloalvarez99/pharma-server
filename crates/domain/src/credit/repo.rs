@@ -86,11 +86,34 @@ pub async fn post_abono(
     note: Option<&str>,
     created_by: Option<&Thing>,
 ) -> DomainResult<LedgerEntryDto> {
+    // Un abono con `cash_session` es plata que ENTRÓ al cajón: se postea el
+    // `cash_movement(tipo='ingreso')` en la MISMA transacción. Sin esto el
+    // esperado del arqueo queda por debajo de los billetes que hay adentro y la
+    // cajera cierra el día con un sobrante fantasma. El campo `cash_session`
+    // existe exactamente para esto — lo dice la 0039: "Caja donde entró el
+    // abono en efectivo (para que salga en el arqueo)" — y desde 2026-08 el
+    // arqueo por fin lo cumple.
+    //
+    // El servicio ya verificó, bajo el lock de la sesión, que la caja está
+    // abierta.
+    let sql = if cash_session.is_some() {
+        "BEGIN; \
+         CREATE customer_ledger SET tenant = $t, customer = $c, kind = 'abono', \
+            amount = $amount, cash_session = $cs, note = $note, created_by = $by RETURN AFTER; \
+         CREATE cash_movement SET tenant = $t, session = $cs, tipo = 'ingreso', \
+            amount = $amount, reason = $rsn, admin = $by; \
+         COMMIT;"
+    } else {
+        "CREATE customer_ledger SET tenant = $t, customer = $c, kind = 'abono', \
+         amount = $amount, cash_session = $cs, note = $note, created_by = $by RETURN AFTER"
+    };
+    let reason = match note {
+        Some(n) if !n.trim().is_empty() => format!("Abono de fiado: {}", n.trim()),
+        _ => "Abono de fiado".to_string(),
+    };
     let mut r = db
-        .query(
-            "CREATE customer_ledger SET tenant = $t, customer = $c, kind = 'abono', \
-             amount = $amount, cash_session = $cs, note = $note, created_by = $by RETURN AFTER",
-        )
+        .query(sql)
+        .bind(("rsn", reason))
         .bind(("t", tenant.clone()))
         .bind(("c", customer.clone()))
         .bind(("amount", dec_val(amount)))

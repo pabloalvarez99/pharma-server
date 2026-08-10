@@ -724,9 +724,13 @@ fn validate_payment_method(method: &str) -> DomainResult<&'static str> {
 /// rejected so the AP ledger doesn't accept money against a void document),
 /// amount > 0, payment_method ∈ {cash,bank,card,transfer}, and that the
 /// running `paid + amount ≤ total` so accidental overpayment is caught up-
-/// front (operator can split a payment but not double-pay). Cash payments
-/// optionally bind a `cash_register_session` (validated tenant-scoped) so
-/// arqueo can include them later.
+/// front (operator can split a payment but not double-pay).
+///
+/// Un pago `cash` con `cash_session` postea además un
+/// `cash_movement(tipo='retiro')` en la misma transacción: la plata sale del
+/// cajón y el arqueo lo ve al instante. Hasta 2026-08 el binding existía pero
+/// no tenía efecto — el esperado quedaba por encima de lo que había en la caja
+/// y el cierre acusaba un faltante que era el pago al proveedor.
 pub async fn create_purchase_payment(
     db: &Db,
     tenant: &Thing,
@@ -780,6 +784,46 @@ pub async fn create_purchase_payment(
         Some(s) if !s.is_empty() => Some(parse_thing(s)?),
         _ => None,
     };
+
+    // Pago en efectivo contra una caja: es plata que SALE del cajón, así que el
+    // arqueo tiene que verla como retiro. Se sostiene el lock de mutación de la
+    // sesión desde el chequeo de estado hasta que commitea la transacción del
+    // repo — el mismo que toman `cash_register::add_movement` y
+    // `close_session`, para que un cierre concurrente no congele el esperado
+    // justo antes de que aterrice el retiro. Mismo patrón que
+    // `expenses::service::create_expense`.
+    let _drawer_guard = match (method == "cash", cash_session.as_ref()) {
+        (true, Some(sid)) => {
+            let guard =
+                crate::cash_register::service::session_mutation_lock(tenant, &sid.to_string())
+                    .lock_owned()
+                    .await;
+            let mut sr = db
+                .query(
+                    "SELECT status FROM cash_register_session WHERE id = $id AND tenant = $t LIMIT 1",
+                )
+                .bind(("id", sid.clone()))
+                .bind(("t", tenant.clone()))
+                .await?;
+            let status: Option<String> = sr.take((0, "status"))?;
+            match status.as_deref() {
+                Some("open") => {}
+                Some(_) => {
+                    return Err(DomainError::Conflict(
+                        "no se puede pagar en efectivo desde una caja cerrada".into(),
+                    ))
+                }
+                None => {
+                    return Err(DomainError::Invalid(
+                        "la sesión de caja no existe en este tenant".into(),
+                    ))
+                }
+            }
+            Some(guard)
+        }
+        _ => None,
+    };
+
     repo::create_purchase_payment(
         db,
         tenant,

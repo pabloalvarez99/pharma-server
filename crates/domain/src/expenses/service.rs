@@ -263,22 +263,26 @@ pub async fn list_expenses(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-/// Daily sales rollup over `order`. Tenant-scoped. `refunded`/`cancelled`
-/// excluded. Returns one row per UTC date in the range, sorted ascending.
+/// Daily sales rollup over `order`. Tenant-scoped. Returns one row per UTC
+/// date in the range, sorted ascending.
 ///
 /// `cash` es el efectivo **neto de vuelto**
 /// ([`crate::invariants::cash_into_drawer`]) de las ventas que mueven efectivo,
 /// la misma definición que el arqueo del cajón: los dos números tienen que
 /// cerrar contra la misma plata.
+///
+/// Se excluye `cancelled` — documento anulado, nunca hubo venta. `refunded`
+/// SÍ entra (migración 0049): la venta ocurrió, la plata entró, y lo devuelto
+/// sale por [`DailySalesRow::refunds`] con la fecha en que volvió. Antes se
+/// filtraba `refunded` también, y como `apply_refund` marcaba la orden entera
+/// con cualquier devolución parcial, una venta de $15.000 con $5.000 devueltos
+/// desaparecía COMPLETA: el dueño veía $0 en un día que vendió.
 pub async fn sales_daily(
     db: &Db,
     tenant: &Thing,
     f: SalesReportFilters,
 ) -> DomainResult<Vec<DailySalesRow>> {
-    let mut conds = vec![
-        "tenant = $t".to_string(),
-        "status NOT IN ['refunded','cancelled']".to_string(),
-    ];
+    let mut conds = vec!["tenant = $t".to_string(), "status != 'cancelled'".to_string()];
     if f.from.is_some() {
         conds.push("created_at >= $a".to_string());
     }
@@ -320,6 +324,7 @@ pub async fn sales_daily(
             revenue: Decimal::ZERO,
             cash: Decimal::ZERO,
             card: Decimal::ZERO,
+            refunds: Decimal::ZERO,
         });
         let card = r.card_amount.unwrap_or(Decimal::ZERO);
         entry.orders += 1;
@@ -334,6 +339,47 @@ pub async fn sales_daily(
         }
         entry.card += card;
     }
+
+    // Devoluciones del período, fechadas por la devolución. Consulta aparte
+    // porque el día que vuelve la plata no es el día de la venta: un día sin
+    // ventas pero con una devolución tiene que aparecer igual, con su fila.
+    let mut rconds = vec!["tenant = $t".to_string()];
+    if f.from.is_some() {
+        rconds.push("created_at >= $a".to_string());
+    }
+    if f.to.is_some() {
+        rconds.push("created_at <= $b".to_string());
+    }
+    let rsql = format!(
+        "SELECT created_at, total_devuelto FROM devolucion WHERE {} ORDER BY created_at ASC",
+        rconds.join(" AND ")
+    );
+    let mut rqb = db.query(rsql).bind(("t", tenant.clone()));
+    if let Some(a) = f.from {
+        rqb = rqb.bind(("a", surrealdb::sql::Datetime::from(a)));
+    }
+    if let Some(b) = f.to {
+        rqb = rqb.bind(("b", surrealdb::sql::Datetime::from(b)));
+    }
+    #[derive(Deserialize)]
+    struct D {
+        created_at: DateTime<Utc>,
+        total_devuelto: Decimal,
+    }
+    let devs: Vec<D> = rqb.await?.check()?.take(0)?;
+    for d in devs {
+        let date = d.created_at.format("%Y-%m-%d").to_string();
+        let entry = by_day.entry(date.clone()).or_insert(DailySalesRow {
+            date: date.clone(),
+            orders: 0,
+            revenue: Decimal::ZERO,
+            cash: Decimal::ZERO,
+            card: Decimal::ZERO,
+            refunds: Decimal::ZERO,
+        });
+        entry.refunds += d.total_devuelto;
+    }
+
     Ok(by_day.into_values().collect())
 }
 
@@ -354,15 +400,19 @@ pub async fn sales_daily(
 ///     la mano.
 ///
 /// Devuelve sólo los buckets con movimiento, ordenados de mayor a menor monto.
+///
+/// BRUTO de devoluciones, igual que el cajón (migración 0049): acá se responde
+/// "¿por dónde entró la plata?", y entró por donde dice cada venta. Lo que se
+/// devolvió se reporta con su propia fecha en
+/// [`crate::expenses::model::DailySalesRow::refunds`] — restarlo de estos
+/// buckets obligaría a decidir por cuál método salió y haría mutar el reporte
+/// de ayer. `cancelled` sí queda afuera: documento anulado, nunca hubo venta.
 pub async fn sales_by_method(
     db: &Db,
     tenant: &Thing,
     f: SalesReportFilters,
 ) -> DomainResult<Vec<SalesByMethodRow>> {
-    let mut conds = vec![
-        "tenant = $t".to_string(),
-        "status NOT IN ['refunded','cancelled']".to_string(),
-    ];
+    let mut conds = vec!["tenant = $t".to_string(), "status != 'cancelled'".to_string()];
     if f.from.is_some() {
         conds.push("created_at >= $a".to_string());
     }
@@ -597,11 +647,110 @@ pub async fn near_expiry(
         .collect())
 }
 
+/// Unidades ya devueltas por `(orden, producto)`, para netear los reportes por
+/// ítem (migración 0049).
+///
+/// Antes de la 0049 alcanzaba con filtrar `status != 'refunded'`: cualquier
+/// devolución marcaba la orden entera y la orden desaparecía del reporte. Eso
+/// era el bug — devolver 1 kilo de 3 borraba los 3 del ranking de productos.
+/// Ahora la orden parcialmente devuelta se queda, así que hay que descontar
+/// las unidades que volvieron, no la venta completa.
+///
+/// Una orden totalmente devuelta ya no aparece acá: sigue filtrada por
+/// `status = 'refunded'`, que desde la 0049 significa devuelta ENTERA.
+async fn refunded_units_by_order_product(
+    db: &Db,
+    tenant: &Thing,
+    order_ids: &[Thing],
+) -> DomainResult<std::collections::HashMap<(String, String), i64>> {
+    use std::collections::HashMap;
+    if order_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    #[derive(Deserialize)]
+    struct D {
+        id: Thing,
+        order: Thing,
+    }
+    let devs: Vec<D> = db
+        .query("SELECT id, order FROM devolucion WHERE tenant = $t AND order IN $ids")
+        .bind(("t", tenant.clone()))
+        .bind(("ids", order_ids.to_vec()))
+        .await?
+        .check()?
+        .take(0)?;
+    if devs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let dev_order: HashMap<String, String> =
+        devs.iter().map(|d| (d.id.to_string(), d.order.to_string())).collect();
+    let dev_ids: Vec<Thing> = devs.into_iter().map(|d| d.id).collect();
+    #[derive(Deserialize)]
+    struct I {
+        devolucion: Thing,
+        product: Option<Thing>,
+        quantity: i64,
+    }
+    let items: Vec<I> = db
+        .query(
+            "SELECT devolucion, product, quantity FROM devolucion_item \
+             WHERE tenant = $t AND devolucion IN $ids",
+        )
+        .bind(("t", tenant.clone()))
+        .bind(("ids", dev_ids))
+        .await?
+        .check()?
+        .take(0)?;
+    let mut out: HashMap<(String, String), i64> = HashMap::new();
+    for i in items {
+        let (Some(p), Some(o)) = (i.product, dev_order.get(&i.devolucion.to_string())) else {
+            // Línea sin producto identificado: no se puede descontar de ningún
+            // `order_item`. Queda como venta, igual que hoy.
+            continue;
+        };
+        *out.entry((o.clone(), p.to_string())).or_default() += i.quantity;
+    }
+    Ok(out)
+}
+
+/// Descuenta de una línea de venta las unidades devueltas de ese `(orden,
+/// producto)`, consumiendo el remanente compartido: el mismo producto puede
+/// venir en más de una línea de la misma orden y la devolución no dice de cuál
+/// salió. Devuelve `(unidades_netas, subtotal_neto)`.
+///
+/// El subtotal se prorratea por unidad en vez de recalcularse con el precio de
+/// la devolución: el ranking tiene que reflejar lo que se COBRÓ en esa línea
+/// (con su descuento), no lo que se reembolsó.
+fn net_line(
+    refunded: &mut std::collections::HashMap<(String, String), i64>,
+    order: &str,
+    product: Option<&Thing>,
+    quantity: i64,
+    subtotal: Decimal,
+) -> (i64, Decimal) {
+    let Some(p) = product else {
+        return (quantity, subtotal);
+    };
+    let key = (order.to_string(), p.to_string());
+    let Some(rem) = refunded.get_mut(&key) else {
+        return (quantity, subtotal);
+    };
+    let take = quantity.min(*rem).max(0);
+    *rem -= take;
+    let net_qty = quantity - take;
+    if take == 0 || quantity <= 0 {
+        return (net_qty, subtotal);
+    }
+    let net_subtotal = subtotal * Decimal::from(net_qty) / Decimal::from(quantity);
+    (net_qty, net_subtotal)
+}
+
 /// Daily gross-margin rollup. `revenue` = Σ `order_item.subtotal`;
 /// `cost` = Σ `quantity * product.cost_price` over items with a known cost.
-/// `refunded`/`cancelled` orders excluded. Tenant-scoped, sorted ascending
-/// by UTC date. Three batched queries (orders → items → product costs) +
-/// bucket in Rust — same kv-surrealkv-safe shape as `sales_daily`.
+/// `refunded`/`cancelled` orders excluded — desde la 0049 `refunded` significa
+/// devuelta ENTERA, y las unidades de una devolución PARCIAL se descuentan
+/// línea por línea ([`refunded_units_by_order_product`]). Tenant-scoped, sorted
+/// ascending by UTC date.
 pub async fn margins_daily(
     db: &Db,
     tenant: &Thing,
@@ -663,13 +812,14 @@ pub async fn margins_daily(
              WHERE tenant = $t AND order IN $ids",
         )
         .bind(("t", tenant.clone()))
-        .bind(("ids", order_ids))
+        .bind(("ids", order_ids.clone()))
         .await?
         .check()?
         .take(0)?;
     if items.is_empty() {
         return Ok(Vec::new());
     }
+    let mut refunded = refunded_units_by_order_product(db, tenant, &order_ids).await?;
 
     // Resolve product costs in one batched query (string-keyed: `Thing`
     // trips clippy `mutable_key_type` as a map key).
@@ -721,13 +871,22 @@ pub async fn margins_daily(
             cost: Decimal::ZERO,
             without_cost: 0,
         });
-        e.revenue += it.subtotal;
+        // Se descuentan las unidades devueltas de esta línea: la venta ocurrió,
+        // pero la mercadería volvió y su costo tampoco se consumió.
+        let (net_qty, net_subtotal) = net_line(
+            &mut refunded,
+            &it.order.to_string(),
+            it.product.as_ref(),
+            it.quantity,
+            it.subtotal,
+        );
+        e.revenue += net_subtotal;
         let unit_cost = it
             .product
             .as_ref()
             .and_then(|p| costs.get(&p.to_string()).cloned().flatten());
         match unit_cost {
-            Some(c) => e.cost += c * Decimal::from(it.quantity),
+            Some(c) => e.cost += c * Decimal::from(net_qty),
             None => e.without_cost += 1,
         }
     }
@@ -798,6 +957,7 @@ pub async fn top_products(
 
     #[derive(Deserialize)]
     struct It {
+        order: Thing,
         product: Option<Thing>,
         product_name: String,
         quantity: i64,
@@ -805,17 +965,18 @@ pub async fn top_products(
     }
     let items: Vec<It> = db
         .query(
-            "SELECT product, product_name, quantity, subtotal FROM order_item \
+            "SELECT order, product, product_name, quantity, subtotal FROM order_item \
              WHERE tenant = $t AND order IN $ids",
         )
         .bind(("t", tenant.clone()))
-        .bind(("ids", order_ids))
+        .bind(("ids", order_ids.clone()))
         .await?
         .check()?
         .take(0)?;
     if items.is_empty() {
         return Ok(Vec::new());
     }
+    let mut refunded = refunded_units_by_order_product(db, tenant, &order_ids).await?;
 
     use std::collections::HashMap;
     struct Agg {
@@ -828,6 +989,16 @@ pub async fn top_products(
     // catalogued and free-text lines never collide.
     let mut by_key: HashMap<String, Agg> = HashMap::new();
     for it in items {
+        // Ranking de lo que se VENDIÓ y se quedó vendido: las unidades que
+        // volvieron por una devolución parcial no cuentan. Una orden devuelta
+        // entera ya quedó fuera por el filtro de `status`.
+        let (net_qty, net_revenue) = net_line(
+            &mut refunded,
+            &it.order.to_string(),
+            it.product.as_ref(),
+            it.quantity,
+            it.subtotal,
+        );
         let pid = it.product.as_ref().map(|p| p.to_string());
         let key = pid
             .clone()
@@ -838,8 +1009,8 @@ pub async fn top_products(
             qty: 0,
             revenue: Decimal::ZERO,
         });
-        e.qty += it.quantity;
-        e.revenue += it.subtotal;
+        e.qty += net_qty;
+        e.revenue += net_revenue;
     }
 
     let mut aggs: Vec<Agg> = by_key.into_values().collect();
@@ -935,28 +1106,43 @@ pub async fn stock_rotation(
 
     #[derive(Deserialize)]
     struct It {
+        order: Thing,
         product: Option<Thing>,
         quantity: i64,
     }
     let items: Vec<It> = db
         .query(
-            "SELECT product, quantity FROM order_item \
+            "SELECT order, product, quantity FROM order_item \
              WHERE tenant = $t AND order IN $ids",
         )
         .bind(("t", tenant.clone()))
-        .bind(("ids", order_ids))
+        .bind(("ids", order_ids.clone()))
         .await?
         .check()?
         .take(0)?;
+    let mut refunded = refunded_units_by_order_product(db, tenant, &order_ids).await?;
 
     use std::collections::HashMap;
     // Sum sold qty per catalogued product (string-keyed: `Thing` trips
     // clippy `mutable_key_type` as a map key). Free-text lines (no product)
     // have no stock to rotate — skipped.
+    //
+    // Netas de devoluciones parciales: la unidad que volvió está otra vez en
+    // la góndola, así que no rotó. Contarla infla la rotación justo del
+    // producto que la gente devuelve — el peor lugar donde equivocarse.
     let mut sold: HashMap<String, i64> = HashMap::new();
     for it in items {
+        let (net_qty, _) = net_line(
+            &mut refunded,
+            &it.order.to_string(),
+            it.product.as_ref(),
+            it.quantity,
+            Decimal::ZERO,
+        );
         if let Some(p) = it.product {
-            *sold.entry(p.to_string()).or_insert(0) += it.quantity;
+            if net_qty > 0 {
+                *sold.entry(p.to_string()).or_insert(0) += net_qty;
+            }
         }
     }
     if sold.is_empty() {
