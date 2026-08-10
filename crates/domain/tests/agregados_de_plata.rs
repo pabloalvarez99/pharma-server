@@ -1201,23 +1201,22 @@ async fn los_reportes_por_item_descuentan_solo_lo_devuelto() {
     );
 }
 
-/// **Una venta en efectivo le suma a TODAS las cajas abiertas del tenant.**
+/// Dos cajeros con caja abierta, UNA venta: le entra a la caja **del que la
+/// cobró**, y a la otra no le entra nada.
 ///
-/// El evento `cash_sales_running_maint` (0030 → 0046 → 0049) aplica su delta
-/// con `WHERE tenant = $tenant AND status = 'open' AND opened_at <= $created`:
-/// sin filtro por cajero ni por sucursal. El chequeo de "una sola caja abierta"
-/// de `open_session` es POR USUARIO (`... AND user=$u`), así que dos cajeros
-/// con caja abierta son un estado alcanzable desde la API pública, y esa única
-/// venta de $5.000 le entra a las dos.
+/// Era el quinto defecto del carril `fix/agregados-de-plata` y quedó `#[ignore]`
+/// ado ahí porque el arreglo no era mío todavía. Lo que hacía el evento
+/// (0030 → 0046 → 0049) era aplicar el delta con
+/// `WHERE tenant = $tenant AND status = 'open' AND opened_at <= $created` —
+/// sin filtro por cajero ni por sucursal—, así que la venta de $5.000 le entraba
+/// a las dos y el sistema esperaba $10.000 en dos cajones que suman $5.000.
 ///
-/// `#[ignore]` a propósito, y no borrado: el arreglo es scopear el evento por
-/// caja/sucursal, territorio del carril de sucursales — moverlo desde acá
-/// pisaría trabajo ajeno. Queda corriendo con `cargo test -- --ignored` para
-/// que el defecto no se pierda en la próxima ronda. Hoy FALLA, y eso es lo que
-/// documenta.
+/// Las tres aserciones hacen falta y ninguna sobra:
+/// * `ca == 5000` — la caja de A se llevó la venta ENTERA;
+/// * `cb == 0` — la de B no vio nada. Sin esta, un reparto 2500/2500 pasaría;
+/// * `ca + cb == 5000` — nombra el daño original en la unidad del negocio.
 #[tokio::test]
-#[ignore = "defecto conocido: el evento no filtra por caja. Arreglo en el carril de sucursales"]
-async fn una_venta_no_le_puede_sumar_a_dos_cajas_a_la_vez() {
+async fn una_venta_le_entra_a_la_caja_del_que_la_cobro() {
     let (db, tenant, user_a) = setup().await;
     let user_b: Thing = db
         .query("CREATE user SET tenant=$t, email='b@t.l', password='x', roles=['admin'] RETURN id")
@@ -1246,9 +1245,317 @@ async fn una_venta_no_le_puede_sumar_a_dos_cajas_a_la_vez() {
 
     let ca = caja::arqueo(&db, &tenant, &a.id).await.unwrap().cash_sales;
     let cb = caja::arqueo(&db, &tenant, &b.id).await.unwrap().cash_sales;
+    assert_eq!(ca, dec("5000"), "la cobró A: los 5000 son de la caja de A");
+    assert_eq!(cb, dec("0"), "B no cobró nada, su cajón no vio esa plata");
     assert_eq!(
         ca + cb,
         dec("5000"),
         "entraron 5000 al negocio, no 10000: la venta es de una sola caja"
     );
+}
+
+/// La venta guarda a qué caja fue. Es el hecho del que cuelga todo lo demás: el
+/// evento no puede scopear si la fila no lo dice, y hasta la 0050 `order` era la
+/// única tabla que toca el cajón sin nombrar su sesión (`expense` la tiene desde
+/// 0012, `purchase_payment` desde 0016, `customer_ledger` desde 0039).
+///
+/// Detector directo del contrato: si `apply_sale` dejara de persistirlo, el
+/// agregado seguiría cuadrando con UNA sola caja abierta y el defecto volvería
+/// a aparecer recién con dos cajeros. Acá falla de inmediato.
+#[tokio::test]
+async fn la_venta_guarda_a_que_caja_fue() {
+    let (db, tenant, user) = setup().await;
+    let s = abrir_caja(&db, &tenant, &user, "0").await;
+    let p = catalog::create_product(&db, &tenant, producto("Zapallo", "1200", 20))
+        .await
+        .unwrap();
+    let v = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user),
+        Some("admin"),
+        None,
+        venta(&p.id, &p.name, "1200", 1, "pos_cash", Some("1200"), None),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        v.order.cash_session.as_deref(),
+        Some(s.id.as_str()),
+        "la venta tiene que nombrar la caja que se llevó el efectivo"
+    );
+
+    // Vender sin caja abierta sigue siendo legal — es el feriante que nunca usa
+    // el arqueo. La venta existe y no le entra a ningún cajón.
+    let (db2, tenant2, user2) = setup().await;
+    let p2 = catalog::create_product(&db2, &tenant2, producto("Zapallo", "1200", 20))
+        .await
+        .unwrap();
+    let v2 = sales::post_sale(
+        &db2,
+        &tenant2,
+        Some(&user2),
+        Some("admin"),
+        None,
+        venta(&p2.id, &p2.name, "1200", 1, "pos_cash", Some("1200"), None),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        v2.order.cash_session, None,
+        "sin caja abierta la venta se hace igual, sin cajón donde asentarla"
+    );
+}
+
+/// **La regresión que un arreglo ingenuo causaría.** La dueña abre la caja a la
+/// mañana y vende un empleado, que no tiene caja propia.
+///
+/// Hoy esa venta le entra a la caja de la dueña —por accidente, porque el evento
+/// se la aplica a todas las abiertas— y **está bien que le entre**: la plata
+/// terminó en ese cajón. Un `WHERE user = $vendedor` pelado la dejaría sin caja
+/// y le inventaría a la dueña un faltante del tamaño del día.
+///
+/// Por eso `sale_cash_session` tiene rama 2: sin caja del vendedor, si hay
+/// EXACTAMENTE UNA abierta en el negocio, es esa. Con 0 o 1 caja abierta el
+/// comportamiento queda idéntico al anterior a la 0050.
+#[tokio::test]
+async fn si_hay_una_sola_caja_la_venta_del_empleado_le_entra_igual() {
+    let (db, tenant, duenia) = setup().await;
+    let empleado: Thing = db
+        .query("CREATE user SET tenant=$t, email='e@t.l', password='x', roles=['admin'] RETURN id")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    // La única caja del negocio la abrió la dueña.
+    let caja_duenia = abrir_caja(&db, &tenant, &duenia, "0").await;
+    let p = catalog::create_product(&db, &tenant, producto("Acelga", "800", 30))
+        .await
+        .unwrap();
+    // Vende el empleado, que no tiene caja propia.
+    let v = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&empleado),
+        Some("admin"),
+        None,
+        venta(&p.id, &p.name, "800", 1, "pos_cash", Some("1000"), None),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        v.order.cash_session.as_deref(),
+        Some(caja_duenia.id.as_str()),
+        "hay una sola caja abierta: la venta del empleado va ahí"
+    );
+    let arq = caja::arqueo(&db, &tenant, &caja_duenia.id).await.unwrap();
+    assert_eq!(
+        arq.cash_sales,
+        dec("800"),
+        "entraron 800 netos de vuelto, y entraron al único cajón que hay"
+    );
+    assert_eq!(
+        arq.session.closing_cash_expected,
+        Some(dec("800")),
+        "el cajón de la dueña espera lo que vendió el empleado, sin faltante inventado"
+    );
+}
+
+/// Con DOS cajas abiertas y un vendedor que no tiene ninguna, la venta no le
+/// entra a nadie — en vez de entrarle a las dos, o a una elegida al azar.
+///
+/// Es el borde de la rama 2: la regla es "si hay exactamente una, es esa", no
+/// "agarrá la primera". Si `sale_cash_session` usara `LIMIT 1` en vez de
+/// `LIMIT 2` + chequeo de cardinalidad, "hay una" y "hay varias" se verían igual
+/// y elegiría una caja al azar, que es una forma más silenciosa del mismo bug:
+/// la plata aparece en el cajón de alguien que no la cobró.
+#[tokio::test]
+async fn con_dos_cajas_ajenas_la_venta_no_elige_una_al_azar() {
+    let (db, tenant, user_a) = setup().await;
+    let mk = |email: &'static str| {
+        let db = db.clone();
+        let tenant = tenant.clone();
+        async move {
+            db.query(format!(
+                "CREATE user SET tenant=$t, email='{email}', password='x', roles=['admin'] RETURN id"
+            ))
+            .bind(("t", tenant))
+            .await
+            .unwrap()
+            .take::<Option<Thing>>((0, "id"))
+            .unwrap()
+            .unwrap()
+        }
+    };
+    let user_b: Thing = mk("b@t.l").await;
+    let vendedor: Thing = mk("c@t.l").await;
+    let a = abrir_caja(&db, &tenant, &user_a, "0").await;
+    let b = abrir_caja(&db, &tenant, &user_b, "0").await;
+    let p = catalog::create_product(&db, &tenant, producto("Zanahoria", "700", 30))
+        .await
+        .unwrap();
+    let v = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&vendedor),
+        Some("admin"),
+        None,
+        venta(&p.id, &p.name, "700", 1, "pos_cash", Some("700"), None),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        v.order.cash_session, None,
+        "dos cajas ajenas: no hay forma de saber cuál, y adivinar es el bug"
+    );
+    let ca = caja::arqueo(&db, &tenant, &a.id).await.unwrap().cash_sales;
+    let cb = caja::arqueo(&db, &tenant, &b.id).await.unwrap().cash_sales;
+    assert_eq!(ca, dec("0"));
+    assert_eq!(cb, dec("0"));
+}
+
+/// La devolución en efectivo sale del cajón **del que devuelve**, y con dos
+/// cajas abiertas ya no se rechaza.
+///
+/// La 0049 rechazaba con "hay N cajas abiertas: no se puede saber de cuál sale
+/// el efectivo" en cuanto había dos. Era lo correcto entonces —adivinar es mover
+/// plata del cajón equivocado— pero dejaba un negocio de dos mostradores
+/// pudiendo vender y no pudiendo devolver. Con la misma precedencia que la
+/// venta, se sabe cuál.
+///
+/// Detector doble: si la devolución volviera a rechazarse, el `unwrap()`
+/// revienta; si el retiro cayera en el cajón ajeno, `arqueo(b)` lo delata.
+#[tokio::test]
+async fn la_devolucion_sale_del_cajon_del_que_devuelve() {
+    let (db, tenant, user_a) = setup().await;
+    let user_b: Thing = db
+        .query("CREATE user SET tenant=$t, email='b@t.l', password='x', roles=['admin'] RETURN id")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let a = abrir_caja(&db, &tenant, &user_a, "0").await;
+    let b = abrir_caja(&db, &tenant, &user_b, "0").await;
+    let p = catalog::create_product(&db, &tenant, producto("Melón", "2000", 20))
+        .await
+        .unwrap();
+    let v = sales::post_sale(
+        &db,
+        &tenant,
+        Some(&user_a),
+        Some("admin"),
+        None,
+        venta(&p.id, &p.name, "2000", 1, "pos_cash", Some("2000"), None),
+    )
+    .await
+    .unwrap();
+
+    // Devuelve A, que es quien tiene el cajón con esa plata adentro.
+    sales::create_refund(
+        &db,
+        &tenant,
+        Some(&user_a),
+        smodel::NewDevolucion {
+            order: Some(v.order.id.clone()),
+            tipo: "venta".into(),
+            motivo: "estaba pasado".into(),
+            notas: None,
+            items: vec![smodel::NewDevolucionItem {
+                product: Some(p.id.clone()),
+                product_name: p.name.clone(),
+                quantity: 1,
+                unit_price: dec("2000"),
+                restock: false,
+            }],
+            metodo_reembolso: Some("efectivo".into()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let arq_a = caja::arqueo(&db, &tenant, &a.id).await.unwrap();
+    let arq_b = caja::arqueo(&db, &tenant, &b.id).await.unwrap();
+    assert_eq!(arq_a.cash_sales, dec("2000"), "la venta fue de A");
+    assert_eq!(arq_a.movements_out, dec("2000"), "y el retiro también");
+    assert_eq!(
+        arq_a.session.closing_cash_expected,
+        Some(dec("0")),
+        "entró 2000 y salió 2000: el cajón de A queda en cero"
+    );
+    assert_eq!(
+        arq_b.movements_out,
+        dec("0"),
+        "B no devolvió nada: de su cajón no salió plata"
+    );
+    assert_eq!(arq_b.session.closing_cash_expected, Some(dec("0")));
+}
+
+/// Cada caja cierra con lo suyo. Es el test que mira el número que alguien
+/// compara contra billetes, no el agregado intermedio.
+///
+/// A vende 5000 y B vende 3000, cada uno en su caja. Bajo el defecto los dos
+/// cajones esperaban 8000 y los dos aparecían con un sobrante de 3000 y 5000
+/// respectivamente — dos faltantes inventados por una sola causa.
+#[tokio::test]
+async fn dos_cajeros_cierran_cada_uno_con_lo_suyo() {
+    let (db, tenant, user_a) = setup().await;
+    let user_b: Thing = db
+        .query("CREATE user SET tenant=$t, email='b@t.l', password='x', roles=['admin'] RETURN id")
+        .bind(("t", tenant.clone()))
+        .await
+        .unwrap()
+        .take::<Option<Thing>>((0, "id"))
+        .unwrap()
+        .unwrap();
+    let a = abrir_caja(&db, &tenant, &user_a, "0").await;
+    let b = abrir_caja(&db, &tenant, &user_b, "0").await;
+    let p = catalog::create_product(&db, &tenant, producto("Papa kilo", "1000", 100))
+        .await
+        .unwrap();
+    for (u, qty) in [(&user_a, 5), (&user_b, 3)] {
+        sales::post_sale(
+            &db,
+            &tenant,
+            Some(u),
+            Some("admin"),
+            None,
+            venta(&p.id, &p.name, "1000", qty, "pos_cash", None, None),
+        )
+        .await
+        .unwrap();
+    }
+
+    let cierre_a = caja::close_session(
+        &db,
+        &tenant,
+        &a.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("5000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let cierre_b = caja::close_session(
+        &db,
+        &tenant,
+        &b.id,
+        CloseSessionInput {
+            closing_cash_counted: dec("3000"),
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(cierre_a.session.closing_cash_expected, Some(dec("5000")));
+    assert_eq!(cierre_a.session.discrepancia, Some(dec("0")));
+    assert_eq!(cierre_b.session.closing_cash_expected, Some(dec("3000")));
+    assert_eq!(cierre_b.session.discrepancia, Some(dec("0")));
 }

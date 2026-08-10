@@ -73,6 +73,11 @@ struct OrderRow {
     /// anteriores a la migración no tienen el campo.
     #[serde(default)]
     branch: Option<Thing>,
+    /// Caja que se llevó el efectivo (migración 0050). `default` por lo mismo:
+    /// las órdenes anteriores no lo tienen, y NONE significa "no le entró a
+    /// ningún arqueo", que es la verdad para ellas.
+    #[serde(default)]
+    cash_session: Option<Thing>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -102,6 +107,7 @@ impl From<OrderRow> for OrderDto {
             expires_at: r.expires_at,
             ready_at: r.ready_at,
             branch: r.branch.map(|t| t.to_string()),
+            cash_session: r.cash_session.map(|t| t.to_string()),
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -272,6 +278,10 @@ pub async fn apply_sale(
     sold_by_name: Option<&str>,
     customer: Option<&Thing>,
     branch: Option<&Thing>,
+    // Caja que se lleva el efectivo (migración 0050). La resuelve
+    // `cash_register::service::sale_cash_session` con el vendedor a mano; acá
+    // sólo se persiste, para que `cash_sales_running_maint` pueda scopear.
+    cash_session: Option<&Thing>,
     req: &PosSaleRequest,
     fefo_plans: &[Option<Vec<FefoAllocation>>],
     physical: &[bool],
@@ -294,7 +304,7 @@ pub async fn apply_sale(
             cash_amount=$cash, card_amount=$card, customer=$cust, \
             customer_name=$cname, customer_phone=$cphone, sold_by=$sb, \
             sold_by_name=$sbname, notes=$notes, external_ref=$ext, \
-            branch=$br RETURN AFTER; ",
+            branch=$br, cash_session=$csess RETURN AFTER; ",
     );
     // Per item we always emit the `order_item` CREATE; a *physical* line also
     // emits the `product.stock` UPDATE + `stock_movement` CREATE. A service line
@@ -364,6 +374,7 @@ pub async fn apply_sale(
         .bind(("notes", req.notes.clone()))
         .bind(("ext", req.external_ref.clone()))
         .bind(("br", branch.cloned()))
+        .bind(("csess", cash_session.cloned()))
         .bind(("ref", order_thing.to_string()));
     for (i, item) in req.items.iter().enumerate() {
         let pid = surrealdb::sql::thing(&item.product)
