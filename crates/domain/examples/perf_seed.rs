@@ -108,6 +108,7 @@ async fn main() -> anyhow::Result<()> {
             active_ingredient: Some(ingredient.to_string()),
             prescription_type: None,
             presentation: None,
+            physical_stock: None,
             discount_percent: None,
             attrs: None,
         };

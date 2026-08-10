@@ -1647,6 +1647,7 @@ pub async fn seed_demo(
                 price: Decimal::from(item.price),
                 cost_price: Some(Decimal::from(item.cost)),
                 stock: 0, // el stock físico entra por el lote → emite movimiento
+                physical_stock: Some(physical_stock),
                 category: None,
                 image_url: None,
                 external_id: Some(demo_external_id(item.name)),
@@ -1666,13 +1667,6 @@ pub async fn seed_demo(
         let product_thing = surrealdb::sql::thing(&product.id)
             .map_err(|e| DomainError::Other(anyhow::anyhow!("product id parse: {e}")))?;
         catalog_repo::upsert_barcode(db, tenant, &product_thing, item.barcode).await?;
-
-        // Servicio = no físico: marcarlo `physical_stock = false` (migración
-        // 0031). `create_product` deja el DEFAULT `true`; este UPDATE lo baja
-        // para los servicios antes de (no) sembrar lote.
-        if !physical_stock {
-            catalog_repo::set_physical_stock(db, tenant, &product_thing, false).await?;
-        }
 
         // Un servicio (`physical_stock = false`) no tiene inventario: no se crea
         // lote ni se emite movimiento. Los bienes físicos entran su stock por un
