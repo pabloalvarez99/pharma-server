@@ -11,6 +11,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -54,6 +55,17 @@ private data class NuevoProducto(
     /** Decimal como texto: es como viaja la plata en toda esta API. */
     val price: String,
     val stock: Int,
+    /**
+     * `false` = el ítem no tiene inventario: la venta no le descuenta nada y
+     * queda fuera de las alertas de stock bajo y del tablero.
+     *
+     * Ausente (`null`, que con `explicitNulls = false` no se serializa) = el
+     * DEFAULT del server, o sea un bien físico. Se manda ausente y no `true`
+     * a propósito: así una app vieja hablándole a un server nuevo, y una app
+     * nueva hablándole a un server que todavía no tiene el campo, hacen lo
+     * mismo que siempre.
+     */
+    @SerialName("physical_stock") val physicalStock: Boolean? = null,
     /** Atributos del pack de rubro (`product.attrs`). Ausente = sin atributos. */
     val attrs: JsonObject? = null,
 )
@@ -70,16 +82,18 @@ private data class CambioDeProducto(
 @Serializable
 private data class CambioDeCodigo(val barcode: String)
 
-/** `StockAdjust` con `set`: deja el stock **en** ese número, no le suma. */
-@Serializable
-private data class AjusteDeStock(val set: Int, val reason: String? = null)
-
 /**
  * Da de alta el producto.
  *
  * Nace con [stock] unidades -una, la que la cajera tiene en la mano- porque con
  * cero el server rechaza la venta por stock insuficiente y crear el producto no
  * habría servido de nada.
+ *
+ * [sinInventario] es la excepción a eso: un ítem que no es una cosa que se
+ * cuenta -un servicio, o el centinela de los montos sueltos- no choca nunca
+ * contra el chequeo de stock, así que nace en cero y se queda en cero para
+ * siempre. El server lo rechaza si además se le pide stock, y hace bien: sería
+ * un número que después nadie puede mover.
  *
  * [unidad] es el valor del `AttrField` «unidad» que declara el pack ("Se vende
  * por": kg, atado, bolsa…). Va adentro de `attrs` con la **clave del pack**, no
@@ -90,6 +104,7 @@ suspend fun crearProducto(
     nombre: String,
     precio: String,
     stock: Int = 1,
+    sinInventario: Boolean = false,
     unidad: String? = null,
     claveDeUnidad: String = CLAVE_UNIDAD,
     /** Atributos que no son del pack —una marca interna, por ejemplo—. */
@@ -102,31 +117,10 @@ suspend fun crearProducto(
                 name = nombre,
                 price = precio,
                 stock = stock,
+                physicalStock = if (sinInventario) false else null,
                 attrs = atributosCon(extras, claveDeUnidad, unidad),
             ),
         )
-    }.exigirExito(api.baseUrl).body()
-}
-
-/**
- * Deja el stock de un producto **en** [unidades].
- *
- * `set` y no `delta` a propósito: es una corrección hacia un número conocido, y
- * repetirla dos veces por un reintento tiene que dar lo mismo. Un `delta` sumaría
- * dos veces.
- *
- * Pide rol admin+ (`crates/api/src/v1/catalog.rs`), así que una cajera puede
- * recibir 403. Quien llame tiene que poder seguir sin esto.
- */
-suspend fun fijarStock(
-    api: ApiFactory,
-    productoId: String,
-    unidades: Int,
-    motivo: String,
-): Resultado<ProductDto> = llamar(api) {
-    api.http.post("${api.baseUrl}/api/v1/products/$productoId/stock") {
-        contentType(ContentType.Application.Json)
-        setBody(AjusteDeStock(set = unidades, reason = motivo))
     }.exigirExito(api.baseUrl).body()
 }
 

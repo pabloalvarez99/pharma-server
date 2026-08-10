@@ -198,6 +198,7 @@ class CobrarViewModel(
             levantarCatalogoDeDisco()
             buscar()
             refrescarCatalogoGuardado()
+            asegurarCentinelaDeMontoSuelto()
         }
         // Los clientes del fiado se piden ACÁ, con el catálogo, y no al entrar
         // al paso de pago. En la feria el fiado no es un extra: es cómo
@@ -249,14 +250,57 @@ class CobrarViewModel(
             is Resultado.Ok -> {
                 catalogoLocal = r.valor
                 catalogoGuardadoEn = servicios.reloj()
-                servicios.cache.guardar(
-                    ClaveDeCache.de(ClaveDeCache.Que.Catalogo, api.baseUrl),
-                    ListSerializer(ProductDto.serializer()),
-                    r.valor,
-                )
+                guardarCatalogoEnDisco()
             }
 
             is Resultado.Falla -> Unit
+        }
+    }
+
+    /** Baja [catalogoLocal] a disco, tal como está. */
+    private suspend fun guardarCatalogoEnDisco() {
+        val servicios = offline ?: return
+        val api = sesion.apiActiva() ?: return
+        servicios.cache.guardar(
+            ClaveDeCache.de(ClaveDeCache.Que.Catalogo, api.baseUrl),
+            ListSerializer(ProductDto.serializer()),
+            catalogoLocal,
+        )
+    }
+
+    /**
+     * Crea el centinela de los montos sueltos, si el negocio todavía no lo tiene.
+     *
+     * **Por qué acá y no cuando hace falta.** Cobrar un monto suelto sin señal
+     * funciona: `asegurarVentaSuelta` mira primero el catálogo del teléfono. El
+     * agujero es la primera vez, porque crearlo sí pide red — y la primera vez
+     * cae justo en la feria, que es donde no hay. Desde que el centinela dejó de
+     * necesitar reposición, crearlo pasó a ser algo que ocurre **una sola vez en
+     * la vida del negocio**, así que se puede adelantar a un momento con señal.
+     * Éste lo es: la pantalla ya está abierta, ya hubo red para el catálogo, y la
+     * cajera no está esperando a que salga nada.
+     *
+     * Va **fuera** del corte de seis horas de [refrescarCatalogoGuardado] a
+     * propósito: ahí se decide si vale la pena volver a bajar el catálogo entero,
+     * y esto es otra cosa. Si el catálogo estuviera fresco pero el centinela no
+     * existiera, quedaría sin crear justo en el caso que importa. Cuesta una
+     * búsqueda por nombre y sólo mientras falte: apenas existe, la primera línea
+     * corta sin salir a la red.
+     *
+     * Si falla, se calla: es una preparación, no una acción que alguien pidió.
+     * El cobro sigue teniendo su propio camino y su propio mensaje.
+     */
+    private suspend fun asegurarCentinelaDeMontoSuelto() {
+        if (ventaSueltaEn(catalogoLocal) != null) return
+        if (!hayConexion) return
+        val api = sesion.apiActiva() ?: return
+
+        val r = asegurarVentaSuelta(api, catalogoLocal)
+        if (r is Resultado.Ok && ventaSueltaEn(catalogoLocal) == null) {
+            catalogoLocal = catalogoLocal + r.valor
+            // A disco, no sólo a memoria: si esto se quedara en RAM, cerrar la
+            // app antes de la primera venta suelta reabriría el agujero.
+            guardarCatalogoEnDisco()
         }
     }
 
@@ -339,7 +383,6 @@ class CobrarViewModel(
                     } else {
                         errorBusqueda = r.error.aCopy("tus productos")
                     }
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
             buscando = false
@@ -459,10 +502,12 @@ class CobrarViewModel(
                 is Resultado.Ok -> {
                     carrito = carrito.conMontoSuelto(r.valor, paraElServidor)
                     invalidarClave()
-                    // Queda en el catálogo de memoria para que la próxima -y la
-                    // primera sin señal- no tenga que salir a la red.
+                    // Queda en el catálogo del teléfono para que la próxima -y la
+                    // primera sin señal- no tenga que salir a la red. En disco,
+                    // no sólo en memoria: cerrar la app no puede desandar esto.
                     if (ventaSueltaEn(catalogoLocal) == null) {
                         catalogoLocal = catalogoLocal + r.valor
+                        guardarCatalogoEnDisco()
                     }
                     montoSuelto = ""
                     preparandoMontoSuelto = false
@@ -472,7 +517,6 @@ class CobrarViewModel(
                 is Resultado.Falla -> {
                     errorMontoSuelto = r.error.userMessage
                     preparandoMontoSuelto = false
-                    if (r.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
         }
@@ -612,10 +656,10 @@ class CobrarViewModel(
     private suspend fun noResolvio(codigo: String, error: AppError) {
         ultimaLectura = null
         when {
-            error is AppError.SesionExpirada -> {
-                escaneando = false
-                sesion.salir()
-            }
+            // La sesión la cierra `llamar()` por su cuenta (`AvisoDeSesion`);
+            // lo que falta acá es apagar la cámara, porque la app se está yendo
+            // a la pantalla de entrada y nadie más lo haría.
+            error is AppError.SesionExpirada -> escaneando = false
 
             // 404 no es una falla del escáner: leyó perfecto, el catálogo no lo
             // tiene. Es el único caso donde ofrecemos crear el producto.
@@ -884,19 +928,13 @@ class CobrarViewModel(
                     } else {
                         errorPago = copyDeCobroFallido(venta.error)
                         cobrando = false
-                        // El copy de sesión expirada dice "te vamos a llevar a la
-                        // pantalla de entrada", y quien lo cumple es `salir()`:
-                        // `RutBusinessApp` observa `sesion.estado` y cambia solo.
-                        // Sin esta línea el mensaje era mentira **acá y sólo
-                        // acá** — todas las demás acciones (abrir caja, anotar
-                        // movimiento, cerrar caja, abonar un fiado) ya la tenían.
-                        // Y era el peor lugar para que faltara: el cajero se
-                        // quedaba en la pantalla de cobro, con el cliente
-                        // delante, leyendo una promesa que no pasaba nunca y sin
-                        // botón para tocar (Unauthorized no lleva "Reintentar").
-                        // La venta no se cobró — el server contestó 401 —, así
-                        // que no hay plata en juego, sólo el carrito.
-                        if (venta.error is AppError.SesionExpirada) sesion.salir()
+                        // El 401 no se maneja acá. El copy de sesión expirada
+                        // promete llevar a la pantalla de entrada, y quien lo
+                        // cumple es `sesion.salir()` — pero eso ya pasa solo:
+                        // lo dispara `llamar()` para cualquier llamada de esta
+                        // sesión (`AvisoDeSesion`). Acá la venta no se cobró, el
+                        // server contestó 401, así que no hay plata en juego:
+                        // sólo el carrito, que se pierde con la sesión.
                     }
                 }
 
