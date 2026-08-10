@@ -48,6 +48,10 @@ struct OrderRow {
     total: Decimal,
     cash_amount: Option<Decimal>,
     card_amount: Option<Decimal>,
+    /// Migración 0049. `default` porque las órdenes anteriores no tienen el
+    /// campo — `Decimal::default()` es 0, que es exactamente "nada devuelto".
+    #[serde(default)]
+    refunded_total: Decimal,
     customer: Option<Thing>,
     customer_name: Option<String>,
     customer_phone: Option<String>,
@@ -84,6 +88,7 @@ impl From<OrderRow> for OrderDto {
             total: r.total,
             cash_amount: r.cash_amount,
             card_amount: r.card_amount,
+            refunded_total: r.refunded_total,
             customer: r.customer.map(|t| t.to_string()),
             customer_name: r.customer_name,
             customer_phone: r.customer_phone,
@@ -525,12 +530,42 @@ pub struct AppliedRefund {
     pub order_marked_refunded: bool,
 }
 
+/// Efectos de plata de una devolución, derivados por
+/// [`super::service::create_refund`] y aplicados por [`apply_refund`] DENTRO de
+/// la misma transacción que la devolución (migración 0049).
+///
+/// Van juntos a propósito: un crash entre "se devolvió la mercadería" y "salió
+/// la plata del cajón" deja el arqueo mintiendo, que es el defecto que esto
+/// cierra. Mismo criterio que `expenses::service::create_expense` con su
+/// `retiro`.
+#[derive(Debug, Default)]
+pub struct RefundEffects {
+    /// Acumulado devuelto de la orden DESPUÉS de esta devolución
+    /// (`order.refunded_total`). `None` = devolución suelta, sin orden.
+    pub refunded_total: Option<Decimal>,
+    /// `true` sólo cuando el acumulado cubre la venta entera. Una parcial deja
+    /// la orden en su estado: `refunded` significa devuelta ENTERA, no
+    /// "alguien devolvió algo" (migración 0049).
+    pub mark_refunded: bool,
+    /// Retiro del cajón: sesión abierta donde sale la plata + monto. `Some`
+    /// sólo cuando el reembolso fue en efectivo.
+    pub cash_retiro: Option<(Thing, Decimal)>,
+    /// Reversa del fiado: cliente + monto que deja de deber. `Some` sólo
+    /// cuando la venta original fue `pos_fiado`.
+    pub ledger_reversal: Option<(Thing, Decimal)>,
+}
+
 /// Persist a `devolucion` + its `devolucion_item`s atomically. Lines flagged
 /// `restock=true` add their quantity back to `product.stock` and append a
 /// `stock_movement(reason='return')` inside the same BEGIN/COMMIT (stock is
 /// never written outside the audit trail — same invariant as the sale path).
-/// When `order` is set, the order is moved to `status='refunded'` in the same
-/// tx so a crash can't leave a refunded order still marked paid.
+///
+/// `effects` ([`RefundEffects`], migración 0049) trae los efectos de plata ya
+/// derivados por el servicio y los aplica en ESTA misma transacción:
+/// `order.refunded_total` acumulado, `status='refunded'` sólo si la devolución
+/// cubre la venta entera, el `cash_movement(tipo='retiro')` cuando el reembolso
+/// fue en efectivo, y la reversa del fiado en `customer_ledger`. Un crash entre
+/// medio no puede dejar la mercadería devuelta con el cajón mintiendo.
 ///
 /// `restock_plans[i]` aligns with `req.items[i]`: `Some(allocs)` restores the
 /// returned units to those specific `product_batch` lots (so the
@@ -556,6 +591,7 @@ pub async fn apply_refund(
     req: &NewDevolucion,
     restock_plans: &[Option<Vec<FefoAllocation>>],
     total: Decimal,
+    effects: &RefundEffects,
 ) -> DomainResult<AppliedRefund> {
     let did = uuid::Uuid::new_v4().simple().to_string();
     let dev_thing = surrealdb::sql::thing(&format!("devolucion:{did}"))
@@ -598,9 +634,21 @@ pub async fn apply_refund(
             mov_idx.push(None);
         }
     }
-    let order_marked = order.is_some();
-    if order_marked {
-        q.push_str("UPDATE order SET status='refunded' WHERE id=$ord AND tenant=$t; ");
+    // La orden acumula lo devuelto y sólo cae a `refunded` cuando el acumulado
+    // cubre la venta entera (migración 0049). Antes se marcaba `refunded` ante
+    // cualquier devolución, parcial incluida: eso hacía desaparecer la venta
+    // completa de los reportes del día y le restaba al esperado del cajón los
+    // $15.000 de una venta a la que sólo se le devolvieron $5.000.
+    let order_marked = effects.mark_refunded;
+    if effects.refunded_total.is_some() {
+        if order_marked {
+            q.push_str(
+                "UPDATE order SET refunded_total=$rt, status='refunded' \
+                 WHERE id=$ord AND tenant=$t; ",
+            );
+        } else {
+            q.push_str("UPDATE order SET refunded_total=$rt WHERE id=$ord AND tenant=$t; ");
+        }
     }
     // Batch restocks grouped at the tail (no RETURN, results not read) so the
     // per-item statement indices above stay fixed regardless of allocation
@@ -615,7 +663,45 @@ pub async fn apply_refund(
             ralloc_idx += 1;
         }
     }
+    // Efectos de plata, al final y sin RETURN: no corren los índices por ítem.
+    //
+    // El retiro sale del cajón ABIERTO hoy, con su propia fecha, igual que un
+    // gasto — no se toca el agregado de la venta. El esperado de un arqueo sólo
+    // puede depender de movimientos que ya pasaron: se cuenta a mano y no hay
+    // forma de volver a contar el cajón de ayer.
+    if effects.cash_retiro.is_some() {
+        q.push_str(
+            "CREATE cash_movement SET tenant=$t, session=$cms, tipo='retiro', \
+                amount=$cma, reason=$cmr, admin=$by; ",
+        );
+    }
+    // Fiado: la mercadería vuelve, la deuda baja. `kind='devolucion'` (0049) y
+    // no `abono` porque el cliente NO pagó — mezclarlos rompería cualquier
+    // lectura de "cuánto cobré" sobre el ledger.
+    if effects.ledger_reversal.is_some() {
+        q.push_str(
+            "CREATE customer_ledger SET tenant=$t, customer=$clc, \
+                kind='devolucion', amount=$cla, order=$ord, note=$cln, \
+                created_by=$by; ",
+        );
+    }
     q.push_str("COMMIT;");
+
+    let (retiro_session, retiro_amount) = match &effects.cash_retiro {
+        Some((s, a)) => (
+            surrealdb::sql::Value::from(s.clone()),
+            dec_val(*a),
+        ),
+        None => (surrealdb::sql::Value::None, dec_val(Decimal::ZERO)),
+    };
+    let (ledger_customer, ledger_amount) = match &effects.ledger_reversal {
+        Some((c, a)) => (
+            surrealdb::sql::Value::from(c.clone()),
+            dec_val(*a),
+        ),
+        None => (surrealdb::sql::Value::None, dec_val(Decimal::ZERO)),
+    };
+    let money_note = format!("Devolución: {}", req.motivo.trim());
 
     let mut qb = db
         .query(q)
@@ -630,7 +716,17 @@ pub async fn apply_refund(
         .bind(("by", processed_by.cloned()))
         .bind(("br", branch.cloned()))
         .bind(("dev", dev_thing.clone()))
-        .bind(("devref", dev_thing.to_string()));
+        .bind(("devref", dev_thing.to_string()))
+        .bind((
+            "rt",
+            dec_val(effects.refunded_total.unwrap_or(Decimal::ZERO)),
+        ))
+        .bind(("cms", retiro_session))
+        .bind(("cma", retiro_amount))
+        .bind(("cmr", money_note.clone()))
+        .bind(("clc", ledger_customer))
+        .bind(("cla", ledger_amount))
+        .bind(("cln", money_note));
     for (i, it) in req.items.iter().enumerate() {
         let pid: surrealdb::sql::Value = match it.product.as_deref() {
             Some(s) => surrealdb::sql::thing(s)

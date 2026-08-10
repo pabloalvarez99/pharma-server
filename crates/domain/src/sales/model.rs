@@ -53,6 +53,14 @@ pub struct OrderDto {
     #[serde(with = "rust_decimal::serde::str_option")]
     #[schema(value_type = String)]
     pub card_amount: Option<Decimal>,
+    /// Plata de esta venta ya devuelta, acumulada sobre N devoluciones
+    /// parciales (migración 0049). `status == 'refunded'` ⇔
+    /// `refunded_total >= total`: devolver una parte deja la venta viva y este
+    /// campo dice cuánto se fue. Distinto del "neto de vuelto" de la 0046 —
+    /// ese es cuánto entró al cobrar, esto es cuánto salió después.
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub refunded_total: Decimal,
     pub customer: Option<String>,
     pub customer_name: Option<String>,
     pub customer_phone: Option<String>,

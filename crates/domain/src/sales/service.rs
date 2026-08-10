@@ -878,6 +878,67 @@ pub async fn get_receipt(db: &Db, tenant: &Thing, id: &str) -> DomainResult<Rece
     })
 }
 
+/// Caja abierta donde tiene que salir el efectivo de una devolución, con su
+/// lock de mutación ya tomado (migración 0049).
+///
+/// El lock se sostiene desde ANTES de re-verificar el estado y hasta que la
+/// transacción de la devolución commitea: es el mismo que toman
+/// `cash_register::add_movement` y `close_session`, así que un `close_session`
+/// concurrente no puede congelar el esperado justo antes de que aterrice el
+/// retiro (faltante fantasma). Mismo patrón que
+/// `expenses::service::create_expense`.
+///
+/// Sin caja abierta ⇒ `Conflict`, no un retiro al vacío: el reembolso en
+/// efectivo es plata que sale y necesita asiento.
+///
+/// Con MÁS de una caja abierta ⇒ `Conflict` también. `NewDevolucion` no tiene
+/// campo para elegir cuál, y adivinar sería mover plata del cajón equivocado.
+/// Es el mismo agujero que tiene hoy el evento `cash_sales_running_maint`, que
+/// le suma cada venta a TODAS las cajas abiertas del tenant (defecto conocido,
+/// territorio del carril de sucursales); acá al menos falla ruidoso.
+async fn open_session_for_refund(
+    db: &Db,
+    tenant: &Thing,
+) -> DomainResult<(Thing, tokio::sync::OwnedMutexGuard<()>)> {
+    let mut r = db
+        .query("SELECT VALUE id FROM cash_register_session WHERE tenant = $t AND status = 'open'")
+        .bind(("t", tenant.clone()))
+        .await?
+        .check()?;
+    let open: Vec<Thing> = r.take(0)?;
+    let session = match open.len() {
+        0 => {
+            return Err(DomainError::Conflict(
+                "no hay caja abierta: abrí la caja antes de devolver en efectivo".into(),
+            ))
+        }
+        1 => open.into_iter().next().unwrap(),
+        n => {
+            return Err(DomainError::Conflict(format!(
+                "hay {n} cajas abiertas: no se puede saber de cuál sale el efectivo"
+            )))
+        }
+    };
+    let guard = crate::cash_register::service::session_mutation_lock(tenant, &session.to_string())
+        .lock_owned()
+        .await;
+    // Re-chequeo BAJO el lock: entre el SELECT y el lock, un `close_session`
+    // pudo cerrarla.
+    let mut sr = db
+        .query("SELECT status FROM cash_register_session WHERE id = $id AND tenant = $t LIMIT 1")
+        .bind(("id", session.clone()))
+        .bind(("t", tenant.clone()))
+        .await?
+        .check()?;
+    let status: Option<String> = sr.take((0, "status"))?;
+    if status.as_deref() != Some("open") {
+        return Err(DomainError::Conflict(
+            "la caja se cerró: abrí la caja antes de devolver en efectivo".into(),
+        ));
+    }
+    Ok((session, guard))
+}
+
 /// Validate + persist a refund/return atomically.
 ///
 /// Rules enforced before the tx:
@@ -954,10 +1015,16 @@ pub async fn create_refund(
     let sale_lock = tenant_sale_lock(tenant);
     let _refund_guard = sale_lock.lock().await;
 
+    // La venta original, si la hay: de acá salen el acumulado ya devuelto, el
+    // total a cubrir y si fue fiada. Se necesita después del bloque para
+    // derivar los efectos de plata (migración 0049).
+    let mut sale: Option<crate::sales::model::OrderDto> = None;
+
     if let Some(ord) = order_thing.as_ref() {
         let (order_row, sold_items) = repo::get_order(db, tenant, ord)
             .await?
             .ok_or(DomainError::NotFound)?;
+        sale = Some(order_row.clone());
         // La devolución repone EN LA SUCURSAL DONDE SE VENDIÓ: devolver en el
         // local A no puede inflar el stock del local B.
         refund_branch = crate::stock::service::parse_branch(order_row.branch.as_deref())?;
@@ -1055,6 +1122,45 @@ pub async fn create_refund(
         .map(|i| i.unit_price * Decimal::from(i.quantity))
         .sum();
 
+    // === Efectos de plata de la devolución (migración 0049) ==================
+    //
+    // Dos señales, las dos hechos y no adivinanzas:
+    //   `metodo_reembolso == 'efectivo'` ⇒ la plata salió del cajón.
+    //   la venta original fue `pos_fiado` ⇒ el cliente nunca la pagó, así que
+    //   devolver mercadería baja la deuda.
+    // Cualquier otra cosa (tarjeta, o método sin registrar) no toca plata: una
+    // devolución con tarjeta vuelve por el procesador, y de un campo vacío no
+    // se inventa un movimiento de caja.
+    //
+    // Ojo con la asimetría contra `invariants::cash_into_drawer`, que trata
+    // `None` como "entró todo": ahí `cash_amount` es un campo OPCIONAL de una
+    // venta que sí se cobró. Acá `metodo_reembolso` es la ÚNICA señal de que
+    // hubo plata en movimiento; inventar un retiro desde el silencio fabrica
+    // faltantes, que es justo la clase de bug que esto cierra.
+    let refund_cash = req.metodo_reembolso.as_deref() == Some("efectivo");
+    let mut effects = repo::RefundEffects::default();
+    if let Some(s) = sale.as_ref() {
+        let acc = s.refunded_total + total;
+        effects.refunded_total = Some(acc);
+        effects.mark_refunded = acc >= s.total;
+        if !refund_cash && s.payment_method == "pos_fiado" && total > Decimal::ZERO {
+            let cust = s.customer.as_deref().ok_or_else(|| {
+                DomainError::Invalid("venta fiada sin cliente: no hay deuda que revertir".into())
+            })?;
+            effects.ledger_reversal = Some((parse_tenant_thing(cust, "customer")?, total));
+        }
+    }
+    // El retiro necesita una caja abierta donde salga la plata. Sin caja no se
+    // deja caer en el vacío: se rechaza y se dice por qué. Un reembolso en
+    // efectivo sin asiento es plata que se va sin libro — el agujero exacto que
+    // este carril cierra.
+    let mut drawer_guard = None;
+    if refund_cash && total > Decimal::ZERO {
+        let (session, guard) = open_session_for_refund(db, tenant).await?;
+        drawer_guard = Some(guard);
+        effects.cash_retiro = Some((session, total));
+    }
+
     let applied = repo::apply_refund(
         db,
         tenant,
@@ -1064,8 +1170,10 @@ pub async fn create_refund(
         &req,
         &restock_plans,
         total,
+        &effects,
     )
     .await?;
+    drop(drawer_guard);
 
     Ok(RefundResponse {
         devolucion: applied.devolucion,
