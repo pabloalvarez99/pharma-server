@@ -67,12 +67,14 @@ pub fn router(state: AppState) -> Router<AppState> {
     // the receipt header) — consistent with the generic `GET /settings/{key}`.
     let reads = Router::new()
         .route("/api/v1/config/payment-methods", get(get_payment_methods))
-        .route("/api/v1/config/business", get(get_business));
+        .route("/api/v1/config/business", get(get_business))
+        .route("/api/v1/config/receipt", get(get_receipt_config));
 
     // Writes are admin/owner only.
     let writes = Router::new()
         .route("/api/v1/config/payment-methods", put(set_payment_methods))
         .route("/api/v1/config/business", put(set_business))
+        .route("/api/v1/config/receipt", put(set_receipt_config))
         .route_layer(crate::role::layer(state, admin_plus()));
 
     users.merge(reads).merge(writes)
@@ -534,4 +536,67 @@ async fn set_business(
     })?;
     domain::sales::service::set_setting(db.as_ref(), &t, BUSINESS_PROFILE_KEY, &encoded).await?;
     Ok(Json(profile))
+}
+
+// ---------------------------------------------------------------------------
+// Boleta
+// ---------------------------------------------------------------------------
+
+/// El pie que se imprime abajo de cada boleta.
+///
+/// Se lee sin rol especial porque el POS lo necesita para imprimir; escribirlo
+/// es admin/owner, como todo lo que cambia cómo se ve el negocio hacia afuera.
+#[derive(Debug, Serialize, Deserialize)]
+struct ReceiptConfig {
+    /// Lo que va a salir impreso. En la lectura viene siempre resuelto: si el
+    /// negocio no configuró nada, acá llega el default con su nombre, no un
+    /// `null` que la pantalla tenga que interpretar.
+    footer_note: String,
+    /// `true` cuando eso es el default derivado del nombre del negocio y no
+    /// algo que alguien escribió. La pantalla lo usa para mostrarlo como
+    /// sugerencia en vez de como texto guardado.
+    #[serde(default)]
+    es_default: bool,
+}
+
+/// Nombre del negocio para armar el default del pie.
+async fn nombre_del_negocio(db: &db::Db, t: &Thing) -> Result<String, ApiError> {
+    Ok(domain::sales::repo::tenant_name(db, t)
+        .await?
+        .unwrap_or_default())
+}
+
+async fn get_receipt_config(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<ReceiptConfig>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    let nombre = nombre_del_negocio(db.as_ref(), &t).await?;
+    let footer_note = domain::settings::receipt_footer_note(db.as_ref(), &t, &nombre).await?;
+    let es_default = footer_note == domain::settings::default_receipt_footer(&nombre);
+    Ok(Json(ReceiptConfig {
+        footer_note,
+        es_default,
+    }))
+}
+
+/// Un `footer_note` vacío **borra** la personalización y vuelve al default. Es
+/// la única forma de deshacer sin tener que adivinar el texto original.
+async fn set_receipt_config(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(req): Json<ReceiptConfig>,
+) -> Result<Json<ReceiptConfig>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    let nombre = nombre_del_negocio(db.as_ref(), &t).await?;
+    let footer_note =
+        domain::settings::set_receipt_footer_note(db.as_ref(), &t, &req.footer_note, &nombre)
+            .await?;
+    let es_default = footer_note == domain::settings::default_receipt_footer(&nombre);
+    Ok(Json(ReceiptConfig {
+        footer_note,
+        es_default,
+    }))
 }

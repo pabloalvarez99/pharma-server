@@ -113,8 +113,11 @@ pub struct OrderItemBatchAllocation {
 
 // --- receipt / boleta (read-only POS ticket data) --------------------------
 
-/// Static footer printed on every ticket (Spanish, user-facing).
-pub const RECEIPT_FOOTER_NOTE: &str = "Gracias por su compra · Tu Farmacia";
+// El pie de boleta ya no es una constante. Era
+// `"Gracias por su compra · Tu Farmacia"`, y Tu Farmacia es **otro producto**:
+// cada negocio que imprimía una boleta repartía publicidad ajena en su propio
+// papel. Ahora es por tenant, con default derivado del nombre del negocio:
+// ver [`crate::settings::receipt_footer_note`].
 
 /// One printable line on a [`ReceiptDto`]. `line_total = qty * unit_price`.
 #[derive(Debug, Clone, Serialize, ToSchema)]

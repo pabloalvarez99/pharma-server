@@ -88,6 +88,16 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
     // Sin botón: los `ViewModel` cierran la sesión al ver este error, así que la
     // app se va sola a la pantalla de entrada. Un botón acá alcanzaría a
     // dibujarse un instante y llevaría a la misma pantalla que ya viene sola.
+    //
+    // CONDICIÓN QUE ESTE TEXTO EXIGE, y que este módulo no puede garantizar
+    // solo: quien muestre esta copy TIENE que llamar a `sesion.salir()`. El
+    // redirect no lo hace el mensaje, lo hace `RutBusinessApp` observando
+    // `sesion.estado`. Ya pasó una vez que faltara — en el cobro (2026-08-09):
+    // el cajero quedaba mirando "te vamos a llevar a la pantalla de entrada"
+    // para siempre, y sin botón, porque acá `retryLabel` es null. Si algún día
+    // hay un caso donde no se puede cerrar la sesión, lo que se cambia es el
+    // texto, no el silencio: prometerle un rescate a alguien que ya está
+    // perdido y no cumplirlo es peor que no decirle nada.
     RbErrorKind.Unauthorized -> RbErrorCopy(
         title = "Tienes que entrar de nuevo",
         message = "Por seguridad se cerró tu sesión. Te vamos a llevar a la pantalla " +

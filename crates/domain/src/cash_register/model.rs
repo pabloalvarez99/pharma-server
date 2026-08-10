@@ -90,8 +90,9 @@ pub struct CashMovementDto {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CloseSummary {
     pub session: CashSessionDto,
-    /// Sum of `order.cash_amount` for pos_cash/pos_mixed orders during the
-    /// session (refunded/cancelled excluded).
+    /// Efectivo neto de vuelto ([`crate::invariants::cash_into_drawer`]) de las
+    /// órdenes pos_cash/pos_mixed de la sesión (refunded/cancelled excluidas).
+    /// NO es `Σ order.cash_amount`: eso es lo entregado, vuelto incluido.
     #[serde(with = "rust_decimal::serde::str")]
     #[schema(value_type = String)]
     pub cash_sales: Decimal,

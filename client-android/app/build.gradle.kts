@@ -421,6 +421,10 @@ dependencies {
     // alguien se acuerde de enchufar un teléfono.
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test.junit4)
+    // `Dispatchers.setMain`: sin esto no se puede probar nada que pase adentro
+    // de un `viewModelScope.launch`, que es donde vive el comportamiento de
+    // todos los ViewModel de la app. `:core` ya la usaba.
+    testImplementation(libs.kotlinx.coroutines.test)
     debugImplementation(libs.compose.ui.test.manifest)
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.espresso.core)
