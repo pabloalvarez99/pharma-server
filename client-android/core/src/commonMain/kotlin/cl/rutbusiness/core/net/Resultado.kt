@@ -33,15 +33,27 @@ suspend fun <T> llamar(baseUrl: String, bloque: suspend () -> T): Resultado<T> =
     llamar(baseUrl, ReporteDeRed.Nulo, bloque)
 
 /**
- * La misma llamada, avisándole a [ApiFactory.red] cómo le fue.
+ * La misma llamada, avisándole a [ApiFactory.red] cómo le fue y a
+ * [ApiFactory.sesionVencida] si el token se murió.
  *
  * Es la forma que usan los repositorios. Pasa por acá **todo** lo que habla con
  * el server, y por eso es el único lugar donde hace falta enganchar el cartel
  * de "sin conexión": engancharlo repositorio por repositorio dejaría agujeros,
  * y un agujero acá es un cartel que no se prende cuando debería.
+ *
+ * El 401 va por el mismo embudo y por el mismo motivo. Antes cada pantalla
+ * tenía que acordarse de llamar a `salir()` en su rama de error —catorce
+ * lugares en seis ViewModels— y con eso el agujero no era un cartel: era la app
+ * mandando a entrar de nuevo con el token muerto todavía guardado. Quien
+ * escucha decide qué hacer; acá sólo se reporta el hecho.
  */
-suspend fun <T> llamar(api: ApiFactory, bloque: suspend () -> T): Resultado<T> =
-    llamar(api.baseUrl, api.red, bloque)
+suspend fun <T> llamar(api: ApiFactory, bloque: suspend () -> T): Resultado<T> {
+    val resultado = llamar(api.baseUrl, api.red, bloque)
+    if (resultado is Resultado.Falla && resultado.error is AppError.SesionExpirada) {
+        api.sesionVencida.vencio()
+    }
+    return resultado
+}
 
 private suspend fun <T> llamar(
     baseUrl: String,

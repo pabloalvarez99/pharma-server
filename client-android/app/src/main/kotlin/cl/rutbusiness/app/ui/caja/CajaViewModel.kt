@@ -161,7 +161,6 @@ class CajaViewModel(
             when (val abierta = caja.sesionAbierta()) {
                 is Resultado.Falla -> {
                     error = abierta.error.aCopy("tu caja")
-                    if (abierta.error is AppError.SesionExpirada) sesion.salir()
                     cargando = false
                     return@launch
                 }
@@ -264,7 +263,6 @@ class CajaViewModel(
 
                 is Resultado.Falla -> {
                     errorDeAccion = copyDeAperturaFallida(abierta.error)
-                    if (abierta.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
 
@@ -341,7 +339,6 @@ class CajaViewModel(
                     // nuevo. Este endpoint no tiene clave de idempotencia.
                     cargarEstadoDe(caja, sesionId)
                     errorDeAccion = copyDeMovimientoFallido(guardado.error)
-                    if (guardado.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
 
@@ -401,7 +398,6 @@ class CajaViewModel(
 
                 is Resultado.Falla -> {
                     errorDeAccion = copyDeCierreFallido(cerrado.error)
-                    if (cerrado.error is AppError.SesionExpirada) sesion.salir()
                 }
             }
 

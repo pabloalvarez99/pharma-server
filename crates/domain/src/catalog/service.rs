@@ -147,6 +147,17 @@ pub async fn create_product(
     if input.price < Decimal::ZERO {
         return Err(DomainError::Invalid("precio no puede ser negativo".into()));
     }
+    // Un ítem sin inventario no puede nacer con existencias. No es cosmético:
+    // el stock inicial de un producto físico emite su `product_branch_stock` en
+    // el CREATE (migración 0041) y esa condición pide `physical_stock = true`,
+    // así que un servicio con stock quedaría con `product.stock` sin respaldo en
+    // el libro mayor por sucursal — y `stock::service` se niega a moverlo, o sea
+    // que tampoco habría forma de corregirlo después.
+    if input.physical_stock == Some(false) && input.stock != 0 {
+        return Err(DomainError::Invalid(
+            "un ítem sin inventario (physical_stock = false) no puede nacer con stock".into(),
+        ));
+    }
     let category = match input.category.as_deref() {
         Some(s) if !s.is_empty() => Some(resolve_category(db, tenant, s).await?),
         _ => None,

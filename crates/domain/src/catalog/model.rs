@@ -111,6 +111,19 @@ pub struct NewProduct {
     pub cost_price: Option<Decimal>,
     #[serde(default)]
     pub stock: i64,
+    /// `false` = servicio: la venta salta el chequeo de stock y el ítem queda
+    /// fuera de las alertas de stock bajo y del tablero (migración 0031).
+    /// Ausente (`None`) = el DEFAULT de la base (`true`), o sea un bien físico:
+    /// todo cliente escrito antes de este campo sigue creando productos físicos.
+    ///
+    /// **Sólo se decide al crear**, y por eso no está en [`UpdateProduct`]: el
+    /// stock inicial de un producto físico emite su movimiento de sucursal en el
+    /// `CREATE` (migración 0041). Darlo vuelta después dejaría un `product.stock`
+    /// sin el `product_branch_stock` que le corresponde, y para eso no hay
+    /// reconciliación escrita. Un ítem creado del lado equivocado se borra y se
+    /// crea de nuevo.
+    #[serde(default)]
+    pub physical_stock: Option<bool>,
     /// Category record id (`category:xxx`) — validated tenant-scoped.
     pub category: Option<String>,
     pub image_url: Option<String>,
