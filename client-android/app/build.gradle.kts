@@ -91,6 +91,34 @@ val versionNameDeEsteBuild: String = run {
 // app instalada, no acá.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Client id de Google — REGLA 3 (ADR-0022)
+//
+// Tres fuentes, en este orden, y ninguna es el repo:
+//
+//   1. `-Prb.googleClientId=...` en la línea de comandos.
+//   2. `client-android/local.properties`, clave `rb.googleClientId`.
+//      Ese archivo ya está gitignoreado (es donde vive `sdk.dir`).
+//   3. La variable de entorno `RB_GOOGLE_CLIENT_ID`.
+//
+// Si no hay ninguna queda vacío, y vacío significa que este APK no trae Google:
+// el botón no aparece y se entra con correo y clave, igual que hoy. No falla el
+// build a propósito — al revés que la firma de release. Un APK sin Google es
+// perfectamente válido y es el que sale del repo hoy; uno sin firmar no sirve
+// para nada.
+// ---------------------------------------------------------------------------
+
+val propiedadesLocales = Properties().apply {
+    val archivo = rootProject.file("local.properties")
+    if (archivo.isFile) archivo.inputStream().use { load(it) }
+}
+
+val clientIdDeGoogle: String = (
+    providers.gradleProperty("rb.googleClientId").orNull
+        ?: propiedadesLocales.getProperty("rb.googleClientId")
+        ?: System.getenv("RB_GOOGLE_CLIENT_ID")
+    )?.trim().orEmpty()
+
 val archivoDeFirma = rootProject.file("keystore.properties")
 
 val propiedadesDeFirma = Properties().apply {
@@ -244,6 +272,34 @@ android {
             "URL_NUBE",
             "\"${providers.gradleProperty("rb.urlNube").getOrElse("")}\"",
         )
+
+        // Entrar con Google (ADR-0022). Ver `core/.../IdentidadGoogleAndroid.kt`.
+        //
+        // **Vacío por defecto, y vacío es lo que hay en el repo.** Sin este
+        // valor el botón de Google no aparece y la app se comporta exactamente
+        // como antes de que existiera este carril: correo y clave. Eso es lo que
+        // permite mergear esto antes de que haya credenciales en la consola de
+        // Google — y es un test, no una intención (`IdentidadGoogleDeEsteBuildTest`).
+        //
+        // Va el client id **Web**, no el de Android. Los dos existen y se
+        // confunden fácil:
+        //
+        //   * el de Android ata el APK a su package y a la huella SHA-1 del
+        //     certificado de firma — Google lo usa para decidir si le entrega
+        //     una credencial a esta app;
+        //   * el Web es el que queda en el `aud` del `id_token`, y es contra el
+        //     que el server compara (`PHARMA_GOOGLE_CLIENT_ID`).
+        //
+        // Poner el de Android acá compila, abre el selector, y después el server
+        // rechaza todos los tokens con 401 sin decir por qué. Los dos tienen que
+        // estar en el mismo proyecto de Google Cloud.
+        //
+        // Ninguno de los dos es un secreto: el de Android viaja dentro del APK y
+        // se lee descomprimiéndolo. Igual entra por `local.properties`
+        // (gitignoreado) o por entorno, nunca por el repo — Regla 3 no hace
+        // excepciones por grado, y al lado de este campo el día de mañana va a
+        // haber alguno que sí lo sea.
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$clientIdDeGoogle\"")
     }
 
     // PISO DE HARDWARE (regla 2): NUNCA un APK universal. Un teléfono con 8 GB

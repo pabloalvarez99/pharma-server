@@ -33,6 +33,17 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.androidx.datastore.preferences)
+            // Entrar con Google (ADR-0022). Sólo `androidMain`: el contrato
+            // `IdentidadGoogle` vive en `commonMain` sin saber que existen, y
+            // por eso el día que haya iOS no hay que tocar la interfaz.
+            //
+            // Estas tres suman ~1 MB al APK y viajan aunque el build no traiga
+            // client id. Se acepta: partirlas por flavor duplicaría la matriz de
+            // builds (y el APK ya sale partido por ABI) para ahorrar menos de lo
+            // que pesa el escáner de códigos.
+            implementation(libs.androidx.credentials)
+            implementation(libs.androidx.credentials.play.services.auth)
+            implementation(libs.googleid)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

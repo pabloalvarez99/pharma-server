@@ -13,6 +13,7 @@ pub mod customers;
 pub mod expenses;
 pub mod finance;
 pub mod google_identity;
+pub mod google_verify;
 pub mod inventory;
 pub mod operations;
 pub mod prescriptions;

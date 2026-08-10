@@ -24,6 +24,10 @@ sha2.workspace = true
 # Async mutex (per-tenant sale serialization) + timer (conflict backoff) for
 # the BUG-003/004 concurrency-safe sale path. Workspace tokio = full features.
 tokio.workspace = true
+# Verificación RS256 del `id_token` de Google (`google_verify`). Sólo decodifica
+# y valida firma contra llaves públicas — no emite nada: nuestro JWT lo firma
+# `crates/auth`, por el mismo camino que el login con clave.
+jsonwebtoken.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
@@ -32,6 +36,11 @@ chrono = { workspace = true }
 surrealdb = { workspace = true, features = ["kv-mem"] }
 # Property-based testing of the canonical invariants (`crate::invariants`).
 proptest = "1"
+# Par RSA de test para `google_verify`: se **genera en memoria**, nunca se
+# commitea una clave privada al repo (Regla 3), ni siquiera una "de test".
+rsa = { workspace = true, features = ["pem"] }
+rand = { workspace = true }
+base64 = { workspace = true }
 # join_all for the concurrent-open cash-session race test.
 futures = { workspace = true }
 # POS hot-path bench (benches/pos_hotpath.rs). Mirrors crates/api/benches.
