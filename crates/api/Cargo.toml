@@ -4,16 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# SPIKE (spike/server-en-telefono): Android no deja que una app haga execve de
-# un binario suelto — SELinux niega `entrypoint` a `untrusted_app` tanto sobre
-# `app_data_file` como sobre `apk_data_file`. Para que el server corra dentro
-# del teléfono tiene que cargarse como biblioteca en el proceso de la app, no
-# spawnearse como proceso aparte. De ahí el `cdylib`: es la forma del artefacto
-# que el caso de uso exige. `rlib` se conserva para que el binario de escritorio
-# y los tests sigan compilando igual.
-[lib]
-name = "api"
-crate-type = ["rlib", "cdylib"]
+# cdylib del server embebido vive en `crates/servidor-android` (no acá):
+# (a) evita conflictos de merge con carriles que tocan api, (b) un cdylib en
+# api emitiría api.dll en cada build Windows del workspace.
+# Default de cargo = rlib.
 
 [[bin]]
 name = "pharma-api"

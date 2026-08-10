@@ -5904,6 +5904,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "servidor-android"
+version = "0.1.28"
+dependencies = [
+ "api",
+ "tokio",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

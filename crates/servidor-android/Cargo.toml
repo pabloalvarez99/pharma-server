@@ -1,0 +1,21 @@
+[package]
+name = "servidor-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cdylib del server embebido: puente JNI + lifecycle. Dominio via HTTP (ADR-0021)."
+publish = false
+
+# Solo cdylib: el artefacto es libservidor_android.so para jniLibs.
+# No rlib — nadie del workspace de escritorio depende de este crate.
+[lib]
+name = "servidor_android"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# H2 mide el .so real: linkear api tira del grafo de producción (surrealkv,
+# axum, rustls…). El puente JNI se agrega en H3+; acá basta un símbolo exportado
+# + un path opaco a `api::run` para que LTO no elimine el grafo.
+api = { path = "../api" }
+tokio = { workspace = true }

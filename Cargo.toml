@@ -15,6 +15,7 @@ members = [
     "crates/dte",
     "crates/sync",
     "crates/assist",
+    "crates/servidor-android",
 ]
 # `client/` is the Tauri 2 desktop client (LoL-style operator launcher). It is a
 # STANDALONE cargo project with its own [workspace] in client/src-tauri so the
@@ -140,6 +141,17 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+# Perfil del .so embebido (H2+). No toca el `release` de los otros carriles.
+# - panic=unwind: un panic en el .so no debe abortar el proceso de la app
+#   (JNI lo atrapa con catch_unwind; con abort no hay chance).
+# - opt-level=z + lto=fat: medidos en H2. Con thin+opt3 el arm64 daba 51.79 MB
+#   (sobre el umbral ~40 MB del piso de hardware). Con z+fat queda 30.43 MB.
+[profile.release-android]
+inherits = "release"
+panic = "unwind"
+opt-level = "z"
+lto = "fat"
 
 [profile.dev]
 opt-level = 0
