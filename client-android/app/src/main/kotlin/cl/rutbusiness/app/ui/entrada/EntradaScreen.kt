@@ -49,8 +49,12 @@ import kotlinx.coroutines.launch
  * Tres lugares y no dos: al camino de "ya tengo un negocio" se le sumó el de
  * crearlo. Un booleano habría alcanzado para dos, pero el tercero llegó y con
  * un booleano el que se pierde siempre es el nuevo.
+ *
+ * El cuarto, [Rescate], es el de quien perdió el teléfono (ADR-0023). Está acá
+ * y no adentro de la app por una razón simple: el otro camino para bajar un
+ * respaldo pide sesión, y esta persona no la tiene. Ver [RescateRoute].
  */
-private enum class LugarDeLaEntrada { Puerta, Alta, Formulario }
+private enum class LugarDeLaEntrada { Puerta, Alta, Formulario, Rescate }
 
 /**
  * La puerta de entrada: la explicación del primer uso, la elección de camino, y
@@ -143,6 +147,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                 yaEntroAlgunaVez = yaEntro,
                 onCrear = { lugar = LugarDeLaEntrada.Alta },
                 onEntrar = { lugar = LugarDeLaEntrada.Formulario },
+                onRecuperar = { lugar = LugarDeLaEntrada.Rescate },
                 onVerExplicacion = { explicando = true },
             )
             return
@@ -153,6 +158,23 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                 sesion = sesion,
                 onVolver = { lugar = LugarDeLaEntrada.Puerta },
                 onIrAEntrar = { lugar = LugarDeLaEntrada.Formulario },
+            )
+            return
+        }
+
+        LugarDeLaEntrada.Rescate -> {
+            RescateRoute(
+                sesion = sesion,
+                estado = estado,
+                onVolver = { lugar = LugarDeLaEntrada.Puerta },
+                onEntrarConDatos = { url, negocio ->
+                    // Los dos datos que la persona acaba de tipear en el rescate
+                    // son dos de los cuatro que pide el login. Volver a pedirlos
+                    // sería castigarla por haber usado el camino correcto.
+                    vm.cambiarUrl(url)
+                    vm.cambiarNegocio(negocio)
+                    lugar = LugarDeLaEntrada.Formulario
+                },
             )
             return
         }

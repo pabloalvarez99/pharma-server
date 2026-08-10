@@ -57,9 +57,9 @@ fun FranjaDeConexion(
     val titulo = when {
         !conectado && esperando > 0 -> "Sin conexión · ${ventas(esperando)} esperando"
         !conectado -> "Sin conexión"
-        rechazadas > 0 && esperando == 0 -> "${ventas(rechazadas)} no se pudieron enviar"
+        rechazadas > 0 && esperando == 0 -> "${ventas(rechazadas)} no ${if (rechazadas == 1) "se pudo" else "se pudieron"} enviar"
         esperando > 0 -> "Enviando ${ventas(esperando)}..."
-        else -> "${ventas(rechazadas)} no se pudieron enviar"
+        else -> "${ventas(rechazadas)} no ${if (rechazadas == 1) "se pudo" else "se pudieron"} enviar"
     }
 
     // Corto a propósito. Cada renglón que se lleva la franja se lo saca a la

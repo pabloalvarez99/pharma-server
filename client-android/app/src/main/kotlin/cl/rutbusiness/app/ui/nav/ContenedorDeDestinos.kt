@@ -25,6 +25,7 @@ import cl.rutbusiness.app.ui.offline.hayConexion
 import cl.rutbusiness.app.ui.offline.ventasEnCola
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.app.ui.offline.ResultadoTraerNube
+import cl.rutbusiness.core.backup.PruebaDeRetiro
 import cl.rutbusiness.core.backup.UserBackupApi
 import cl.rutbusiness.core.backup.conRehidratacion
 import cl.rutbusiness.core.backup.envelopeToBase64
@@ -37,8 +38,29 @@ import cl.rutbusiness.core.backup.prepararRespaldoDesdeCola
 import cl.rutbusiness.core.backup.restaurarDesdeTextos
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.session.SessionRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.LaunchedEffect
+
+/**
+ * Lo que se le agrega al mensaje de subida cuando el sobre viajó **sin** carril
+ * de rescate.
+ *
+ * Pasa cuando no se pudo derivar la prueba de retiro: sin frase (respaldo sin
+ * cifrar) o sin el slug del login. El sobre está guardado igual y se puede
+ * abrir desde este teléfono; lo que no se puede es pedirlo desde uno nuevo. Se
+ * dice, porque el silencio acá es justo la clase de confianza mal puesta que la
+ * tarjeta impresa promete y el server no cumplía.
+ */
+private fun avisoSinRescate(hashRetiro: String?): String =
+    if (hashRetiro != null) {
+        ""
+    } else {
+        " · Ojo: este respaldo no se va a poder bajar desde un teléfono nuevo. " +
+            "Preparalo con tus 12 palabras después de entrar con el nombre corto " +
+            "del negocio."
+    }
 
 /**
  * El armazón de la navegación: qué pestaña está elegida, qué se dibuja arriba
@@ -91,10 +113,19 @@ internal fun ContenedorDeDestinos(
     var subiendoRespaldo by remember { mutableStateOf(false) }
     val pack = packActual()
 
+    // El slug del login, que es contra lo que el server busca en el rescate
+    // (`tenant.slug`). No sirve `tenantId`: ése puede venir del JWT como
+    // `tenant:abc`, y con eso la prueba de retiro se derivaría de un texto que
+    // el server nunca va a comparar. Sin slug no se arma el carril de rescate,
+    // y se dice — un respaldo que no se puede bajar desde un teléfono nuevo es
+    // exactamente el agujero que este trabajo vino a tapar.
+    var slugDelNegocio by remember { mutableStateOf<String?>(null) }
+
     // Prefill del último sobre cifrado en disco (nunca la frase).
     LaunchedEffect(sesion) {
-        val disco = sesion?.disco ?: return@LaunchedEffect
-        ultimoSobreBase64 = leerSobreLocalBase64(disco)
+        val s = sesion ?: return@LaunchedEffect
+        ultimoSobreBase64 = leerSobreLocalBase64(s.disco)
+        slugDelNegocio = s.ultimoTenant()
     }
 
     // Atrás desde una pestaña secundaria vuelve al inicio en vez de cerrar la
@@ -212,15 +243,38 @@ internal fun ContenedorDeDestinos(
                                                         )
                                                         return@launch
                                                     }
+                                                    // La prueba de retiro se
+                                                    // deriva acá y no en la
+                                                    // preparación: son otros
+                                                    // ~210.000 PBKDF2, y en el
+                                                    // hilo de la composición
+                                                    // eso es un segundo de
+                                                    // pantalla congelada.
+                                                    val slug = slugDelNegocio
+                                                    val hashRetiro = if (
+                                                        material != null && !slug.isNullOrBlank()
+                                                    ) {
+                                                        withContext(Dispatchers.Default) {
+                                                            PruebaDeRetiro
+                                                                .derivar(material, slug)
+                                                                .map { PruebaDeRetiro.hashHex(it) }
+                                                                .getOrNull()
+                                                        }
+                                                    } else {
+                                                        null
+                                                    }
                                                     when (
-                                                        val r = UserBackupApi(api).subirSobre(sobre)
+                                                        val r = UserBackupApi(api).subirSobre(
+                                                            sobre,
+                                                            hashRetiro,
+                                                        )
                                                     ) {
                                                         is Resultado.Ok -> {
                                                             estadoRespaldo = EstadoRespaldoUi(
                                                                 mensaje = mensajeTrasSubida(
                                                                     ok,
                                                                     r.valor,
-                                                                ),
+                                                                ) + avisoSinRescate(hashRetiro),
                                                                 bytes = sobre.envelopeBytes.size,
                                                                 ventas = ok.ventasEnCola,
                                                             )

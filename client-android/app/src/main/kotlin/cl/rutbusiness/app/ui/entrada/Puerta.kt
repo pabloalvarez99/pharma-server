@@ -34,7 +34,14 @@ import cl.rutbusiness.ui.theme.RbTheme
  * más, porque una pantalla con dos botones igual de importantes es una pantalla
  * sin respuesta.
  *
+ * **El tercer camino** (ADR-0023) no compite con los otros dos y por eso no es
+ * una tarjeta: es la salida de quien perdió el teléfono. Va abajo, en letra
+ * chica, porque el día que se necesita se busca — y arriba, compitiendo por
+ * atención con los dos caminos normales, sólo le agregaría una decisión más a
+ * quien viene a lo de siempre.
+ *
  * @param yaEntroAlgunaVez si este teléfono tuvo sesión antes.
+ * @param onRecuperar `null` cuando esta build no ofrece el rescate.
  */
 @Composable
 internal fun Puerta(
@@ -42,6 +49,7 @@ internal fun Puerta(
     onCrear: () -> Unit,
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
+    onRecuperar: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
@@ -96,6 +104,23 @@ internal fun Puerta(
                     },
                     fillWidth = true,
                 )
+            }
+
+            onRecuperar?.let { recuperar ->
+                RbCard(title = "Perdí mi teléfono") {
+                    Text(
+                        text = "Si guardaste la tarjeta que la app te pidió anotar, tu negocio " +
+                            "vuelve con ella. No hace falta tu clave.",
+                        style = RbTheme.typography.body,
+                        color = RbTheme.colors.textPrimary,
+                    )
+                    RbButton(
+                        label = "Recuperar con mi tarjeta",
+                        onClick = recuperar,
+                        variant = RbButtonVariant.Secondary,
+                        fillWidth = true,
+                    )
+                }
             }
 
             RbButton(
