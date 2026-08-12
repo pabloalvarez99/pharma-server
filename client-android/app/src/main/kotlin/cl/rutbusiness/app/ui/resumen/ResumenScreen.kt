@@ -14,8 +14,11 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.agente.ASI_SE_ANOTA_UNA_VENTA
+import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
+import cl.rutbusiness.app.ui.agente.irAlAgente
 import cl.rutbusiness.app.ui.offline.LocalOffline
-import cl.rutbusiness.app.ui.rubro.packActual
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.offline.Fechado
@@ -29,6 +32,7 @@ import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
+import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbSkeletonLines
@@ -96,7 +100,7 @@ private fun ResumenScreen(
 ) {
     val dimens = RbTheme.dimens
 
-    val feria = packActual().features.agentHome || packActual().rubro == "feria"
+    val feria = esFeria()
 
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
@@ -179,6 +183,10 @@ private fun VendidoHoy(vm: ResumenViewModel) {
  * `ResumenEscalaTest` la monta con montos de siete dígitos, que es el peor caso
  * real de un negocio chico.
  *
+ * En feria y antes de la primera venta del día, la tarjeta se cambia entera por
+ * [HoySinVentas]: ver "$0 · 0 boletas · menos que ayer" es enterarse tres veces
+ * de lo mismo y no saber qué hacer con eso.
+ *
  * @param vendidoHoy monto en el texto decimal exacto que mandó el server.
  * @param vendidoAyer ídem para ayer; `null` si no se pudo traer.
  */
@@ -190,6 +198,13 @@ internal fun TarjetaDelDia(
     comparacion: Comparacion,
     vendidoAyer: String?,
 ) {
+    // `boletas` y no el monto: cuántas ventas hubo lo cuenta el server, y una
+    // venta regalada -monto cero, boleta uno- es un día que ya empezó.
+    if (esFeria() && boletas == 0L) {
+        HoySinVentas(onHablarleAlAgente = irAlAgente())
+        return
+    }
+
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
 
@@ -248,6 +263,29 @@ internal fun TarjetaDelDia(
             )
         }
     }
+}
+
+/**
+ * "Hoy", antes de la primera venta del día.
+ *
+ * Un cuaderno en blanco tampoco dice nada, y sin embargo la dueña sabe qué hacer
+ * con él: anotar. Esto es eso — la frase exacta que hay que decirle al agente, y
+ * el botón que lleva a decírsela. Lo que sigue debajo ("acá vas a ver cuánto
+ * llevas") es la parte que el cuaderno no puede: la suma sale sola.
+ *
+ * Sin [onHablarleAlAgente] el botón no se dibuja. La frase sigue enseñando el
+ * paso, y en feria el agente está a un toque en la barra de abajo; un botón que
+ * no lleva a ninguna parte sería peor que no tenerlo.
+ */
+@Composable
+private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
+    RbEmptyState(
+        title = "Todavía no vendiste nada hoy",
+        hint = "Cuéntale al agente lo que vayas vendiendo — «$ASI_SE_ANOTA_UNA_VENTA» — y acá " +
+            "vas a ver cuánto llevas hecho, sin sumar a mano.",
+        actionLabel = onHablarleAlAgente?.let { "Hablarle al agente" },
+        onAction = onHablarleAlAgente,
+    )
 }
 
 // --- 3: cuánta plata hay en caja -------------------------------------------
@@ -319,9 +357,16 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
                 color = colors.textSecondary,
             )
 
+            // En feria fiar no es un botón de la pantalla de cobro: es una
+            // frase. El vacío la enseña acá, que es donde la dueña se está
+            // preguntando por la deuda, y no en una pantalla más adentro.
             !hayDeuda -> Text(
-                text = "Nadie te debe plata. Cuando fíes una venta, la deuda aparece acá hasta " +
-                    "que te la paguen.",
+                text = if (esFeria()) {
+                    "Nadie te debe. Cuando fíes, díselo al agente: «$ASI_SE_FIA»."
+                } else {
+                    "Nadie te debe plata. Cuando fíes una venta, la deuda aparece acá hasta " +
+                        "que te la paguen."
+                },
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )

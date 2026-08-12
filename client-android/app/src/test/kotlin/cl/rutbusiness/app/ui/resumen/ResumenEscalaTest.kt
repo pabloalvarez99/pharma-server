@@ -15,11 +15,18 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
+import cl.rutbusiness.app.ui.agente.LocalIrAlAgente
+import cl.rutbusiness.app.ui.rubro.LocalRubro
+import cl.rutbusiness.app.ui.rubro.ServiciosDeRubro
 import cl.rutbusiness.core.money.Moneda
+import cl.rutbusiness.core.rubro.RubroPackRepository
+import cl.rutbusiness.ui.theme.RbDefaultDimens
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -51,6 +58,14 @@ class ResumenEscalaTest {
     @get:Rule
     val compose = createComposeRule()
 
+    private val objetivoTactil = RbDefaultDimens.touchTarget
+
+    /**
+     * @param rubro pack que se le da a la pantalla. `null` es el caso histórico
+     *   -sin servicios de rubro- y equivale al pack genérico: retail formal.
+     * @param onIrAlAgente cómo se llega al agente desde acá. `null` es el
+     *   contenedor que todavía no lo provee, y ahí el vacío no dibuja botón.
+     */
     private fun mostrar(
         escala: Float,
         moneda: Moneda = Moneda.POR_DEFECTO,
@@ -58,11 +73,18 @@ class ResumenEscalaTest {
         boletas: Long = 42L,
         comparacion: Comparacion = Comparacion.Mejor,
         vendidoAyer: String? = "987654",
+        rubro: String? = null,
+        onIrAlAgente: (() -> Unit)? = null,
     ) {
+        val servicios = rubro?.let {
+            ServiciosDeRubro(RubroPackRepository().apply { usarLocal(it) })
+        }
         compose.setContent {
             val base = LocalDensity.current
             CompositionLocalProvider(
                 LocalDensity provides Density(base.density, fontScale = escala),
+                LocalRubro provides servicios,
+                LocalIrAlAgente provides onIrAlAgente,
             ) {
                 RbTheme(darkTheme = true, reducedMotion = true) {
                     // La tarjeta vive en una lista que scrollea; el contenedor
@@ -202,6 +224,109 @@ class ResumenEscalaTest {
 
         compose.onNodeWithText("Todavía no hay ninguna venta.").assertIsDisplayed()
         compose.onNodeWithText("$0").assertIsDisplayed()
+    }
+
+    // --- feria: el día antes de la primera venta ------------------------------
+
+    /**
+     * El vacío enseña el paso siguiente, no el estado.
+     *
+     * "$0 · 0 boletas · menos que ayer" es la misma nada dicha tres veces. Lo que
+     * hace falta es la frase que se le dice al agente, con el ejemplo adentro:
+     * la dueña copia el ejemplo, no la instrucción.
+     */
+    @Test
+    fun `en feria un dia sin ventas ensena a anotar la primera`() {
+        var hablado = false
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "0",
+            boletas = 0L,
+            comparacion = Comparacion.SinDatoDeAyer,
+            vendidoAyer = null,
+            rubro = "feria",
+            onIrAlAgente = { hablado = true },
+        )
+
+        compose.onNodeWithText("Todavía no vendiste nada hoy").assertIsDisplayed()
+        compose.onNodeWithText("vendí 3 kilos de papa a 1200", substring = true).assertIsDisplayed()
+
+        compose.onNodeWithText("Hablarle al agente").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertTrue("el botón del vacío tiene que llevar a hablarle al agente", hablado)
+    }
+
+    /** El caso que define "listo" según el piso de hardware, también en el vacío. */
+    @Test
+    fun `en feria el vacio del dia se lee entero al 200 por ciento`() {
+        mostrar(
+            escala = 2.0f,
+            vendidoHoy = "0",
+            boletas = 0L,
+            comparacion = Comparacion.SinDatoDeAyer,
+            vendidoAyer = null,
+            rubro = "feria",
+            onIrAlAgente = {},
+        )
+
+        compose.onNodeWithText("Todavía no vendiste nada hoy").performScrollTo().assertIsDisplayed()
+        val cta = compose.onNodeWithText("Hablarle al agente").performScrollTo()
+        cta.assertIsDisplayed()
+
+        val caja = cta.getUnclippedBoundsInRoot()
+        assertTrue(
+            "a 2x el botón del vacío mide ${caja.width} x ${caja.height}, bajo el objetivo " +
+                "táctil de $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+        revisarQueNadaSeCorte(2.0f)
+    }
+
+    /** Sin agente al alcance no se dibuja un botón que no lleva a ninguna parte. */
+    @Test
+    fun `sin manera de llegar al agente el vacio no ofrece boton`() {
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "0",
+            boletas = 0L,
+            comparacion = Comparacion.SinDatoDeAyer,
+            vendidoAyer = null,
+            rubro = "feria",
+            onIrAlAgente = null,
+        )
+
+        compose.onNodeWithText("Todavía no vendiste nada hoy").assertIsDisplayed()
+        assertTrue(
+            "sin manera de llegar al agente el botón no va",
+            compose.onAllNodes(hasText("Hablarle al agente")).fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
+    /**
+     * Un rubro formal no hereda el copy de feria.
+     *
+     * Es la mitad que se rompe sola: quien toca el vacío de feria tiende a
+     * mirarlo sólo con el pack de feria puesto, y la farmacia se entera después.
+     */
+    @Test
+    fun `con pack formal un dia sin ventas sigue mostrando la cifra`() {
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "0",
+            boletas = 0L,
+            comparacion = Comparacion.Peor,
+            rubro = "farmacia",
+            onIrAlAgente = {},
+        )
+
+        compose.onNodeWithText("Vendiste hoy").assertIsDisplayed()
+        compose.onNodeWithText("$0").assertIsDisplayed()
+        compose.onNodeWithText("Todavía no hay ninguna venta.").assertIsDisplayed()
+        assertTrue(
+            "el copy de feria no puede aparecer con un pack formal",
+            compose.onAllNodes(hasText("Todavía no vendiste nada hoy")).fetchSemanticsNodes()
+                .isEmpty(),
+        )
     }
 }
 
