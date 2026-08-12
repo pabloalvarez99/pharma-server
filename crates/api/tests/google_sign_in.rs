@@ -78,41 +78,75 @@ fn jwks_json() -> serde_json::Value {
 /// Se hace una sola vez por proceso: el handler cachea las llaves en un
 /// `OnceLock` global, así que dos servidores distintos en el mismo binario
 /// serían un caché apuntando al primero y tests que dependen del orden.
-async fn google_de_mentira() {
+///
+/// ## Por qué tiene hilo y runtime propios
+///
+/// `#[tokio::test]` arma un runtime por test y lo **tira** al terminar. Un
+/// `tokio::spawn` acá ataba el servidor al runtime del primer test que lo
+/// arrancara: ese test terminaba, el runtime moría, y el servidor con él. Los
+/// que venían después se encontraban la conexión rechazada.
+///
+/// No se veía siempre, que es lo peor: el caché de llaves del handler es
+/// global y dura 24 h, así que cualquier test que alcanzara a bajarlas antes
+/// de la muerte tapaba el problema para el resto. Sólo fallaban los que
+/// pedían justo en la ventana entre el fin del dueño y el caché lleno — 503
+/// intermitentes, distintos en cada corrida, y más probables cuanto más tests
+/// tiene el binario. Un test que falla según quién terminó primero no prueba
+/// nada.
+///
+/// `get_or_init` además arregla la carrera del arranque: la versión con
+/// `get()` + `set()` dejaba que dos tests entraran a la vez y levantaran dos
+/// servidores, cada uno pisándole la variable de entorno al otro.
+fn google_de_mentira() {
     static ARRANCADO: OnceLock<()> = OnceLock::new();
-    if ARRANCADO.get().is_some() {
-        return;
-    }
+    ARRANCADO.get_or_init(|| {
+        let (avisar_puerto, esperar_puerto) = std::sync::mpsc::channel();
 
-    let app = axum::Router::new().route(
-        "/certs",
-        axum::routing::get(|| async {
-            (
-                // El mismo `Cache-Control` que manda Google de verdad: el
-                // handler lo parsea para decidir cuánto vive el caché.
-                [(
-                    axum::http::header::CACHE_CONTROL,
-                    "public, max-age=20489, must-revalidate, no-transform",
-                )],
-                axum::Json(jwks_json()),
-            )
-        }),
-    );
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime del google de mentira");
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind");
-    let puerto = listener.local_addr().expect("addr").port();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.ok();
+            rt.block_on(async move {
+                let app = axum::Router::new().route(
+                    "/certs",
+                    axum::routing::get(|| async {
+                        (
+                            // El mismo `Cache-Control` que manda Google de
+                            // verdad: el handler lo parsea para decidir cuánto
+                            // vive el caché.
+                            [(
+                                axum::http::header::CACHE_CONTROL,
+                                "public, max-age=20489, must-revalidate, no-transform",
+                            )],
+                            axum::Json(jwks_json()),
+                        )
+                    }),
+                );
+
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("bind");
+                let puerto = listener.local_addr().expect("addr").port();
+                avisar_puerto.send(puerto).expect("avisar el puerto");
+
+                axum::serve(listener, app).await.ok();
+            });
+        });
+
+        // Bloquea hasta que el socket está escuchando. Devolver antes dejaría
+        // al primer test pegándole a un puerto que todavía no existe.
+        let puerto = esperar_puerto
+            .recv()
+            .expect("el google de mentira no llegó a escuchar");
+
+        std::env::set_var("PHARMA_GOOGLE_CLIENT_ID", AUD_NUESTRO);
+        std::env::set_var(
+            "PHARMA_GOOGLE_JWKS_URL",
+            format!("http://127.0.0.1:{puerto}/certs"),
+        );
     });
-
-    std::env::set_var("PHARMA_GOOGLE_CLIENT_ID", AUD_NUESTRO);
-    std::env::set_var(
-        "PHARMA_GOOGLE_JWKS_URL",
-        format!("http://127.0.0.1:{puerto}/certs"),
-    );
-    let _ = ARRANCADO.set(());
 }
 
 /// Firma un `id_token` como lo haría Google.
@@ -151,7 +185,7 @@ const RUTA: &str = "/api/v1/auth/google";
 /// emite el login con clave, para que Android no necesite otra rama.
 #[tokio::test]
 async fn primera_vez_liga_la_cuenta_y_devuelve_nuestro_jwt() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -185,7 +219,7 @@ async fn primera_vez_liga_la_cuenta_y_devuelve_nuestro_jwt() {
 /// La segunda vez ya no liga nada: entra por el `sub`, que es el punto.
 #[tokio::test]
 async fn la_segunda_vez_ya_no_es_usuario_nuevo() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -210,7 +244,7 @@ async fn la_segunda_vez_ya_no_es_usuario_nuevo() {
 /// **nuevo** dueño de esa casilla entraría al negocio de Rosa.
 #[tokio::test]
 async fn el_sub_manda_aunque_cambie_el_email() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -250,7 +284,7 @@ async fn el_sub_manda_aunque_cambie_el_email() {
 /// Google — sólo que para otra aplicación.
 #[tokio::test]
 async fn un_token_para_otra_app_no_entra() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -271,7 +305,7 @@ async fn un_token_para_otra_app_no_entra() {
 
 #[tokio::test]
 async fn un_token_firmado_por_cualquier_otro_no_entra() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -300,7 +334,7 @@ async fn un_token_firmado_por_cualquier_otro_no_entra() {
 
 #[tokio::test]
 async fn un_token_vencido_no_entra() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -323,7 +357,7 @@ async fn un_token_vencido_no_entra() {
 /// por un dato que escribió el usuario, no por uno que Google comprobó.
 #[tokio::test]
 async fn sin_email_verificado_no_se_liga() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -347,7 +381,7 @@ async fn sin_email_verificado_no_se_liga() {
 /// sólo saber su nombre corto.
 #[tokio::test]
 async fn una_cuenta_ajena_no_se_da_de_alta_sola() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -384,7 +418,7 @@ async fn una_cuenta_ajena_no_se_da_de_alta_sola() {
 /// entrar.
 #[tokio::test]
 async fn negocio_inexistente_no_confirma_que_no_existe() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -407,7 +441,7 @@ async fn negocio_inexistente_no_confirma_que_no_existe() {
 /// para que la app pregunte.
 #[tokio::test]
 async fn la_primera_vez_hay_que_decir_el_negocio() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -429,7 +463,7 @@ async fn la_primera_vez_hay_que_decir_el_negocio() {
 /// tocar una opción más.
 #[tokio::test]
 async fn dos_negocios_sin_elegir_pide_elegir() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
     seed_tenant_admin(&tdb.db, "almacen-juan", "rosa@gmail.com").await;
@@ -510,7 +544,7 @@ async fn dos_negocios_sin_elegir_pide_elegir() {
 /// largo emitiendo un JWT por un vínculo que no se creó.
 #[tokio::test]
 async fn un_usuario_no_puede_tener_dos_cuentas_de_google() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -562,7 +596,7 @@ async fn un_usuario_no_puede_tener_dos_cuentas_de_google() {
 /// Basura no es token, y no revienta el server.
 #[tokio::test]
 async fn basura_no_entra() {
-    google_de_mentira().await;
+    google_de_mentira();
     let tdb = spawn_db().await;
     seed_tenant_admin(&tdb.db, "puesto-rosa", "rosa@gmail.com").await;
 
@@ -578,4 +612,231 @@ async fn basura_no_entra() {
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "basura: {basura:?}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Crear un negocio nuevo — la otra puerta
+// ---------------------------------------------------------------------------
+
+const RUTA_ALTA: &str = "/api/v1/auth/google/negocio";
+
+#[derive(Debug, serde::Deserialize)]
+struct Conteo {
+    count: i64,
+}
+
+async fn contar(db: &Arc<db::Db>, tabla: &str) -> i64 {
+    let mut q = db
+        .query(format!("SELECT count() FROM {tabla} GROUP ALL"))
+        .await
+        .expect("contar");
+    let fila: Option<Conteo> = q.take(0).expect("decode");
+    fila.map(|f| f.count).unwrap_or(0)
+}
+
+/// El camino que hoy no existe: alguien con una cuenta de Google y ningún
+/// negocio se crea el suyo. Tenant, usuario y vínculo, y queda adentro.
+///
+/// Es la contracara del 403 de `/auth/google`: entrar a un negocio ajeno está
+/// cerrado, arrancar uno vacío no le saca nada a nadie.
+#[tokio::test]
+async fn con_google_se_crea_un_negocio_nuevo_y_queda_adentro() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    let token = firmar("llave-1", claims("rosa@gmail.com", true));
+    let (status, body) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({
+            "id_token": token,
+            "business_name": "Verdulería Rosa",
+            "vertical": "feria",
+        })),
+        &[],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["token_type"], json!("Bearer"));
+    assert_eq!(body["email"], json!("rosa@gmail.com"));
+    // El slug lo decide el server; el cliente no lo puede adivinar y por eso
+    // vuelve en la respuesta.
+    assert_eq!(body["tenant_slug"], json!("verduleria-rosa"));
+
+    let nuestro = body["token"].as_str().expect("token");
+    let (status, _) = req_json(&app(&tdb.db), "GET", "/api/v1/me", Some(nuestro), None, &[]).await;
+    assert_eq!(status, StatusCode::OK, "el token del alta no abre la API");
+
+    assert_eq!(contar(&tdb.db, "tenant").await, 1);
+    assert_eq!(contar(&tdb.db, "user").await, 1);
+    assert_eq!(contar(&tdb.db, "google_identity").await, 1);
+}
+
+/// Lo que hace que el alta sirva: la segunda vez entra por la puerta de
+/// siempre, sin decir el negocio, porque el vínculo quedó hecho.
+#[tokio::test]
+async fn despues_del_alta_entra_por_la_puerta_de_siempre() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    let (status, _) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", true)),
+                     "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", true)) })),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["is_new_user"], json!(false), "el vínculo ya existía");
+}
+
+/// La cuenta nace **sin** clave usable. No es clave vacía ni una fija: se
+/// hashea material aleatorio que no se guarda, así que ni nosotros podemos
+/// entrar por ahí.
+#[tokio::test]
+async fn la_cuenta_creada_con_google_no_entra_por_clave() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    let (status, body) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", true)),
+                     "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let slug = body["tenant_slug"].as_str().expect("slug").to_string();
+
+    for intento in ["", "password", "rosa@gmail.com", "verduleria-rosa"] {
+        let (status, _) = req_json(
+            &app(&tdb.db),
+            "POST",
+            "/api/v1/login",
+            None,
+            Some(json!({ "tenant": slug, "email": "rosa@gmail.com", "password": intento })),
+            &[],
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "entró por clave con {intento:?}"
+        );
+    }
+}
+
+/// Nombre corto repetido: 409 con texto, no un 500 del índice único ni —peor—
+/// meterla en el negocio que ya existe.
+#[tokio::test]
+async fn el_nombre_corto_repetido_no_toca_el_negocio_que_ya_esta() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+    seed_tenant_admin(&tdb.db, "verduleria-rosa", "otra@gmail.com").await;
+
+    let (status, _) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", true)),
+                     "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(contar(&tdb.db, "tenant").await, 1, "se creó un tenant de más");
+    assert_eq!(contar(&tdb.db, "user").await, 1, "se metió en el ajeno");
+    assert_eq!(contar(&tdb.db, "google_identity").await, 0);
+}
+
+/// Sin nombre no hay negocio. El server no lo deriva del correo: "gmail.com"
+/// no es el nombre de nadie.
+#[tokio::test]
+async fn sin_nombre_no_se_crea_negocio() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    for nombre in ["", "   "] {
+        let (status, _) = req_json(
+            &app(&tdb.db),
+            "POST",
+            RUTA_ALTA,
+            None,
+            Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", true)),
+                         "business_name": nombre })),
+            &[],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "nombre {nombre:?}");
+    }
+    assert_eq!(contar(&tdb.db, "tenant").await, 0);
+}
+
+/// Email sin verificar: Google deja escribir cualquier cosa ahí en cuentas que
+/// nunca confirmaron la casilla. No alcanza para fundar un negocio.
+#[tokio::test]
+async fn sin_email_verificado_no_se_crea_negocio() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    let (status, _) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", claims("rosa@gmail.com", false)),
+                     "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(contar(&tdb.db, "tenant").await, 0);
+}
+
+/// La puerta nueva se verifica igual que la vieja: un token emitido para otra
+/// app de Google no funda nada.
+#[tokio::test]
+async fn un_token_para_otra_app_no_crea_negocio() {
+    google_de_mentira();
+    let tdb = spawn_db().await;
+
+    let mut ajenos = claims("rosa@gmail.com", true);
+    ajenos["aud"] = json!("otra-app.apps.googleusercontent.com");
+
+    let (status, _) = req_json(
+        &app(&tdb.db),
+        "POST",
+        RUTA_ALTA,
+        None,
+        Some(json!({ "id_token": firmar("llave-1", ajenos),
+                     "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(contar(&tdb.db, "tenant").await, 0);
 }

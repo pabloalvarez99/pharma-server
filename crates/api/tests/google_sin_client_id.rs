@@ -104,3 +104,35 @@ async fn con_google_apagado_se_entra_con_correo_y_clave() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["token"].as_str().is_some_and(|t| !t.is_empty()));
 }
+
+/// La puerta de crear negocio nace apagada por el mismo gate. Sin client id no
+/// hay forma de saber si un `id_token` es nuestro, así que fundar un negocio
+/// con uno sería fundarlo con cualquier cosa.
+#[tokio::test]
+async fn sin_client_id_no_se_puede_crear_un_negocio() {
+    let tdb = spawn_db().await;
+    let app = api::build_router(state_free(tdb.db.clone()));
+
+    let (status, _) = req_json(
+        &app,
+        "POST",
+        "/api/v1/auth/google/negocio",
+        None,
+        Some(json!({ "id_token": "cualquier.cosa.firmada", "business_name": "Verdulería Rosa" })),
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Conteo {
+        count: i64,
+    }
+    let mut q = tdb
+        .db
+        .query("SELECT count() FROM tenant GROUP ALL")
+        .await
+        .expect("contar");
+    let fila: Option<Conteo> = q.take(0).expect("decode");
+    assert!(fila.is_none(), "un build sin client id creó un negocio");
+}
