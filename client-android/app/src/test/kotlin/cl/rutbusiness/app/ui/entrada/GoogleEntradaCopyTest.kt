@@ -8,7 +8,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import cl.rutbusiness.core.session.IdentidadGoogle
 import cl.rutbusiness.core.session.IdentidadGoogleNoCableada
+import cl.rutbusiness.core.session.ResultadoGoogle
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -110,5 +112,107 @@ class GoogleEntradaCopyTest {
         compose.waitForIdle()
         compose.onNodeWithText("Entrar a tu negocio").assertIsDisplayed()
         compose.onNodeWithText("Cuenta de Google").assertIsDisplayed()
+    }
+
+    // --- una sola verdad sobre si Google existe en este build -----------------
+
+    /**
+     * Google cableado y andando. No abre picker: `disponible()` es lo único que
+     * mira el copy, y `pedirCuenta()` acá nunca se llama.
+     */
+    private object GoogleCableado : IdentidadGoogle {
+        override fun disponible(): Boolean = true
+
+        override fun copyPromocion(rubroEsFeria: Boolean): String =
+            "Entrá con tu cuenta de Google."
+
+        override suspend fun pedirCuenta(): ResultadoGoogle =
+            error("el copy del primer uso no puede pedir una cuenta")
+    }
+
+    private fun servicios(identidad: IdentidadGoogle) = ServiciosDeEntrada(
+        red = object : RedDelTelefono {
+            override fun hayRed(): Boolean = true
+        },
+        preferencias = object : PreferenciasDeEntrada {
+            override fun yaEntroAlgunaVez(): Boolean = false
+            override fun marcarQueEntro() = Unit
+            override fun rubroElegido(): String? = null
+            override fun guardarRubroElegido(rubro: String) = Unit
+            override fun debeMostrarTarjetaRescate(): Boolean = false
+            override fun marcarTarjetaRescateVista() = Unit
+        },
+        identidadGoogle = identidad,
+    )
+
+    /**
+     * El texto del primer uso sale del **mismo** `disponible()` que el botón.
+     *
+     * Sin esto vuelven las dos verdades: un APK con client id muestra el botón
+     * de Google andando y, dos pantallas antes, promete que llega "pronto". La
+     * primera que la persona lee es la falsa.
+     */
+    @Test
+    fun `con Google cableado el paso 3 no promete que llega pronto`() {
+        val conGoogle = pasosDelPrimerUso(googleDisponible = true).last()
+        val sinGoogle = pasosDelPrimerUso(googleDisponible = false).last()
+
+        assertTrue(
+            "con Google cableado el paso 3 sigue diciendo 'pronto'",
+            conGoogle.lista.none { it.contains("Pronto", ignoreCase = true) },
+        )
+        assertTrue(
+            "con Google cableado el paso 3 no nombra la cuenta de Google",
+            conGoogle.lista.any { it.contains("cuenta de Google") },
+        )
+        // Y sin client id el texto es exactamente el de siempre: prometer
+        // "pronto" es honesto cuando el botón todavía no está.
+        assertTrue(
+            "sin Google el paso 3 dejó de prometer",
+            sinGoogle.lista.any { it.contains("Pronto también con tu cuenta de Google") },
+        )
+    }
+
+    @Test
+    fun `la pantalla del primer uso muestra el texto que corresponde al build`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    ProveerEntrada(servicios(GoogleCableado)) {
+                        PrimerUso(onListo = {})
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        // Paso 1 y 2 hasta llegar al que cambia.
+        compose.onNodeWithText("Siguiente").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Siguiente").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Tu cuenta de Google", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `sin servicios provistos el primer uso no finge que hay Google`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) { PrimerUso(onListo = {}) }
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Siguiente").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Siguiente").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Pronto también", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 }

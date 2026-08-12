@@ -19,6 +19,7 @@ import cl.rutbusiness.core.rubro.RubroPackRepository
 import cl.rutbusiness.core.session.AlmacenamientoPlataforma
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
+import cl.rutbusiness.core.session.identidadGoogleDeEsteBuild
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,16 +84,37 @@ class AppContainer(context: Context) {
         preferencias = PreferenciasDeImpresoraAndroid(context.applicationContext),
     )
 
+    /** La red y las preferencias, que no dependen de qué Activity esté viva. */
+    private val redDelTelefono = RedDelTelefonoAndroid(context.applicationContext)
+    private val preferenciasDeEntrada = PreferenciasDeEntradaAndroid(context.applicationContext)
+
     /**
      * Lo que necesita la pantalla de entrada.
      *
      * Igual de barato de construir que la impresora: guarda un `Context` y abre
      * un `SharedPreferences`. Nada toca la radio ni la red hasta que alguien
      * pregunta.
+     *
+     * Es una función y no un `val` por una sola razón: el selector de cuentas de
+     * Google necesita el contexto de una **Activity** —es UI del sistema y tiene
+     * que montarse sobre una ventana—, y este contenedor vive en la aplicación,
+     * que no tiene ninguna. Con el contexto de la aplicación, Credential Manager
+     * compila igual y falla recién cuando alguien toca el botón, o sea en el
+     * teléfono de la dueña y no acá.
+     *
+     * @param contextoDeActivity el de `MainActivity`, no el de la aplicación.
      */
-    val entrada = ServiciosDeEntrada(
-        red = RedDelTelefonoAndroid(context.applicationContext),
-        preferencias = PreferenciasDeEntradaAndroid(context.applicationContext),
+    fun entradaPara(contextoDeActivity: Context) = ServiciosDeEntrada(
+        red = redDelTelefono,
+        preferencias = preferenciasDeEntrada,
+        // Sin `rb.googleClientId` al compilar esto es exactamente
+        // `IdentidadGoogleNoCableada` —el mismo objeto de siempre— y el botón de
+        // Google no aparece. Ver `app/build.gradle.kts` y el test
+        // `IdentidadGoogleDeEsteBuildTest`.
+        identidadGoogle = identidadGoogleDeEsteBuild(
+            clientId = BuildConfig.GOOGLE_CLIENT_ID,
+            contexto = { contextoDeActivity },
+        ),
         // A dónde apunta "Crear mi negocio". Se decide al compilar
         // (`-Prb.urlNube=...`), no acá: ver el comentario en
         // `app/build.gradle.kts`. Vacío significa que este APK no trae nube, y

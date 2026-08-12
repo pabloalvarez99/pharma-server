@@ -45,6 +45,13 @@ class MainActivity : ComponentActivity() {
         // tenga que saber de `PackageManager` ni de `SpeechRecognizer`.
         val dictado = if (hayDictadoDeVoz()) DictadoDeVozAndroid else null
 
+        // Fuera de `setContent` a propósito: adentro se recompone, y armar los
+        // servicios de entrada en cada recomposición crearía un
+        // `IdentidadGoogleAndroid` nuevo por frame. Acá se arma una vez, con el
+        // contexto de esta Activity — que es el que el selector de cuentas de
+        // Google necesita para poder montarse (ver `AppContainer.entradaPara`).
+        val entrada = container.entradaPara(this)
+
         setContent {
             // Los enchufes entre la plataforma y la UI. De acá para abajo nadie
             // sabe que existen CameraX, el `SpeechRecognizer`, el Bluetooth ni
@@ -59,7 +66,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 ProveerImpresora(container.impresora) {
                     ProveerOffline(container.offline) {
-                        ProveerEntrada(container.entrada) {
+                        ProveerEntrada(entrada) {
                             ProveerRubro(container.rubro) {
                                 RutBusinessApp(sesion = container.sesion)
                             }

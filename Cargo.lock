@@ -2113,13 +2113,17 @@ name = "domain"
 version = "0.1.28"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "criterion",
  "db",
  "dte",
  "futures",
+ "jsonwebtoken",
  "pharma-core",
  "proptest",
+ "rand 0.8.6",
+ "rsa",
  "rust_decimal",
  "serde",
  "serde_json",

@@ -64,6 +64,19 @@ interface PreferenciasDeEntrada {
 class ServiciosDeEntrada(
     val red: RedDelTelefono,
     val preferencias: PreferenciasDeEntrada,
+    /**
+     * Quién sabe pedir una cuenta de Google en este aparato.
+     *
+     * El default sigue siendo el stub y eso importa: un `ServiciosDeEntrada`
+     * armado en un test, o en cualquier camino que no pase por `MainActivity`,
+     * no tiene Google y no lo finge.
+     *
+     * A diferencia del resto de este archivo, el real **no** se arma en
+     * `AppContainer` sino en `MainActivity`: el selector de cuentas es UI del
+     * sistema y necesita el contexto de una Activity, no el de la aplicación.
+     * Con el de la aplicación, Credential Manager compila igual y falla recién
+     * cuando alguien toca el botón.
+     */
     val identidadGoogle: IdentidadGoogle = IdentidadGoogleNoCableada,
     /**
      * La dirección a la que apunta "Crear mi negocio", o `null` cuando este APK
