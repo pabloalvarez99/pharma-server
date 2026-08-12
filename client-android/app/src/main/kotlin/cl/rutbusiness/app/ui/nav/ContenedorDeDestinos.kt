@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.agente.LocalIrAlAgente
 import cl.rutbusiness.app.ui.catalogo.CatalogoRoute
 import cl.rutbusiness.app.ui.catalogo.LocalAbrirCatalogo
 import cl.rutbusiness.app.ui.offline.EstadoRespaldoUi
@@ -164,6 +165,12 @@ internal fun ContenedorDeDestinos(
     val abrirCatalogo: (() -> Unit)? = remember(sesion) {
         if (sesion == null) null else ({ viendoCatalogo = true })
     }
+
+    // Lo mismo para el agente, y por la misma razón de identidad estable. El
+    // vacío de Hoy y el de Deudas no explican qué hacer: ofrecen hacerlo, y
+    // eso es cambiar de destino. Sin este provider el CTA existe, se dibuja, y
+    // no lleva a ninguna parte — la peor versión, porque parece que anda.
+    val irAlAgente: (() -> Unit)? = remember { { destino = Destino.Agente } }
 
     Column(modifier = modifier.fillMaxSize()) {
         FranjaDeConexion(
@@ -458,7 +465,10 @@ internal fun ContenedorDeDestinos(
                     onCerrar = { viendoCatalogo = false },
                 )
             } else {
-                CompositionLocalProvider(LocalAbrirCatalogo provides abrirCatalogo) {
+                CompositionLocalProvider(
+                    LocalAbrirCatalogo provides abrirCatalogo,
+                    LocalIrAlAgente provides irAlAgente,
+                ) {
                     estados.SaveableStateProvider(destino.name) {
                         contenido(destino)
                     }
