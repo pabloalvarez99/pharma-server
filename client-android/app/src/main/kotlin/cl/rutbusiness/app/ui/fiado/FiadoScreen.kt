@@ -20,7 +20,10 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.money.Moneda
+import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
+import cl.rutbusiness.app.ui.agente.irAlAgente
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
@@ -160,6 +163,8 @@ internal fun ListaDeDeudores(
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val feria = esFeria()
+    val alAgente = irAlAgente()
 
     Column(modifier = modifier.fillMaxSize()) {
         // Fijo sobre la lista y no como primer ítem de ella: con cincuenta
@@ -179,10 +184,20 @@ internal fun ListaDeDeudores(
         when {
             deudores == null -> Unit
 
+            // El vacío que más veces se va a ver: el primer día nadie debe nada.
+            // En feria tiene que enseñar **cómo se fía**, que es una frase y no
+            // un formulario; el botón lleva a decirla y desaparece si desde acá
+            // no se puede llegar al agente.
             deudores.cuantos == 0 || esCero(deudores.total) -> RbEmptyState(
-                title = "Nadie te debe plata",
-                hint = "Cuando fíes una venta, la deuda de esa persona aparece acá hasta que " +
-                    "te la termine de pagar.",
+                title = if (feria) "Nadie te debe" else "Nadie te debe plata",
+                hint = if (feria) {
+                    "Cuando fíes, díselo al agente: «$ASI_SE_FIA». Queda acá hasta que te pague."
+                } else {
+                    "Cuando fíes una venta, la deuda de esa persona aparece acá hasta que " +
+                        "te la termine de pagar."
+                },
+                actionLabel = if (feria) alAgente?.let { "Hablarle al agente" } else null,
+                onAction = if (feria) alAgente else null,
             )
 
             visibles.isEmpty() -> RbEmptyState(

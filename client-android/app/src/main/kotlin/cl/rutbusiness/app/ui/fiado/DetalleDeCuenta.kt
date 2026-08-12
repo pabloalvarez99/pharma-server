@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
@@ -124,8 +126,17 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
                     // se quedaba ahí: informaba en vez de enseñar. Ahora dice de
                     // dónde salen las líneas, que es lo que hace falta saber la
                     // primera vez que se abre una cuenta recién creada.
-                    text = "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando " +
-                        "le fíes una venta desde «Cobrar», y cuando anotes que te pagó.",
+                    //
+                    // En feria no se manda a «Cobrar»: esa pestaña se llama
+                    // "Vender" y fiar se hace hablando. Mandar a alguien a una
+                    // pestaña que no existe es peor que no decirle nada.
+                    text = if (esFeria()) {
+                        "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando le " +
+                            "fíes algo — «$ASI_SE_FIA» — y cuando anotes que te pagó."
+                    } else {
+                        "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando " +
+                            "le fíes una venta desde «Cobrar», y cuando anotes que te pagó."
+                    },
                     style = RbTheme.typography.body,
                     color = colors.textSecondary,
                 )

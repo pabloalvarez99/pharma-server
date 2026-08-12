@@ -30,7 +30,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
+import cl.rutbusiness.app.ui.agente.LocalIrAlAgente
+import cl.rutbusiness.app.ui.rubro.LocalRubro
+import cl.rutbusiness.app.ui.rubro.ServiciosDeRubro
 import cl.rutbusiness.core.money.Moneda
+import cl.rutbusiness.core.rubro.RubroPackRepository
 import cl.rutbusiness.ui.theme.RbDefaultDimens
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertEquals
@@ -191,22 +195,129 @@ class FiadoEscalaTest {
 
     @Test
     fun `sin deudores se explica que va a pasar cuando fie`() {
-        compose.setContent {
-            ConEscala(1.0f) {
-                ListaDeDeudores(
-                    moneda = Moneda.de("CLP"),
-                    deudores = DeudoresDto(total = "0", cuantos = 0, rows = emptyList()),
-                    visibles = emptyList(),
-                    consulta = "",
-                    onConsulta = {},
-                    onElegir = {},
-                )
-            }
-        }
-        compose.waitForIdle()
+        mostrarSinDeudores(escala = 1.0f)
 
         compose.onNodeWithText("Nadie te debe plata").assertIsDisplayed()
         compose.onNodeWithText("Cuando fíes una venta", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * El vacío que más veces se va a ver: el primer día nadie debe nada.
+     *
+     * En feria fiar no es una pantalla, es una frase — así que el vacío la
+     * enseña completa, con nombre y monto, para que se copie tal cual.
+     */
+    @Test
+    fun `en feria sin deudores se ensena como fiar`() {
+        var hablado = false
+        mostrarSinDeudores(escala = 1.0f, rubro = "feria", onIrAlAgente = { hablado = true })
+
+        compose.onNodeWithText("Nadie te debe").assertIsDisplayed()
+        compose.onNodeWithText("Don Juan me debe 5000", substring = true).assertIsDisplayed()
+
+        compose.onNodeWithText("Hablarle al agente").performClick()
+        compose.waitForIdle()
+        assertTrue("el botón del vacío tiene que llevar a hablarle al agente", hablado)
+    }
+
+    /** El caso que define "listo" según el piso de hardware, también en el vacío. */
+    @Test
+    fun `en feria el vacio de deudas se lee entero al 200 por ciento`() {
+        mostrarSinDeudores(escala = 2.0f, rubro = "feria", onIrAlAgente = {})
+
+        compose.onNodeWithText("Nadie te debe").assertIsDisplayed()
+        val cta = compose.onNodeWithText("Hablarle al agente")
+        cta.assertIsDisplayed()
+
+        val caja = cta.getUnclippedBoundsInRoot()
+        assertTrue(
+            "a 2x el botón del vacío mide ${caja.width} x ${caja.height}, bajo el objetivo " +
+                "táctil de $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+        revisarQueNadaSeCorte(2.0f)
+    }
+
+    /** Un rubro formal no hereda el copy de feria. */
+    @Test
+    fun `con pack formal el vacio de deudas no cambia`() {
+        mostrarSinDeudores(escala = 1.0f, rubro = "farmacia", onIrAlAgente = {})
+
+        compose.onNodeWithText("Nadie te debe plata").assertIsDisplayed()
+        compose.onNodeWithText("Cuando fíes una venta", substring = true).assertIsDisplayed()
+        assertEquals(
+            "con un pack formal no se ofrece hablarle al agente",
+            0,
+            compose.onAllNodes(hasText("Hablarle al agente")).fetchSemanticsNodes().size,
+        )
+    }
+
+    /**
+     * Abrir la cuenta de alguien: el objetivo táctil, medido donde se toca.
+     *
+     * Es el gesto de "¿cuánto debe don Juan?" con don Juan parado adelante. Al
+     * 200% la fila crece con la letra, y lo que no puede pasar es que crezca el
+     * texto y no el área que recibe el dedo.
+     */
+    @Test
+    fun `el toque para ver una cuenta mide al menos 56 dp al 200 por ciento`() {
+        mostrarLista(escala = 2.0f)
+
+        val fila = enLaLista("Marta Díaz")
+        val caja = fila.getUnclippedBoundsInRoot()
+        assertTrue(
+            "a 2x la fila del deudor mide ${caja.width} x ${caja.height}, bajo el objetivo " +
+                "táctil de $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+    }
+
+    /** Ídem para anotar el pago, que es el otro toque con alguien esperando. */
+    @Test
+    fun `el toque para anotar el pago mide al menos 56 dp al 200 por ciento`() {
+        mostrarAbono(escala = 2.0f)
+
+        val boton = compose.onNodeWithText("Anotar el pago").performScrollTo()
+        val caja = boton.getUnclippedBoundsInRoot()
+        assertTrue(
+            "a 2x «Anotar el pago» mide ${caja.width} x ${caja.height}, bajo el objetivo " +
+                "táctil de $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+    }
+
+    /**
+     * La lista vacía, con el pack que se le quiera dar.
+     *
+     * @param rubro `null` es el caso histórico -sin servicios de rubro- y
+     *   equivale al pack genérico: retail formal.
+     */
+    private fun mostrarSinDeudores(
+        escala: Float,
+        rubro: String? = null,
+        onIrAlAgente: (() -> Unit)? = null,
+    ) {
+        val servicios = rubro?.let {
+            ServiciosDeRubro(RubroPackRepository().apply { usarLocal(it) })
+        }
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalRubro provides servicios,
+                LocalIrAlAgente provides onIrAlAgente,
+            ) {
+                ConEscala(escala) {
+                    ListaDeDeudores(
+                        moneda = Moneda.de("CLP"),
+                        deudores = DeudoresDto(total = "0", cuantos = 0, rows = emptyList()),
+                        visibles = emptyList(),
+                        consulta = "",
+                        onConsulta = {},
+                        onElegir = {},
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
     }
 
     // --- el pago -------------------------------------------------------------

@@ -41,3 +41,21 @@ fun packActual(): RubroPack {
     val pack by repo.pack.collectAsState()
     return pack
 }
+
+/**
+ * Si la UI tiene que hablar como en la feria (ADR-0022).
+ *
+ * El pack manda: `agent_home` es la bandera que dice "el agente es la casa", y
+ * es lo que separa el copy de feria del de un rubro formal. El `rubro == "feria"`
+ * queda de cinturón por si un server viejo manda el vertical sin las features.
+ *
+ * Vive acá y no adentro de cada pantalla porque "Hoy" y "Quién me debe" tienen
+ * que contestar lo mismo: con la condición copiada en dos archivos, alcanza con
+ * que una cambie para que el mismo teléfono hable como feriante en una pantalla
+ * y como farmacia en la otra.
+ */
+@Composable
+fun esFeria(): Boolean {
+    val pack = packActual()
+    return pack.features.agentHome || pack.rubro == "feria"
+}
