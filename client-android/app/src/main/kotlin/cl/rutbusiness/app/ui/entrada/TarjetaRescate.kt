@@ -278,7 +278,7 @@ fun TarjetaRescate(
                     label = "Compartir a una nota (no WhatsApp)",
                     onClick = {
                         compartir.compartirTexto(
-                            asunto = "RutBusiness - tarjeta de rescate",
+                            asunto = "RutAgent - tarjeta de rescate",
                             texto = textoPagina,
                         )
                     },

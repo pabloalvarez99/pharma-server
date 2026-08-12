@@ -116,7 +116,7 @@ fun armarSnapshotDesdeCola(
 fun textoTarjetaImprimible(
     clave: ClaveDelNegocio,
     tenantSlug: String,
-    titulo: String = "RutBusiness - tarjeta de rescate",
+    titulo: String = "RutAgent - tarjeta de rescate",
 ): String {
     val qr = payloadQrRescate(tenantSlug, clave.bloques).orEmpty()
     val sb = StringBuilder()
@@ -154,7 +154,7 @@ fun htmlTarjetaImprimible(
     clave: ClaveDelNegocio,
     tenantSlug: String,
     svgQr: String? = null,
-    titulo: String = "RutBusiness - tarjeta de rescate",
+    titulo: String = "RutAgent - tarjeta de rescate",
 ): String {
     val slug = tenantSlug.trim().lowercase()
     val qrPayload = payloadQrRescate(tenantSlug, clave.bloques).orEmpty()
@@ -223,7 +223,7 @@ fun htmlTarjetaImprimible(
   <div class="warn">
     <strong>Pegá esta hoja en tu cuaderno.</strong>
     Sin esta llave el respaldo cifrado no se puede abrir.
-    RutBusiness no puede recuperarla. No la mandes por WhatsApp.
+    RutAgent no puede recuperarla. No la mandes por WhatsApp.
   </div>
   <h2>Palabras (12)</h2>
   <ol class="words">
@@ -233,7 +233,7 @@ $palabrasHtml
   <p class="blocks">${escaparHtml(clave.bloquesCompletos())}</p>
   <h2>Código QR de rescate</h2>
 $qrBlock
-  <p class="foot">RutBusiness · tarjeta de rescate · una página · no compartir por chat</p>
+  <p class="foot">RutAgent · tarjeta de rescate · una página · no compartir por chat</p>
 </body>
 </html>
 """.trim() + "\n"

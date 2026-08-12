@@ -46,7 +46,13 @@ fun RutBusinessApp(sesion: SessionRepository) {
 
     RbTheme {
         when (val actual = estado) {
-            EstadoSesion.Cargando -> RbLoadingState(label = "Abriendo RutBusiness...")
+            // Lo primero que se lee al abrir, y por eso dice **RutAgent**: es el
+            // mismo nombre que la dueña acaba de tocar en el lanzador. El
+            // identificador de este composable sigue siendo `RutBusinessApp`
+            // —igual que el package— porque eso no lo ve nadie; lo que no puede
+            // pasar es que el cartel de arranque nombre un producto distinto al
+            // del ícono. Lo fija `NombreDelProductoTest`.
+            EstadoSesion.Cargando -> RbLoadingState(label = "Abriendo RutAgent...")
             is EstadoSesion.SinSesion -> EntradaRoute(sesion = sesion, estado = actual)
             is EstadoSesion.Activa -> ConSesion(sesion = sesion, estado = actual)
         }

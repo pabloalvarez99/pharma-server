@@ -45,8 +45,13 @@ sealed class FallaDeImpresion(
      */
     class FaltaPermiso : FallaDeImpresion(
         titulo = "Falta darle permiso al Bluetooth",
+        // El nombre acá no es decorativo: es la instrucción de dónde tocar. En
+        // Ajustes › Aplicaciones el teléfono lista la app por su `app_name`, así
+        // que este texto tiene que decir exactamente eso — si nombra otro
+        // producto, la dueña recorre la lista buscando algo que no existe. Por
+        // eso queda atado a `app_name` en `NombreDelProductoTest`.
         queHacer = "Toca «Dar permiso» y acepta. Es una sola vez. Si no te aparece el aviso, " +
-            "Android ya lo tiene negado: entra a Ajustes › Aplicaciones › RutBusiness › " +
+            "Android ya lo tiene negado: entra a Ajustes › Aplicaciones › RutAgent › " +
             "Permisos y activa «Dispositivos cercanos».",
         sePuedeReintentar = true,
     )
