@@ -33,6 +33,7 @@ import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipRow
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
+import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
@@ -121,6 +122,20 @@ fun AssistScreen(
             habilitado = !vm.pensando,
             onEscribir = vm::escribir,
             onEnviar = vm::enviarBorrador,
+            // Lo dictado entra por **el mismo camino** que lo tipeado: cae en el
+            // campo y se manda. No hay un `preguntarPorVoz` en el ViewModel, a
+            // propósito: un segundo camino al server es un segundo lugar donde
+            // arreglar las cosas, y el día que "hablar" y "escribir" se porten
+            // distinto nadie va a saber por qué.
+            //
+            // Se manda solo, sin un toque más, porque la mano que sostiene la
+            // bolsa es la misma que tendría que apretar Enviar. Lo que protege
+            // de una palabra mal entendida no es un toque extra: es que el
+            // agente **propone y espera confirmación** antes de escribir nada.
+            onDictado = { dicho ->
+                vm.escribir(dicho)
+                vm.enviarBorrador()
+            },
         )
     }
 }
@@ -251,15 +266,30 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
     }
 }
 
-/** El campo de abajo. */
+/**
+ * El campo de abajo, y las dos formas de llenarlo.
+ *
+ * El micrófono va **al lado del campo**, no en lugar de nada: los chips de
+ * ejemplo siguen arriba y el teclado sigue siendo el camino que nunca falla.
+ * Cuando no hay con qué escuchar -un teléfono sin motor de reconocimiento, un
+ * test- el control no se dibuja y esta pantalla es exactamente la de ayer.
+ *
+ * La fila es [RbReflowRow] y no un `Row`: al 200% de escala de letra, cuando el
+ * botón deja al campo más angosto que la palabra más larga de su etiqueta, el
+ * botón baja solo a su propio renglón. Es la misma regla que sostiene la barra
+ * de título y las filas de la lista, y no tiene ningún umbral de escala que
+ * alguien tenga que adivinar.
+ */
 @Composable
 private fun Redactor(
     texto: String,
     habilitado: Boolean,
     onEscribir: (String) -> Unit,
     onEnviar: () -> Unit,
+    onDictado: (String) -> Unit,
 ) {
     val dimens = RbTheme.dimens
+    val dictado = LocalDictadoDeVoz.current?.recordarSesion(onTexto = onDictado)
 
     Column(
         modifier = Modifier
@@ -276,15 +306,52 @@ private fun Redactor(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space2),
     ) {
-        RbTextField(
-            value = texto,
-            onValueChange = onEscribir,
-            label = "¿Qué necesitas?",
-            placeholder = "Escribe o toca una sugerencia",
-            enabled = habilitado,
-            imeAction = ImeAction.Send,
-            onImeAction = onEnviar,
+        RbReflowRow(
+            spacing = dimens.space2,
+            content = {
+                RbTextField(
+                    value = texto,
+                    onValueChange = { escrito ->
+                        // Empezar a escribir baja el aviso del dictado: ya
+                        // eligió el otro camino, la línea dejó de servirle.
+                        dictado?.olvidarAviso()
+                        onEscribir(escrito)
+                    },
+                    label = "¿Qué necesitas?",
+                    placeholder = if (dictado == null) {
+                        "Escribe o toca una sugerencia"
+                    } else {
+                        "Habla o escribe"
+                    },
+                    enabled = habilitado,
+                    imeAction = ImeAction.Send,
+                    onImeAction = onEnviar,
+                )
+            },
+            trailing = {
+                if (dictado != null) {
+                    BotonDeVoz(
+                        escuchando = dictado.escuchando,
+                        // Mientras el agente piensa no se dicta, por la misma
+                        // razón por la que no se envía: la respuesta que está
+                        // por llegar es a la pregunta anterior.
+                        habilitado = habilitado,
+                        onTocar = dictado::alternar,
+                    )
+                }
+            },
         )
+
+        // Lo único que el dictado tiene para decir cuando algo no sale. Una
+        // línea, del color del texto de apoyo, y siempre termina en cómo seguir.
+        dictado?.aviso?.let { linea ->
+            Text(
+                text = linea,
+                style = RbTheme.typography.support,
+                color = RbTheme.colors.textSecondary,
+            )
+        }
+
         RbButton(
             label = "Enviar",
             onClick = onEnviar,

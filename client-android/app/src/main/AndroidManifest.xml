@@ -51,6 +51,34 @@
         android:name="android.hardware.camera.autofocus"
         android:required="false" />
 
+    <!--
+        Dictarle al agente. El permiso se pide en el momento en que la dueña
+        toca el micrófono, nunca al abrir la app.
+
+        `required="false"` en el micrófono, por la misma razón que en la cámara:
+        sin esa línea Google Play deduce del permiso que el micrófono es
+        obligatorio y esconde la app de todo aparato que no tenga uno. Hablar
+        suma; escribir sigue siendo el camino que nunca falla.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!--
+        Desde Android 11 una app sólo ve los servicios que declara que le
+        interesan. Sin esto `SpeechRecognizer.isRecognitionAvailable()` contesta
+        que no hay reconocedor aunque el teléfono lo tenga instalado, y el
+        control de voz no se dibujaría nunca en un aparato moderno.
+
+        No concede nada: es visibilidad de paquetes, no un permiso.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".RutBusinessApplication"
         android:allowBackup="false"

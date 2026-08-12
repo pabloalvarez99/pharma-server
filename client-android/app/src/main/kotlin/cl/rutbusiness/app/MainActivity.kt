@@ -8,12 +8,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import cl.rutbusiness.app.camara.CamaraDeCodigosCameraX
 import cl.rutbusiness.app.ui.RutBusinessApp
 import cl.rutbusiness.app.entrada.CompartirTarjetaAndroid
+import cl.rutbusiness.app.ui.assist.LocalDictadoDeVoz
 import cl.rutbusiness.app.ui.entrada.LocalCompartirTarjeta
 import cl.rutbusiness.app.ui.entrada.ProveerEntrada
 import cl.rutbusiness.app.ui.impresora.ProveerImpresora
 import cl.rutbusiness.app.ui.offline.ProveerOffline
 import cl.rutbusiness.app.ui.rubro.ProveerRubro
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
+import cl.rutbusiness.app.voz.DictadoDeVozAndroid
+import cl.rutbusiness.app.voz.hayDictadoDeVoz
 
 /**
  * Único `Activity` de la app. Su trabajo es exactamente uno: montar Compose.
@@ -35,15 +38,23 @@ class MainActivity : ComponentActivity() {
             null
         }
 
+        // Lo mismo con el micrófono: si este teléfono no tiene con qué
+        // escuchar -sin micrófono, o sin ningún motor de reconocimiento
+        // instalado- la pantalla del agente no dibuja el control de voz y se
+        // sigue escribiendo. Preguntarlo acá, una vez, evita que la pantalla
+        // tenga que saber de `PackageManager` ni de `SpeechRecognizer`.
+        val dictado = if (hayDictadoDeVoz()) DictadoDeVozAndroid else null
+
         setContent {
-            // Los cuatro enchufes entre la plataforma y la UI. De acá para abajo
-            // nadie sabe que existen CameraX, el Bluetooth ni el
-            // `ConnectivityManager`: las pantallas piden `CamaraDeCodigos`,
-            // `Impresora` o `RedDelTelefono` por `CompositionLocal` y reciben
-            // una interfaz. Es lo que deja la capa de UI compilable para iOS sin
-            // tocarla.
+            // Los enchufes entre la plataforma y la UI. De acá para abajo nadie
+            // sabe que existen CameraX, el `SpeechRecognizer`, el Bluetooth ni
+            // el `ConnectivityManager`: las pantallas piden `CamaraDeCodigos`,
+            // `DictadoDeVoz`, `Impresora` o `RedDelTelefono` por
+            // `CompositionLocal` y reciben una interfaz. Es lo que deja la capa
+            // de UI compilable para iOS sin tocarla.
             CompositionLocalProvider(
                 LocalCamaraDeCodigos provides camara,
+                LocalDictadoDeVoz provides dictado,
                 LocalCompartirTarjeta provides CompartirTarjetaAndroid(this),
             ) {
                 ProveerImpresora(container.impresora) {
