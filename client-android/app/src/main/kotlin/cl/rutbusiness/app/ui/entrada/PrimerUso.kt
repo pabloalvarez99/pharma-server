@@ -61,13 +61,21 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     var indice by rememberSaveable { mutableStateOf(0) }
 
-    val paso = PASOS[indice]
-    val ultimo = indice == PASOS.lastIndex
+    // La misma fuente de verdad que gobierna el botón de la pantalla de
+    // entrada. Sin servicios provistos —una prueba de otra pantalla— no hay
+    // Google y el texto no lo finge.
+    val servicios = LocalEntrada.current
+    val pasos = pasosDelPrimerUso(
+        googleDisponible = servicios?.identidadGoogle?.disponible() == true,
+    )
+
+    val paso = pasos[indice]
+    val ultimo = indice == pasos.lastIndex
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
             title = paso.titulo,
-            subtitle = "Paso ${indice + 1} de ${PASOS.size}",
+            subtitle = "Paso ${indice + 1} de ${pasos.size}",
             onBack = if (indice > 0) ({ indice -= 1 }) else null,
         )
 
@@ -193,7 +201,19 @@ internal data class PasoDelPrimerUso(
     val remate: String? = null,
 )
 
-internal val PASOS = listOf(
+/**
+ * Los tres pasos, con el paso 3 escrito según lo que este build puede hacer.
+ *
+ * [googleDisponible] es el **mismo** `disponible()` que decide si aparece el
+ * botón de Google en la pantalla de entrada, y eso es todo el punto: si el
+ * texto tuviera su propia constante, un APK compilado con client id mostraría
+ * el botón andando y, dos pantallas antes, "pronto". Dos verdades sobre lo
+ * mismo, y la que la persona lee primero es la falsa.
+ *
+ * Cuando no hay client id el texto es **exactamente** el de siempre: prometer
+ * "pronto" es honesto, porque el botón todavía no está.
+ */
+internal fun pasosDelPrimerUso(googleDisponible: Boolean): List<PasoDelPrimerUso> = listOf(
     PasoDelPrimerUso(
         titulo = "Esto es RutBusiness",
         encabezado = "El cuaderno del negocio, en tu teléfono",
@@ -228,8 +248,12 @@ internal val PASOS = listOf(
             "La dirección del computador del negocio (si te la dieron). " +
                 "Se ve así: 192.168.1.10:8080",
             "El nombre corto de tu negocio.",
-            "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
-                "(sin otra contraseña que acordarte).",
+            if (googleDisponible) {
+                "Tu cuenta de Google, o tu correo y tu clave."
+            } else {
+                "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
+                    "(sin otra contraseña que acordarte)."
+            },
         ),
         remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
             "Quedaron anotados el día que lo instaló.",

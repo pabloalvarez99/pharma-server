@@ -103,8 +103,11 @@ class EntradaEscalaTest {
      * que hay que medir: el paso 3 sólo existe después de tocar dos veces.
      */
     private fun recorrerLosTresPasos(escala: Float) {
-        PASOS.forEachIndexed { indice, paso ->
-            val ultimo = indice == PASOS.lastIndex
+        // Sin `ServiciosDeEntrada` provistos, `PrimerUso` no tiene Google: los
+        // pasos que se recorren son los mismos que arma la pantalla.
+        val pasos = pasosDelPrimerUso(googleDisponible = false)
+        pasos.forEachIndexed { indice, paso ->
+            val ultimo = indice == pasos.lastIndex
             val avanzar = if (ultimo) "Empezar" else "Siguiente"
 
             compose.onNodeWithText(paso.encabezado, substring = true).assertIsDisplayed()
@@ -144,7 +147,10 @@ class EntradaEscalaTest {
     @Test
     fun `el primer uso no usa jerga`() {
         val prohibidas = listOf("endpoint", "API", "instancia", "tenant", "URL", "HTTP", "IP")
-        val texto = PASOS.joinToString(" ") { paso ->
+        // Las dos versiones del paso 3, porque la jerga se cuela igual de fácil
+        // en la rama que hoy nadie ve.
+        val texto = (pasosDelPrimerUso(googleDisponible = false) +
+            pasosDelPrimerUso(googleDisponible = true)).joinToString(" ") { paso ->
             listOf(paso.titulo, paso.encabezado).joinToString(" ") +
                 paso.parrafos.joinToString(" ") + paso.lista.joinToString(" ") +
                 paso.remate.orEmpty()
