@@ -133,6 +133,14 @@ async fn sin_client_id_no_se_puede_crear_un_negocio() {
         .query("SELECT count() FROM tenant GROUP ALL")
         .await
         .expect("contar");
+    // `GROUP ALL` siempre devuelve una fila, incluso sobre una tabla vacía:
+    // ahí viene con `count: 0`. Preguntar por la *ausencia* de fila haría
+    // fallar este test con la puerta bien cerrada, que es la peor forma de
+    // fallar — se arregla el gate que ya andaba y el test sigue rojo.
     let fila: Option<Conteo> = q.take(0).expect("decode");
-    assert!(fila.is_none(), "un build sin client id creó un negocio");
+    assert_eq!(
+        fila.map(|c| c.count).unwrap_or(0),
+        0,
+        "un build sin client id creó un negocio",
+    );
 }
