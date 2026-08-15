@@ -113,6 +113,22 @@ class AssistViewModel(
     /** True hasta el primer mensaje: es cuando se enseña qué se puede pedir. */
     val recienEmpezando: Boolean get() = mensajes.isEmpty()
 
+    /** Nombre del puesto, si el último login lo trajo. */
+    var nombreDelPuesto by mutableStateOf<String?>(null)
+        private set
+
+    val titulo: String
+        get() = nombreDelPuesto
+            ?.takeIf { it.isNotBlank() }
+            ?.let { "Pídele a $it" }
+            ?: "Pídele a tu negocio"
+
+    init {
+        viewModelScope.launch {
+            nombreDelPuesto = sesion.nombreDelPuesto()
+        }
+    }
+
     fun escribir(texto: String) {
         borrador = texto
     }

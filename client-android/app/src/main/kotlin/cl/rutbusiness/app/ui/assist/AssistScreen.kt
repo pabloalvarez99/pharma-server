@@ -78,7 +78,7 @@ fun AssistScreen(
         // esta pantalla y tiene que poder cargar su primera cosa desde acá, sin
         // que nadie le explique dónde mirar.
         RbTopBar(
-            title = "Pídele a tu negocio",
+            title = vm.titulo,
             actions = if (abrirLoQueVendo == null) {
                 null
             } else {
