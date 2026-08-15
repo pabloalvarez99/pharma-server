@@ -17,6 +17,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.agente.ASI_SE_ANOTA_UNA_VENTA
 import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.agente.irAlAgente
+import cl.rutbusiness.app.ui.gente.compartirConGente
+import cl.rutbusiness.app.ui.gente.mensajeHoy
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.api.models.ProductDto
@@ -262,7 +264,37 @@ internal fun TarjetaDelDia(
                 color = colors.textSecondary,
             )
         }
+
+        // Contar cómo va el día — al socio, a la casa, al hijo que atiende el
+        // otro puesto. Sólo con al menos una venta: el vacío de "Hoy" enseña a
+        // anotar la primera, y ofrecer ahí "compartí que no vendiste nada" es
+        // una broma pesada.
+        //
+        // Va después de la comparación porque es lo último que se hace con esta
+        // tarjeta, y como secundario porque la tarjeta se abre para leerla, no
+        // para mandarla.
+        val compartir = compartirConGente()
+        if (compartir != null && boletas > 0L) {
+            RbButton(
+                label = if (esFeria()) "Contar cómo va el día" else "Compartir el resumen",
+                onClick = { compartir(mensajeHoy(resumenDelDia(moneda, vendidoHoy, boletas))) },
+                variant = RbButtonVariant.Secondary,
+                fillWidth = true,
+            )
+        }
     }
+}
+
+/**
+ * Lo mismo que dicen las dos primeras líneas de la tarjeta, en una sola.
+ *
+ * Se arma con la misma [Moneda] y el mismo `boletas` que ya se dibujaron, y no
+ * con una consulta nueva: el mensaje que sale por el chat tiene que decir el
+ * número que la dueña estaba mirando cuando tocó el botón.
+ */
+private fun resumenDelDia(moneda: Moneda, vendidoHoy: String, boletas: Long): String {
+    val monto = moneda.formatear(vendidoHoy)
+    return if (boletas == 1L) "$monto en 1 boleta" else "$monto en $boletas boletas"
 }
 
 /**

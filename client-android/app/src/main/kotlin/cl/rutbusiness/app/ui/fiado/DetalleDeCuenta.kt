@@ -10,11 +10,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
+import cl.rutbusiness.app.ui.gente.compartirConGente
+import cl.rutbusiness.app.ui.gente.mensajeDeuda
 import cl.rutbusiness.app.ui.rubro.esFeria
+import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
+import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
@@ -40,6 +44,13 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val cuenta = vm.cuenta
+
+    val compartir = compartirConGente()
+    // El mismo texto que dibuja la tarjeta de arriba, y los pesos detrás de ese
+    // texto para saber si hay algo que recordar. Se leen una sola vez acá para
+    // que el botón y la tarjeta no puedan discrepar.
+    val saldoEnPantalla = cuenta?.let { vm.moneda.formatear(it.balance) }
+    val pesosQueDebe = cuenta?.let { Dinero.deTextoDeServidor(it.balance)?.unidades }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -83,6 +94,31 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
                 enabled = !vm.guardando && cuenta != null && vm.motivoParaNoAbonar == null,
                 fillWidth = true,
             )
+        }
+
+        // Recordarle a alguien lo que debe es la otra mitad de esta pantalla: la
+        // dueña ya está mirando el saldo y el nombre, que es exactamente lo que
+        // el mensaje necesita. Va acá, pegado al saldo, y no en un menú.
+        //
+        // Sólo con deuda viva. Mandar "me debes $0" a quien terminó de pagar es
+        // cobrarle de nuevo, y esa cuenta se abre igual —es la única forma de
+        // ver los movimientos de un cliente que ya se puso al día.
+        if (compartir != null && saldoEnPantalla != null && pesosQueDebe != null && pesosQueDebe > 0L) {
+            item("compartir") {
+                RbButton(
+                    label = if (esFeria()) "Mandarle lo que debe" else "Compartir el saldo",
+                    onClick = {
+                        compartir(
+                            mensajeDeuda(
+                                nombre = vm.elegido?.name.orEmpty(),
+                                monto = saldoEnPantalla,
+                            ),
+                        )
+                    },
+                    variant = RbButtonVariant.Secondary,
+                    fillWidth = true,
+                )
+            }
         }
 
         vm.motivoParaNoAbonar?.let { motivo ->

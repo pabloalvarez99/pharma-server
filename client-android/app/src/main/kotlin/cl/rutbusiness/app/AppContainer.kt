@@ -3,6 +3,7 @@ package cl.rutbusiness.app
 import android.content.Context
 import cl.rutbusiness.app.entrada.PreferenciasDeEntradaAndroid
 import cl.rutbusiness.app.entrada.RedDelTelefonoAndroid
+import cl.rutbusiness.app.gente.CompartirConGenteAndroid
 import cl.rutbusiness.app.impresora.ImpresoraBluetoothAndroid
 import cl.rutbusiness.app.impresora.PreferenciasDeImpresoraAndroid
 import cl.rutbusiness.app.ui.entrada.ServiciosDeEntrada
@@ -83,6 +84,23 @@ class AppContainer(context: Context) {
         enlace = ImpresoraBluetoothAndroid(context.applicationContext),
         preferencias = PreferenciasDeImpresoraAndroid(context.applicationContext),
     )
+
+    /**
+     * Mandar un texto por el chat que la dueña ya usa (fase B).
+     *
+     * Contexto de aplicación y no de `Activity`: el `Intent` lleva
+     * `FLAG_ACTIVITY_NEW_TASK`, así que el selector se monta igual. A diferencia
+     * del selector de cuentas de Google, esto no es UI del sistema que necesite
+     * una ventana previa.
+     *
+     * **Todavía no está enchufado a la composición.** Falta la línea de
+     * `MainActivity` que lo provee —`LocalCompartirConGente provides
+     * container.compartirConGente`—, que este asiento no puede tocar. Mientras
+     * no esté, las pantallas leen `null` y esconden el botón, que es
+     * exactamente lo que hacen cuando no hay plataforma detrás: no se rompe
+     * nada, simplemente la función no aparece.
+     */
+    val compartirConGente = CompartirConGenteAndroid(context.applicationContext)
 
     /** La red y las preferencias, que no dependen de qué Activity esté viva. */
     private val redDelTelefono = RedDelTelefonoAndroid(context.applicationContext)
