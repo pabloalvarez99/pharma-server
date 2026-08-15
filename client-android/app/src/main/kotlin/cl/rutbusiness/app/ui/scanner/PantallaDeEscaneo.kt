@@ -105,7 +105,7 @@ internal fun Cartel(
  * Tres reglas que esta pantalla existe para cumplir:
  *
  * 1. **Se explica antes de que Android pregunte.** El cuadro del sistema dice
- *    "¿Permitir que RutBusiness tome fotos y grabe videos?", que en un mostrador
+ *    "¿Permitir que RutAgent tome fotos y grabe videos?", que en un mostrador
  *    suena a que la app va a guardar fotos del local. Acá se dice para qué es y
  *    qué **no** hacemos con la imagen, antes de que decidir sea urgente.
  * 2. **Nunca es un callejón sin salida.** Escribir el código a mano está

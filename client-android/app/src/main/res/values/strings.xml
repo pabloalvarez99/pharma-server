@@ -1,4 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  El nombre que lee la dueña. **RutAgent**, no "RutBusiness".
+
+  "RutBusiness" es el nombre interno del producto y sigue vivo donde no lo ve
+  nadie: el package `cl.rutbusiness`, el `applicationId`, el estilo
+  `Theme.RutBusiness`. Ninguno de esos se toca — el `applicationId` es la
+  identidad de la app para Play y para el APK ya instalado, y moverlo convierte
+  una actualización en una segunda app al lado de la primera, con los datos de
+  la dueña en la que quedó huérfana.
+
+  Este archivo es el único lugar donde se escribe el nombre visible: el
+  `android:label` de la aplicación y el de la activity salen los dos de acá, así
+  que el lanzador, el conmutador de apps y Ajustes › Aplicaciones dicen lo mismo
+  sin que nadie tenga que acordarse de tres lugares.
+-->
 <resources>
-    <string name="app_name">RutBusiness</string>
+    <string name="app_name">RutAgent</string>
 </resources>

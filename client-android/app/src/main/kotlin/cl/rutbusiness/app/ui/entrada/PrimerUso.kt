@@ -215,7 +215,7 @@ internal data class PasoDelPrimerUso(
  */
 internal fun pasosDelPrimerUso(googleDisponible: Boolean): List<PasoDelPrimerUso> = listOf(
     PasoDelPrimerUso(
-        titulo = "Esto es RutBusiness",
+        titulo = "Esto es RutAgent",
         encabezado = "El cuaderno del negocio, en tu teléfono",
         parrafos = listOf(
             "Anotás una venta con la voz o el teclado, sabés quién te debe y " +

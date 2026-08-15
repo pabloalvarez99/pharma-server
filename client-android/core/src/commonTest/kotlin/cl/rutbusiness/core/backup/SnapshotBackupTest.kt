@@ -5,6 +5,7 @@ import cl.rutbusiness.core.pos.LineaDeVenta
 import cl.rutbusiness.core.pos.SolicitudDeVenta
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -89,6 +90,39 @@ class SnapshotBackupTest {
         // No mete la frase cruda como un solo nodo sin numerar (lista <li>).
         assertTrue(html.contains("<li>"))
         assertTrue(html.contains("&lt;") || !html.contains("<script"))
+    }
+
+    /**
+     * La hoja se presenta como **RutAgent**, que es el nombre que la dueña ve en
+     * el teléfono. Va acá, en `core`, y no sólo en la prueba de UI de la app,
+     * porque el nombre es el valor por defecto de estas dos funciones: quien lo
+     * cambie va a estar editando este archivo, no una pantalla.
+     *
+     * De los tres lugares, el pie es el que se pierde: título y advertencia se
+     * leen al revisar la hoja, el pie está abajo de todo y no lo mira nadie
+     * hasta que la tarjeta aparece meses después, con un nombre que ya no
+     * existe, en manos de alguien que necesita saber qué app reinstalar.
+     *
+     * El payload `rutbusiness-rescue:v1:` no entra en esto —lo fijan las pruebas
+     * de arriba— y no se renombra: es formato de cable, y cambiarlo invalidaría
+     * las tarjetas ya impresas.
+     */
+    @Test
+    fun `la tarjeta se presenta como RutAgent y no como el nombre interno`() {
+        val clave = claveDeDemostracion()
+        val texto = textoTarjetaImprimible(clave, "Puesto-Rosa")
+        val html = htmlTarjetaImprimible(clave, "Puesto-Rosa")
+
+        assertTrue(texto.startsWith("RutAgent - tarjeta de rescate"))
+        assertTrue(html.contains("<h1>RutAgent - tarjeta de rescate</h1>"))
+        assertTrue(html.contains("<title>RutAgent - tarjeta de rescate</title>"))
+        assertTrue(html.contains("RutAgent no puede recuperarla"))
+        assertTrue(html.contains("RutAgent · tarjeta de rescate"))
+
+        // Y que no quede el viejo en ninguna de las dos, salvo el payload.
+        val sinPayload = { s: String -> s.replace("rutbusiness-rescue:v1:", "") }
+        assertFalse(sinPayload(texto).contains("RutBusiness", ignoreCase = true))
+        assertFalse(sinPayload(html).contains("RutBusiness", ignoreCase = true))
     }
 
     @Test

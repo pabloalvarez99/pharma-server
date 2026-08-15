@@ -204,8 +204,10 @@ class ImpresoraFlujoTest {
 
         seVe("Falta darle permiso al Bluetooth")
         seVe("Toca «Dar permiso» y acepta")
-        // Y el camino de salida cuando Android ya dejó de preguntar.
-        seVe("Ajustes › Aplicaciones › RutBusiness › Permisos")
+        // Y el camino de salida cuando Android ya dejó de preguntar. El nombre
+        // es el del lanzador —RutAgent, no el interno—, porque así lista la app
+        // Ajustes; que siga siendo el mismo lo fija `NombreDelProductoTest`.
+        seVe("Ajustes › Aplicaciones › RutAgent › Permisos")
         seVe("Dar permiso")
         laVentaSobrevive()
 
