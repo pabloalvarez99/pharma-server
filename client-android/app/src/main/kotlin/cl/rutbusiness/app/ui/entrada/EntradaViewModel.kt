@@ -114,13 +114,14 @@ class EntradaViewModel(
 
     val puedeEntrar: Boolean
         get() = !enviando && !probando && direccion != null &&
-            negocio.isNotBlank() && email.isNotBlank() && password.isNotBlank()
+            (nube != null || negocio.isNotBlank()) &&
+            email.isNotBlank() && password.isNotBlank()
 
     /** Qué falta para poder entrar, dicho una cosa a la vez. */
     fun impedimentoParaEntrar(): String? = when {
         pideDireccion && url.isBlank() -> "Escribe la dirección del computador del negocio."
         pideDireccion && direccion == null -> "Revisa la dirección: todavía no se entiende."
-        negocio.isBlank() -> "Falta el nombre corto de tu negocio."
+        pideDireccion && negocio.isBlank() -> "Falta el nombre corto de tu negocio."
         email.isBlank() -> "Falta tu correo."
         password.isBlank() -> "Falta tu clave."
         else -> null

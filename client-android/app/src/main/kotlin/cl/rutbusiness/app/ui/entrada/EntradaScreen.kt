@@ -150,6 +150,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                 onEntrar = { lugar = LugarDeLaEntrada.Formulario },
                 onRecuperar = { lugar = LugarDeLaEntrada.Rescate },
                 onVerExplicacion = { explicando = true },
+                nube = !servicios?.nube.isNullOrBlank(),
             )
             return
         }
@@ -448,8 +449,12 @@ internal fun FormularioDeEntrada(
                     value = negocio,
                     onValueChange = onNegocio,
                     label = "Nombre corto del negocio",
-                    supportingText = "El que te dieron al crear el negocio. Suele ser una sola " +
-                        "palabra, sin espacios.",
+                    supportingText = if (pideDireccion) {
+                        "El que te dieron al crear el negocio. Suele ser una sola " +
+                            "palabra, sin espacios."
+                    } else {
+                        "Si lo tenés. Si no, alcanza con el correo y la clave."
+                    },
                     enabled = !ocupado,
                     imeAction = ImeAction.Next,
                 )

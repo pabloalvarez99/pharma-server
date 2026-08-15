@@ -215,6 +215,36 @@ class GoogleEntradaCopyTest {
     }
 
     @Test
+    fun `con nube la puerta no habla de quien instalo`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    Puerta(
+                        yaEntroAlgunaVez = false,
+                        onCrear = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        nube = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Crear mi negocio").assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("instaló", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("192.168", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithText("nombre corto", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun `con nube el primer uso no pide direccion de computador`() {
         val conNube = pasosDelPrimerUso(googleDisponible = false, nube = true)
         val texto = conNube.joinToString(" ") { paso ->

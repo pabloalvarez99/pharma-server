@@ -50,6 +50,8 @@ internal fun Puerta(
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
     onRecuperar: (() -> Unit)? = null,
+    /** APK de feria: no hay técnico ni computador que pedir. */
+    nube: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
@@ -89,8 +91,13 @@ internal fun Puerta(
 
             RbCard(title = "Ya tienes un negocio") {
                 Text(
-                    text = "Lo creaste antes, o alguien te lo instaló y te pasó los datos. " +
-                        "Necesitas tu correo y tu clave.",
+                    text = if (nube) {
+                        "Lo creaste antes en este teléfono o en otro. " +
+                            "Entrá con el nombre corto, tu correo y tu clave."
+                    } else {
+                        "Lo creaste antes, o alguien te lo instaló y te pasó los datos. " +
+                            "Necesitas tu correo y tu clave."
+                    },
                     style = RbTheme.typography.body,
                     color = RbTheme.colors.textPrimary,
                 )

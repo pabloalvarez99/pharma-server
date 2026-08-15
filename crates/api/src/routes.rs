@@ -1,5 +1,6 @@
 use axum::{
     extract::State,
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
@@ -19,6 +20,8 @@ struct Me {
 
 #[derive(Deserialize)]
 struct LoginRequest {
+    /// Vacío = buscar el puesto por el correo (nube de feria).
+    #[serde(default)]
     tenant: String,
     email: String,
     password: String,
@@ -69,38 +72,69 @@ async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let db = s.db.as_ref().ok_or_else(ApiError::service_unavailable)?;
+    let email = req.email.trim().to_lowercase();
+    let slug = req.tenant.trim();
 
-    let mut tq = db
-        .query("SELECT id FROM tenant WHERE slug = $slug LIMIT 1")
-        .bind(("slug", req.tenant.clone()))
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, "login: tenant lookup failed");
+    let user = if slug.is_empty() {
+        let mut uq = db
+            .query(
+                "SELECT id, tenant, password, roles, active FROM user \
+                 WHERE email = $email LIMIT 2",
+            )
+            .bind(("email", email.clone()))
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "login: email lookup failed");
+                ApiError::service_unavailable()
+            })?;
+        let users: Vec<UserRow> = uq.take(0).map_err(|e| {
+            tracing::warn!(error = %e, "login: email decode failed");
             ApiError::service_unavailable()
         })?;
-    let tenant: Option<TenantRow> = tq.take(0).map_err(|e| {
-        tracing::warn!(error = %e, "login: tenant decode failed");
-        ApiError::service_unavailable()
-    })?;
-    let tenant = tenant.ok_or_else(ApiError::bad_credentials)?;
-
-    let mut uq = db
-        .query(
-            "SELECT id, tenant, password, roles, active FROM user \
-             WHERE tenant = $tenant AND email = $email LIMIT 1",
-        )
-        .bind(("tenant", tenant.id.clone()))
-        .bind(("email", req.email.clone()))
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, "login: user lookup failed");
+        match users.len() {
+            0 => return Err(ApiError::bad_credentials()),
+            1 => users.into_iter().next().unwrap(),
+            _ => {
+                return Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "NECESITA_NEGOCIO",
+                    "Ese correo está en más de un puesto. Escribí el nombre corto.",
+                ))
+            }
+        }
+    } else {
+        let mut tq = db
+            .query("SELECT id FROM tenant WHERE slug = $slug LIMIT 1")
+            .bind(("slug", slug.to_string()))
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "login: tenant lookup failed");
+                ApiError::service_unavailable()
+            })?;
+        let tenant: Option<TenantRow> = tq.take(0).map_err(|e| {
+            tracing::warn!(error = %e, "login: tenant decode failed");
             ApiError::service_unavailable()
         })?;
-    let user: Option<UserRow> = uq.take(0).map_err(|e| {
-        tracing::warn!(error = %e, "login: user decode failed");
-        ApiError::service_unavailable()
-    })?;
-    let user = user.ok_or_else(ApiError::bad_credentials)?;
+        let tenant = tenant.ok_or_else(ApiError::bad_credentials)?;
+
+        let mut uq = db
+            .query(
+                "SELECT id, tenant, password, roles, active FROM user \
+                 WHERE tenant = $tenant AND email = $email LIMIT 1",
+            )
+            .bind(("tenant", tenant.id.clone()))
+            .bind(("email", email.clone()))
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, "login: user lookup failed");
+                ApiError::service_unavailable()
+            })?;
+        let user: Option<UserRow> = uq.take(0).map_err(|e| {
+            tracing::warn!(error = %e, "login: user decode failed");
+            ApiError::service_unavailable()
+        })?;
+        user.ok_or_else(ApiError::bad_credentials)?
+    };
 
     if user.active == Some(false) {
         return Err(ApiError::bad_credentials());
