@@ -114,6 +114,13 @@ sealed class FallaDeConexion(
             "minúsculas.",
         tecnico = tecnico,
     )
+
+    /** Correo en más de un puesto: hay que escribir el nombre corto. */
+    class FaltaNombreCorto(tecnico: String? = null) : FallaDeConexion(
+        titulo = "Falta el nombre corto",
+        queHacer = "Ese correo está en más de un puesto. Escribí el nombre corto del que querés.",
+        tecnico = tecnico,
+    )
 }
 
 /**
@@ -174,6 +181,13 @@ internal fun fallaDeLogin(
     direccion: String,
     nube: Boolean = false,
 ): FallaDeConexion = when (error) {
+    is AppError.ErrorDelServidor ->
+        if (error.code == "NECESITA_NEGOCIO") {
+            FallaDeConexion.FaltaNombreCorto(error.technical)
+        } else {
+            FallaDeConexion.ContestaPeroNoEsElSistema(direccion, error.technical, nube)
+        }
+
     // El server contesta lo mismo para negocio, correo y clave equivocados, así
     // que el mensaje nombra los tres en vez de adivinar cuál fue.
     is AppError.CredencialesInvalidas -> FallaDeConexion.DatosQueNoCoinciden(error.technical)

@@ -101,6 +101,18 @@ class DiagnosticoDeEntradaTest {
     }
 
     @Test
+    fun `correo en dos puestos pide el nombre corto`() {
+        val falla = fallaDeLogin(
+            AppError.ErrorDelServidor(409, "NECESITA_NEGOCIO", "escribí el nombre corto"),
+            direccion,
+            nube = true,
+        )
+        assertTrue(falla is FallaDeConexion.FaltaNombreCorto)
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+        assertTrue(falla.queHacer.contains("nombre corto"))
+    }
+
+    @Test
     fun `un error propio del server no se lee como clave mala`() {
         val falla = fallaDeLogin(
             AppError.ErrorDelServidor(status = 503, code = null, serverMessage = null),
