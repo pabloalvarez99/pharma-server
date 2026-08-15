@@ -1,0 +1,11 @@
+# TLS + reverse proxy para la nube de feria.
+# En la caja: /etc/caddy/Caddyfile
+#
+# Exportar RUTAGENT_HOST antes de recargar Caddy. Es el hostname que el
+# capitán compró (ej. api.ejemplo.cl), nunca una IP. Let's Encrypt lo
+# firma solo si el DNS A/AAAA ya apunta a esta caja.
+
+{$RUTAGENT_HOST} {
+	encode gzip
+	reverse_proxy 127.0.0.1:8080
+}

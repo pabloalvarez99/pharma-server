@@ -85,6 +85,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                     probador = ServidorPorHttp(sesion),
                     red = servicios?.red,
                     inicial = estado,
+                    nube = servicios?.nube,
                 )
             }
         },
@@ -186,6 +187,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
     FormularioDeEntrada(
         url = vm.url,
         onUrl = vm::cambiarUrl,
+        pideDireccion = vm.pideDireccion,
         ayudaDeDireccion = vm.ayudaDeDireccion,
         errorDeDireccion = vm.errorDeDireccion,
         negocio = vm.negocio,
@@ -219,8 +221,11 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                     is ResultadoGoogle.Listo -> {
                         val destino = vm.direccion
                         if (destino == null) {
-                            avisoGoogle =
+                            avisoGoogle = if (vm.pideDireccion) {
                                 "Primero poné la dirección del sistema del negocio."
+                            } else {
+                                "RutAgent no responde. Reintentá en un momento."
+                            }
                         } else {
                             when (
                                 val login = sesion.entrarConGoogle(
@@ -286,6 +291,12 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
 internal fun FormularioDeEntrada(
     url: String,
     onUrl: (String) -> Unit,
+    /**
+     * `false` en el APK de feria: la dirección viene compilada y este campo
+     * no existe. Quien ve un recuadro que pide `192.168…` en la feria no
+     * entra — desinstala.
+     */
+    pideDireccion: Boolean = true,
     ayudaDeDireccion: String,
     errorDeDireccion: String?,
     negocio: String,
@@ -400,34 +411,36 @@ internal fun FormularioDeEntrada(
                 }
             }
 
-            RbCard(title = "¿Dónde está el computador del negocio?") {
-                RbTextField(
-                    value = url,
-                    onValueChange = onUrl,
-                    label = "Dirección del computador",
-                    placeholder = "192.168.1.10:8080",
-                    supportingText = ayudaDeDireccion,
-                    errorMessage = errorDeDireccion,
-                    keyboardType = KeyboardType.Uri,
-                    enabled = !ocupado,
-                )
+            if (pideDireccion) {
+                RbCard(title = "¿Dónde está el computador del negocio?") {
+                    RbTextField(
+                        value = url,
+                        onValueChange = onUrl,
+                        label = "Dirección del computador",
+                        placeholder = "192.168.1.10:8080",
+                        supportingText = ayudaDeDireccion,
+                        errorMessage = errorDeDireccion,
+                        keyboardType = KeyboardType.Uri,
+                        enabled = !ocupado,
+                    )
 
-                if (conexionConfirmada) {
-                    RbChip(label = "Contestó tu negocio", tone = RbChipTone.Brand)
+                    if (conexionConfirmada) {
+                        RbChip(label = "Contestó tu negocio", tone = RbChipTone.Brand)
+                    }
+
+                    RbButton(
+                        label = if (probando) "Probando..." else "Probar la dirección",
+                        onClick = onProbar,
+                        variant = RbButtonVariant.Secondary,
+                        enabled = puedeProbar,
+                        fillWidth = true,
+                    )
+                    Text(
+                        text = "Puedes probar la dirección ahora, sin escribir tu clave.",
+                        style = RbTheme.typography.support,
+                        color = RbTheme.colors.textSecondary,
+                    )
                 }
-
-                RbButton(
-                    label = if (probando) "Probando..." else "Probar la dirección",
-                    onClick = onProbar,
-                    variant = RbButtonVariant.Secondary,
-                    enabled = puedeProbar,
-                    fillWidth = true,
-                )
-                Text(
-                    text = "Puedes probar la dirección ahora, sin escribir tu clave.",
-                    style = RbTheme.typography.support,
-                    color = RbTheme.colors.textSecondary,
-                )
             }
 
             RbCard(title = "¿Quién eres?") {

@@ -166,6 +166,24 @@ class DiagnosticoDeEntradaTest {
 
     /** El detalle técnico nunca se filtra al texto que se lee. */
     @Test
+    fun `en la nube nadie contesta no nombra computador ni IP`() {
+        val falla = runBlocking {
+            diagnosticarLaEntrada(
+                direccion = "https://nube.test.invalid",
+                hayRed = { true },
+                sondear = { Sondeo.NadieContesta("timeout") },
+                nube = true,
+            )
+        }
+        assertTrue(falla is FallaDeConexion.NadieContesta)
+        val texto = "${falla!!.titulo} ${falla.queHacer}"
+        assertFalse(texto.contains("192.168"))
+        assertFalse(texto.contains("computador", ignoreCase = true))
+        assertFalse(texto.contains("nube.test.invalid"))
+        assertTrue(falla.titulo.contains("RutAgent"))
+    }
+
+    @Test
     fun `el detalle tecnico no aparece en lo que se muestra`() {
         val tecnico = "java.net.ConnectException: failed to connect"
         val falla = FallaDeConexion.NadieContesta(direccion, tecnico)

@@ -38,7 +38,11 @@ class EntradaViewModel(
     private val probador: ProbadorDeServidor,
     private val red: RedDelTelefono?,
     inicial: EstadoSesion.SinSesion,
+    nube: String? = null,
 ) : ViewModel() {
+
+    /** Dirección compilada en el APK de feria, o `null` si este build pregunta. */
+    private val nube: String? = nube?.let(ServerUrl::normalizar)
 
     /**
      * La dirección guardada, mostrada como ella la escribió.
@@ -49,7 +53,9 @@ class EntradaViewModel(
      * sacárselo cambiaría a dónde nos conectamos, porque el normalizador asume
      * `http` cuando no hay esquema.
      */
-    var url by mutableStateOf(inicial.baseUrl?.removePrefix("http://") ?: "")
+    var url by mutableStateOf(
+        (nube ?: inicial.baseUrl)?.removePrefix("http://") ?: "",
+    )
         private set
     var negocio by mutableStateOf(inicial.tenant.orEmpty())
         private set
@@ -100,6 +106,9 @@ class EntradaViewModel(
         get() = direccion?.let { "Nos vamos a conectar a ${comoSeLee(it)}" }
             ?: "El número que te dio quien instaló el sistema, con los dos puntos y todo."
 
+    /** En el APK de feria el campo de dirección no existe. */
+    val pideDireccion: Boolean get() = nube == null
+
     val puedeProbar: Boolean
         get() = !enviando && !probando && direccion != null
 
@@ -109,8 +118,8 @@ class EntradaViewModel(
 
     /** Qué falta para poder entrar, dicho una cosa a la vez. */
     fun impedimentoParaEntrar(): String? = when {
-        url.isBlank() -> "Escribe la dirección del computador del negocio."
-        direccion == null -> "Revisa la dirección: todavía no se entiende."
+        pideDireccion && url.isBlank() -> "Escribe la dirección del computador del negocio."
+        pideDireccion && direccion == null -> "Revisa la dirección: todavía no se entiende."
         negocio.isBlank() -> "Falta el nombre corto de tu negocio."
         email.isBlank() -> "Falta tu correo."
         password.isBlank() -> "Falta tu clave."
@@ -187,7 +196,7 @@ class EntradaViewModel(
                 }
 
                 is Resultado.Falla -> {
-                    falla = fallaDeLogin(r.error, destino)
+                    falla = fallaDeLogin(r.error, destino, nube != null)
                     enviando = false
                 }
             }
@@ -198,6 +207,7 @@ class EntradaViewModel(
         direccion = destino,
         hayRed = red?.let { { it.hayRed() } },
         sondear = probador::sondear,
+        nube = nube != null,
     )
 
     /**

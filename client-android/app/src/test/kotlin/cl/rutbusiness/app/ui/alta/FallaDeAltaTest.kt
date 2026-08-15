@@ -3,6 +3,7 @@ package cl.rutbusiness.app.ui.alta
 import cl.rutbusiness.app.ui.entrada.FallaDeConexion
 import cl.rutbusiness.core.error.AppError
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -208,6 +209,50 @@ class FallaDeAltaTest {
     }
 
     /** La dirección se muestra como la escribió ella, sin el `http://` nuestro. */
+    @Test
+    fun `slug tomado no se lee como computador ocupado`() {
+        val falla = fallaDeAlta(
+            error = AppError.ErrorDelServidor(
+                status = 409,
+                code = "SLUG_TOMADO",
+                serverMessage = "Ese nombre corto ya lo usa otro puesto. Probá con otro nombre.",
+            ),
+            donde = "https://nube.test.invalid",
+            email = email,
+            nube = true,
+        )
+        assertTrue(falla is FallaDeAlta.DatosRechazados)
+        assertTrue(falla.queHacer.contains("otro puesto"))
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("nube.test.invalid"))
+    }
+
+    @Test
+    fun `correo tomado manda a entrar y no a inventar otro correo`() {
+        val falla = fallaDeAlta(
+            error = AppError.ErrorDelServidor(
+                status = 409,
+                code = "CORREO_TOMADO",
+                serverMessage = "Ese correo ya tiene un puesto. Entrá con tu clave, no crees otro.",
+            ),
+            donde = "https://nube.test.invalid",
+            email = email,
+            nube = true,
+        )
+        assertTrue(falla is FallaDeAlta.DatosRechazados)
+        assertTrue(falla.queHacer.contains("Entrá", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+    }
+
+    @Test
+    fun `en la nube el servicio caido no nombra una IP`() {
+        val falla = FallaDeAlta.ServicioNoResponde("https://nube.test.invalid", nube = true)
+        assertFalse(falla.queHacer.contains("nube.test.invalid"))
+        assertFalse(falla.queHacer.contains("192.168"))
+        assertTrue(falla.queHacer.contains("internet"))
+        assertTrue(falla.queHacer.contains("ya están") || falla.queHacer.contains("ya hay"))
+    }
+
     @Test
     fun `los mensajes no muestran el esquema que agrego el normalizador`() {
         val falla = FallaDeAlta.ServicioNoResponde("http://192.168.1.10:8080")

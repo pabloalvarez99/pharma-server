@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -12,6 +15,8 @@ import cl.rutbusiness.core.session.IdentidadGoogle
 import cl.rutbusiness.core.session.IdentidadGoogleNoCableada
 import cl.rutbusiness.core.session.ResultadoGoogle
 import cl.rutbusiness.ui.theme.RbTheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -152,6 +157,75 @@ class GoogleEntradaCopyTest {
      * de Google andando y, dos pantallas antes, promete que llega "pronto". La
      * primera que la persona lee es la falsa.
      */
+    @Test
+    fun `con pideDireccion false no se ve la IP ni el computador`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    FormularioDeEntrada(
+                        url = "https://nube.test.invalid",
+                        onUrl = {},
+                        pideDireccion = false,
+                        ayudaDeDireccion = "no se muestra",
+                        errorDeDireccion = null,
+                        negocio = "puesto-rosa",
+                        onNegocio = {},
+                        email = "rosa@feria.cl",
+                        onEmail = {},
+                        password = "x",
+                        onPassword = {},
+                        conexionConfirmada = false,
+                        falla = null,
+                        impedimento = null,
+                        probando = false,
+                        enviando = false,
+                        puedeProbar = false,
+                        puedeEntrar = true,
+                        onProbar = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        rubroEsFeria = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Entrar a tu puesto").assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("¿Dónde está el computador del negocio?")
+                .fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("192.168", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithContentDescription("Dirección del computador")
+                .fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("Probar la dirección")
+                .fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithContentDescription("Nombre corto del negocio").assertIsDisplayed()
+    }
+
+    @Test
+    fun `con nube el primer uso no pide direccion de computador`() {
+        val conNube = pasosDelPrimerUso(googleDisponible = false, nube = true)
+        val texto = conNube.joinToString(" ") { paso ->
+            listOf(paso.titulo, paso.encabezado, paso.parrafos.joinToString(" "), paso.lista.joinToString(" "), paso.remate.orEmpty())
+                .joinToString(" ")
+        }
+        assertFalse("la feria no puede ver una IP", texto.contains("192.168"))
+        assertFalse(texto.contains("computador del negocio"))
+        assertFalse(texto.contains("quien instaló el sistema"))
+    }
+
     @Test
     fun `con Google cableado el paso 3 no promete que llega pronto`() {
         val conGoogle = pasosDelPrimerUso(googleDisponible = true).last()

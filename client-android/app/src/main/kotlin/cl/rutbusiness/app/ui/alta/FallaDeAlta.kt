@@ -58,12 +58,23 @@ sealed class FallaDeAlta(
      * es peor que no prometer nada, así que se dice qué va a ver si se creó —
      * es el mismo cuidado que con la cola de ventas y con `/assist/act`.
      */
-    class ServicioNoResponde(donde: String, tecnico: String? = null) : FallaDeAlta(
+    class ServicioNoResponde(
+        donde: String,
+        tecnico: String? = null,
+        nube: Boolean = false,
+    ) : FallaDeAlta(
         titulo = "El servicio no está contestando",
-        queHacer = "Intentamos crear tu negocio en ${comoSeLee(donde)} y no hubo respuesta. " +
-            "Revisa que tu teléfono tenga wifi o datos, espera un momento y vuelve a intentar. " +
-            "Si al reintentar te dice que ahí ya hay un negocio, es que sí alcanzó a crearse: " +
-            "entra con tu correo y tu clave.",
+        queHacer = if (nube) {
+            "Intentamos crear tu negocio y no hubo respuesta. Revisá que el teléfono tenga " +
+                "internet, espera un momento y vuelve a intentar. Si al reintentar te dice que " +
+                "ese nombre o correo ya están, es que sí alcanzó a crearse: entra con tu correo " +
+                "y tu clave."
+        } else {
+            "Intentamos crear tu negocio en ${comoSeLee(donde)} y no hubo respuesta. " +
+                "Revisa que tu teléfono tenga wifi o datos, espera un momento y vuelve a intentar. " +
+                "Si al reintentar te dice que ahí ya hay un negocio, es que sí alcanzó a crearse: " +
+                "entra con tu correo y tu clave."
+        },
         tecnico = tecnico,
     )
 
@@ -173,7 +184,16 @@ internal fun fallaDeAlta(
     error: AppError,
     donde: String,
     email: String,
+    nube: Boolean = false,
 ): FallaDeAlta = when {
+    // 409 de la nube compartida: el nombre corto o el correo ya son de otro
+    // puesto. Traducir eso a "este computador está ocupado" es el recuadro
+    // rojo que vio el feriante.
+    error is AppError.ErrorDelServidor &&
+        error.status == 409 &&
+        (error.code == "SLUG_TOMADO" || error.code == "CORREO_TOMADO") ->
+        FallaDeAlta.DatosRechazados(error.userMessage, error.technical)
+
     // 409: la instalación ya tiene cuenta (`SETUP_ALREADY_DONE`).
     error is AppError.ErrorDelServidor && error.status == 409 ->
         FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical)
@@ -189,7 +209,7 @@ internal fun fallaDeAlta(
 
     // Todo lo demás -sin respuesta, 5xx, 503, lo inesperado- es la misma cosa
     // para la dueña: el servicio no está en condiciones ahora.
-    else -> FallaDeAlta.ServicioNoResponde(donde, error.technical)
+    else -> FallaDeAlta.ServicioNoResponde(donde, error.technical, nube)
 }
 
 /**
@@ -201,10 +221,14 @@ internal fun fallaDeAlta(
  * la dueña "no contesta nadie" y "contesta algo que no sirve" se arreglan igual
  * cuando lo que estaba haciendo era crear su negocio: esperar y reintentar.
  */
-internal fun deLaConexion(problema: FallaDeConexion, donde: String): FallaDeAlta =
+internal fun deLaConexion(
+    problema: FallaDeConexion,
+    donde: String,
+    nube: Boolean = false,
+): FallaDeAlta =
     when (problema) {
         is FallaDeConexion.SinRed -> FallaDeAlta.SinRed()
-        else -> FallaDeAlta.ServicioNoResponde(donde, problema.tecnico)
+        else -> FallaDeAlta.ServicioNoResponde(donde, problema.tecnico, nube)
     }
 
 /**

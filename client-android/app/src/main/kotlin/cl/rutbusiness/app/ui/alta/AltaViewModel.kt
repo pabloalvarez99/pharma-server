@@ -195,7 +195,11 @@ class AltaViewModel(
      * alguien que ya estaba desconfiando de la app.
      */
     fun empezar() {
-        if (nube != null && estado == EstadoDelAlta.Preguntando && indice == 0) {
+        // Con nube no se pregunta si el proceso está "libre": ese chequeo es
+        // de `/setup` (un nodo, un negocio). En la nube compartida el segundo
+        // feriante tiene que poder crear el suyo. Sólo se sondea al crear.
+        if (nube != null) return
+        if (estado == EstadoDelAlta.Preguntando && indice == 0) {
             revisarElLugar(alTerminar = {})
         }
     }
@@ -225,14 +229,14 @@ class AltaViewModel(
         viewModelScope.launch {
             val problema = diagnosticar(donde)
             if (problema != null) {
-                falla = deLaConexion(problema, donde)
+                falla = deLaConexion(problema, donde, nube != null)
                 estado = EstadoDelAlta.Preguntando
                 return@launch
             }
 
             when (val r = estadoDelServidor(sesion.apiPara(donde))) {
                 is Resultado.Falla -> {
-                    falla = fallaDeAlta(r.error, donde, email)
+                    falla = fallaDeAlta(r.error, donde, email, nube != null)
                     estado = EstadoDelAlta.Preguntando
                 }
 
@@ -275,7 +279,7 @@ class AltaViewModel(
         viewModelScope.launch {
             val problema = diagnosticar(donde)
             if (problema != null) {
-                falla = deLaConexion(problema, donde)
+                falla = deLaConexion(problema, donde, nube != null)
                 estado = EstadoDelAlta.Preguntando
                 return@launch
             }
@@ -286,10 +290,16 @@ class AltaViewModel(
                 rubro = (rubro ?: RUBROS.last()).clave,
                 email = email.trim().lowercase(),
                 clave = clave,
+                enLaNube = nube != null,
             )
             when (creado) {
                 is Resultado.Falla -> {
-                    falla = fallaDeAlta(creado.error, donde, email.trim().lowercase())
+                    falla = fallaDeAlta(
+                        creado.error,
+                        donde,
+                        email.trim().lowercase(),
+                        nube != null,
+                    )
                     estado = EstadoDelAlta.Preguntando
                 }
 
@@ -319,5 +329,6 @@ class AltaViewModel(
         direccion = donde,
         hayRed = red?.let { { it.hayRed() } },
         sondear = probador::sondear,
+        nube = nube != null,
     )
 }

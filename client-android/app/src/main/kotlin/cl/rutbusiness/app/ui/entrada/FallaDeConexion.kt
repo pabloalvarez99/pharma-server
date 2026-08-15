@@ -38,10 +38,14 @@ sealed class FallaDeConexion(
      * computador apagado. Preguntarlo primero convierte diez segundos de espera
      * y un mensaje equivocado en una respuesta instantánea y correcta.
      */
-    class SinRed : FallaDeConexion(
-        titulo = "Tu teléfono no está conectado",
-        queHacer = "No tiene wifi ni datos prendidos, así que no puede llegar a ninguna parte. " +
-            "Prende el wifi del local, o prende los datos del teléfono, y vuelve a intentar.",
+    class SinRed(nube: Boolean = false) : FallaDeConexion(
+        titulo = if (nube) "No hay internet" else "Tu teléfono no está conectado",
+        queHacer = if (nube) {
+            "El teléfono no tiene wifi ni datos. Prendelos y reintentá."
+        } else {
+            "No tiene wifi ni datos prendidos, así que no puede llegar a ninguna parte. " +
+                "Prende el wifi del local, o prende los datos del teléfono, y vuelve a intentar."
+        },
     )
 
     /**
@@ -51,11 +55,19 @@ sealed class FallaDeConexion(
      * Los tres se ven exactamente igual desde acá y los tres se revisan en el
      * mismo lugar —el local—, así que van juntos y en orden de probabilidad.
      */
-    class NadieContesta(direccion: String, tecnico: String? = null) : FallaDeConexion(
-        titulo = "En esa dirección no contesta nadie",
-        queHacer = "Escribiste ${comoSeLee(direccion)} y no hubo respuesta. Revisa tres cosas, " +
-            "en este orden: que el computador del negocio esté prendido, que este teléfono esté " +
-            "en el mismo wifi que él, y que la dirección esté bien escrita.",
+    class NadieContesta(
+        direccion: String,
+        tecnico: String? = null,
+        nube: Boolean = false,
+    ) : FallaDeConexion(
+        titulo = if (nube) "RutAgent no responde" else "En esa dirección no contesta nadie",
+        queHacer = if (nube) {
+            "No pudimos llegar. Revisá que el teléfono tenga internet y reintentá."
+        } else {
+            "Escribiste ${comoSeLee(direccion)} y no hubo respuesta. Revisa tres cosas, " +
+                "en este orden: que el computador del negocio esté prendido, que este teléfono esté " +
+                "en el mismo wifi que él, y que la dirección esté bien escrita."
+        },
         tecnico = tecnico,
     )
 
@@ -67,12 +79,24 @@ sealed class FallaDeConexion(
      * sistema prendido pero todavía no listo. Los dos se resuelven con la misma
      * persona y con el mismo dato, así que comparten mensaje.
      */
-    class ContestaPeroNoEsElSistema(direccion: String, tecnico: String? = null) : FallaDeConexion(
-        titulo = "Ahí contesta algo, pero no se puede trabajar",
-        queHacer = "En ${comoSeLee(direccion)} hay un computador prendido, pero lo que contesta " +
-            "no es el sistema de tu negocio andando. Casi siempre es el número del final, el que " +
-            "va después de los dos puntos, que quedó mal. Si estás segura de la dirección, " +
-            "avísale a quien instaló el sistema: esto no se arregla desde el teléfono.",
+    class ContestaPeroNoEsElSistema(
+        direccion: String,
+        tecnico: String? = null,
+        nube: Boolean = false,
+    ) : FallaDeConexion(
+        titulo = if (nube) {
+            "RutAgent contestó algo raro"
+        } else {
+            "Ahí contesta algo, pero no se puede trabajar"
+        },
+        queHacer = if (nube) {
+            "Reintentá en un momento. Si sigue igual, no es algo que se arregle desde el teléfono."
+        } else {
+            "En ${comoSeLee(direccion)} hay un computador prendido, pero lo que contesta " +
+                "no es el sistema de tu negocio andando. Casi siempre es el número del final, el que " +
+                "va después de los dos puntos, que quedó mal. Si estás segura de la dirección, " +
+                "avísale a quien instaló el sistema: esto no se arregla desde el teléfono."
+        },
         tecnico = tecnico,
     )
 
@@ -125,14 +149,15 @@ internal suspend fun diagnosticarLaEntrada(
     direccion: String,
     hayRed: (() -> Boolean)?,
     sondear: suspend (String) -> Sondeo,
+    nube: Boolean = false,
 ): FallaDeConexion? {
-    if (hayRed?.invoke() == false) return FallaDeConexion.SinRed()
+    if (hayRed?.invoke() == false) return FallaDeConexion.SinRed(nube)
 
     return when (val sondeo = sondear(direccion)) {
         Sondeo.EsElSistema -> null
-        is Sondeo.NadieContesta -> FallaDeConexion.NadieContesta(direccion, sondeo.tecnico)
+        is Sondeo.NadieContesta -> FallaDeConexion.NadieContesta(direccion, sondeo.tecnico, nube)
         is Sondeo.ContestaOtraCosa ->
-            FallaDeConexion.ContestaPeroNoEsElSistema(direccion, sondeo.tecnico)
+            FallaDeConexion.ContestaPeroNoEsElSistema(direccion, sondeo.tecnico, nube)
     }
 }
 
@@ -144,16 +169,21 @@ internal suspend fun diagnosticarLaEntrada(
  * filoso que el de [cl.rutbusiness.app.ui.common.aCopy], que traduce fallas de
  * pantallas que ya están adentro y no tienen ese dato.
  */
-internal fun fallaDeLogin(error: AppError, direccion: String): FallaDeConexion = when (error) {
+internal fun fallaDeLogin(
+    error: AppError,
+    direccion: String,
+    nube: Boolean = false,
+): FallaDeConexion = when (error) {
     // El server contesta lo mismo para negocio, correo y clave equivocados, así
     // que el mensaje nombra los tres en vez de adivinar cuál fue.
     is AppError.CredencialesInvalidas -> FallaDeConexion.DatosQueNoCoinciden(error.technical)
 
     // La dirección pasó el sondeo, así que si acá se cae la conexión es que se
     // cortó en el medio: el wifi del local, el computador que se durmió.
-    is AppError.ServidorNoResponde -> FallaDeConexion.NadieContesta(direccion, error.technical)
+    is AppError.ServidorNoResponde ->
+        FallaDeConexion.NadieContesta(direccion, error.technical, nube)
 
     // Nos contestó y nos dijo que no, con algo que no son credenciales malas: el
     // sistema está ahí pero no está en condiciones de trabajar.
-    else -> FallaDeConexion.ContestaPeroNoEsElSistema(direccion, error.technical)
+    else -> FallaDeConexion.ContestaPeroNoEsElSistema(direccion, error.technical, nube)
 }

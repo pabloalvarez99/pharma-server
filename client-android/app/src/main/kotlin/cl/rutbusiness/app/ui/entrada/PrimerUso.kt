@@ -67,6 +67,7 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
     val servicios = LocalEntrada.current
     val pasos = pasosDelPrimerUso(
         googleDisponible = servicios?.identidadGoogle?.disponible() == true,
+        nube = !servicios?.nube.isNullOrBlank(),
     )
 
     val paso = pasos[indice]
@@ -213,49 +214,65 @@ internal data class PasoDelPrimerUso(
  * Cuando no hay client id el texto es **exactamente** el de siempre: prometer
  * "pronto" es honesto, porque el botón todavía no está.
  */
-internal fun pasosDelPrimerUso(googleDisponible: Boolean): List<PasoDelPrimerUso> = listOf(
-    PasoDelPrimerUso(
-        titulo = "Esto es RutAgent",
-        encabezado = "El cuaderno del negocio, en tu teléfono",
-        parrafos = listOf(
-            "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
-                "cuánto hiciste hoy - más rápido que el cuaderno de mil pesos.",
-            "Hablale como a un empleado de confianza. Antes de guardar nada, " +
-                "te lo muestra para que lo revises.",
+internal fun pasosDelPrimerUso(
+    googleDisponible: Boolean,
+    nube: Boolean = false,
+): List<PasoDelPrimerUso> {
+    val cuenta = if (googleDisponible) {
+        "Tu cuenta de Google, o tu correo y tu clave."
+    } else {
+        "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
+            "(sin otra contraseña que acordarte)."
+    }
+    val pasoTres = if (nube) {
+        PasoDelPrimerUso(
+            titulo = "Lo que necesitas a mano",
+            encabezado = "Para empezar",
+            parrafos = emptyList(),
+            lista = listOf(
+                "Un nombre para tu puesto (como lo dicen en la feria).",
+                cuenta,
+            ),
+            remate = "Nada más. No hace falta un computador ni una dirección.",
+        )
+    } else {
+        PasoDelPrimerUso(
+            titulo = "Lo que necesitas a mano",
+            encabezado = "Para entrar la primera vez",
+            parrafos = emptyList(),
+            lista = listOf(
+                "La dirección del computador del negocio (si te la dieron). " +
+                    "Se ve así: 192.168.1.10:8080",
+                "El nombre corto de tu negocio.",
+                cuenta,
+            ),
+            remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
+                "Quedaron anotados el día que lo instaló.",
+        )
+    }
+    return listOf(
+        PasoDelPrimerUso(
+            titulo = "Esto es RutAgent",
+            encabezado = "El cuaderno del negocio, en tu teléfono",
+            parrafos = listOf(
+                "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
+                    "cuánto hiciste hoy - más rápido que el cuaderno de mil pesos.",
+                "Hablale como a un empleado de confianza. Antes de guardar nada, " +
+                    "te lo muestra para que lo revises.",
+            ),
         ),
-    ),
-    // El texto de este paso se recortó dos veces a propósito. En el aparato de
-    // referencia la versión larga quedaba cortada por el panel de los botones, y
-    // una frase que se corta a la mitad no la termina de leer nadie: se toca
-    // «Siguiente» y la explicación se pierde justo donde importaba.
-    PasoDelPrimerUso(
-        titulo = "Dónde se guarda todo",
-        encabezado = "En el teléfono y en un respaldo cifrado",
-        parrafos = listOf(
-            "Vendés aunque no haya señal: lo del día queda en el aparato.",
-            "Si activás el respaldo, se sube cifrado con una llave tuya. " +
-                "Nosotros no podemos leerla ni recuperarla: la escribís en el " +
-                "cuaderno el primer día (tarjeta de rescate).",
+        PasoDelPrimerUso(
+            titulo = "Dónde se guarda todo",
+            encabezado = "En el teléfono y en un respaldo cifrado",
+            parrafos = listOf(
+                "Vendés aunque no haya señal: lo del día queda en el aparato.",
+                "Si activás el respaldo, se sube cifrado con una llave tuya. " +
+                    "Nosotros no podemos leerla ni recuperarla: la escribís en el " +
+                    "cuaderno el primer día (tarjeta de rescate).",
+            ),
+            remate = "Sin esa llave, el respaldo no sirve. Con ella y tu cuenta, " +
+                "volvés a entrar si se te rompe el teléfono.",
         ),
-        remate = "Sin esa llave, el respaldo no sirve. Con ella y tu cuenta, " +
-            "volvés a entrar si se te rompe el teléfono.",
-    ),
-    PasoDelPrimerUso(
-        titulo = "Lo que necesitas a mano",
-        encabezado = "Para entrar la primera vez",
-        parrafos = emptyList(),
-        lista = listOf(
-            "La dirección del computador del negocio (si te la dieron). " +
-                "Se ve así: 192.168.1.10:8080",
-            "El nombre corto de tu negocio.",
-            if (googleDisponible) {
-                "Tu cuenta de Google, o tu correo y tu clave."
-            } else {
-                "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
-                    "(sin otra contraseña que acordarte)."
-            },
-        ),
-        remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
-            "Quedaron anotados el día que lo instaló.",
-    ),
-)
+        pasoTres,
+    )
+}

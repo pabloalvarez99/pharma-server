@@ -60,6 +60,19 @@ class AltaViewModelTest {
         assertEquals("https://api.rutbusiness.cl", alta.destino)
     }
 
+    /**
+     * En la nube compartida ya hay otros puestos. Preguntar
+     * `GET /setup/status` y pintar "lugar ocupado" es el recuadro rojo que
+     * vio el feriante: el servidor contesta, pero no para él.
+     */
+    @Test
+    fun `con nube empezar no declara el lugar ocupado ni sale a la red`() {
+        val alta = vm("https://api.rutbusiness.cl")
+        alta.empezar()
+        assertEquals(EstadoDelAlta.Preguntando, alta.estado)
+        assertNull(alta.falla)
+    }
+
     @Test
     fun `sin nube compilada se pregunta primero donde guardar`() {
         val alta = vm(null)

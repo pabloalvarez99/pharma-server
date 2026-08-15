@@ -23,8 +23,9 @@ import kotlinx.serialization.Serializable
  *
  * | Endpoint | Qué lo protege | ¿Sirve acá? |
  * |---|---|---|
- * | `POST /api/v1/setup` | que la base **no tenga ni un usuario** | **sí** |
- * | `POST /admin/v1/tenants` | un secreto compartido (`X-Provisioning-Key`) | **no** |
+ * | `POST /api/v1/setup` | base **sin** usuarios (nodo de un puesto) | lab / teléfono |
+ * | `POST /api/v1/alta` | slug y correo libres (nube compartida) | **feria** |
+ * | `POST /admin/v1/tenants` | secreto `X-Provisioning-Key` | **no** |
  *
  * `/admin/v1/tenants` está hecho para máquina a máquina: lo llama el sitio web
  * de registro, que corre en un servidor y guarda la clave en su propio entorno
@@ -117,8 +118,10 @@ suspend fun crearNegocio(
     rubro: String,
     email: String,
     clave: String,
+    enLaNube: Boolean = false,
 ): Resultado<NegocioCreado> = llamar(api) {
-    api.http.post("${api.baseUrl}/api/v1/setup") {
+    val camino = if (enLaNube) "/api/v1/alta" else "/api/v1/setup"
+    api.http.post("${api.baseUrl}$camino") {
         contentType(ContentType.Application.Json)
         setBody(
             AltaDeNegocio(

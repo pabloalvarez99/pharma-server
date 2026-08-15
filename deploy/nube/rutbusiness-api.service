@@ -1,0 +1,29 @@
+# systemd — API de RutBusiness en la nube de feria (Hetzner CX22).
+# Copiar a /etc/systemd/system/rutbusiness-api.service
+#
+# Usuario de sistema `rutbusiness` (no root). Env en
+# /etc/rutbusiness/api.env (root:rutbusiness, 640). El binario escucha
+# solo loopback; Caddy termina 443.
+
+[Unit]
+Description=RutBusiness API (nube feria)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rutbusiness
+Group=rutbusiness
+EnvironmentFile=-/etc/rutbusiness/api.env
+WorkingDirectory=/var/lib/rutbusiness
+ExecStart=/opt/rutbusiness/bin/pharma-api
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rutbusiness
+
+[Install]
+WantedBy=multi-user.target

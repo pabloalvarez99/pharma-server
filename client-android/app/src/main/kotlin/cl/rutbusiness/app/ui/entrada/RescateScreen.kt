@@ -88,6 +88,7 @@ internal fun RescateRoute(
     RescatePantalla(
         url = url,
         onUrl = { url = it; mensaje = null },
+        pideDireccion = servicios?.nube.isNullOrBlank(),
         negocio = negocio,
         onNegocio = { negocio = it; mensaje = null },
         tarjeta = tarjeta,
@@ -100,8 +101,12 @@ internal fun RescateRoute(
         onRescatar = {
             val destino = ServerUrl.normalizar(url)
             if (destino == null) {
-                mensaje = "Revisá la dirección: algo como 192.168.1.10:8080 o " +
-                    "app.rutbusiness.cl."
+                mensaje = if (!servicios?.nube.isNullOrBlank()) {
+                    "RutAgent no responde. Reintentá en un momento."
+                } else {
+                    "Revisá la dirección: algo como 192.168.1.10:8080 o " +
+                        "app.rutbusiness.cl."
+                }
             } else {
                 trabajando = true
                 mensaje = null
@@ -155,6 +160,7 @@ internal fun RescateRoute(
 internal fun RescatePantalla(
     url: String,
     onUrl: (String) -> Unit,
+    pideDireccion: Boolean = true,
     negocio: String,
     onNegocio: (String) -> Unit,
     tarjeta: String,
@@ -200,16 +206,18 @@ internal fun RescatePantalla(
             }
 
             RbCard(title = "¿Dónde está tu negocio?") {
-                RbTextField(
-                    value = url,
-                    onValueChange = onUrl,
-                    label = "Dirección del computador",
-                    placeholder = "192.168.1.10:8080",
-                    supportingText = "La misma que usabas para entrar.",
-                    keyboardType = KeyboardType.Uri,
-                    enabled = !trabajando,
-                    imeAction = ImeAction.Next,
-                )
+                if (pideDireccion) {
+                    RbTextField(
+                        value = url,
+                        onValueChange = onUrl,
+                        label = "Dirección del computador",
+                        placeholder = "192.168.1.10:8080",
+                        supportingText = "La misma que usabas para entrar.",
+                        keyboardType = KeyboardType.Uri,
+                        enabled = !trabajando,
+                        imeAction = ImeAction.Next,
+                    )
+                }
                 RbTextField(
                     value = negocio,
                     onValueChange = onNegocio,
