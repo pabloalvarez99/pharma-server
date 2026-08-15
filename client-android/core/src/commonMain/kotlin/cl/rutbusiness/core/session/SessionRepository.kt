@@ -105,6 +105,10 @@ class SessionRepository(
     suspend fun ultimoTenant(): String? =
         almacenamiento.preferencias.leerUltimoTenant()
 
+    /** Nombre que ella le puso al puesto. No es el slug. */
+    suspend fun nombreDelPuesto(): String? =
+        almacenamiento.preferencias.leerNombreDelPuesto()
+
     /**
      * Se llama una vez al arrancar la app, y **antes** del primer frame: quien
      * la dispara es `Application.onCreate`, no la UI.
@@ -176,7 +180,12 @@ class SessionRepository(
                 token = r.valor.token
                 almacenamiento.tokens.guardar(r.valor.token)
                 almacenamiento.preferencias.guardarBaseUrl(baseUrl)
-                almacenamiento.preferencias.guardarUltimoAcceso(tenant.trim(), email.trim().lowercase())
+                val slug = tenant.trim().ifBlank { r.valor.tenantSlug }
+                almacenamiento.preferencias.guardarUltimoAcceso(
+                    slug,
+                    email.trim().lowercase(),
+                    r.valor.tenantName,
+                )
                 _estado.value = EstadoSesion.Activa(baseUrl = baseUrl, me = null)
                 Resultado.Ok(Unit)
             }
@@ -213,10 +222,10 @@ class SessionRepository(
                 token = r.valor.token
                 almacenamiento.tokens.guardar(r.valor.token)
                 almacenamiento.preferencias.guardarBaseUrl(baseUrl)
-                val t = tenant?.trim().orEmpty()
+                val t = tenant?.trim().orEmpty().ifBlank { r.valor.tenantSlug }
                 val e = emailHint?.trim()?.lowercase().orEmpty()
                 if (t.isNotEmpty() || e.isNotEmpty()) {
-                    almacenamiento.preferencias.guardarUltimoAcceso(t, e)
+                    almacenamiento.preferencias.guardarUltimoAcceso(t, e, r.valor.tenantName)
                 }
                 _estado.value = EstadoSesion.Activa(baseUrl = baseUrl, me = null)
                 Resultado.Ok(Unit)

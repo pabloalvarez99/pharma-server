@@ -114,7 +114,8 @@ private fun ResumenScreen(
             subtitle = vm.guardadoEn?.let { guardadoEn ->
                 "Datos guardados en el teléfono, " +
                     Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
-            } ?: "Cómo va el negocio hoy",
+            } ?: vm.nombreDelPuesto?.takeIf { feria && it.isNotBlank() }
+                ?: "Cómo va el negocio hoy",
             actions = {
                 RbButton(
                     label = "Actualizar",

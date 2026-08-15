@@ -51,4 +51,6 @@ Logs: `journalctl -u rutbusiness-api -f`. Backup diario: `backup.sh`
 semanal de la CX22 en el panel de Hetzner.
 
 `POST /api/v1/setup` sólo en base vacía. El segundo feriante entra por
-`POST /api/v1/alta`. No hay `X-Provisioning-Key` en el APK.
+`POST /api/v1/alta`. Login: correo + clave alcanzan si el correo es de un
+solo puesto; la respuesta trae `tenant_slug` y `tenant_name` para que el
+teléfono recuerde el puesto. No hay `X-Provisioning-Key` en el APK.

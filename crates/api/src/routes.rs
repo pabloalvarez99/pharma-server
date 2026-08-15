@@ -32,6 +32,10 @@ struct LoginResponse {
     token: String,
     token_type: &'static str,
     expires_in: u64,
+    /// Nombre corto: lo que se escribe al entrar si hace falta.
+    tenant_slug: String,
+    /// Nombre que ella le puso al puesto. Para la barra de Hoy, no para login.
+    tenant_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,9 +179,39 @@ async fn login(
         tracing::warn!(error = %e, "login: session persist failed (token still issued)");
     }
 
+    let (tenant_slug, tenant_name) = nombre_del_puesto(db, &user.tenant).await;
+
     Ok(Json(LoginResponse {
         token,
         token_type: "Bearer",
         expires_in: s.jwt.ttl_seconds,
+        tenant_slug,
+        tenant_name,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct PuestoRow {
+    slug: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn nombre_del_puesto(db: &db::Db, tenant: &surrealdb::sql::Thing) -> (String, String) {
+    let mut q = match db
+        .query("SELECT slug, name FROM tenant WHERE id = $id LIMIT 1")
+        .bind(("id", tenant.clone()))
+        .await
+    {
+        Ok(q) => q,
+        Err(e) => {
+            tracing::warn!(error = %e, "login: tenant name lookup failed");
+            return (String::new(), String::new());
+        }
+    };
+    let row: Option<PuestoRow> = q.take(0).ok().flatten();
+    match row {
+        Some(p) => (p.slug, p.name),
+        None => (String::new(), String::new()),
+    }
 }

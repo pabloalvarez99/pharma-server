@@ -19,7 +19,8 @@ interface PreferenciasServidor {
     suspend fun guardarBaseUrl(url: String)
     suspend fun leerUltimoTenant(): String?
     suspend fun leerUltimoEmail(): String?
-    suspend fun guardarUltimoAcceso(tenant: String, email: String)
+    suspend fun leerNombreDelPuesto(): String? = null
+    suspend fun guardarUltimoAcceso(tenant: String, email: String, nombre: String = "")
 }
 
 /**

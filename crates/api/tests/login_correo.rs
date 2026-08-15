@@ -57,7 +57,10 @@ async fn entra_con_correo_y_clave_sin_nombre_corto() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
-    assert!(body_json(res).await["token"].as_str().unwrap().len() > 10);
+    let body = body_json(res).await;
+    assert!(body["token"].as_str().unwrap().len() > 10);
+    assert_eq!(body["tenant_slug"], "huevos-de-marta");
+    assert_eq!(body["tenant_name"], "Huevos de Marta");
 }
 
 #[tokio::test]

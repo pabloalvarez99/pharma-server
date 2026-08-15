@@ -25,6 +25,8 @@ data class LoginResponse(
     val token: String,
     @SerialName("token_type") val tokenType: String = "Bearer",
     @SerialName("expires_in") val expiresIn: Long = 0,
+    @SerialName("tenant_slug") val tenantSlug: String = "",
+    @SerialName("tenant_name") val tenantName: String = "",
 )
 
 @Serializable

@@ -89,6 +89,10 @@ class ResumenViewModel(
     var guardadoEn by mutableStateOf<Long?>(null)
         private set
 
+    /** Nombre del puesto, si el último login lo trajo. */
+    var nombreDelPuesto by mutableStateOf<String?>(null)
+        private set
+
     /** El reloj de pared, para escribir "hace 20 minutos". */
     val relojDePared: Long get() = offline?.reloj?.invoke() ?: ahora()
 
@@ -159,6 +163,7 @@ class ResumenViewModel(
         error = null
 
         viewModelScope.launch {
+            nombreDelPuesto = sesion.nombreDelPuesto()
             // Sin señal ni se sale a la red: seis llamadas que van a morir por
             // timeout son treinta segundos de spinner para terminar mostrando
             // lo que ya está guardado en el teléfono.

@@ -31,10 +31,13 @@ internal class PreferenciasServidorAndroid(context: Context) : PreferenciasServi
 
     override suspend fun leerUltimoEmail(): String? = leer(EMAIL)
 
-    override suspend fun guardarUltimoAcceso(tenant: String, email: String) {
+    override suspend fun leerNombreDelPuesto(): String? = leer(NOMBRE)
+
+    override suspend fun guardarUltimoAcceso(tenant: String, email: String, nombre: String) {
         store.edit {
             it[TENANT] = tenant
             it[EMAIL] = email
+            if (nombre.isNotBlank()) it[NOMBRE] = nombre
         }
     }
 
@@ -45,5 +48,6 @@ internal class PreferenciasServidorAndroid(context: Context) : PreferenciasServi
         val BASE_URL = stringPreferencesKey("base_url")
         val TENANT = stringPreferencesKey("ultimo_tenant")
         val EMAIL = stringPreferencesKey("ultimo_email")
+        val NOMBRE = stringPreferencesKey("nombre_del_puesto")
     }
 }
