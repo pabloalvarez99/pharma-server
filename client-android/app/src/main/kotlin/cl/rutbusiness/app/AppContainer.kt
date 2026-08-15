@@ -93,12 +93,10 @@ class AppContainer(context: Context) {
      * del selector de cuentas de Google, esto no es UI del sistema que necesite
      * una ventana previa.
      *
-     * **Todavía no está enchufado a la composición.** Falta la línea de
-     * `MainActivity` que lo provee —`LocalCompartirConGente provides
-     * container.compartirConGente`—, que este asiento no puede tocar. Mientras
-     * no esté, las pantallas leen `null` y esconden el botón, que es
-     * exactamente lo que hacen cuando no hay plataforma detrás: no se rompe
-     * nada, simplemente la función no aparece.
+     * `MainActivity` lo enchufa a la composición con
+     * `LocalCompartirConGente provides container.compartirConGente`. Sin esa
+     * línea las pantallas leen `null` y esconden el botón: el síntoma es una
+     * deuda o un Hoy que no se pueden mandar, no un crash.
      */
     val compartirConGente = CompartirConGenteAndroid(context.applicationContext)
 

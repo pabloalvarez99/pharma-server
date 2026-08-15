@@ -11,6 +11,7 @@ import cl.rutbusiness.app.entrada.CompartirTarjetaAndroid
 import cl.rutbusiness.app.ui.assist.LocalDictadoDeVoz
 import cl.rutbusiness.app.ui.entrada.LocalCompartirTarjeta
 import cl.rutbusiness.app.ui.entrada.ProveerEntrada
+import cl.rutbusiness.app.ui.gente.LocalCompartirConGente
 import cl.rutbusiness.app.ui.impresora.ProveerImpresora
 import cl.rutbusiness.app.ui.offline.ProveerOffline
 import cl.rutbusiness.app.ui.rubro.ProveerRubro
@@ -63,6 +64,7 @@ class MainActivity : ComponentActivity() {
                 LocalCamaraDeCodigos provides camara,
                 LocalDictadoDeVoz provides dictado,
                 LocalCompartirTarjeta provides CompartirTarjetaAndroid(this),
+                LocalCompartirConGente provides container.compartirConGente,
             ) {
                 ProveerImpresora(container.impresora) {
                     ProveerOffline(container.offline) {
