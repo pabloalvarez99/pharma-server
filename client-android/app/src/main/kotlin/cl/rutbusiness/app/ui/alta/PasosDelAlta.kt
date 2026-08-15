@@ -80,14 +80,19 @@ internal fun PasoNegocio(
     onNombre: (String) -> Unit,
     habilitado: Boolean,
     onListo: () -> Unit,
+    esFeria: Boolean = false,
 ) {
-    RbCard(title = "El nombre de tu negocio") {
+    RbCard(title = if (esFeria) "El nombre de tu puesto" else "El nombre de tu negocio") {
         RbTextField(
             value = nombre,
             onValueChange = onNombre,
-            label = "Nombre del negocio",
-            placeholder = "Almacén Doña Rosa",
-            supportingText = "El que le dice la gente del barrio. Después se puede cambiar.",
+            label = if (esFeria) "Nombre del puesto" else "Nombre del negocio",
+            placeholder = if (esFeria) "Huevos de Marta" else "Almacén Doña Rosa",
+            supportingText = if (esFeria) {
+                "Como te gritan en la feria. Después se puede cambiar."
+            } else {
+                "El que le dice la gente del barrio. Después se puede cambiar."
+            },
             enabled = habilitado,
             imeAction = ImeAction.Next,
             onImeAction = onListo,

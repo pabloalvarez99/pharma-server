@@ -100,6 +100,7 @@ fun AltaRoute(
         onAvanzar = vm::avanzar,
         onCrear = vm::crear,
         onIrAEntrar = onIrAEntrar,
+        esFeria = servicios?.preferencias?.rubroElegido() == "feria",
     )
 }
 
@@ -144,6 +145,7 @@ internal fun PantallaDeAlta(
     onAvanzar: () -> Unit,
     onCrear: () -> Unit,
     onIrAEntrar: () -> Unit,
+    esFeria: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     if (estado == EstadoDelAlta.LugarOcupado) {
@@ -171,7 +173,7 @@ internal fun PantallaDeAlta(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = tituloDelPaso(paso),
+            title = tituloDelPaso(paso, esFeria),
             subtitle = "Paso ${indice + 1} de $total",
             onBack = if (ocupado) null else onAtras,
         )
@@ -198,6 +200,7 @@ internal fun PantallaDeAlta(
                     onNombre = onNombre,
                     habilitado = !ocupado,
                     onListo = onAvanzar,
+                    esFeria = esFeria,
                 )
 
                 PasoDelAlta.Rubro -> PasoRubro(
@@ -331,9 +334,10 @@ private fun LugarOcupado(
     }
 }
 
-internal fun tituloDelPaso(paso: PasoDelAlta): String = when (paso) {
+internal fun tituloDelPaso(paso: PasoDelAlta, esFeria: Boolean = false): String = when (paso) {
     PasoDelAlta.Donde -> "¿Dónde se guarda todo?"
-    PasoDelAlta.Negocio -> "¿Cómo se llama tu negocio?"
+    PasoDelAlta.Negocio ->
+        if (esFeria) "¿Cómo te dicen en la feria?" else "¿Cómo se llama tu negocio?"
     PasoDelAlta.Rubro -> "¿A qué se dedica?"
     PasoDelAlta.Cuenta -> "Tu cuenta"
 }

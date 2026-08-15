@@ -52,6 +52,12 @@ class AltaViewModelTest {
     // --- cuántas preguntas ---------------------------------------------------
 
     @Test
+    fun `en feria el alta pregunta por el puesto, no por el negocio`() {
+        assertEquals("¿Cómo te dicen en la feria?", tituloDelPaso(PasoDelAlta.Negocio, true))
+        assertEquals("¿Cómo se llama tu negocio?", tituloDelPaso(PasoDelAlta.Negocio, false))
+    }
+
+    @Test
     fun `con nube compilada son tres pasos y ninguno es la direccion`() {
         val alta = vm("https://api.rutbusiness.cl")
 
