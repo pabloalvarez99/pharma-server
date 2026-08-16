@@ -1,17 +1,26 @@
 package cl.rutbusiness.app.ui.catalogo
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -20,18 +29,24 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.session.SessionRepository
+import cl.rutbusiness.ui.components.RbAmount
+import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
+import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipRow
 import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbDivider
 import cl.rutbusiness.ui.components.RbErrorCopy
 import cl.rutbusiness.ui.components.RbErrorState
-import cl.rutbusiness.ui.components.RbList
-import cl.rutbusiness.ui.components.RbListRow
+import cl.rutbusiness.ui.components.RbLoadingState
+import cl.rutbusiness.ui.components.RbReflowRow
+import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /**
  * "Lo que vendo" enchufada a la sesión.
@@ -66,6 +81,9 @@ fun CatalogoRoute(sesion: SessionRepository, onCerrar: () -> Unit) {
  * Dos pasos y no un tablero, por lo mismo que Cobrar: en 360dp con la letra al
  * 200% una lista y un formulario a la vez no entran, y el que pierde siempre es
  * el formulario. Un paso a la vez ocupa el ancho completo y siempre cabe.
+ *
+ * La lista se lee como la mesa del puesto: cada cosa es una tarjeta con nombre
+ * grande y precio numérico, no una grilla de inventario.
  */
 @Composable
 internal fun CatalogoScreen(
@@ -140,79 +158,226 @@ private fun ListaDeCosas(
             }
         }
 
-        RbList(
-            items = vm.cosas,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            loading = vm.cargando && vm.cosas.isEmpty(),
-            loadingLabel = "Cargando ${copy.titulo.replaceFirstChar { it.lowercase() }}",
-            error = vm.errorDeLista,
-            onRetry = vm::cargar,
-            emptyTitle = if (vm.consulta.isBlank()) {
-                copy.vacioTitulo
-            } else {
-                "Nada con \"${vm.consulta.trim()}\""
-            },
-            emptyHint = if (vm.consulta.isBlank()) {
-                copy.vacioPista
-            } else {
-                "Fíjate cómo se escribe, o agrégalo si todavía no está."
-            },
-            // El vacío no es una lista vacía: es la pantalla diciendo qué hacer,
-            // con el botón grande adentro. `RbEmptyState` ya lo dibuja primario.
-            emptyActionLabel = copy.agregar,
-            onEmptyAction = vm::nuevaCosa,
-            key = { it.id },
-        ) { cosa ->
-            FilaDeCosa(
-                cosa = cosa,
-                unidad = vm.unidadDe(cosa),
-                precio = vm.moneda.formatear(cosa.price),
-                onEditar = { vm.editar(cosa) },
-            )
-        }
+        // Mesa del puesto: vacío con aire y un solo CTA; tarjetas cuando hay
+        // cosas; loading/error con el mismo lenguaje del resto de la app.
+        // No se reusa RbList acá porque esa fila trae divisor a borde y no da
+        // el aire de tarjeta que pide la mesa.
+        when {
+            vm.errorDeLista != null -> {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(dimens.space3),
+                ) {
+                    RbErrorState(
+                        title = vm.errorDeLista!!.title,
+                        message = vm.errorDeLista!!.message,
+                        retryLabel = vm.errorDeLista!!.retryLabel,
+                        onRetry = vm::cargar,
+                    )
+                }
+            }
 
-        // Con la lista llena el botón sigue abajo y anclado: cargar el puesto es
-        // repetir este gesto veinte veces seguidas, y mandarlo a una barra de
-        // arriba costaría un viaje del pulgar por cada alta.
-        if (vm.cosas.isNotEmpty()) {
-            RbDivider()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(dimens.space3),
-            ) {
-                RbButton(
-                    label = copy.agregar,
-                    onClick = vm::nuevaCosa,
-                    fillWidth = true,
-                )
+            vm.cargando && vm.cosas.isEmpty() -> {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    RbLoadingState(
+                        label = "Cargando ${copy.titulo.replaceFirstChar { it.lowercase() }}",
+                    )
+                    RbSkeletonLines(
+                        lines = 5,
+                        modifier = Modifier.padding(dimens.space3),
+                    )
+                }
+            }
+
+            vm.cosas.isEmpty() -> {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (vm.consulta.isBlank()) {
+                        VacioDelCatalogo(
+                            titulo = copy.vacioTitulo,
+                            pista = copy.vacioPista,
+                            accion = copy.agregar,
+                            onAccion = vm::nuevaCosa,
+                        )
+                    } else {
+                        VacioDelCatalogo(
+                            titulo = "Nada con \"${vm.consulta.trim()}\"",
+                            pista = "Fíjate cómo se escribe, o agrégalo si todavía no está.",
+                            accion = copy.agregar,
+                            onAccion = vm::nuevaCosa,
+                        )
+                    }
+                }
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        horizontal = dimens.space3,
+                        vertical = dimens.space2,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(dimens.space2),
+                ) {
+                    items(items = vm.cosas, key = { it.id }) { cosa ->
+                        FilaDeCosa(
+                            cosa = cosa,
+                            unidad = vm.unidadDe(cosa),
+                            precio = vm.moneda.formatear(cosa.price),
+                            onEditar = { vm.editar(cosa) },
+                        )
+                    }
+                }
+
+                // Con la lista llena el botón sigue abajo y anclado: cargar el
+                // puesto es repetir este gesto veinte veces seguidas.
+                RbDivider()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(dimens.space3),
+                ) {
+                    RbButton(
+                        label = copy.agregar,
+                        onClick = vm::nuevaCosa,
+                        fillWidth = true,
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Una fila.
- *
- * El subtítulo dice **cómo se vende** y no cuánto stock hay. En un puesto el
- * stock no se cuenta —nadie sabe cuántos tomates quedan— y un "1 disponible" al
- * lado de algo recién cargado es ruido que además se lee como un error. "Por
- * kilo" es lo que hay que confirmar de un vistazo.
+ * Vacío de la mesa: aire, la pista que enseña (feria: «vendí tomates a 2000»),
+ * y un solo CTA primario. Sin segunda acción ni ruido de sistema.
  */
 @Composable
-private fun FilaDeCosa(
+internal fun VacioDelCatalogo(
+    titulo: String,
+    pista: String,
+    accion: String,
+    onAccion: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = dimens.space4, vertical = dimens.space5),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(shape)
+                .background(colors.brandContainer)
+                .border(dimens.border, colors.brandText, shape)
+                .padding(dimens.space3),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "+",
+                style = RbTheme.typography.title,
+                color = colors.brandText,
+            )
+        }
+
+        Text(
+            text = titulo,
+            style = RbTheme.typography.heading,
+            color = colors.textPrimary,
+        )
+
+        // La pista va en tarjeta: es lo que enseña el día 1, no un pie de página.
+        RbCard {
+            Text(
+                text = pista,
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
+            )
+        }
+
+        RbButton(
+            label = accion,
+            onClick = onAccion,
+            fillWidth = true,
+        )
+    }
+}
+
+/**
+ * Una cosa en la mesa del puesto.
+ *
+ * Nombre grande, precio numérico, superficie de tarjeta, mínimo 56dp. El
+ * subtítulo dice **cómo se vende** y no cuánto stock hay: en un puesto el stock
+ * no se cuenta y un "1 disponible" al lado de algo recién cargado se lee como
+ * error. "Por kilo" es lo que hay que confirmar de un vistazo.
+ */
+@Composable
+internal fun FilaDeCosa(
     cosa: ProductDto,
     unidad: String,
     precio: String,
     onEditar: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    RbListRow(
-        title = cosa.name,
-        subtitle = if (unidad.isNotBlank()) "Por $unidad" else null,
-        value = precio,
-        onClick = onEditar,
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    RbReflowRow(
+        spacing = dimens.space3,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, shape)
+            .rbClickable(
+                onClick = onEditar,
+                role = Role.Button,
+                shape = shape,
+            )
+            .rbTouchTarget()
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
+                Text(
+                    text = cosa.name,
+                    style = RbTheme.typography.heading,
+                    color = colors.textPrimary,
+                )
+                if (unidad.isNotBlank()) {
+                    Text(
+                        text = "Por $unidad",
+                        style = RbTheme.typography.support,
+                        color = colors.textSecondary,
+                    )
+                }
+            }
+        },
+        trailing = {
+            RbAmount(
+                amount = precio,
+                emphasis = RbAmountEmphasis.Body,
+            )
+        },
     )
 }
 
@@ -246,7 +411,7 @@ private fun FormularioDeCosa(vm: CatalogoViewModel, copy: CopyCatalogo) {
 }
 
 /**
- * El formulario: tres campos y un botón.
+ * El formulario: nombre, precio y —si el pack lo pide— unidad.
  *
  * Sin `ViewModel` a propósito. Todo lo que decide el layout entra por parámetro
  * para poder medirlo en una prueba —que es donde vive la escala al 200% y el
@@ -257,6 +422,9 @@ private fun FormularioDeCosa(vm: CatalogoViewModel, copy: CopyCatalogo) {
  * guardar va **dentro** del scroll y no anclado abajo: es el final del
  * formulario, y anclarlo le quitaría a los campos el poco alto que les queda
  * justo mientras se escribe.
+ *
+ * Jerarquía calmada: nombre y precio son el camino feliz; la unidad va después
+ * con menos ruido de ayuda, para que no compita con lo que hay que llenar sí o sí.
  */
 @Composable
 internal fun FormularioContenido(
@@ -277,6 +445,7 @@ internal fun FormularioContenido(
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
 
     Column(
         modifier = modifier
@@ -284,31 +453,34 @@ internal fun FormularioContenido(
             .verticalScroll(rememberScrollState())
             .imePadding()
             .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space4),
     ) {
-        RbTextField(
-            value = nombre,
-            onValueChange = onNombre,
-            label = copy.etiquetaNombre,
-            placeholder = copy.ejemploNombre,
-            errorMessage = errorDeNombre,
-            enabled = !guardando,
-            imeAction = ImeAction.Next,
-        )
+        // Camino feliz: nombre + precio, sin párrafos de ayuda compitiendo.
+        Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
+            RbTextField(
+                value = nombre,
+                onValueChange = onNombre,
+                label = copy.etiquetaNombre,
+                placeholder = copy.ejemploNombre,
+                errorMessage = errorDeNombre,
+                enabled = !guardando,
+                imeAction = ImeAction.Next,
+            )
 
-        RbTextField(
-            value = precio,
-            onValueChange = onPrecio,
-            label = copy.etiquetaPrecio,
-            placeholder = "0",
-            supportingText = "En $simbolo. Después lo puedes cambiar cuando quieras.",
-            errorMessage = errorDePrecio,
-            enabled = !guardando,
-            // Monoespaciado y teclado numérico: los dígitos de la plata se leen
-            // en columna y el teclado abre directo en números.
-            numeric = true,
-            keyboardType = KeyboardType.Number,
-        )
+            RbTextField(
+                value = precio,
+                onValueChange = onPrecio,
+                label = copy.etiquetaPrecio,
+                placeholder = "0",
+                supportingText = "En $simbolo",
+                errorMessage = errorDePrecio,
+                enabled = !guardando,
+                // Monoespaciado y teclado numérico: los dígitos de la plata se leen
+                // en columna y el teclado abre directo en números.
+                numeric = true,
+                keyboardType = KeyboardType.Number,
+            )
+        }
 
         // El campo de unidad existe sólo si el pack lo declara. En farmacia o
         // minimarket el `AttrField` no está y la pantalla no lo inventa.
@@ -319,7 +491,7 @@ internal fun FormularioContenido(
                     onValueChange = onUnidad,
                     label = copy.etiquetaUnidad,
                     placeholder = "kilo, atado, bolsa…",
-                    supportingText = "Toca una o escribe la tuya. También puedes dejarlo vacío.",
+                    supportingText = "Opcional",
                     enabled = !guardando,
                     imeAction = ImeAction.Done,
                 )
@@ -357,14 +529,13 @@ internal fun FormularioContenido(
             fillWidth = true,
         )
 
-        // Lo que la pantalla no pide, dicho para que nadie lo vaya a buscar. Sin
-        // esto el formulario se lee como incompleto —"¿y el código de barras?"—
-        // y quien viene de otro sistema se queda esperando más campos.
+        // Lo que la pantalla no pide, dicho en voz baja. Sin esto el formulario
+        // se lee como incompleto —"¿y el código de barras?"— y quien viene de
+        // otro sistema se queda esperando más campos.
         Text(
-            text = "Con el nombre y el precio alcanza para cobrar. " +
-                "No hace falta código de barras.",
+            text = "Con el nombre y el precio alcanza. No hace falta código de barras.",
             style = RbTheme.typography.support,
-            color = RbTheme.colors.textSecondary,
+            color = colors.textSecondary,
         )
     }
 }
