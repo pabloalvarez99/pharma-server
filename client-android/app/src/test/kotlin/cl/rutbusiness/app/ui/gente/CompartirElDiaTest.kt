@@ -109,7 +109,7 @@ class CompartirElDiaTest {
         compose.onNodeWithText(pistaDelRecado()).assertIsDisplayed()
         compose.onNodeWithText("Hoy en el negocio: $45.000 en 12 boletas").assertIsDisplayed()
 
-        compose.onNodeWithText("Contarle cómo va el día").performScrollTo().performClick()
+        compose.onNodeWithText("Mandar por chat").performScrollTo().performClick()
         compose.waitForIdle()
 
         assertEquals(listOf("Hoy en el negocio: $45.000 en 12 boletas"), puerto.mandados)
@@ -120,7 +120,7 @@ class CompartirElDiaTest {
         val puerto = PuertoFalso()
         mostrar(boletas = 1L, vendidoHoy = "3500", puerto = puerto)
 
-        compose.onNodeWithText("Contarle cómo va el día").performScrollTo().performClick()
+        compose.onNodeWithText("Mandar por chat").performScrollTo().performClick()
         compose.waitForIdle()
 
         assertEquals(listOf("Hoy en el negocio: $3.500 en 1 boleta"), puerto.mandados)
@@ -134,7 +134,7 @@ class CompartirElDiaTest {
         // nada que mandar.
         mostrar(boletas = 0L, vendidoHoy = "0")
 
-        compose.onNodeWithText("Contarle cómo va el día").assertDoesNotExist()
+        compose.onNodeWithText("Mandar por chat").assertDoesNotExist()
         compose.onNodeWithText(pistaDelRecado()).assertDoesNotExist()
     }
 
@@ -142,8 +142,7 @@ class CompartirElDiaTest {
     fun `sin ventas en feria tampoco, que ahi la tarjeta es el vacio`() {
         mostrar(boletas = 0L, vendidoHoy = "0", rubro = "feria")
 
-        compose.onNodeWithText("Contar cómo va el día").assertDoesNotExist()
-        compose.onNodeWithText("Contarle cómo va el día").assertDoesNotExist()
+        compose.onNodeWithText("Mandar por chat").assertDoesNotExist()
     }
 
     @Test
@@ -152,7 +151,7 @@ class CompartirElDiaTest {
         // nada, y la dueña queda sin saber si falló ella o el teléfono.
         mostrar(puerto = null)
 
-        compose.onNodeWithText("Contarle cómo va el día").assertDoesNotExist()
+        compose.onNodeWithText("Mandar por chat").assertDoesNotExist()
         compose.onNodeWithText(pistaDelRecado()).assertDoesNotExist()
     }
 
@@ -162,7 +161,7 @@ class CompartirElDiaTest {
         mostrar(rubro = "feria", puerto = puerto)
 
         compose.onNodeWithText("Hoy en el puesto: $45.000 en 12 ventas").assertIsDisplayed()
-        compose.onNodeWithText("Contar cómo va el día").performScrollTo().performClick()
+        compose.onNodeWithText("Mandar por chat").performScrollTo().performClick()
         compose.waitForIdle()
 
         // Feria: puesto (no negocio) + ventas (no boletas).
@@ -173,7 +172,7 @@ class CompartirElDiaTest {
     fun `al 200 por ciento el boton sigue siendo tocable`() {
         mostrar(escala = 2.0f)
 
-        val boton = compose.onNodeWithText("Contarle cómo va el día").performScrollTo()
+        val boton = compose.onNodeWithText("Mandar por chat").performScrollTo()
         boton.assertIsDisplayed()
 
         val alto = boton.getUnclippedBoundsInRoot().height

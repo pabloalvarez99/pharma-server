@@ -21,7 +21,7 @@ class TextoParaGenteTest {
     @Test
     fun `el recordatorio nombra a la persona y el monto que se ve en pantalla`() {
         assertEquals(
-            "Hola Don Juan, me debes $5.000.",
+            "Hola Don Juan, te quedaron $5.000 de lo de ayer.",
             mensajeDeuda(nombre = "Don Juan", monto = "$5.000"),
         )
     }
@@ -29,26 +29,44 @@ class TextoParaGenteTest {
     @Test
     fun `sin nombre el saludo no queda con una coma suelta`() {
         // Alguien fiado sin nombre completo existe: se anota "el de la esquina"
-        // o directamente nada. "Hola , me debes" delata que el texto lo armó una
-        // máquina, y eso es lo que hace que no se mande.
-        assertEquals("Hola, me debes $5.000.", mensajeDeuda(nombre = "", monto = "$5.000"))
-        assertEquals("Hola, me debes $5.000.", mensajeDeuda(nombre = "   ", monto = "$5.000"))
+        // o directamente nada. "Hola , te quedaron" delata que el texto lo armó
+        // una máquina, y eso es lo que hace que no se mande.
+        assertEquals(
+            "Hola, te quedaron $5.000 de lo de ayer.",
+            mensajeDeuda(nombre = "", monto = "$5.000"),
+        )
+        assertEquals(
+            "Hola, te quedaron $5.000 de lo de ayer.",
+            mensajeDeuda(nombre = "   ", monto = "$5.000"),
+        )
     }
 
     @Test
     fun `el nombre llega recortado porque se escribe a mano en el mostrador`() {
         assertEquals(
-            "Hola Rosa, me debes $1.200.",
+            "Hola Rosa, te quedaron $1.200 de lo de ayer.",
             mensajeDeuda(nombre = "  Rosa  ", monto = "$1.200"),
         )
     }
 
     @Test
     fun `con pesos enteros se escribe es-CL, miles con punto`() {
-        assertEquals("Hola Juan, me debes $5.000.", mensajeDeuda("Juan", 5_000L))
-        assertEquals("Hola Juan, me debes $1.234.567.", mensajeDeuda("Juan", 1_234_567L))
-        assertEquals("Hola Juan, me debes $999.", mensajeDeuda("Juan", 999L))
-        assertEquals("Hola Juan, me debes $0.", mensajeDeuda("Juan", 0L))
+        assertEquals(
+            "Hola Juan, te quedaron $5.000 de lo de ayer.",
+            mensajeDeuda("Juan", 5_000L),
+        )
+        assertEquals(
+            "Hola Juan, te quedaron $1.234.567 de lo de ayer.",
+            mensajeDeuda("Juan", 1_234_567L),
+        )
+        assertEquals(
+            "Hola Juan, te quedaron $999 de lo de ayer.",
+            mensajeDeuda("Juan", 999L),
+        )
+        assertEquals(
+            "Hola Juan, te quedaron $0 de lo de ayer.",
+            mensajeDeuda("Juan", 0L),
+        )
     }
 
     @Test
@@ -69,6 +87,17 @@ class TextoParaGenteTest {
 
         assertTrue(texto, texto.contains("1.234,50"))
         assertFalse("no puede aparecer el peso chileno", texto.contains("$1.234"))
+        assertTrue(texto, texto.startsWith("Hola Rosa, te quedaron "))
+        assertTrue(texto, texto.endsWith(" de lo de ayer."))
+    }
+
+    @Test
+    fun `el recordatorio no suena a cobro de oficina`() {
+        val texto = mensajeDeuda(nombre = "Don Juan", monto = "$5.000")
+        assertFalse(texto, texto.contains("me debes", ignoreCase = true))
+        assertFalse(texto, texto.contains("saldo", ignoreCase = true))
+        assertFalse(texto, texto.contains("factura", ignoreCase = true))
+        assertFalse(texto, texto.contains("resumen ejecutivo", ignoreCase = true))
     }
 
     // --- el día --------------------------------------------------------------
@@ -110,5 +139,17 @@ class TextoParaGenteTest {
         assertEquals("Hoy en el puesto.", vacio)
         assertTrue(vacio.startsWith("Hoy en el puesto"))
         assertFalse(vacio.contains("negocio"))
+    }
+
+    @Test
+    fun `el dia no habla de resumen ejecutivo ni en ingles`() {
+        val feria = mensajeHoy("$10.000 en 3 ventas", feria = true)
+        val formal = mensajeHoy("$10.000 en 3 boletas", feria = false)
+        for (texto in listOf(feria, formal)) {
+            assertFalse(texto, texto.contains("resumen ejecutivo", ignoreCase = true))
+            assertFalse(texto, texto.contains("executive", ignoreCase = true))
+            assertFalse(texto, texto.contains("report", ignoreCase = true))
+            assertFalse(texto, texto.contains("share", ignoreCase = true))
+        }
     }
 }
