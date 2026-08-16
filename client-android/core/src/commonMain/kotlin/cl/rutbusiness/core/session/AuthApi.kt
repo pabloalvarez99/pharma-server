@@ -35,6 +35,10 @@ data class Me(
     @SerialName("tenant_id") val tenantId: String,
     val roles: List<String> = emptyList(),
     val exp: Long = 0,
+    /** Nombre corto del puesto (mismo que LoginResponse). */
+    @SerialName("tenant_slug") val tenantSlug: String = "",
+    /** Nombre que ella le puso al puesto. Para Hoy / «Pídele a $nombre». */
+    @SerialName("tenant_name") val tenantName: String = "",
 )
 
 /**

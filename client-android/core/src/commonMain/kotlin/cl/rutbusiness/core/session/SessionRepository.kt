@@ -154,7 +154,23 @@ class SessionRepository(
     suspend fun confirmarSesion() {
         val activa = _estado.value as? EstadoSesion.Activa ?: return
         when (val r = AuthApi(apiPara(activa.baseUrl)).me()) {
-            is Resultado.Ok -> _estado.value = activa.copy(me = r.valor)
+            is Resultado.Ok -> {
+                val me = r.valor
+                // Al restaurar sesión o entrar con Google, /me trae el nombre
+                // del puesto que el JWT solo no tiene.
+                if (me.tenantSlug.isNotBlank() || me.tenantName.isNotBlank()) {
+                    val slug = me.tenantSlug.ifBlank {
+                        almacenamiento.preferencias.leerUltimoTenant().orEmpty()
+                    }
+                    val email = almacenamiento.preferencias.leerUltimoEmail().orEmpty()
+                    almacenamiento.preferencias.guardarUltimoAcceso(
+                        slug,
+                        email,
+                        me.tenantName,
+                    )
+                }
+                _estado.value = activa.copy(me = me)
+            }
             is Resultado.Falla -> Unit
         }
     }
