@@ -110,15 +110,22 @@ class AltaViewModel(
 
     /** Igual que en la entrada: no se marca en rojo un campo todavía vacío. */
     val errorDeDireccion: String?
-        get() = if (url.isNotBlank() && destino == null) {
-            "Así no se entiende. Tiene que verse como 192.168.1.10:8080"
-        } else {
-            null
+        get() = when {
+            // El paso Donde no existe en el camino de la nube; no filtrar acá
+            // dejaría copy de IP en propiedades que un test o un bug de UI
+            // podrían leer.
+            nube != null -> null
+            url.isNotBlank() && destino == null ->
+                "Así no se entiende. Tiene que verse como 192.168.1.10:8080"
+            else -> null
         }
 
     val ayudaDeDireccion: String
-        get() = destino?.let { "Ahí vamos a crear tu negocio: ${comoSeLee(it)}" }
-            ?: "El número que te dio quien instaló el sistema, con los dos puntos y todo."
+        get() = when {
+            nube != null -> ""
+            else -> destino?.let { "Ahí vamos a crear tu negocio: ${comoSeLee(it)}" }
+                ?: "El número que te dio quien instaló el sistema, con los dos puntos y todo."
+        }
 
     /** El correo, con la misma forma mínima que exige `crates/api/src/setup.rs`. */
     val errorDeCorreo: String?
@@ -231,7 +238,7 @@ class AltaViewModel(
         viewModelScope.launch {
             val problema = diagnosticar(donde)
             if (problema != null) {
-                falla = deLaConexion(problema, donde, nube != null)
+                falla = deLaConexion(problema, donde, nube != null, esFeria)
                 estado = EstadoDelAlta.Preguntando
                 return@launch
             }
@@ -281,7 +288,7 @@ class AltaViewModel(
         viewModelScope.launch {
             val problema = diagnosticar(donde)
             if (problema != null) {
-                falla = deLaConexion(problema, donde, nube != null)
+                falla = deLaConexion(problema, donde, nube != null, esFeria)
                 estado = EstadoDelAlta.Preguntando
                 return@launch
             }

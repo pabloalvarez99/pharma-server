@@ -42,11 +42,11 @@ sealed class FallaDeAlta(
      * cualquier intento termina en un timeout largo que además no distingue
      * esto de un servicio caído.
      */
-    class SinRed : FallaDeAlta(
+    class SinRed(esFeria: Boolean = false) : FallaDeAlta(
         titulo = "Tu teléfono no está conectado",
         queHacer = "No tiene wifi ni datos prendidos, así que no puede llegar a ninguna parte. " +
             "Prende el wifi del local, o prende los datos del teléfono, y vuelve a tocar " +
-            "«Crear mi negocio».",
+            if (esFeria) "«Crear mi puesto»." else "«Crear mi negocio».",
     )
 
     /**
@@ -94,11 +94,24 @@ sealed class FallaDeAlta(
         email: String,
         donde: String,
         tecnico: String? = null,
+        nube: Boolean = false,
     ) : FallaDeAlta(
-        titulo = "Ese correo no puede crear un negocio acá",
-        queHacer = "En ${comoSeLee(donde)} ya hay un negocio creado, así que $email no puede " +
-            "crear otro encima. Si ese negocio es tuyo, vuelve atrás y toca «Entrar a mi " +
-            "negocio»: entras con ese mismo correo y tu clave.",
+        titulo = if (nube) {
+            "Ese correo no puede crear un puesto acá"
+        } else {
+            "Ese correo no puede crear un negocio acá"
+        },
+        queHacer = if (nube) {
+            // El host de la nube es compilado (emulador, dominio…): no se lo
+            // mostramos al feriante ni lo llamamos "computador".
+            "Ahí ya hay un puesto creado, así que $email no puede crear otro encima. " +
+                "Si ese puesto es tuyo, vuelve atrás y toca «Entrar»: entras con ese " +
+                "mismo correo y tu clave."
+        } else {
+            "En ${comoSeLee(donde)} ya hay un negocio creado, así que $email no puede " +
+                "crear otro encima. Si ese negocio es tuyo, vuelve atrás y toca «Entrar a mi " +
+                "negocio»: entras con ese mismo correo y tu clave."
+        },
         tecnico = tecnico,
     )
 
@@ -196,7 +209,7 @@ internal fun fallaDeAlta(
 
     // 409: la instalación ya tiene cuenta (`SETUP_ALREADY_DONE`).
     error is AppError.ErrorDelServidor && error.status == 409 ->
-        FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical)
+        FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical, nube)
 
     // 400 hablando de la clave: el mínimo del server se movió respecto del
     // nuestro. Se cree el del server y se dice como falla de clave, no como un
@@ -225,9 +238,10 @@ internal fun deLaConexion(
     problema: FallaDeConexion,
     donde: String,
     nube: Boolean = false,
+    esFeria: Boolean = false,
 ): FallaDeAlta =
     when (problema) {
-        is FallaDeConexion.SinRed -> FallaDeAlta.SinRed()
+        is FallaDeConexion.SinRed -> FallaDeAlta.SinRed(esFeria)
         else -> FallaDeAlta.ServicioNoResponde(donde, problema.tecnico, nube)
     }
 

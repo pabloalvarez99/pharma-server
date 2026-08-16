@@ -102,6 +102,7 @@ fun AltaRoute(
         onCrear = vm::crear,
         onIrAEntrar = onIrAEntrar,
         esFeria = servicios?.preferencias?.rubroElegido() == "feria",
+        nube = servicios?.nube != null,
     )
 }
 
@@ -147,10 +148,16 @@ internal fun PantallaDeAlta(
     onCrear: () -> Unit,
     onIrAEntrar: () -> Unit,
     esFeria: Boolean = false,
+    nube: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     if (estado == EstadoDelAlta.LugarOcupado) {
-        LugarOcupado(onIrAEntrar = onIrAEntrar, onAtras = onAtras, modifier = modifier)
+        LugarOcupado(
+            onIrAEntrar = onIrAEntrar,
+            onAtras = onAtras,
+            nube = nube,
+            modifier = modifier,
+        )
         return
     }
 
@@ -273,18 +280,36 @@ internal fun PantallaDeAlta(
  *
  * No es una falla del alta sino su respuesta correcta: no hay nada que crear
  * acá. Se dice antes de pedir un solo dato y se ofrece la puerta que sí sirve.
+ *
+ * @param nube en el APK de la nube no hay "computador" ni "dirección" que
+ *   revisar: el feriante entra con correo y clave.
  */
 @Composable
 private fun LugarOcupado(
     onIrAEntrar: () -> Unit,
     onAtras: () -> Unit,
+    nube: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val tituloBarra = if (nube) "Ahí ya hay un puesto" else "Ahí ya hay un negocio"
+    val titulo = if (nube) {
+        "Ese puesto ya está creado"
+    } else {
+        "Ese computador ya tiene un negocio creado"
+    }
+    val cuerpo = if (nube) {
+        "No se puede crear otro encima. Si ese puesto es tuyo, entra con tu correo y tu clave."
+    } else {
+        "No se puede crear otro encima. Si ese negocio es tuyo, entra con tu " +
+            "correo y tu clave. Si nunca creaste uno ahí, revisa la dirección con quien " +
+            "instaló el sistema."
+    }
+    val boton = if (nube) "Entrar a ese puesto" else "Entrar a ese negocio"
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Ahí ya hay un negocio",
+            title = tituloBarra,
             onBack = onAtras,
         )
         Column(
@@ -296,15 +321,13 @@ private fun LugarOcupado(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = "Ese computador ya tiene un negocio creado",
+                text = titulo,
                 style = RbTheme.typography.title,
                 color = RbTheme.colors.textPrimary,
                 modifier = Modifier.rbHeading(),
             )
             Text(
-                text = "No se puede crear otro encima. Si ese negocio es tuyo, entra con tu " +
-                    "correo y tu clave. Si nunca creaste uno ahí, revisa la dirección con quien " +
-                    "instaló el sistema.",
+                text = cuerpo,
                 style = RbTheme.typography.body,
                 color = RbTheme.colors.textPrimary,
             )
@@ -327,7 +350,7 @@ private fun LugarOcupado(
                 .padding(dimens.space3),
         ) {
             RbButton(
-                label = "Entrar a ese negocio",
+                label = boton,
                 onClick = onIrAEntrar,
                 fillWidth = true,
             )
