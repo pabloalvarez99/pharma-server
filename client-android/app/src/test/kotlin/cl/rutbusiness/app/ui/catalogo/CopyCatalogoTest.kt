@@ -99,19 +99,41 @@ class CopyCatalogoTest {
         assertEquals("Producto", copy.item)
     }
 
-    /** El vacío enseña el próximo paso en vez de informar que está vacío. */
+    /**
+     * En feria el vacío enseña dos caminos day-1: cargar con precio, o venderle
+     * al agente. No le habla de código de barras (en el puesto no hay).
+     */
     @Test
-    fun `el vacio dice que hacer y no que no hay nada`() {
+    fun `en feria el vacio ensena venderle al agente`() {
         val copy = copyCatalogo(PACK_FERIA)
 
         assertTrue(
-            "la pista tiene que decir qué hacer: era \"${copy.vacioPista}\"",
-            copy.vacioPista.contains("Agrega"),
+            "pista feria debe enseñar la frase al agente: era \"${copy.vacioPista}\"",
+            copy.vacioPista.contains("vendí tomates a 2000"),
         )
-        assertTrue(
-            "y tiene que decir que el código de barras no hace falta, que es lo que " +
-                "la señora del puesto está por preguntar",
+        assertFalse(
+            "feria no pide código de barras en el vacío: era \"${copy.vacioPista}\"",
             copy.vacioPista.contains("código de barras"),
         )
+    }
+
+    /** agentHome sin rubro=feria también usa el vacío de feria. */
+    @Test
+    fun `agentHome usa el vacio de feria aunque el rubro no diga feria`() {
+        val pack = PACK_OTRO.copy(features = PACK_OTRO.features.copy(agentHome = true))
+        val copy = copyCatalogo(pack)
+
+        assertTrue(copy.vacioPista.contains("vendí tomates a 2000"))
+        assertFalse(copy.vacioPista.contains("código de barras"))
+    }
+
+    /** Farmacia y formal siguen con la pista genérica del form. */
+    @Test
+    fun `en farmacia el vacio sigue con codigo de barras`() {
+        val pista =
+            "Agrega lo que vendes con su precio y ya puedes cobrarlo. " +
+                "No hace falta código de barras ni nada más."
+        assertEquals(pista, copyCatalogo(PACK_FARMACIA).vacioPista)
+        assertEquals(pista, copyCatalogo(PACK_OTRO).vacioPista)
     }
 }

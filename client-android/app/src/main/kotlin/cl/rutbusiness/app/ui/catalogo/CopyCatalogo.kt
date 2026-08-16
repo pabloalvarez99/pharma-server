@@ -60,6 +60,7 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
     val item = pack.vocab.item.trim().ifEmpty { "Producto" }
     val catalogo = pack.vocab.catalog.trim().ifEmpty { "Inventario" }
     val unidad = campoDeUnidad(pack)
+    val feria = pack.features.agentHome || pack.rubro.equals("feria", ignoreCase = true)
 
     // "una cosa" / "un producto": el artículo cambia con la palabra del pack y
     // no se puede derivar de la gramática sin adivinar. Las tres formas que hoy
@@ -87,9 +88,15 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
         claveUnidad = unidad?.key ?: CLAVE_UNIDAD,
         hayUnidad = unidad != null,
         vacioTitulo = "Todavía no cargaste nada",
-        // El vacío enseña el próximo paso, no informa que está vacío.
-        vacioPista = "Agrega lo que vendes con su precio y ya puedes cobrarlo. " +
-            "No hace falta código de barras ni nada más.",
+        // Feria: el vacío enseña el form y el day-1 por el agente.
+        // Farmacia/otro: form + "no hace falta código de barras".
+        vacioPista = if (feria) {
+            "Agregá tomates, cilantro, lo que sea, con el precio. " +
+                "O decile al agente: «vendí tomates a 2000»."
+        } else {
+            "Agrega lo que vendes con su precio y ya puedes cobrarlo. " +
+                "No hace falta código de barras ni nada más."
+        },
     )
 }
 
