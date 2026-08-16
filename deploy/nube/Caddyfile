@@ -2,10 +2,44 @@
 # En la caja: /etc/caddy/Caddyfile
 #
 # Exportar RUTAGENT_HOST antes de recargar Caddy. Es el hostname que el
-# capitán compró (ej. api.ejemplo.cl), nunca una IP. Let's Encrypt lo
-# firma solo si el DNS A/AAAA ya apunta a esta caja.
+# capitán compró, nunca una IP. Let's Encrypt lo firma solo si el DNS
+# A/AAAA ya apunta a esta caja.
+#
+# Validar en la caja (no en el repo):
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#
+# Log en JSON en disco. NO copiar /var/log/caddy/* al vault ni a tickets:
+# Caddy no filtra Authorization/cookies por defecto; el log puede
+# contener tokens si un cliente los mandó mal. Rotar con logrotate y
+# dejar en la caja.
 
 {$RUTAGENT_HOST} {
-	encode gzip
-	reverse_proxy 127.0.0.1:8080
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Frame-Options DENY
+		-Server
+	}
+
+	request_body {
+		max_size 2MB
+	}
+
+	log {
+		output file /var/log/caddy/rutagent.log
+		format json
+	}
+
+	# /health y /health/ready van al binario en loopback sin auth extra.
+	handle /health* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
 }

@@ -1,0 +1,22 @@
+# Oneshot de backup SurrealKV. Preferí root para systemctl stop/start
+# de rutbusiness-api sin polkit extra.
+# Copiar a /etc/systemd/system/backup-rutbusiness.service
+# (o rutbusiness-backup.service — el timer debe coincidir).
+#
+# Environment DESTINO lo define el capitán. Sin rclone ni secretos.
+
+[Unit]
+Description=Backup diario SurrealKV (RutBusiness nube)
+After=network-online.target
+# Sin Requires=rutbusiness-api: el script hace stop/start y Requires
+# mataría este oneshot al bajar la API (SurrealKV necesita el stop).
+
+[Service]
+Type=oneshot
+User=root
+Environment=DESTINO=/var/backups/rutbusiness
+Environment=PHARMA__DB__PATH=/var/lib/rutbusiness/data
+ExecStart=/opt/rutbusiness/bin/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
