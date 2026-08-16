@@ -17,14 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbHeading
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /**
- * The screen's top bar.
+ * The screen's top bar — the header of the puesto, not a floating Material app bar.
  *
  * Two things it does that the WebView client did not, both from the ADR's list
  * of what was broken on a real phone ("el header pisa la barra de estado",
@@ -34,7 +33,13 @@ import cl.rutbusiness.ui.theme.rbTouchTarget
  *   so it never sits under the clock or a punch-hole camera;
  * - it has **no fixed height**. A `56.dp`-tall bar clips its own title the
  *   moment the user raises the font scale. The bar is as tall as its content
- *   needs, with 56dp only as a floor.
+ *   needs, with 56dp only as a floor on the back affordance via [rbTouchTarget].
+ *
+ * The bottom edge uses [cl.rutbusiness.ui.theme.RbColors.outlineStrong] at the
+ * real border token, not a decorative hairline: under feria sun a 1.27 line
+ * vanishes and the title melts into the body. Padding is generous so title +
+ * subtitle read as a thick mesa header at 100% and still reflow cleanly at 200%.
+ * No translateY, no motion on the bar itself.
  *
  * @param subtitle second line - the business name, the branch. Optional.
  * @param onBack renders the back affordance when set.
@@ -65,7 +70,9 @@ fun RbTopBar(
             spacing = dimens.space2,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = dimens.space3, vertical = dimens.space2),
+                // Horizontal space3 + vertical space3: air like the mesa cards,
+                // so a long title wrapping at 200% still has room around it.
+                .padding(horizontal = dimens.space3, vertical = dimens.space3),
             leading = {
                 if (onBack != null) {
                     Box(
@@ -113,11 +120,13 @@ fun RbTopBar(
             trailing = { actions?.invoke() },
         )
 
+        // Strong edge, token width: same outdoor rule as RbCard — a hairline
+        // outline disappears in daylight and the header stops reading as a bar.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(1.dp)
-                .background(colors.outline),
+                .height(dimens.border)
+                .background(colors.outlineStrong),
         )
     }
 }

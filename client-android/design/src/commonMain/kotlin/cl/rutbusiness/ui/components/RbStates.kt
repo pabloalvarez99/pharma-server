@@ -1,10 +1,8 @@
 package cl.rutbusiness.ui.components
 
-import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,7 +26,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbAssertive
 import cl.rutbusiness.ui.theme.rbHeading
@@ -43,7 +40,7 @@ import cl.rutbusiness.ui.theme.rbPolite
  */
 
 /**
- * Loading.
+ * Loading — a quiet wait on the mesa, not a SaaS spinner takeover.
  *
  * Announced politely to TalkBack, matching the web helper's
  * `role="status" aria-live="polite"`.
@@ -52,6 +49,8 @@ import cl.rutbusiness.ui.theme.rbPolite
  * **static** rather than removed: a still ring next to "Cargando..." still says
  * the app is working. This is the port of the CSS's
  * `@media (prefers-reduced-motion: reduce) { .ui-spinner { animation: none } }`.
+ * The sweep comes from [cl.rutbusiness.ui.theme.RbMotion.spinnerSweep] only —
+ * no layout motion, no translateY.
  */
 @Composable
 fun RbLoadingState(
@@ -61,19 +60,19 @@ fun RbLoadingState(
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
     val sweep = RbTheme.motion.spinnerSweep()
+    val strokeWidth = dimens.border
 
     val rotation: Float = if (sweep == null) {
         // Reduced motion: a fixed angle, never a moving one.
         0f
     } else {
+        // spinnerSweep returns InfiniteRepeatableSpec when motion is allowed.
+        val infinite = sweep as InfiniteRepeatableSpec<Float>
         val transition = rememberInfiniteTransition(label = "RbLoadingState spinner")
         val animated by transition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 900, easing = androidx.compose.animation.core.LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
+            animationSpec = infinite,
             label = "RbLoadingState angle",
         )
         animated
@@ -82,9 +81,9 @@ fun RbLoadingState(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(dimens.space3)
+            .padding(horizontal = dimens.space4, vertical = dimens.space3)
             .rbPolite(),
-        horizontalArrangement = Arrangement.spacedBy(dimens.space2),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space3),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Canvas(
@@ -92,11 +91,12 @@ fun RbLoadingState(
                 .size(dimens.iconSize)
                 .clearAndSetSemantics { },
         ) {
-            val stroke = 3.dp.toPx()
+            val stroke = strokeWidth.toPx()
             val inset = stroke / 2f
             val arcSize = Size(size.width - stroke, size.height - stroke)
             // The full ring at low contrast, then the bright arc on top: the
-            // gap between them is what reads as progress.
+            // gap between them is what reads as progress. outlineStrong would
+            // fight the brand arc outdoors; outline stays the track.
             drawArc(
                 color = colors.outline,
                 startAngle = 0f,
@@ -125,12 +125,14 @@ fun RbLoadingState(
 }
 
 /**
- * Empty.
+ * Empty — teaches the next step on the mesa del puesto.
  *
  * The rule from `ui.ts`: an empty state **teaches the next step**. `title` says
  * what is missing, `hint` says how to make the first one, and the optional
  * action takes the user there. "No hay datos" alone is a dead end and is not
- * allowed in this product.
+ * allowed in this product. Mark + air match the chunky card tiles (56dp mark,
+ * outline brand edge, space3 between lines) so the empty block reads as part of
+ * the puesto, not a Material void.
  */
 @Composable
 fun RbEmptyState(
@@ -142,25 +144,28 @@ fun RbEmptyState(
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
+    val markShape = RbTheme.shapes.card
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = dimens.space4, vertical = dimens.space5),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        // The soft mark from `.ui-empty-mark`. Decorative, so it is hidden from
-        // TalkBack rather than read as a shape with no meaning.
+        // Soft paper mark (`.ui-empty-mark`). Decorative, so it is hidden from
+        // TalkBack rather than read as a shape with no meaning. markSize is the
+        // 56dp floor so the tile itself is finger-sized even though it is not
+        // interactive.
         Box(
             modifier = Modifier
                 .size(dimens.markSize)
-                .clip(RoundedCornerShape(dimens.radiusCard))
+                .clip(markShape)
                 .background(colors.brandContainer)
                 // Brand-toned edge, not the neutral one: a warm grey outline
                 // around a mint tile reads muddy in the light theme, and
                 // brandText clears 3.0 on the container either way.
-                .border(dimens.border, colors.brandText, RoundedCornerShape(dimens.radiusCard))
+                .border(dimens.border, colors.brandText, markShape)
                 .clearAndSetSemantics { },
             contentAlignment = Alignment.Center,
         ) {
@@ -182,14 +187,16 @@ fun RbEmptyState(
         if (hint != null) {
             Text(
                 text = hint,
-                style = RbTheme.typography.body,
+                // Support, not body: hierarchy under the heading so the next
+                // step reads as help, not a second title.
+                style = RbTheme.typography.support,
                 color = colors.textSecondary,
                 textAlign = TextAlign.Center,
             )
         }
 
         if (actionLabel != null && onAction != null) {
-            Box(modifier = Modifier.padding(top = dimens.space2)) {
+            Box(modifier = Modifier.padding(top = dimens.space1)) {
                 RbButton(label = actionLabel, onClick = onAction)
             }
         }
