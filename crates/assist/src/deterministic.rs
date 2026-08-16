@@ -558,6 +558,9 @@ async fn resumen_dia(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> Dom
     .await
     .unwrap_or_default();
 
+    // Feria: ventas + puesto only (no FEFO / reposición / Ley 20.000 copy).
+    let feria = crate::feria_caja::es_feria(db, tenant).await?;
+
     // --- prose: one bullet per domain section ---
     let mut lines: Vec<String> = Vec::new();
     lines.push(if orders == 0 {
@@ -570,49 +573,56 @@ async fn resumen_dia(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> Dom
             m.fmt(rev)
         )
     });
-    lines.push(match &caja_line {
-        Some((reg, expected)) => format!("Caja «{reg}»: deberían haber {}.", m.fmt(*expected)),
-        None => "No hay caja abierta.".to_string(),
-    });
-    lines.push(if reorder.rows.is_empty() {
-        "Reposición: todo sobre el mínimo. 👍".to_string()
+    if feria {
+        lines.push(match &caja_line {
+            Some((_reg, expected)) => format!("Puesto: deberían haber {}.", m.fmt(*expected)),
+            None => "El puesto todavía no arrancó el día.".to_string(),
+        });
     } else {
-        let top: Vec<String> = reorder
-            .rows
-            .iter()
-            .take(3)
-            .map(|r| format!("{} (+{})", r.name, r.suggested_qty))
-            .collect();
-        format!(
-            "Reposición: {} {} bajo el mínimo ({}).",
-            reorder.rows.len(),
-            plural(reorder.rows.len() as i64, "producto", "productos"),
-            top.join(", ")
-        )
-    });
-    lines.push(if expiry.is_empty() {
-        "Por vencer (7 días): nada. 👍".to_string()
-    } else if expired > 0 {
-        format!(
-            "Por vencer (7 días): {} {} ({} ya {}).",
-            expiry.len(),
-            plural(expiry.len() as i64, "lote", "lotes"),
-            expired,
-            plural(expired as i64, "vencido", "vencidos")
-        )
-    } else {
-        format!(
-            "Por vencer (7 días): {} {}.",
-            expiry.len(),
-            plural(expiry.len() as i64, "lote", "lotes")
-        )
-    });
-    if !controlados.is_empty() {
-        lines.push(format!(
-            "Controlados (mes): {} {} en el libro (Ley 20.000).",
-            controlados.len(),
-            plural(controlados.len() as i64, "receta", "recetas")
-        ));
+        lines.push(match &caja_line {
+            Some((reg, expected)) => format!("Caja «{reg}»: deberían haber {}.", m.fmt(*expected)),
+            None => "No hay caja abierta.".to_string(),
+        });
+        lines.push(if reorder.rows.is_empty() {
+            "Reposición: todo sobre el mínimo. 👍".to_string()
+        } else {
+            let top: Vec<String> = reorder
+                .rows
+                .iter()
+                .take(3)
+                .map(|r| format!("{} (+{})", r.name, r.suggested_qty))
+                .collect();
+            format!(
+                "Reposición: {} {} bajo el mínimo ({}).",
+                reorder.rows.len(),
+                plural(reorder.rows.len() as i64, "producto", "productos"),
+                top.join(", ")
+            )
+        });
+        lines.push(if expiry.is_empty() {
+            "Por vencer (7 días): nada. 👍".to_string()
+        } else if expired > 0 {
+            format!(
+                "Por vencer (7 días): {} {} ({} ya {}).",
+                expiry.len(),
+                plural(expiry.len() as i64, "lote", "lotes"),
+                expired,
+                plural(expired as i64, "vencido", "vencidos")
+            )
+        } else {
+            format!(
+                "Por vencer (7 días): {} {}.",
+                expiry.len(),
+                plural(expiry.len() as i64, "lote", "lotes")
+            )
+        });
+        if !controlados.is_empty() {
+            lines.push(format!(
+                "Controlados (mes): {} {} en el libro (Ley 20.000).",
+                controlados.len(),
+                plural(controlados.len() as i64, "receta", "recetas")
+            ));
+        }
     }
 
     let text = format!(
