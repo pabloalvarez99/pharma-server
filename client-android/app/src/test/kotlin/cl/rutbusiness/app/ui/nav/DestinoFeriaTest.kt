@@ -17,9 +17,21 @@ class DestinoFeriaTest {
     }
 
     @Test
-    fun `con agent_home Cobrar es Vender y Resumen es Hoy`() {
-        assertEquals("Agente", Destino.Agente.etiquetaPara(true))
+    fun `con agent_home se lee Hablar Vender Hoy`() {
+        assertEquals("Hablar", Destino.Agente.etiquetaPara(true))
         assertEquals("Vender", Destino.Cobrar.etiquetaPara(true))
         assertEquals("Hoy", Destino.Resumen.etiquetaPara(true))
+    }
+
+    @Test
+    fun `feria no dice Caja en ninguna pestana`() {
+        Destino.entries.forEach { destino ->
+            val etiqueta = destino.etiquetaPara(agentHome = true)
+            assertEquals(
+                "feria no debe decir «Caja» en «$etiqueta»",
+                false,
+                etiqueta.contains("Caja", ignoreCase = true),
+            )
+        }
     }
 }
