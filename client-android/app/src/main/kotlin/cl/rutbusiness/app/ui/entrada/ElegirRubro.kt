@@ -1,5 +1,7 @@
 package cl.rutbusiness.app.ui.entrada
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -15,9 +17,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
-import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
@@ -25,8 +27,10 @@ import cl.rutbusiness.ui.theme.rbHeading
 /**
  * Elegí tu rubro (day-1). Feria primero (ADR-0022).
  *
- * No habla con el server todavía: guarda en preferencias locales y al primer
- * login se empuja `business.vertical` + se carga el pack.
+ * Se siente una **mesa del puesto**, no un catálogo de productos: la opción
+ * recomendada (feria) va arriba con más aire y relleno; el resto, más quieto.
+ * Misma altura táctil en todos los botones (≥ 56 dp). No habla con el server:
+ * guarda en preferencias locales y al primer login se empuja `business.vertical`.
  */
 @Composable
 fun ElegirRubro(
@@ -37,8 +41,8 @@ fun ElegirRubro(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Tu negocio",
-            subtitle = "¿Cómo trabajás?",
+            title = "¿Cómo trabajás?",
+            subtitle = "Elegí lo que más se parece a tu día",
         )
 
         Column(
@@ -46,47 +50,35 @@ fun ElegirRubro(
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
             Text(
-                text = "Elegí lo que más se parece a tu día",
-                style = RbTheme.typography.title,
-                color = RbTheme.colors.textPrimary,
-                modifier = Modifier.rbHeading(),
-            )
-            Text(
-                text = "Después se puede cambiar. Esto define si ves escáner e " +
-                    "impresora, o el agente y el fiado primero.",
+                text = "Después se puede cambiar. Esto define si ves el agente y el " +
+                    "fiado primero, o escáner e impresora.",
                 style = RbTheme.typography.body,
-                color = RbTheme.colors.textSecondary,
+                color = RbTheme.colors.textPrimary,
             )
 
             OPCIONES.forEach { opcion ->
-                RbCard(title = opcion.titulo) {
-                    Text(
-                        text = opcion.tagline,
-                        style = RbTheme.typography.body,
-                        color = RbTheme.colors.textSecondary,
-                    )
-                    RbButton(
-                        label = if (opcion.recomendado) "Elegir (recomendado)" else "Elegir",
-                        onClick = { onElegir(opcion.rubro) },
-                        variant = if (opcion.recomendado) {
-                            RbButtonVariant.Primary
-                        } else {
-                            RbButtonVariant.Secondary
-                        },
-                        fillWidth = true,
-                        modifier = Modifier.padding(top = dimens.space2),
-                    )
-                }
+                CaminoDeRubro(
+                    titulo = opcion.titulo,
+                    cuerpo = opcion.tagline,
+                    etiqueta = if (opcion.recomendado) {
+                        "Elegir (recomendado)"
+                    } else {
+                        "Elegir"
+                    },
+                    onClick = { onElegir(opcion.rubro) },
+                    primario = opcion.recomendado,
+                )
             }
         }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(RbTheme.colors.surfaceRaised)
                 .windowInsetsPadding(
                     WindowInsets.safeDrawing.only(
                         WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
@@ -101,6 +93,64 @@ fun ElegirRubro(
                 fillWidth = true,
             )
         }
+    }
+}
+
+/**
+ * Un rubro con peso: el recomendado (feria) se lee de lejos; los demás no
+ * pelean por atención. Misma vara visual que [CaminoDePuerta] en la puerta.
+ */
+@Composable
+private fun CaminoDeRubro(
+    titulo: String,
+    cuerpo: String,
+    etiqueta: String,
+    onClick: () -> Unit,
+    primario: Boolean,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(if (primario) colors.surfaceRaised else colors.surface)
+            .border(
+                width = if (primario) dimens.focusRing else dimens.border,
+                color = if (primario) colors.outlineStrong else colors.outline,
+                shape = shape,
+            )
+            .padding(
+                horizontal = dimens.space3,
+                vertical = if (primario) dimens.space4 else dimens.space3,
+            ),
+        verticalArrangement = Arrangement.spacedBy(
+            if (primario) dimens.space3 else dimens.space2,
+        ),
+    ) {
+        Text(
+            text = titulo,
+            style = if (primario) RbTheme.typography.heading else RbTheme.typography.bodyStrong,
+            color = colors.textPrimary,
+            modifier = Modifier.rbHeading(),
+        )
+        Text(
+            text = cuerpo,
+            style = if (primario) RbTheme.typography.body else RbTheme.typography.support,
+            color = if (primario) colors.textPrimary else colors.textSecondary,
+        )
+        RbButton(
+            label = etiqueta,
+            onClick = onClick,
+            variant = if (primario) {
+                RbButtonVariant.Primary
+            } else {
+                RbButtonVariant.Secondary
+            },
+            fillWidth = true,
+        )
     }
 }
 

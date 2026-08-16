@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
-import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.theme.RbDefaultDimens
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertTrue
@@ -324,11 +323,9 @@ class EntradaEscalaTest {
                     verticalArrangement = Arrangement.spacedBy(RbTheme.dimens.space3),
                 ) {
                     fallas.forEach { falla ->
-                        RbErrorState(
-                            title = falla.titulo,
-                            message = falla.queHacer,
-                            retryLabel = null,
-                            onRetry = null,
+                        TarjetaDeFallaEntrada(
+                            titulo = falla.titulo,
+                            queHacer = falla.queHacer,
                         )
                     }
                 }

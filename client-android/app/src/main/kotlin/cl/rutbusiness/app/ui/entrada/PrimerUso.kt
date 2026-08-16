@@ -1,6 +1,7 @@
 package cl.rutbusiness.app.ui.entrada
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -39,22 +41,13 @@ import cl.rutbusiness.ui.theme.rbHeading
  * escribir ahí, y un campo que no se sabe llenar no es una pantalla difícil: es
  * una app que se desinstala en treinta segundos. Estas tres pantallas contestan
  * las tres preguntas que esa persona tiene, en el orden en que se las hace: qué
- * es esto, por qué me pide una dirección, y de dónde saco los datos.
+ * es esto, dónde se guarda, y qué necesitás a mano.
  *
- * Reglas de esta parte, todas del piso de hardware y del encargo:
- *
- * - **Un botón obvio por pantalla.** El de avanzar es el único primario. Saltar
- *   está siempre, del mismo tamaño táctil, pero secundario.
- * - **Cero jerga.** Ni "endpoint", ni "API", ni "instancia", ni "tenant". La
- *   palabra "servidor" aparece una vez y se explica, porque es la que le va a
- *   decir quien le instaló el sistema — no enseñarla la dejaría sin entender a
- *   la única persona que puede ayudarla.
- * - **Los botones no scrollean.** El texto sí. Al 200% de escala el cuerpo de
- *   estas pantallas no entra, y un botón que hay que ir a buscar scrolleando es
- *   un botón que la persona mayor no encuentra.
- *
- * Se muestra una sola vez: la bandera se prende con el primer login que
- * funciona, no al terminar de leer. Ver [PreferenciasDeEntrada].
+ * Se siente un **cartel del puesto**, no un tutorial: una idea grande por paso,
+ * superficie elevada, mucho aire. Un botón obvio por pantalla; saltar siempre
+ * a la vista, del mismo tamaño táctil, pero secundario. Los botones no
+ * scrollean. Se muestra una sola vez: la bandera se prende con el primer login
+ * que funciona. Ver [PreferenciasDeEntrada].
  */
 @Composable
 fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
@@ -72,6 +65,8 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
 
     val paso = pasos[indice]
     val ultimo = indice == pasos.lastIndex
+    val colors = RbTheme.colors
+    val shape = RbTheme.shapes.card
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
@@ -85,42 +80,58 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
-            Text(
-                text = paso.encabezado,
-                style = RbTheme.typography.title,
-                color = RbTheme.colors.textPrimary,
-                modifier = Modifier.rbHeading(),
-            )
-
-            paso.parrafos.forEach { parrafo ->
+            // Cartel del paso: se lee de lejos, como el camino primario de la puerta.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.focusRing, colors.outlineStrong, shape)
+                    .padding(horizontal = dimens.space3, vertical = dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            ) {
                 Text(
-                    text = parrafo,
-                    style = RbTheme.typography.body,
-                    color = RbTheme.colors.textPrimary,
+                    text = paso.encabezado,
+                    style = RbTheme.typography.title,
+                    color = colors.textPrimary,
+                    modifier = Modifier.rbHeading(),
                 )
-            }
 
-            paso.lista.forEachIndexed { numero, linea ->
-                LineaNumerada(numero = numero + 1, texto = linea)
-            }
+                paso.parrafos.forEach { parrafo ->
+                    Text(
+                        text = parrafo,
+                        style = RbTheme.typography.body,
+                        color = colors.textPrimary,
+                    )
+                }
 
-            paso.remate?.let { remate ->
-                Text(
-                    text = remate,
-                    style = RbTheme.typography.support,
-                    color = RbTheme.colors.textSecondary,
-                )
+                if (paso.lista.isNotEmpty()) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+                    ) {
+                        paso.lista.forEachIndexed { numero, linea ->
+                            LineaNumerada(numero = numero + 1, texto = linea)
+                        }
+                    }
+                }
+
+                paso.remate?.let { remate ->
+                    Text(
+                        text = remate,
+                        style = RbTheme.typography.support,
+                        color = colors.textSecondary,
+                    )
+                }
             }
         }
 
         // La misma hairline que cierra el `RbTopBar`, arriba en vez de abajo.
         // No es decoración: al 200% el texto no entra y se corta justo debajo de
         // este borde. Sin la línea, la frase cortada se lee como una frase que
-        // termina mal; con ella se lee como texto que sigue detrás del panel, y
-        // eso es lo que hace que alguien piense en scrollear.
+        // termina mal; con ella se lee como texto que sigue detrás del panel.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -226,7 +237,7 @@ internal fun pasosDelPrimerUso(
     }
     val pasoTres = if (nube) {
         PasoDelPrimerUso(
-            titulo = "Lo que necesitas a mano",
+            titulo = "Lo que necesitás a mano",
             encabezado = "Para empezar",
             parrafos = emptyList(),
             lista = listOf(
@@ -237,7 +248,7 @@ internal fun pasosDelPrimerUso(
         )
     } else {
         PasoDelPrimerUso(
-            titulo = "Lo que necesitas a mano",
+            titulo = "Lo que necesitás a mano",
             encabezado = "Para entrar la primera vez",
             parrafos = emptyList(),
             lista = listOf(
@@ -246,7 +257,7 @@ internal fun pasosDelPrimerUso(
                 "El nombre corto de tu negocio.",
                 cuenta,
             ),
-            remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
+            remate = "¿No los tenés? Pedíselos a quien instaló el sistema. " +
                 "Quedaron anotados el día que lo instaló.",
         )
     }
@@ -256,7 +267,7 @@ internal fun pasosDelPrimerUso(
             encabezado = "El cuaderno del negocio, en tu teléfono",
             parrafos = listOf(
                 "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
-                    "cuánto hiciste hoy - más rápido que el cuaderno de mil pesos.",
+                    "cuánto hiciste hoy — más rápido que el cuaderno de mil pesos.",
                 "Hablale como a un empleado de confianza. Antes de guardar nada, " +
                     "te lo muestra para que lo revises.",
             ),
