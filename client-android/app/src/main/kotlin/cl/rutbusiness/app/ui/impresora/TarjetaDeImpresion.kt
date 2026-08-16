@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -319,11 +320,18 @@ private fun Fallida(
     onDarPermiso: () -> Unit,
 ) {
     val dimens = RbTheme.dimens
+    // El enlace Bluetooth arma SinBluetooth() sin rubro; acá se reescribe el
+    // qué-hacer si el pack es feria (sin computador / boleta).
+    val queHacer = if (falla is FallaDeImpresion.SinBluetooth) {
+        copyQueHacerSinBluetooth(feria = esFeria())
+    } else {
+        falla.queHacer
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
         RbErrorState(
             title = falla.titulo,
-            message = falla.queHacer,
+            message = queHacer,
             retryLabel = null,
             onRetry = null,
         )
