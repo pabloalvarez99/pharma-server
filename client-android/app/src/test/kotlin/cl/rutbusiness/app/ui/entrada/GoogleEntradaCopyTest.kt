@@ -231,6 +231,7 @@ class GoogleEntradaCopyTest {
             }
         }
         compose.waitForIdle()
+        compose.onNodeWithText("Tu puesto").assertIsDisplayed()
         compose.onNodeWithText("Crear mi puesto").assertIsDisplayed()
         compose.onNodeWithText("Creas tu puesto acá mismo", substring = true).assertIsDisplayed()
         assertEquals(
@@ -249,6 +250,57 @@ class GoogleEntradaCopyTest {
                 .fetchSemanticsNodes().size,
         )
         compose.onNodeWithText("nombre corto", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `la puerta pone el camino primario primero y el rescate queda quieto`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    Puerta(
+                        yaEntroAlgunaVez = false,
+                        onCrear = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        onRecuperar = {},
+                        nube = true,
+                        esFeria = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        // Primera vez: crear pesa más y va arriba; entrar es el secundario.
+        compose.onNodeWithText("Es la primera vez").assertIsDisplayed()
+        compose.onNodeWithText("Ya tenés un puesto").assertIsDisplayed()
+        compose.onNodeWithText("Creá uno, o entrá al que ya tenés").assertIsDisplayed()
+
+        // Rescate usable sin pelear con los dos caminos.
+        compose.onNodeWithText("Perdí mi teléfono").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Recuperar con mi tarjeta").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `si ya entro el camino primario es entrar`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    Puerta(
+                        yaEntroAlgunaVez = true,
+                        onCrear = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        nube = true,
+                        esFeria = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Entrá de nuevo, o creá otro").assertIsDisplayed()
+        compose.onNodeWithText("Entrar a mi puesto").assertIsDisplayed()
+        compose.onNodeWithText("Crear mi puesto").assertIsDisplayed()
     }
 
     @Test
