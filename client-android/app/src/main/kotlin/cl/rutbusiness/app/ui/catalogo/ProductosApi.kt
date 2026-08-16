@@ -83,6 +83,19 @@ private data class CambioDeProducto(
 private data class CambioDeCodigo(val barcode: String)
 
 /**
+ * Body de `POST /api/v1/products/ensure`: cosa de feria (nombre + precio).
+ *
+ * El server pone `physical_stock=false`, `stock=0` y `attrs.rb_simple=true`.
+ * No manda stock ni attrs desde acá: eso lo decide el ensure del dominio.
+ */
+@Serializable
+private data class ProductoAsegurar(
+    val name: String,
+    /** Decimal como texto: es como viaja la plata en toda esta API. */
+    val price: String,
+)
+
+/**
  * Da de alta el producto.
  *
  * Nace con [stock] unidades -una, la que la cajera tiene en la mano- porque con
@@ -121,6 +134,26 @@ suspend fun crearProducto(
                 attrs = atributosCon(extras, claveDeUnidad, unidad),
             ),
         )
+    }.exigirExito(api.baseUrl).body()
+}
+
+/**
+ * Asegura una cosa de feria por nombre (idempotente en el server).
+ *
+ * `POST /api/v1/products/ensure` es cashier+: la dueña en el puesto no choca
+ * con el 403 de `POST /products` (admin+). Si el nombre ya existe
+ * (case-insensitive) el server devuelve el mismo id sin crear otro ni
+ * tocar el precio. No es el centinela de [VentaSuelta]: eso es
+ * `rb_venta_suelta`; acá es tomates, cilantro, etc.
+ */
+suspend fun asegurarProducto(
+    api: ApiFactory,
+    nombre: String,
+    precio: String,
+): Resultado<ProductDto> = llamar(api) {
+    api.http.post("${api.baseUrl}/api/v1/products/ensure") {
+        contentType(ContentType.Application.Json)
+        setBody(ProductoAsegurar(name = nombre, price = precio))
     }.exigirExito(api.baseUrl).body()
 }
 
