@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,13 +16,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.unit.dp
 import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbLoadingState
-import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 import kotlinx.coroutines.delay
@@ -39,16 +35,15 @@ import kotlinx.coroutines.delay
  *   saber en un vistazo que todavía no pasó nada.
  * - **El resumen del server, grande.** Es la frase que el server armó con los
  *   datos reales; va en el cuerpo más grande de la pantalla.
- * - **El detalle campo por campo**, con la plata formateada. El resumen puede
- *   leerse rápido; el detalle es donde se pilla un cero de más.
+ * - **El detalle campo por campo** ([TarjetaDetalleAccion]), con la plata
+ *   formateada. El resumen se lee rápido; el detalle pilla un cero de más.
  * - **Botones con verbo**, no "Aceptar". "Sí, registrar el gasto" se entiende
  *   incluso si alguien no leyó el resto.
  * - **El vencimiento en palabras.** Un timestamp no le sirve a nadie.
  *
  * A 200% de escala esta tarjeta es el peor caso de toda la app: la que más
- * texto tiene y la que no se puede cortar. Por eso nada acá lleva `maxLines`,
- * ninguna altura es fija, y el detalle usa [RbReflowRow], que baja el valor a
- * su propia línea antes de dejar que se parta una palabra.
+ * texto tiene y la que no se puede cortar. Por eso nada acá lleva `maxLines`
+ * y ninguna altura es fija.
  */
 @Composable
 fun TarjetaPropuesta(
@@ -212,63 +207,11 @@ internal fun etiquetaDeConfirmar(nombreDeAccion: String): String = when (nombreD
     else -> "Sí, hazlo"
 }
 
-/** El detalle campo por campo. */
+/** El detalle campo por campo — tarjeta legible del puesto. */
 @Composable
 private fun Detalle(propuesta: PropuestaAccion) {
-    val dimens = RbTheme.dimens
-    val colors = RbTheme.colors
     val lineas = remember(propuesta.confirmToken) { DetalleAccion.lineas(propuesta.params) }
-
-    if (lineas.isEmpty()) return
-
-    // Detalle sobre surface dentro del brandContainer de la tarjeta: se lee
-    // el desglose sin competir con el resumen hablado de arriba.
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RbTheme.shapes.field)
-            .background(colors.surface)
-            .border(dimens.border, colors.outline, RbTheme.shapes.field)
-            .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space2),
-    ) {
-        Text(
-            text = "Esto es lo que voy a guardar",
-            style = RbTheme.typography.label,
-            color = colors.textSecondary,
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(colors.outline)
-                .clearAndSetSemantics { },
-        )
-
-        lineas.forEach { linea ->
-            RbReflowRow(
-                spacing = dimens.space3,
-                modifier = Modifier.fillMaxWidth(),
-                content = {
-                    Text(
-                        text = linea.etiqueta,
-                        style = RbTheme.typography.support,
-                        color = colors.textSecondary,
-                    )
-                },
-                trailing = {
-                    // El valor en el cuerpo fuerte: es el número que hay que
-                    // mirar. La etiqueta es contexto, el valor es la decisión.
-                    Text(
-                        text = linea.valor,
-                        style = RbTheme.typography.bodyStrong,
-                        color = colors.textPrimary,
-                    )
-                },
-            )
-        }
-    }
+    TarjetaDetalleAccion(lineas = lineas)
 }
 
 private enum class Tono { Bien, Neutro, Atencion }
