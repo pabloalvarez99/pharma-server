@@ -5,15 +5,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
-import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbEmptyState
@@ -53,6 +55,22 @@ fun CajaRoute(
 @Composable
 private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
     val dimens = RbTheme.dimens
+    val feria = esFeria()
+
+    // Feria: al entrar al paso Abrir se abre el puesto con $0 sin ritual de cajón.
+    // 409 "ya tiene caja abierta" lo trata el VM como éxito.
+    LaunchedEffect(feria, vm.paso, vm.cargando, vm.hayConexion, vm.guardando) {
+        if (feria &&
+            vm.paso == PasoDeCaja.Abrir &&
+            !vm.cargando &&
+            !vm.guardando &&
+            vm.hayConexion &&
+            vm.sesionDeCaja == null
+        ) {
+            vm.modoFeria(true)
+            vm.abrirPuestoFeria()
+        }
+    }
 
     // Atrás deshace el último paso antes de salir de la caja, que es el orden en
     // que la gente espera que se deshagan las cosas. Se registra acá y no en
@@ -69,8 +87,8 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
-            title = tituloDelPaso(vm),
-            subtitle = subtituloDelPaso(vm),
+            title = tituloPasoCaja(vm.paso, feria || vm.esFeria, vm.tipoDeMovimiento),
+            subtitle = subtituloDelPaso(vm, feria || vm.esFeria),
             onBack = atras,
             actions = {
                 // No hay botón de actualizar mientras se está escribiendo un
@@ -93,11 +111,21 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
             // que enterarse al entrar y no al final del arqueo, con la plata ya
             // contada arriba del mostrador.
             !vm.hayConexion -> RbEmptyState(
-                title = "La caja necesita el sistema prendido",
-                hint = "Sin conexión no se puede abrir la caja, anotar retiros ni cerrar con " +
-                    "arqueo: lo que debería haber en el cajón lo calcula el sistema del " +
-                    "negocio sumando las ventas del día, y desde el teléfono no hay contra " +
-                    "qué comparar. Mientras tanto puedes seguir cobrando en efectivo.",
+                title = if (feria || vm.esFeria) {
+                    "El puesto necesita el sistema prendido"
+                } else {
+                    "La caja necesita el sistema prendido"
+                },
+                hint = if (feria || vm.esFeria) {
+                    "Sin conexión no se puede abrir el puesto ni cerrar el día: lo que " +
+                        "debería haber lo calcula el sistema sumando las ventas. Mientras " +
+                        "tanto puedes seguir cobrando en efectivo."
+                } else {
+                    "Sin conexión no se puede abrir la caja, anotar retiros ni cerrar con " +
+                        "arqueo: lo que debería haber en el cajón lo calcula el sistema del " +
+                        "negocio sumando las ventas del día, y desde el teléfono no hay contra " +
+                        "qué comparar. Mientras tanto puedes seguir cobrando en efectivo."
+                },
                 actionLabel = "Volver",
                 onAction = onVolver,
                 modifier = Modifier.padding(dimens.space3),
@@ -112,7 +140,13 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
             )
 
             vm.cargando && vm.sesionDeCaja == null -> Column {
-                RbLoadingState(label = "Viendo cómo está la caja...")
+                RbLoadingState(
+                    label = if (feria || vm.esFeria) {
+                        "Abriendo el puesto..."
+                    } else {
+                        "Viendo cómo está la caja..."
+                    },
+                )
                 RbSkeletonLines(lines = 4, modifier = Modifier.padding(dimens.space3))
             }
 
@@ -127,18 +161,8 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
     }
 }
 
-private fun tituloDelPaso(vm: CajaViewModel): String = when (vm.paso) {
-    PasoDeCaja.Abrir -> "Abrir la caja"
-    PasoDeCaja.Abierta -> "La caja de hoy"
-    PasoDeCaja.Movimiento ->
-        if (vm.tipoDeMovimiento == NuevoMovimiento.RETIRO) "Sacar plata" else "Meter plata"
-
-    PasoDeCaja.Arqueo -> "Contar la plata"
-    PasoDeCaja.Cerrada -> "Caja cerrada"
-}
-
-private fun subtituloDelPaso(vm: CajaViewModel): String? = when (vm.paso) {
-    PasoDeCaja.Abrir -> "Lo primero del día"
+private fun subtituloDelPaso(vm: CajaViewModel, feria: Boolean): String? = when (vm.paso) {
+    PasoDeCaja.Abrir -> if (feria) "Sin contar monedas" else "Lo primero del día"
     PasoDeCaja.Abierta -> vm.sesionDeCaja?.nombreDeCaja?.ifBlank { null }
     PasoDeCaja.Movimiento -> "Queda anotado hasta el cierre"
     PasoDeCaja.Arqueo -> "Cuenta primero, después cierra"

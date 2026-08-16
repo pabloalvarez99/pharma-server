@@ -52,6 +52,7 @@ fun PasoArqueo(vm: CajaViewModel, modifier: Modifier = Modifier) {
         guardando = vm.guardando,
         onCerrar = vm::cerrarCaja,
         onVolver = vm::volverAlEstado,
+        feria = vm.esFeria,
         modifier = modifier,
     )
 }
@@ -86,10 +87,12 @@ internal fun FormularioDeArqueo(
     guardando: Boolean,
     onCerrar: () -> Unit,
     onVolver: () -> Unit,
+    feria: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val copy = copyArqueoCaja(feria)
 
     var confirmando by rememberSaveable { mutableStateOf(false) }
 
@@ -101,10 +104,9 @@ internal fun FormularioDeArqueo(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        RbCard(title = "¿Cuánta plata hay en el cajón?") {
+        RbCard(title = copy.tituloCard) {
             Text(
-                text = "Saca la plata, cuéntala tranquila y escribe el total. Recién después de " +
-                    "cerrar te mostramos cómo quedó contra lo que el sistema tenía anotado.",
+                text = copy.ayuda,
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -114,7 +116,7 @@ internal fun FormularioDeArqueo(
                 onValueChange = onMontoContado,
                 label = "Plata contada",
                 placeholder = "0",
-                supportingText = "Cuenta billetes y monedas. Si el cajón quedó vacío, escribe 0.",
+                supportingText = copy.ayudaMonto,
                 numeric = true,
                 keyboardType = tecladoDePlata(moneda),
                 enabled = !guardando,
@@ -133,12 +135,12 @@ internal fun FormularioDeArqueo(
             )
         }
 
-        error?.let { copy ->
+        error?.let { err ->
             RbErrorState(
-                title = copy.title,
-                message = copy.message,
-                retryLabel = copy.retryLabel,
-                onRetry = if (copy.retryLabel != null) onCerrar else null,
+                title = err.title,
+                message = err.message,
+                retryLabel = err.retryLabel,
+                onRetry = if (err.retryLabel != null) onCerrar else null,
             )
         }
 
@@ -151,7 +153,7 @@ internal fun FormularioDeArqueo(
         }
 
         RbButton(
-            label = if (guardando) "Cerrando..." else "Cerrar la caja",
+            label = if (guardando) copy.ctaGuardando else copy.cta,
             onClick = { confirmando = true },
             enabled = !guardando && impedimento == null,
             fillWidth = true,
@@ -168,13 +170,19 @@ internal fun FormularioDeArqueo(
 
     if (confirmando) {
         RbConfirmDialog(
-            title = "¿Cerramos la caja?",
+            title = copy.confirmarTitulo,
             // Se dice qué es lo que no se puede deshacer, sin adjetivos: cerrar
             // no es peligroso, pero es definitivo, y la dueña tiene derecho a
             // saberlo antes y no después.
-            message = "La caja queda cerrada con los " +
-                "${moneda.formatear(montoContado.replace(',', '.'))} que contaste. Después no " +
-                "se puede volver a abrir la misma caja: mañana se abre una nueva.",
+            message = if (feria) {
+                "El día queda cerrado con los " +
+                    "${moneda.formatear(montoContado.replace(',', '.'))} que contaste. Después no " +
+                    "se puede volver a abrir el mismo día: mañana se abre de nuevo."
+            } else {
+                "La caja queda cerrada con los " +
+                    "${moneda.formatear(montoContado.replace(',', '.'))} que contaste. Después no " +
+                    "se puede volver a abrir la misma caja: mañana se abre una nueva."
+            },
             confirmLabel = "Sí, cerrar",
             cancelLabel = "Seguir contando",
             onConfirm = {

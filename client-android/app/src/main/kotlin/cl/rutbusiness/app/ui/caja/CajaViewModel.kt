@@ -94,6 +94,16 @@ class CajaViewModel(
     var guardando by mutableStateOf(false)
         private set
 
+    /**
+     * Pack feria (ADR-0022): la Screen llama [modoFeria]; el ViewModel no lee
+     * CompositionLocals. Con feria el puesto arranca en $0 sin ritual de cajón.
+     */
+    var esFeria by mutableStateOf(false)
+        private set
+
+    /** Evita reintentar el auto-open de feria en cada recomposición. */
+    private var puestoFeriaIntentado = false
+
     // --- abrir ---------------------------------------------------------------
 
     var cajas by mutableStateOf<List<CajaFisicaDto>>(emptyList())
@@ -205,6 +215,11 @@ class CajaViewModel(
 
     // --- abrir ---------------------------------------------------------------
 
+    /** La Screen lee `esFeria()` y lo baja acá: el VM no toca CompositionLocal. */
+    fun modoFeria(v: Boolean) {
+        esFeria = v
+    }
+
     fun elegirCaja(caja: CajaFisicaDto?) {
         cajaElegida = caja
         errorDeAccion = null
@@ -219,23 +234,52 @@ class CajaViewModel(
         notaDeApertura = valor
     }
 
+    /**
+     * Monto efectivo de apertura: en feria el blank vale `"0"` (sin ritual).
+     */
+    private fun montoDeAperturaParaServidor(): String? {
+        val escrito = if (esFeria && montoDeApertura.isBlank()) "0" else montoDeApertura
+        return montoParaElServidor(escrito)
+    }
+
     /** `null` = se puede abrir. Si no, el motivo ya escrito para mostrar. */
     fun impedimentoParaAbrir(): String? = when {
-        // Sin repetir la ayuda del campo ("Si el cajón arranca vacío, escribe
-        // 0"): dos frases casi iguales una debajo de otra se leen como dos
-        // instrucciones distintas y hacen dudar de cuál seguir.
-        montoDeApertura.isBlank() -> "Escribe con cuánta plata parte el cajón."
+        // Feria: blank = $0, no se bloquea. Farmacia sigue pidiendo el monto.
+        montoDeApertura.isBlank() && !esFeria ->
+            "Escribe con cuánta plata parte el cajón."
 
-        montoParaElServidor(montoDeApertura) == null ->
+        montoDeAperturaParaServidor() == null ->
             "Ese monto no se entiende. Escribe sólo números."
 
         else -> null
     }
 
+    /**
+     * Abre el puesto de feria con $0 sin pedir cajón.
+     *
+     * Si el server contesta 409 ("ya tiene una caja abierta") es éxito: otro
+     * camino (Cobrar / agente) la abrió. Se recarga y se muestra Abierta.
+     */
+    fun abrirPuestoFeria() {
+        if (sesionDeCaja != null || guardando || puestoFeriaIntentado) return
+        esFeria = true
+        puestoFeriaIntentado = true
+        montoDeApertura = "0"
+        if (notaDeApertura.isBlank()) notaDeApertura = NOTA_DIA_DE_FERIA
+        abrirCaja(nombreSuelto = NOMBRE_PUESTO_FERIA, tratarConflictComoAbierta = true)
+    }
+
     fun abrirCaja() {
+        abrirCaja(
+            nombreSuelto = if (esFeria) NOMBRE_PUESTO_FERIA else NOMBRE_DE_CAJA_SUELTA,
+            tratarConflictComoAbierta = esFeria,
+        )
+    }
+
+    private fun abrirCaja(nombreSuelto: String, tratarConflictComoAbierta: Boolean) {
         if (guardando || impedimentoParaAbrir() != null) return
         val api = sesion.apiActiva() ?: return
-        val monto = montoParaElServidor(montoDeApertura) ?: return
+        val monto = montoDeAperturaParaServidor() ?: return
 
         guardando = true
         errorDeAccion = null
@@ -249,7 +293,7 @@ class CajaViewModel(
                 // Sólo cuando no hay caja física: con `register`, el server toma
                 // el nombre del record y así el arqueo dice lo mismo que la
                 // configuración.
-                nombreDeCaja = if (elegida == null) NOMBRE_DE_CAJA_SUELTA else null,
+                nombreDeCaja = if (elegida == null) nombreSuelto else null,
                 notes = notaDeApertura.trim().ifBlank { null },
             )
 
@@ -262,7 +306,13 @@ class CajaViewModel(
                 }
 
                 is Resultado.Falla -> {
-                    errorDeAccion = copyDeAperturaFallida(abierta.error)
+                    if (tratarConflictComoAbierta && esCajaYaAbierta(abierta.error)) {
+                        // Éxito: el puesto ya estaba abierto (p. ej. desde Cobrar).
+                        errorDeAccion = null
+                        cargar()
+                    } else {
+                        errorDeAccion = copyDeAperturaFallida(abierta.error)
+                    }
                 }
             }
 
@@ -500,3 +550,4 @@ class CajaViewModel(
         const val NOMBRE_DE_CAJA_SUELTA = "caja-1"
     }
 }
+
