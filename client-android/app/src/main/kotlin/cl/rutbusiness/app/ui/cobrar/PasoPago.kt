@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.customers.ClienteDto
 import cl.rutbusiness.core.pos.ItemCarrito
@@ -40,13 +41,15 @@ import cl.rutbusiness.ui.theme.RbTheme
  * dos pantallazos de alto, y eso está bien: lo que no puede pasar es que el
  * botón de confirmar quede fuera de alcance o que un texto se corte.
  *
- * Visual de mesa: cada línea del carrito es una tarjeta gruesa; el CTA de
- * cobro es brand fill a 56dp de alto.
+ * Visual de mesa: cada línea del carrito es una tarjeta gruesa; +/− y el CTA
+ * de cobro son ≥56dp (rbTouchTarget vía [RbButton]). Feria habla de mesa de
+ * puesto, no de caja de mall.
  */
 @Composable
 fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val feria = esFeria()
+    val carritoVacio = vm.carrito.items.isEmpty()
 
     Column(
         modifier = modifier
@@ -56,72 +59,79 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
         RbCard(title = copyTituloCarrito(feria)) {
-            Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
-                vm.carrito.items.forEach { item ->
-                    FilaDeCarrito(
-                        item = item,
-                        precioUnitario = vm.moneda.formatear(item.precioUnitario),
-                        // El subtotal de la línea es una multiplicación, y sin
-                        // server esa multiplicación la haría el teléfono. Se calla:
-                        // el precio unitario sí se muestra porque lo mandó el
-                        // server tal cual, y la cantidad la puso la cajera.
-                        subtotal = if (vm.hayConexion) {
-                            item.subtotal?.let { vm.moneda.formatear(it) }
-                        } else {
-                            null
-                        },
-                        mostrarSubtotal = vm.hayConexion,
-                        onMenos = { vm.cambiarCantidad(item.productoId, item.cantidad - 1) },
-                        onMas = { vm.cambiarCantidad(item.productoId, item.cantidad + 1) },
-                    )
-                }
-            }
-
-            RbReflowRow(
-                spacing = dimens.space2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = dimens.space1),
-                content = {
-                    Text(
-                        text = "Total",
-                        style = RbTheme.typography.bodyStrong,
-                        color = RbTheme.colors.textPrimary,
-                    )
-                },
-                trailing = {
-                    // Sin conexión **no va ningún número acá**. El total lo
-                    // calcula el server, y sin server no hay a quién
-                    // preguntarle: un monto armado en el teléfono, en la
-                    // pantalla donde se cobra, es peor que no mostrar nada.
-                    // Con conexión sigue el adelanto del mostrador, que el
-                    // cobro reemplaza por el total real.
-                    when {
-                        !vm.hayConexion -> Text(
-                            text = "se confirma al enviarse",
-                            style = RbTheme.typography.body,
-                            color = RbTheme.colors.textSecondary,
-                        )
-                        vm.carrito.total != null -> RbAmount(
-                            amount = vm.moneda.formatear(vm.carrito.total!!),
-                            emphasis = RbAmountEmphasis.Body,
-                        )
-                        else -> Text(
-                            text = "lo confirma el sistema",
-                            style = RbTheme.typography.body,
-                            color = RbTheme.colors.textSecondary,
+            if (carritoVacio) {
+                // Honestidad: sin líneas no hay total que inventar. El empty
+                // manda a sumar cosas; el CTA queda deshabilitado por el VM.
+                RbEmptyState(
+                    title = copyCarritoVacioTitulo(feria),
+                    hint = copyCarritoVacioPista(feria),
+                )
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+                    vm.carrito.items.forEach { item ->
+                        FilaDeCarrito(
+                            item = item,
+                            precioUnitario = vm.moneda.formatear(item.precioUnitario),
+                            // El subtotal de la línea es una multiplicación, y sin
+                            // server esa multiplicación la haría el teléfono. Se calla:
+                            // el precio unitario sí se muestra porque lo mandó el
+                            // server tal cual, y la cantidad la puso la cajera.
+                            subtotal = if (vm.hayConexion) {
+                                item.subtotal?.let { vm.moneda.formatear(it) }
+                            } else {
+                                null
+                            },
+                            mostrarSubtotal = vm.hayConexion,
+                            onMenos = { vm.cambiarCantidad(item.productoId, item.cantidad - 1) },
+                            onMas = { vm.cambiarCantidad(item.productoId, item.cantidad + 1) },
                         )
                     }
-                },
-            )
+                }
+
+                RbReflowRow(
+                    spacing = dimens.space2,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = dimens.space1),
+                    content = {
+                        Text(
+                            text = copyEtiquetaTotal(feria),
+                            style = RbTheme.typography.bodyStrong,
+                            color = RbTheme.colors.textPrimary,
+                        )
+                    },
+                    trailing = {
+                        // Sin conexión **no va ningún número acá**. El total lo
+                        // calcula el server, y sin server no hay a quién
+                        // preguntarle: un monto armado en el teléfono, en la
+                        // pantalla donde se cobra, es peor que no mostrar nada.
+                        // Con conexión sigue el adelanto del mostrador, que el
+                        // cobro reemplaza por el total real.
+                        when {
+                            !vm.hayConexion || vm.carrito.total == null -> Text(
+                                text = copyTotalPendiente(
+                                    feria = feria,
+                                    hayConexion = vm.hayConexion,
+                                ),
+                                style = RbTheme.typography.body,
+                                color = RbTheme.colors.textSecondary,
+                            )
+                            else -> RbAmount(
+                                amount = vm.moneda.formatear(vm.carrito.total!!),
+                                emphasis = RbAmountEmphasis.Body,
+                            )
+                        }
+                    },
+                )
+            }
         }
 
-        RbCard(title = "Cómo paga") {
+        RbCard(title = copyComoPaga(feria)) {
             RbChipRow {
                 MedioDePago.entries.forEach { opcion ->
                     val bloqueado = vm.motivoParaNoUsar(opcion) != null
                     RbChip(
-                        label = opcion.etiqueta,
+                        label = copyEtiquetaMedio(opcion, feria),
                         tone = when {
                             bloqueado -> RbChipTone.Neutral
                             vm.medio == opcion -> RbChipTone.Brand
@@ -154,9 +164,9 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 cl.rutbusiness.ui.components.RbTextField(
                     value = vm.montoEntregado,
                     onValueChange = vm::cambiarMontoEntregado,
-                    label = "¿Con cuánto paga?",
+                    label = copyLabelMontoEntregado(feria),
                     placeholder = "0",
-                    supportingText = "El vuelto lo calcula el sistema, no la app.",
+                    supportingText = copyAyudaVuelto(feria),
                     numeric = true,
                     keyboardType = KeyboardType.Number,
                 )
@@ -166,6 +176,7 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 SelectorDeCliente(
                     clientes = vm.clientes,
                     elegido = vm.cliente,
+                    feria = feria,
                     onElegir = vm::elegirCliente,
                 )
             }
@@ -197,13 +208,14 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         }
 
         RbButton(
-            // "Guardar venta" y no "Confirmar venta": sin señal no se confirmó
-            // nada todavía, y la palabra tiene que decir lo que de verdad pasa.
-            label = when {
-                vm.cobrando -> "Cobrando..."
-                !vm.hayConexion -> "Guardar venta"
-                else -> "Confirmar venta"
-            },
+            // Verbo de mesa: Cobrar / Anotar fiado / Anotar venta. Sin señal
+            // no se "confirmó" nada: la palabra dice lo que de verdad pasa.
+            label = copyCtaPago(
+                feria = feria,
+                cobrando = vm.cobrando,
+                hayConexion = vm.hayConexion,
+                medio = vm.medio,
+            ),
             onClick = vm::cobrar,
             // Deshabilitado mientras se manda: el primer candado contra el
             // doble toque. El segundo, el que de verdad importa cuando la red
@@ -214,7 +226,7 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         )
 
         RbButton(
-            label = "Seguir agregando",
+            label = copySeguirAgregando(feria),
             onClick = vm::volverABuscar,
             variant = RbButtonVariant.Secondary,
             enabled = !vm.cobrando,
@@ -228,7 +240,8 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
  *
  * El control es un par de [RbButton] y no un componente propio: sumar un
  * "stepper" suelto acá sería exactamente el botón nuevo que el design system
- * pide no inventar.
+ * pide no inventar. Los +/− ya miden ≥56dp vía rbTouchTarget; a 200% crecen
+ * con la letra. La plata va en [RbReflowRow] para no partir el monto a la mitad.
  */
 @Composable
 private fun FilaDeCarrito(
@@ -263,9 +276,11 @@ private fun FilaDeCarrito(
                 )
             },
             trailing = {
-                if (mostrarSubtotal) {
+                if (mostrarSubtotal && subtotal != null) {
+                    // Solo el monto que mandó el server. Sin subtotal no se
+                    // inventa ni se pone "-": el reflow deja el nombre entero.
                     RbAmount(
-                        amount = subtotal ?: "-",
+                        amount = subtotal,
                         emphasis = RbAmountEmphasis.Body,
                     )
                 }
@@ -273,12 +288,15 @@ private fun FilaDeCarrito(
         )
 
         Text(
-            text = "$precioUnitario c/u",
+            text = copyPrecioUnitario(precioUnitario),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
 
+        // +/− a todo el ancho: en mesa de feria con una mano y sol, un
+        // stepper chiquito al borde se pierde. Cada botón ≥56dp (RbButton).
         Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(dimens.space2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -286,16 +304,22 @@ private fun FilaDeCarrito(
                 label = "−",
                 onClick = onMenos,
                 variant = RbButtonVariant.Secondary,
+                modifier = Modifier.weight(1f),
+                fillWidth = true,
             )
             Text(
                 text = "${item.cantidad}",
                 style = RbTheme.typography.title,
                 color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
             )
             RbButton(
                 label = "+",
                 onClick = onMas,
                 variant = RbButtonVariant.Secondary,
+                modifier = Modifier.weight(1f),
+                fillWidth = true,
             )
         }
     }
@@ -305,6 +329,7 @@ private fun FilaDeCarrito(
 private fun SelectorDeCliente(
     clientes: List<ClienteDto>,
     elegido: ClienteDto?,
+    feria: Boolean,
     onElegir: (ClienteDto?) -> Unit,
 ) {
     if (clientes.isEmpty()) {
@@ -318,16 +343,14 @@ private fun SelectorDeCliente(
         // en que sirven: cobrar de otra forma para no frenar la venta, o pedirle
         // el cliente al agente.
         RbEmptyState(
-            title = "Todavía no tienes clientes anotados",
-            hint = "El fiado queda en la cuenta de una persona, así que primero hay que " +
-                "anotarla. Cobra esta venta de otra forma para no hacer esperar, y después " +
-                "pídeselo al agente: «agrega el cliente Juan Pérez».",
+            title = copyClientesVaciosTitulo(feria),
+            hint = copyClientesVaciosPista(feria),
         )
         return
     }
 
     Text(
-        text = "¿A quién se le fía?",
+        text = copyLabelClienteFiado(feria),
         style = RbTheme.typography.label,
         color = RbTheme.colors.textPrimary,
     )
