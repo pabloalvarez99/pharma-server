@@ -16,6 +16,10 @@ struct Me {
     tenant_id: String,
     roles: Vec<String>,
     exp: i64,
+    /// Nombre corto del puesto (mismo campo que LoginResponse).
+    tenant_slug: String,
+    /// Nombre que ella le puso al puesto. Para Hoy / «Pídele a $nombre».
+    tenant_name: String,
 }
 
 #[derive(Deserialize)]
@@ -62,13 +66,26 @@ pub fn router() -> Router<AppState> {
         .route("/api/login", post(login))
 }
 
-async fn me(AuthUser(claims): AuthUser) -> Json<Me> {
-    Json(Me {
+async fn me(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> Result<Json<Me>, ApiError> {
+    let db = s.db.as_ref().ok_or_else(ApiError::service_unavailable)?;
+    let (tenant_slug, tenant_name) = match surrealdb::sql::thing(&claims.tenant_id) {
+        Ok(tenant) => nombre_del_puesto(db, &tenant).await,
+        Err(e) => {
+            tracing::warn!(error = %e, tenant = %claims.tenant_id, "me: bad tenant thing");
+            (String::new(), String::new())
+        }
+    };
+    Ok(Json(Me {
         sub: claims.sub,
         tenant_id: claims.tenant_id,
         roles: claims.roles,
         exp: claims.exp,
-    })
+        tenant_slug,
+        tenant_name,
+    }))
 }
 
 async fn login(

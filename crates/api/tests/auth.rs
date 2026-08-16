@@ -2,7 +2,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use http_body_util::BodyExt;
 use pharma_core::config::JwtConfig;
 use tower::ServiceExt;
 
@@ -67,7 +66,8 @@ async fn me_with_invalid_token_returns_401() {
 }
 
 #[tokio::test]
-async fn me_with_valid_token_returns_claims() {
+async fn me_with_valid_token_without_db_returns_503() {
+    // /me ya nombra el puesto desde DB; sin DB no hay claims útiles → 503.
     let cfg = jwt_cfg();
     let token = auth::issue(&cfg, "user:abc", "tenant:t1", vec!["admin".into()]).unwrap();
 
@@ -82,12 +82,7 @@ async fn me_with_valid_token_returns_claims() {
         )
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = res.into_body().collect().await.unwrap().to_bytes();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["sub"], "user:abc");
-    assert_eq!(json["tenant_id"], "tenant:t1");
-    assert_eq!(json["roles"][0], "admin");
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]
