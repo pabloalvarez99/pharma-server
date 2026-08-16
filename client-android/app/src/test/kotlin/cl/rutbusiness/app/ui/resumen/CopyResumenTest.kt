@@ -1,16 +1,52 @@
 package cl.rutbusiness.app.ui.resumen
 
+import cl.rutbusiness.app.ui.agente.ASI_SE_ANOTA_UNA_VENTA
+import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Gate de copy feria en Resumen (ADR-0022).
+ * Gate de copy feria en Resumen / «Hoy» (ADR-0022).
  *
- * Puro JVM: el feriante dice «venta» y «puesto», no «boleta» ni «computador».
+ * Puro JVM: el feriante lee el cuaderno del día (venta, puesto), no un
+ * tablero con boletas, cajón ni computador.
  */
 class CopyResumenTest {
+
+    private val palabrasProhibidasFeria = listOf(
+        "sistema",
+        "cajón",
+        "cajon",
+        "arqueo",
+        "computador",
+        "tablero",
+        "kpi",
+        "dashboard",
+        "boleta",
+    )
+
+    @Test
+    fun `barra feria dice Hoy y mirar de nuevo`() {
+        assertEquals("Hoy", tituloHoy(feria = true))
+        assertEquals("Tu día", tituloHoy(feria = false))
+        assertEquals("Cómo va el puesto hoy", subtituloHoy(feria = true))
+        assertEquals("Cómo va el negocio hoy", subtituloHoy(feria = false))
+        assertEquals("Mirar de nuevo", labelActualizarHoy(feria = true))
+        assertEquals("Actualizar", labelActualizarHoy(feria = false))
+    }
+
+    @Test
+    fun `carga feria no habla de cuenta de ledger`() {
+        val feria = cargandoHoy(feria = true)
+        assertEquals("Viendo cómo va el día...", feria)
+        assertFalse(
+            "feria no dice «cuenta» de ledger al cargar",
+            feria.lowercase().contains("cuenta"),
+        )
+        assertEquals("Sacando la cuenta del día...", cargandoHoy(feria = false))
+    }
 
     @Test
     fun `feria cuenta ventas en la tarjeta`() {
@@ -62,6 +98,44 @@ class CopyResumenTest {
     }
 
     @Test
+    fun `comparacion sin ayer usa el label de refresco del rubro`() {
+        val feria = pistaComparacion(feria = true, vendidoAyerFormateado = null)
+        assertTrue(feria.contains("«Mirar de nuevo»"))
+        assertFalse(feria.contains("Actualizar"))
+
+        val formal = pistaComparacion(feria = false, vendidoAyerFormateado = null)
+        assertTrue(formal.contains("«Actualizar»"))
+        assertFalse(formal.contains("Mirar de nuevo"))
+    }
+
+    @Test
+    fun `vacio del dia ensena la frase del agente`() {
+        assertEquals("Todavía no vendiste nada hoy", tituloHoySinVentas())
+        val pista = pistaHoySinVentas()
+        assertTrue(pista.contains(ASI_SE_ANOTA_UNA_VENTA))
+        assertTrue(pista.contains("«") && pista.contains("»"))
+        assertTrue(pista.lowercase().contains("agente"))
+        assertEquals("Hablarle al agente", ctaHablarleAlAgenteHoy())
+    }
+
+    @Test
+    fun `fiado en Hoy habla de personas no de cajon`() {
+        assertEquals("Te deben", tituloTeDebenHoy())
+        assertEquals("1 persona te debe.", cuantosTeDebenHoy(1))
+        assertEquals("3 personas te deben.", cuantosTeDebenHoy(3))
+        assertEquals("Quién me debe", ctaFiadoHoy(hayDeuda = false))
+        assertEquals("Ver quién me debe", ctaFiadoHoy(hayDeuda = true))
+
+        val vacio = vacioFiadoHoy(feria = true)
+        assertTrue(vacio.contains(ASI_SE_FIA))
+        assertFalse(vacio.lowercase().contains("cajón") || vacio.lowercase().contains("cajon"))
+
+        val error = errorFiadoHoy(feria = true)
+        assertTrue(error.contains("«Mirar de nuevo»"))
+        assertFalse(error.lowercase().contains("computador"))
+    }
+
+    @Test
     fun `feria explica la caja sin computador`() {
         val t = copyEnCajaExplicacion(feria = true, nombreDeCaja = null)
         assertTrue(t.lowercase().contains("puesto"))
@@ -78,4 +152,49 @@ class CopyResumenTest {
         assertTrue(t.contains("«Caja 1»"))
         assertTrue(t.lowercase().contains("computador"))
     }
+
+    @Test
+    fun `feria nunca usa jerga de tablero ni de cajon`() {
+        for (copy in todoCopyFeriaUsuario()) {
+            val bajo = copy.lowercase()
+            for (palabra in palabrasProhibidasFeria) {
+                assertFalse(
+                    "copy feria no puede decir «$palabra»: «$copy»",
+                    bajo.contains(palabra),
+                )
+            }
+        }
+    }
+
+    /** Strings de usuario en el camino feria de «Hoy». */
+    private fun todoCopyFeriaUsuario(): List<String> = listOf(
+        tituloHoy(true),
+        subtituloHoy(true),
+        labelActualizarHoy(true),
+        cargandoHoy(true),
+        tituloVendidoHoy(),
+        copyTarjetaConteo(true, 0L),
+        copyTarjetaConteo(true, 1L),
+        copyTarjetaConteo(true, 7L),
+        etiquetaComparacion(Comparacion.Mejor),
+        etiquetaComparacion(Comparacion.Igual),
+        etiquetaComparacion(Comparacion.Peor),
+        etiquetaComparacion(Comparacion.SinDatoDeAyer),
+        pistaComparacion(true, null),
+        pistaComparacion(true, "$10.000"),
+        copyResumenDelDia(true, "$5.000", 1L),
+        copyResumenDelDia(true, "$5.000", 3L),
+        tituloHoySinVentas(),
+        pistaHoySinVentas(),
+        ctaHablarleAlAgenteHoy(),
+        tituloTeDebenHoy(),
+        errorFiadoHoy(true),
+        vacioFiadoHoy(true),
+        cuantosTeDebenHoy(1),
+        cuantosTeDebenHoy(4),
+        ctaFiadoHoy(false),
+        ctaFiadoHoy(true),
+        copyEnCajaExplicacion(true, null),
+        copyEnCajaExplicacion(true, "Puesto"),
+    )
 }
