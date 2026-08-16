@@ -18,17 +18,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbAssertive
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
- * A confirmation dialog.
+ * A confirmation dialog — a recado on the mesa, not a Material alert.
  *
  * Ported from `.modal` / `.modal-confirm` in `styles.css`, with the parts that
  * would break on the reference device removed:
  *
  * - **No `backdrop-filter: blur(4px)`.** A full-screen blur is a per-frame GPU
  *   pass, and this is a 2 GB device. A plain scrim separates the layers just as
- *   well.
+ *   well, and it does not animate — reduced motion never has a half-blur frame.
+ * - **No enter/exit motion.** No scale-in, no fade of the card, no translateY.
+ *   The dialog is either there or not; [cl.rutbusiness.ui.theme.RbMotion] is not
+ *   on the path so "Quitar animaciones" cannot leave a stuck 0-alpha sheet.
  * - **No `width: min(420px, 100%)` equivalent as a fixed size.** The dialog
  *   fills the available width minus a gutter, so at 200% scale it has room.
  * - **The body scrolls.** This is the one place a font scale can genuinely run
@@ -36,12 +40,19 @@ import cl.rutbusiness.ui.theme.rbHeading
  *   than a 720p phone. Scrolling the body keeps the buttons reachable instead
  *   of pushing them off the bottom, which is the "botón inalcanzable" failure
  *   the acceptance criteria name.
- * - **Buttons stack vertically**, full width. A side-by-side pair at 200% gives
- *   each label about eight characters before it wraps into a mess, and stacked
- *   full-width targets are easier to hit anyway.
+ * - **Buttons stack vertically**, full width, each at least
+ *   [cl.rutbusiness.ui.theme.RbDimens.touchTarget] (56dp) via [RbButton]. A
+ *   side-by-side pair at 200% gives each label about eight characters before it
+ *   wraps into a mess, and stacked full-width targets are easier to hit anyway.
+ *
+ * Hierarchy: title (heading) → message (body secondary) → cancel → confirm.
+ * Air between the copy block and the actions is [cl.rutbusiness.ui.theme.RbDimens.space4]
+ * so the irreversible verb does not sit under the paragraph like a footnote.
  *
  * The destructive action is the *second* button, below cancel. Putting the
  * irreversible one under the thumb's resting position is how accidents happen.
+ * When [destructive] is true the title is also [rbAssertive] so TalkBack leads
+ * with the risk, not with the chrome.
  *
  * @param destructive paints the confirm button as [RbButtonVariant.Destructive].
  *   Use it whenever the action cannot be undone - anulando una venta, borrando
@@ -69,6 +80,8 @@ fun RbConfirmDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // Static scrim — no blur, no fade. Reduced motion and a 60 Hz
+                // panel both get the same solid separation.
                 .background(colors.scrim)
                 .padding(dimens.space3),
             contentAlignment = Alignment.Center,
@@ -78,6 +91,8 @@ fun RbConfirmDialog(
                     .fillMaxWidth()
                     .clip(shape)
                     .background(colors.surfaceRaised)
+                    // outlineStrong so the card edge survives feria sun the same
+                    // way RbCard does — a soft outline melts into the scrim.
                     .border(dimens.border, colors.outlineStrong, shape)
                     .verticalScroll(rememberScrollState())
                     .padding(dimens.space4),
@@ -87,7 +102,9 @@ fun RbConfirmDialog(
                     text = title,
                     style = RbTheme.typography.heading,
                     color = colors.textPrimary,
-                    modifier = Modifier.rbHeading(),
+                    modifier = Modifier
+                        .rbHeading()
+                        .then(if (destructive) Modifier.rbAssertive() else Modifier),
                 )
                 Text(
                     text = message,
@@ -95,6 +112,9 @@ fun RbConfirmDialog(
                     color = colors.textSecondary,
                 )
 
+                // Cancel first, confirm under it. space2 keeps the pair as one
+                // action block; the space3 from the parent already separates
+                // them from the copy above without another nested spacer.
                 RbButton(
                     label = cancelLabel,
                     onClick = onDismiss,

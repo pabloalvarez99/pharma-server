@@ -17,18 +17,31 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /**
- * One row of a list.
+ * One row of a list — a line of the cuaderno, scannable under feria sun.
+ *
+ * Hierarchy is fixed so the eye finds plata and product without hunting:
+ *
+ * - **Title** in [cl.rutbusiness.ui.theme.RbTypography.bodyStrong]: the subject
+ *   (product, customer, sale) carries weight, not just size.
+ * - **Subtitle** in support / secondary: context, never competition.
+ * - **Value** via [RbAmount]: bold monospace, one line, never split mid-digit.
+ *   A column of prices has to line up and read at a glance.
+ *
+ * Interactive rows are at least [cl.rutbusiness.ui.theme.RbDimens.touchTarget]
+ * (56dp) tall via [rbTouchTarget]. Press feedback lives in [rbClickable] — color
+ * only, no translateY — so reduced motion stays a snap, never a shift under the
+ * finger.
  *
  * @param title the row's subject - a product, a sale, a customer.
  * @param subtitle supporting line. Optional.
- * @param value trailing figure: a price, a stock count, a folio. Rendered
- *   monospace so a column of amounts lines up.
+ * @param value trailing figure: a price, a stock count, a folio. Routed through
+ *   [RbAmount] so a column of amounts lines up and never wraps mid-figure.
  * @param trailing arbitrary trailing slot - typically an [RbChip].
  */
 @Composable
@@ -52,6 +65,8 @@ fun RbListRow(
             )
             .rbTouchTarget()
     } else {
+        // Still min 56dp tall: a non-clickable row sits next to clickable ones and
+        // a thin row next to a fat one reads as a different list.
         Modifier.rbTouchTarget()
     }
 
@@ -65,12 +80,14 @@ fun RbListRow(
         modifier = modifier
             .fillMaxWidth()
             .then(clickable)
-            .padding(horizontal = dimens.space3, vertical = dimens.space2),
+            // space3 vertical: mesa air so title + subtitle + 56dp floor never
+            // feel like a dense SaaS table under a fat finger.
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
         content = {
             Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
                 Text(
                     text = title,
-                    style = RbTheme.typography.body,
+                    style = RbTheme.typography.bodyStrong,
                     color = colors.textPrimary,
                 )
                 if (subtitle != null) {
@@ -89,10 +106,11 @@ fun RbListRow(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (value != null) {
-                        Text(
-                            text = value,
-                            style = RbTheme.typography.numeric,
+                        RbAmount(
+                            amount = value,
+                            emphasis = RbAmountEmphasis.Body,
                             color = colors.textPrimary,
+                            textAlign = TextAlign.End,
                         )
                     }
                     trailing?.invoke()
@@ -102,20 +120,27 @@ fun RbListRow(
     )
 }
 
-/** A hairline between rows. Decorative, so it is not announced. */
+/**
+ * A hairline between rows.
+ *
+ * Decorative only (not announced). Stroke width comes from
+ * [cl.rutbusiness.ui.theme.RbDimens.border] so the list edge and the row
+ * separators share one token — never a raw `1.dp`.
+ */
 @Composable
 fun RbDivider(modifier: Modifier = Modifier) {
+    val dimens = RbTheme.dimens
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = RbTheme.dimens.space3)
-            .height(1.dp)
+            .padding(horizontal = dimens.space3)
+            .height(dimens.border)
             .background(RbTheme.colors.outline),
     )
 }
 
 /**
- * A virtualised list.
+ * A virtualised list — the cuaderno pages, not a Column dumped into RAM.
  *
  * `LazyColumn`, never a `Column` in a scroller: the hardware floor budgets
  * 1-2 GB of RAM total and forbids holding a whole result set in memory. This is
@@ -123,7 +148,13 @@ fun RbDivider(modifier: Modifier = Modifier) {
  * virtualisation across 37 views.
  *
  * The three states are part of the component rather than the caller's problem,
- * which is what stops a screen from shipping without them.
+ * which is what stops a screen from shipping without them. Empty / error sit in
+ * a vertical scroller so a 200% font scale still reaches the hint and the retry
+ * button on a 640dp-tall panel.
+ *
+ * No list-level motion (no staggered row fades, no translateY on appear): the
+ * rows are content, and reduced motion must not leave a blank frame waiting for
+ * an entrance animation that never runs.
  */
 @Composable
 fun <T> RbList(
