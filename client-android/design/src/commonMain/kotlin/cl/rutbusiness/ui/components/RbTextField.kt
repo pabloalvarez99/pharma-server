@@ -1,5 +1,6 @@
 package cl.rutbusiness.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,22 +32,27 @@ import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /**
- * A labelled text field.
+ * A labelled text field — a line on the mesa del puesto, not a Material outline.
  *
- * Ported from `.rb-input` + `.rb-label` in `brand.css`, with three fixes:
+ * Ported from `.rb-input` + `.rb-label` in `brand.css`, with the hardware-floor
+ * fixes kept and the puesto feel tightened:
  *
  * - **The border is a real border.** The CSS used `--rb-line` (#232c40 on
  *   #121826 = 1.27, and #e6e0d4 on #fff = 1.31). Under WCAG 1.4.11 the edge of
  *   an input has to clear 3.0, and at 1.3 the field is invisible on a
  *   sun-washed screen. Uses [cl.rutbusiness.ui.theme.RbColors.outlineStrong].
  * - **The label is not 12px muted.** `.rb-label` was `font-size:12px` in
- *   `--rb-txt-2`. The label ramp here is 15sp at AAA, and it scales.
+ *   `--rb-txt-2`. The label ramp here is 15sp at AAA, and it scales. Focus and
+ *   error paint the label in brand / danger so state is not hue-on-border alone.
  * - **The label sits above the field, never inside it.** A floating label that
  *   shrinks into the border has nowhere to go at 200% font scale.
+ * - **Focus feedback is color + stroke width only** through
+ *   [cl.rutbusiness.ui.theme.RbMotion.quick] — never translateY. Reduced motion
+ *   snaps the edge to its end state.
  *
  * The field holds a single line - the values it carries are a RUT, an amount, a
  * folio - but its **height is a minimum**, so scaled text grows the box instead
- * of clipping.
+ * of clipping. Horizontal air matches the chunky mesa controls (space4).
  */
 @Composable
 fun RbTextField(
@@ -83,21 +89,41 @@ fun RbTextField(
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
+    val motion = RbTheme.motion
     val shape = RbTheme.shapes.field
 
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val hasError = errorMessage != null
 
-    val borderColor = when {
+    val targetBorderColor = when {
         !enabled -> colors.outline
         hasError -> colors.dangerText
         focused -> colors.brandText
         else -> colors.outlineStrong
     }
+    // Color-only transition: same path as RbButton/RbChip, snaps under reduced
+    // motion. No layout shift, no translateY under the finger.
+    val borderColor by animateColorAsState(
+        targetValue = targetBorderColor,
+        animationSpec = motion.quick(),
+        label = "RbTextField border",
+    )
     // A focused or failing field gets a thicker edge, so the state is carried by
     // width as well as hue - colour alone excludes a colour-blind user.
     val borderWidth = if (focused || hasError) dimens.focusRing else dimens.border
+
+    val targetLabelColor = when {
+        !enabled -> colors.textTertiary
+        hasError -> colors.dangerText
+        focused -> colors.brandText
+        else -> colors.textSecondary
+    }
+    val labelColor by animateColorAsState(
+        targetValue = targetLabelColor,
+        animationSpec = motion.quick(),
+        label = "RbTextField label",
+    )
 
     val textStyle = if (numeric) RbTheme.typography.numeric else RbTheme.typography.body
 
@@ -108,7 +134,7 @@ fun RbTextField(
         Text(
             text = label,
             style = RbTheme.typography.label,
-            color = colors.textSecondary,
+            color = labelColor,
             // Read as part of the field below, so TalkBack does not say it twice.
             modifier = Modifier.clearAndSetSemantics { },
         )
@@ -163,9 +189,11 @@ fun RbTextField(
                     // un hermano con `weight(1f)` el campo se comía la pantalla
                     // entera. El piso de 56dp ya lo pone `rbTouchTarget` más
                     // arriba; acá la altura tiene que salir del texto.
+                    // Horizontal space4 matches the chunky mesa buttons so a
+                    // RUT/monto field reads as a real control, not a thin input.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = dimens.space3, vertical = dimens.space2),
+                        .padding(horizontal = dimens.space4, vertical = dimens.space2),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     if (value.isEmpty() && placeholder != null) {
