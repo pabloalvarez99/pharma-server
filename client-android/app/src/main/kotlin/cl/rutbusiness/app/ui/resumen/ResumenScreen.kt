@@ -19,7 +19,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.agente.ASI_SE_ANOTA_UNA_VENTA
 import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.agente.irAlAgente
-import cl.rutbusiness.app.ui.gente.compartirConGente
+import cl.rutbusiness.app.ui.gente.RecadoParaGente
+import cl.rutbusiness.app.ui.gente.etiquetaCompartirDia
 import cl.rutbusiness.app.ui.gente.mensajeHoy
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.rubro.esFeria
@@ -276,27 +277,19 @@ internal fun TarjetaDelDia(
         // anotar la primera, y ofrecer ahí "compartí que no vendiste nada" es
         // una broma pesada.
         //
-        // Va después de la comparación porque es lo último que se hace con esta
-        // tarjeta, y como secundario porque la tarjeta se abre para leerla, no
-        // para mandarla.
-        val compartir = compartirConGente()
-        if (compartir != null && boletas > 0L) {
-            RbButton(
-                label = if (feria) "Contar cómo va el día" else "Compartir el resumen",
-                onClick = {
-                    compartir(
-                        mensajeHoy(
-                            copyResumenDelDia(
-                                feria = feria,
-                                monto = moneda.formatear(vendidoHoy),
-                                conteo = boletas,
-                            ),
-                            feria = feria,
-                        ),
-                    )
-                },
-                variant = RbButtonVariant.Secondary,
-                fillWidth = true,
+        // Va como recado (nota + CTA humano), no como "exportar el resumen".
+        // Sin puerto de plataforma el bloque no se dibuja.
+        if (boletas > 0L) {
+            RecadoParaGente(
+                mensaje = mensajeHoy(
+                    copyResumenDelDia(
+                        feria = feria,
+                        monto = moneda.formatear(vendidoHoy),
+                        conteo = boletas,
+                    ),
+                    feria = feria,
+                ),
+                etiqueta = etiquetaCompartirDia(feria),
             )
         }
     }
