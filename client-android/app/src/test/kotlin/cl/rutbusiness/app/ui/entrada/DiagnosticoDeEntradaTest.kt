@@ -190,9 +190,52 @@ class DiagnosticoDeEntradaTest {
         assertTrue(falla is FallaDeConexion.NadieContesta)
         val texto = "${falla!!.titulo} ${falla.queHacer}"
         assertFalse(texto.contains("192.168"))
+        assertFalse(texto.contains("192.168.1.10"))
         assertFalse(texto.contains("computador", ignoreCase = true))
         assertFalse(texto.contains("nube.test.invalid"))
         assertTrue(falla.titulo.contains("RutAgent"))
+    }
+
+    /** Todas las variantes nube: ni IP de ejemplo, ni "computador del negocio". */
+    @Test
+    fun `camino nube de todas las fallas sin computador ni IP de ejemplo`() {
+        val ip = "192.168.1.10"
+        val fallas = listOf(
+            FallaDeConexion.SinRed(nube = true),
+            FallaDeConexion.NadieContesta("https://nube.test.invalid", nube = true),
+            FallaDeConexion.ContestaPeroNoEsElSistema("https://nube.test.invalid", nube = true),
+            fallaDeLogin(
+                AppError.ServidorNoResponde("https://nube.test.invalid"),
+                "https://nube.test.invalid",
+                nube = true,
+            ),
+            fallaDeLogin(
+                AppError.ErrorDelServidor(503, null, null),
+                "https://nube.test.invalid",
+                nube = true,
+            ),
+        )
+        fallas.forEach { falla ->
+            val texto = "${falla.titulo} ${falla.queHacer}"
+            assertFalse("${falla.titulo} muestra $ip", texto.contains(ip))
+            assertFalse(
+                "${falla.titulo} dice computador",
+                texto.contains("computador", ignoreCase = true),
+            )
+        }
+        assertEquals("No hay internet", FallaDeConexion.SinRed(nube = true).titulo)
+        assertTrue(
+            FallaDeConexion.NadieContesta("https://x", nube = true)
+                .titulo.contains("RutAgent no responde"),
+        )
+    }
+
+    /** El camino local (sin nube) sigue hablando del computador y la IP. */
+    @Test
+    fun `camino local de nadie contesta sigue nombrando computador e IP`() {
+        val falla = FallaDeConexion.NadieContesta(direccion, nube = false)
+        assertTrue(falla.queHacer.contains("computador del negocio"))
+        assertTrue(falla.queHacer.contains("192.168.1.10:8080"))
     }
 
     @Test

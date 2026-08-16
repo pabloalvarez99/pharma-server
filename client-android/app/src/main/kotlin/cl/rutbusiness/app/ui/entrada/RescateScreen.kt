@@ -85,10 +85,14 @@ internal fun RescateRoute(
     var mensaje by rememberSaveable { mutableStateOf<String?>(null) }
     var listo by rememberSaveable { mutableStateOf(false) }
 
+    val esFeria = servicios?.preferencias?.rubroElegido() == "feria"
+    val pideDireccion = servicios?.nube.isNullOrBlank()
+
     RescatePantalla(
         url = url,
         onUrl = { url = it; mensaje = null },
-        pideDireccion = servicios?.nube.isNullOrBlank(),
+        pideDireccion = pideDireccion,
+        esFeria = esFeria,
         negocio = negocio,
         onNegocio = { negocio = it; mensaje = null },
         tarjeta = tarjeta,
@@ -101,7 +105,7 @@ internal fun RescateRoute(
         onRescatar = {
             val destino = ServerUrl.normalizar(url)
             if (destino == null) {
-                mensaje = if (!servicios?.nube.isNullOrBlank()) {
+                mensaje = if (!pideDireccion) {
                     "RutAgent no responde. Reintentá en un momento."
                 } else {
                     "Revisá la dirección: algo como 192.168.1.10:8080 o " +
@@ -161,6 +165,8 @@ internal fun RescatePantalla(
     url: String,
     onUrl: (String) -> Unit,
     pideDireccion: Boolean = true,
+    /** Copy feria: "puesto" en títulos y campos. */
+    esFeria: Boolean = false,
     negocio: String,
     onNegocio: (String) -> Unit,
     tarjeta: String,
@@ -174,14 +180,16 @@ internal fun RescatePantalla(
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val cosa = if (esFeria) "puesto" else "negocio"
+    // En nube la URL ya viene del APK: no bloquear el botón por el campo oculto.
     val puede = !trabajando &&
-        url.isNotBlank() &&
+        (url.isNotBlank() || !pideDireccion) &&
         negocio.isNotBlank() &&
         tarjeta.isNotBlank()
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Recuperar mi negocio",
+            title = "Recuperar mi $cosa",
             subtitle = "Con la tarjeta del cuaderno",
             onBack = onVolver,
         )
@@ -199,13 +207,13 @@ internal fun RescatePantalla(
                 Text(
                     text = "Esto sirve si perdiste el teléfono o lo cambiaste, y guardaste la " +
                         "tarjeta que la app te pidió anotar. No hace falta tu clave: la " +
-                        "tarjeta es la llave.",
+                        "tarjeta es la llave de tu $cosa.",
                     style = RbTheme.typography.body,
                     color = RbTheme.colors.textPrimary,
                 )
             }
 
-            RbCard(title = "¿Dónde está tu negocio?") {
+            RbCard(title = "¿Dónde está tu $cosa?") {
                 if (pideDireccion) {
                     RbTextField(
                         value = url,
@@ -221,7 +229,7 @@ internal fun RescatePantalla(
                 RbTextField(
                     value = negocio,
                     onValueChange = onNegocio,
-                    label = "Nombre corto del negocio",
+                    label = "Nombre corto del $cosa",
                     supportingText = "El que está impreso arriba en la tarjeta.",
                     enabled = !trabajando,
                     imeAction = ImeAction.Next,
@@ -265,7 +273,7 @@ internal fun RescatePantalla(
 
             if (listo) {
                 RbButton(
-                    label = "Entrar a mi negocio",
+                    label = "Entrar a mi $cosa",
                     onClick = onEntrar,
                     variant = RbButtonVariant.Secondary,
                     enabled = !trabajando,
