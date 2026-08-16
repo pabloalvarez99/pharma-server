@@ -1,11 +1,20 @@
 package cl.rutbusiness.app.ui.entrada
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -17,8 +26,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.core.backup.UserBackupApi
 import cl.rutbusiness.core.backup.conRehidratacion
@@ -28,10 +39,10 @@ import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
-import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbHeading
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,6 +170,10 @@ internal fun RescateRoute(
  * La parte dibujable, sin sesión ni red detrás — mismo criterio que
  * [FormularioDeEntrada]: es una pantalla que hay que poder medir al 200% de
  * escala y con el teclado arriba, y montarla de verdad necesitaría un servidor.
+ *
+ * Se siente un **rescate del cuaderno**, no un formulario técnico: un cartel
+ * de calma arriba, campos con aire, CTA anclado abajo y el mensaje como
+ * tarjeta (no muro rojo).
  */
 @Composable
 internal fun RescatePantalla(
@@ -180,6 +195,8 @@ internal fun RescatePantalla(
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+    val shape = RbTheme.shapes.card
     val cosa = if (esFeria) "puesto" else "negocio"
     // En nube la URL ya viene del APK: no bloquear el botón por el campo oculto.
     val puede = !trabajando &&
@@ -200,20 +217,38 @@ internal fun RescatePantalla(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
-            RbCard(title = "Antes de empezar") {
+            // Cartel de calma: la persona llega nerviosa; no se le grita.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.focusRing, colors.outlineStrong, shape)
+                    .padding(horizontal = dimens.space3, vertical = dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space2),
+            ) {
                 Text(
-                    text = "Esto sirve si perdiste el teléfono o lo cambiaste, y guardaste la " +
-                        "tarjeta que la app te pidió anotar. No hace falta tu clave: la " +
-                        "tarjeta es la llave de tu $cosa.",
+                    text = "Si perdiste el teléfono o lo cambiaste",
+                    style = RbTheme.typography.heading,
+                    color = colors.textPrimary,
+                    modifier = Modifier.rbHeading(),
+                )
+                Text(
+                    text = "Con la tarjeta que la app te pidió anotar volvés a " +
+                        "tu $cosa. No hace falta tu clave: la tarjeta es la llave.",
                     style = RbTheme.typography.body,
-                    color = RbTheme.colors.textPrimary,
+                    color = colors.textPrimary,
                 )
             }
 
-            RbCard(title = "¿Dónde está tu $cosa?") {
+            CartelDeCampos(titulo = if (pideDireccion) {
+                "¿Dónde está tu $cosa?"
+            } else {
+                "Tu $cosa"
+            }) {
                 if (pideDireccion) {
                     RbTextField(
                         value = url,
@@ -236,7 +271,7 @@ internal fun RescatePantalla(
                 )
             }
 
-            RbCard(title = "La tarjeta") {
+            CartelDeCampos(titulo = "Las palabras de la tarjeta") {
                 RbTextField(
                     value = tarjeta,
                     onValueChange = onTarjeta,
@@ -252,18 +287,37 @@ internal fun RescatePantalla(
                         "derivada de ella, que sólo sirve para pedir tu paquete y no para " +
                         "abrirlo.",
                     style = RbTheme.typography.support,
-                    color = RbTheme.colors.textSecondary,
+                    color = colors.textSecondary,
                 )
             }
 
-            mensaje?.let {
-                Text(
-                    text = it,
-                    style = RbTheme.typography.body,
-                    color = RbTheme.colors.textPrimary,
+            mensaje?.let { texto ->
+                TarjetaDeFallaEntrada(
+                    titulo = if (listo) "Listo" else "No se pudo traer el respaldo",
+                    queHacer = texto,
                 )
             }
+        }
 
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.outline),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.surfaceRaised)
+                .windowInsetsPadding(
+                    WindowInsets.safeDrawing.only(
+                        WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
+                    ),
+                )
+                .padding(dimens.space3),
+            verticalArrangement = Arrangement.spacedBy(dimens.space2),
+        ) {
             RbButton(
                 label = if (trabajando) "Buscando tu respaldo..." else "Traer mi respaldo",
                 onClick = onRescatar,
@@ -281,5 +335,34 @@ internal fun RescatePantalla(
                 )
             }
         }
+    }
+}
+
+/** Marco de un bloque de campos: superficie del puesto, no formulario apretado. */
+@Composable
+private fun CartelDeCampos(
+    titulo: String,
+    content: @Composable () -> Unit,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, shape)
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        Text(
+            text = titulo,
+            style = RbTheme.typography.heading,
+            color = colors.textPrimary,
+            modifier = Modifier.rbHeading(),
+        )
+        content()
     }
 }

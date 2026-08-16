@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -49,7 +50,6 @@ import cl.rutbusiness.core.backup.svgMatrizCodigo
 import cl.rutbusiness.core.backup.textoTarjetaImprimible
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
-import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
@@ -59,7 +59,8 @@ import cl.rutbusiness.ui.theme.rbHeading
  *
  * Day-1 del feriante: sin esta hoja en el cuaderno, el robo del teléfono
  * pierde la historia. La pantalla **obliga** a leer el aviso; no se esconde
- * en un menú.
+ * en un menú. Se siente una **hoja del cuaderno**, no un export técnico: llave
+ * grande arriba, palabras fáciles de copiar, CTA anclado abajo.
  *
  * Por defecto genera material con CSPRNG del aparato ([claveNuevaDelNegocio]).
  * Tests / previews pueden inyectar [claveDeDemostracion]. No sube nada a la red.
@@ -77,6 +78,7 @@ fun TarjetaRescate(
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val shape = RbTheme.shapes.card
     val clipboard = LocalClipboardManager.current
     val compartir = LocalCompartirTarjeta.current
     var copiado by remember { mutableStateOf(false) }
@@ -105,27 +107,37 @@ fun TarjetaRescate(
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
-            Text(
-                // Esta pantalla es day-1 feria (ADR-0022): "puesto", no "negocio".
-                text = "Esta es la llave de tu puesto",
-                style = RbTheme.typography.title,
-                color = colors.textPrimary,
-                modifier = Modifier.rbHeading(),
-            )
+            // Hero: la llave del puesto, no un título de settings.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.focusRing, colors.outlineStrong, shape)
+                    .padding(horizontal = dimens.space3, vertical = dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            ) {
+                Text(
+                    // Esta pantalla es day-1 feria (ADR-0022): "puesto", no "negocio".
+                    text = "Esta es la llave de tu puesto",
+                    style = RbTheme.typography.title,
+                    color = colors.textPrimary,
+                    modifier = Modifier.rbHeading(),
+                )
+                Text(
+                    text = "Si te roban o se te rompe el teléfono, con esta llave " +
+                        "y tu cuenta de Google volvés a entrar a tus ventas y deudas. " +
+                        "Sin ella, el respaldo es basura: nosotros no podemos " +
+                        "recuperarla por vos.",
+                    style = RbTheme.typography.body,
+                    color = colors.textPrimary,
+                )
+            }
 
-            Text(
-                text = "Si te roban o se te rompe el teléfono, con esta llave " +
-                    "y tu cuenta de Google volvés a entrar a tus ventas y deudas. " +
-                    "Sin ella, el respaldo es basura: nosotros no podemos " +
-                    "recuperarla por vos.",
-                style = RbTheme.typography.body,
-                color = colors.textPrimary,
-            )
-
-            RbCard(title = "Palabras (12)") {
+            SeccionTarjeta(titulo = "Palabras (12)") {
                 Text(
                     text = clave.fraseCompleta(),
                     style = RbTheme.typography.bodyStrong,
@@ -134,7 +146,7 @@ fun TarjetaRescate(
                 )
             }
 
-            RbCard(title = "Bloques (más fáciles con lápiz)") {
+            SeccionTarjeta(titulo = "Bloques (más fáciles con lápiz)") {
                 Text(
                     text = clave.bloquesCompletos(),
                     style = RbTheme.typography.bodyStrong,
@@ -146,7 +158,7 @@ fun TarjetaRescate(
             }
 
             if (qrPayload != null) {
-                RbCard(title = "Código QR de rescate") {
+                SeccionTarjeta(titulo = "Código QR de rescate") {
                     Text(
                         text = "Solo los bloques del código (no las 12 palabras). " +
                             "Podés escanearlo o copiar el texto al cuaderno. " +
@@ -171,7 +183,7 @@ fun TarjetaRescate(
                                 claro = colors.surface,
                                 modifier = Modifier
                                     .size(200.dp)
-                                    .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
+                                    .border(1.dp, colors.outlineStrong, shape)
                                     .padding(8.dp)
                                     .background(colors.surface),
                             )
@@ -182,7 +194,7 @@ fun TarjetaRescate(
                                 claro = colors.surface,
                                 modifier = Modifier
                                     .size(168.dp)
-                                    .border(1.dp, colors.outlineStrong, RbTheme.shapes.card)
+                                    .border(1.dp, colors.outlineStrong, shape)
                                     .padding(6.dp),
                             )
                         }
@@ -209,12 +221,13 @@ fun TarjetaRescate(
                 }
             }
 
-            // Marco grueso: se ve al sol como "hoja importante".
+            // Marco grueso de marca: se ve al sol como "hoja importante".
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(2.dp, colors.brandText, RbTheme.shapes.card)
-                    .background(colors.brandContainer, RbTheme.shapes.card)
+                    .clip(shape)
+                    .border(dimens.focusRing, colors.brandText, shape)
+                    .background(colors.brandContainer, shape)
                     .padding(dimens.space3),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
@@ -252,7 +265,7 @@ fun TarjetaRescate(
             }
 
             // Una página: copiar, compartir texto, o imprimir / Guardar como PDF.
-            RbCard(title = "Una página para el cuaderno") {
+            SeccionTarjeta(titulo = "Una página para el cuaderno") {
                 Text(
                     text = textoPagina,
                     style = RbTheme.typography.label,
@@ -290,7 +303,7 @@ fun TarjetaRescate(
                 if (compartir != null) RbButton(
                     label = "Imprimir o guardar PDF",
                     onClick = {
-                        compartir?.imprimirHtml(htmlPagina)
+                        compartir.imprimirHtml(htmlPagina)
                     },
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
@@ -337,6 +350,35 @@ fun TarjetaRescate(
                 fillWidth = true,
             )
         }
+    }
+}
+
+/** Bloque de contenido de la tarjeta: quieto, legible al sol. */
+@Composable
+private fun SeccionTarjeta(
+    titulo: String,
+    content: @Composable () -> Unit,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, shape)
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        Text(
+            text = titulo,
+            style = RbTheme.typography.heading,
+            color = colors.textPrimary,
+            modifier = Modifier.rbHeading(),
+        )
+        content()
     }
 }
 

@@ -37,7 +37,6 @@ import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
-import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
@@ -499,12 +498,11 @@ internal fun FormularioDeEntrada(
             // El bloque de la falla va **antes** del botón y no debajo del campo
             // que la causó: la dirección puede estar perfecta y la falla ser del
             // wifi, y colgar el reclamo de un campo manda a corregir donde no era.
+            // Tarjeta, no muro rojo: se lee como el resto del puesto.
             falla?.let {
-                RbErrorState(
-                    title = it.titulo,
-                    message = it.queHacer,
-                    retryLabel = null,
-                    onRetry = null,
+                TarjetaDeFallaEntrada(
+                    titulo = it.titulo,
+                    queHacer = it.queHacer,
                 )
             }
 

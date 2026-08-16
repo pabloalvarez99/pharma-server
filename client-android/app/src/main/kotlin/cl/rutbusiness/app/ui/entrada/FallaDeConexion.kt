@@ -1,6 +1,19 @@
 package cl.rutbusiness.app.ui.entrada
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import cl.rutbusiness.core.error.AppError
+import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbAssertive
+import cl.rutbusiness.ui.theme.rbHeading
 
 /**
  * Por qué no se pudo entrar, en las cuatro categorías que se arreglan distinto.
@@ -200,4 +213,46 @@ internal fun fallaDeLogin(
     // Nos contestó y nos dijo que no, con algo que no son credenciales malas: el
     // sistema está ahí pero no está en condiciones de trabajar.
     else -> FallaDeConexion.ContestaPeroNoEsElSistema(direccion, error.technical, nube)
+}
+
+/**
+ * Cómo se **muestra** una falla de entrada: tarjeta legible, no muro rojo.
+ *
+ * Mismo criterio que el cartel del alta: borde grueso y superficie elevada
+ * para verse al sol sin pintar la pantalla de `dangerContainer` (que al 200%
+ * se lee como alarma, no como ayuda). El copy sigue siendo [FallaDeConexion]
+ * — acá no se inventa IP ni se nombra el computador.
+ */
+@Composable
+internal fun TarjetaDeFallaEntrada(
+    titulo: String,
+    queHacer: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surfaceRaised)
+            .border(dimens.focusRing, colors.outlineStrong, shape)
+            .padding(dimens.space3)
+            .rbAssertive(),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        Text(
+            text = titulo,
+            style = RbTheme.typography.heading,
+            color = colors.textPrimary,
+            modifier = Modifier.rbHeading(),
+        )
+        Text(
+            text = queHacer,
+            style = RbTheme.typography.body,
+            color = colors.textPrimary,
+        )
+    }
 }
