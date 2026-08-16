@@ -29,6 +29,10 @@ package cl.rutbusiness.app.ui.gente
 /**
  * Recordatorio de una cuenta pendiente.
  *
+ * Tono de recado entre vecinos, no de cobro formal: lo que se mandaría por
+ * chat desde el puesto. El monto no se inventa ni se reescribe — sale tal
+ * cual llegó (ya formateado en pantalla).
+ *
  * @param nombre como está escrito en la cuenta. Vacío se tolera: alguien fiado
  *   sin nombre completo existe, y el saludo se acomoda en vez de quedar
  *   `"Hola , ..."`.
@@ -38,7 +42,7 @@ package cl.rutbusiness.app.ui.gente
  *   estaba mirando.
  */
 fun mensajeDeuda(nombre: String, monto: String): String =
-    saludo(nombre) + "me debes $monto."
+    saludo(nombre) + "te quedaron $monto de lo de ayer."
 
 /**
  * Ídem, cuando quien llama tiene pesos enteros y no un monto ya escrito.

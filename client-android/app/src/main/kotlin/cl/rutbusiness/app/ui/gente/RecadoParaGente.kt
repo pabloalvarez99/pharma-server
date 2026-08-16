@@ -1,6 +1,7 @@
 package cl.rutbusiness.app.ui.gente
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,10 +17,10 @@ import cl.rutbusiness.ui.theme.RbTheme
 /**
  * Un recado listo para mandar por chat.
  *
- * No es un export: se ve la frase tal cual saldrá (como una nota), con una
- * pista humana y un botón que habla de contar o recordar — no de "compartir
- * el resumen". Si no hay puerto de plataforma, no se dibuja nada (mismo
- * contrato que [LocalCompartirConGente]).
+ * No es un export: se ve la frase tal cual saldrá (como una nota de papel),
+ * con aire para leer al sol y al 200%, una pista humana y un botón que habla
+ * de mandar o recordar — no de "compartir el resumen". Si no hay puerto de
+ * plataforma, no se dibuja nada (mismo contrato que [LocalCompartirConGente]).
  *
  * @param mensaje texto ya armado con [mensajeHoy] o [mensajeDeuda].
  * @param etiqueta verbo del botón; ver [etiquetaCompartirDia] /
@@ -39,17 +40,19 @@ fun RecadoParaGente(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+        // Aire entre la nota y el botón: se lee como dos gestos, no como un sheet.
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        // La nota: superficie callada, aire, la frase completa. Se lee como
-        // lo que le mandarías a alguien, no como una fila de un reporte.
+        // La nota: borde de papel, relleno holgado, tipografía de cuerpo.
+        // Tokens del tema (contraste AAA / outline >= 3.0); no se inventan colores.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(colors.surfaceVariant)
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space1),
+                .background(colors.surfaceRaised)
+                .border(dimens.border, colors.outlineStrong, shape)
+                .padding(dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space2),
         ) {
             Text(
                 text = pista,
@@ -58,7 +61,7 @@ fun RecadoParaGente(
             )
             Text(
                 text = mensaje,
-                style = RbTheme.typography.body,
+                style = RbTheme.typography.bodyStrong,
                 color = colors.textPrimary,
             )
         }

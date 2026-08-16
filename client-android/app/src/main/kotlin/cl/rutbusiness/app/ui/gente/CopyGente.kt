@@ -13,16 +13,27 @@ fun pistaDelRecado(): String = "Se manda por el chat que uses"
 /**
  * CTA para contar cómo va el día.
  *
- * En feria y en formal se habla de **contar**, no de "compartir el resumen":
- * eso suena a exportar un tablero.
+ * Verbo de chat, no de "compartir el resumen": eso suena a exportar un tablero.
+ * Misma frase en feria y formal: se manda la nota, punto.
+ *
+ * @param feria lo reciben las pantallas; el verbo no cambia con el rubro.
  */
-fun etiquetaCompartirDia(feria: Boolean): String =
-    if (feria) "Contar cómo va el día" else "Contarle cómo va el día"
+fun etiquetaCompartirDia(@Suppress("UNUSED_PARAMETER") feria: Boolean): String =
+    "Mandar por chat"
 
 /**
  * CTA para el recordatorio de deuda.
  *
- * Feria: mandar. Formal: recordar. Ninguno dice "compartir el saldo".
+ * Con nombre: "Recordarle a Don Juan". Sin nombre: "Mandar por chat".
+ * Ninguno dice "compartir el saldo".
+ *
+ * @param feria lo reciben las pantallas; el verbo no cambia con el rubro.
+ * @param nombre opcional; si viene, el botón nombra a la persona.
  */
-fun etiquetaCompartirDeuda(feria: Boolean): String =
-    if (feria) "Mandarle lo que debe" else "Recordarle lo que debe"
+fun etiquetaCompartirDeuda(
+    @Suppress("UNUSED_PARAMETER") feria: Boolean,
+    nombre: String = "",
+): String {
+    val limpio = nombre.trim()
+    return if (limpio.isEmpty()) "Mandar por chat" else "Recordarle a $limpio"
+}
