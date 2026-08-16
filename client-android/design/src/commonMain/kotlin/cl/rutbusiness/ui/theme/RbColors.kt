@@ -95,29 +95,29 @@ data class RbColors(
 )
 
 /**
- * Dark set. Surfaces keep the exact `--rb-*` values from `brand.css` - they
- * were already fine. Only the foregrounds moved.
+ * Dark set — puesto de noche. Deep teal-night canvas (not cold Slack navy);
+ * brand is a luminous ripe-lime that still clears AA on every surface.
+ * outlineStrong is graded against surfaceRaised, the lightest dark surface.
  */
 val RbDarkColors = RbColors(
-    background = Color(0xFF0B0F16),
-    surface = Color(0xFF121826),
-    surfaceVariant = Color(0xFF161D2D),
-    surfaceRaised = Color(0xFF1B2335),
+    background = Color(0xFF0A1416),
+    surface = Color(0xFF101C1F),
+    surfaceVariant = Color(0xFF142226),
+    surfaceRaised = Color(0xFF18282D),
 
-    outline = Color(0xFF2A3550),
-    // Graded against surfaceRaised (#1B2335), the *lightest* dark surface, not
-    // against the base background. Picking it against the darkest surface is
-    // how #5A6A8C slipped through at 2.90 on a dialog.
-    outlineStrong = Color(0xFF5C6D8F),
+    outline = Color(0xFF2A3F45),
+    // Graded against surfaceRaised, the *lightest* dark surface — grading only
+    // against the base background is how borders slipped under 3.0 on dialogs.
+    outlineStrong = Color(0xFF5E7A82),
 
-    textPrimary = Color(0xFFEEF2F9),
-    textSecondary = Color(0xFFA8B3C7),
-    textTertiary = Color(0xFF828FA8),
+    textPrimary = Color(0xFFEEF5F2),
+    textSecondary = Color(0xFFA3B8B4),
+    textTertiary = Color(0xFF7E9692),
 
-    brandText = Color(0xFF19D39A),
-    brandFill = Color(0xFF19D39A),
-    onBrandFill = Color(0xFF04140E),
-    brandContainer = Color(0xFF133639),
+    brandText = Color(0xFF9AD63A),
+    brandFill = Color(0xFF9AD63A),
+    onBrandFill = Color(0xFF0A1404),
+    brandContainer = Color(0xFF1A2E14),
 
     dangerText = Color(0xFFFF8F99),
     dangerFill = Color(0xFFD5001A),
@@ -127,34 +127,35 @@ val RbDarkColors = RbColors(
     warnText = Color(0xFFF5B53D),
     infoText = Color(0xFF6BB2FF),
 
-    focusRing = Color(0xFF4CF0C9),
+    focusRing = Color(0xFFB8E85A),
     scrim = Color(0xB3000000),
 
     isDark = true,
 )
 
 /**
- * Light set. Surfaces keep the warm off-white of `brand.css`. The whole
- * foreground ramp is new: the CSS light theme reused the dark status colors and
+ * Light set — feria al amanecer. Sun-washed kraft paper and cream surfaces;
+ * brand is tomato-leaf / ripe-lime green (not generic SaaS mint). Status ramp
+ * is light-specific: the CSS light theme reused dark amber/danger/info and
  * every one of them failed on white.
  */
 val RbLightColors = RbColors(
-    background = Color(0xFFF7F4EE),
-    surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFFBF9F5),
-    surfaceRaised = Color(0xFFFFFFFF),
+    background = Color(0xFFF5EDE0),
+    surface = Color(0xFFFFFBF4),
+    surfaceVariant = Color(0xFFF8F1E6),
+    surfaceRaised = Color(0xFFFFFBF4),
 
-    outline = Color(0xFFD9D2C4),
-    outlineStrong = Color(0xFF8D7F63),
+    outline = Color(0xFFD4C6A8),
+    outlineStrong = Color(0xFF8A7650),
 
-    textPrimary = Color(0xFF161D12),
-    textSecondary = Color(0xFF4A5246),
-    textTertiary = Color(0xFF666E5C),
+    textPrimary = Color(0xFF1A1F14),
+    textSecondary = Color(0xFF4A4F3E),
+    textTertiary = Color(0xFF5F6552),
 
-    brandText = Color(0xFF0C7C5D),
-    brandFill = Color(0xFF085B44),
+    brandText = Color(0xFF3D6B12),
+    brandFill = Color(0xFF3A6A0F),
     onBrandFill = Color(0xFFFFFFFF),
-    brandContainer = Color(0xFFD9EFE9),
+    brandContainer = Color(0xFFE5F0C8),
 
     dangerText = Color(0xFFB3000F),
     dangerFill = Color(0xFFC1001A),
@@ -164,7 +165,7 @@ val RbLightColors = RbColors(
     warnText = Color(0xFF7D5006),
     infoText = Color(0xFF00519F),
 
-    focusRing = Color(0xFF085B44),
+    focusRing = Color(0xFF3A6A0F),
     scrim = Color(0x99000000),
 
     isDark = false,
