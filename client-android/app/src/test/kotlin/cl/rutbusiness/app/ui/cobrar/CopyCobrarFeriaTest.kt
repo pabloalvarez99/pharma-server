@@ -134,4 +134,39 @@ class CopyCobrarFeriaTest {
         assertEquals("Anotá lo que se lleva", copySubtituloBuscar(feria = true))
         assertEquals("Busca el producto y agrégalo", copySubtituloBuscar(feria = false))
     }
+
+    @Test
+    fun `nota de monto suelto feria habla de puesto no de caja`() {
+        val feria = copyNotaMontoSuelto(feria = true)
+        assertTrue(feria.contains("puesto", ignoreCase = true))
+        assertFalse(feria.contains("caja", ignoreCase = true))
+        assertTrue(feria.contains("Venta suelta"))
+
+        val retail = copyNotaMontoSuelto(feria = false)
+        assertTrue(retail.contains("caja", ignoreCase = true))
+        assertFalse(retail.contains("puesto", ignoreCase = true))
+    }
+
+    @Test
+    fun `papel sin detalle feria no suena a ticket fiscal del sistema`() {
+        val feria = copySinDetalleComprobante(feria = true)
+        assertTrue(feria.contains("papel", ignoreCase = true) || feria.contains("Tu día"))
+        assertFalse(feria.contains("computador", ignoreCase = true))
+        assertFalse(feria.contains("sistema del negocio", ignoreCase = true))
+    }
+
+    @Test
+    fun `ref del papel es quieta no grita Comprobante`() {
+        assertEquals("Nº AB12CD34", copyRefPapel("AB12CD34-resto-largo"))
+        assertEquals("Sin número", copyRefPapel("   "))
+        assertFalse(copyRefPapel("folio-1").contains("Comprobante", ignoreCase = true))
+    }
+
+    @Test
+    fun `pie de venta encolada feria no nombra el sistema`() {
+        val feria = copyPieVentaEncolada(feria = true, unidades = 2)
+        assertTrue(feria.contains("2 unidades"))
+        assertTrue(feria.contains("señal", ignoreCase = true))
+        assertFalse(feria.contains("sistema", ignoreCase = true))
+    }
 }
