@@ -249,7 +249,7 @@ class ResumenEscalaTest {
         )
 
         compose.onNodeWithText("Todavía no vendiste nada hoy").assertIsDisplayed()
-        compose.onNodeWithText("vendí 3 kilos de papa a 1200", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("vendí 2 kg de tomates a 2000", substring = true).assertIsDisplayed()
 
         compose.onNodeWithText("Hablarle al agente").performScrollTo().performClick()
         compose.waitForIdle()
