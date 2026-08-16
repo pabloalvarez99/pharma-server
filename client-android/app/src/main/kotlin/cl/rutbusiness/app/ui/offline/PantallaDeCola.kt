@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.offline.VentaEnCola
 import cl.rutbusiness.ui.components.RbButton
@@ -88,6 +89,7 @@ fun PantallaDeCola(
 ) {
     val dimens = RbTheme.dimens
     val alcance = rememberCoroutineScope()
+    val feria = esFeria()
     val esperando = cola.count { it.esperando }
     var materialCuaderno by remember { mutableStateOf("") }
     var sobrePegado by remember(ultimoSobreBase64) {
@@ -109,7 +111,7 @@ fun PantallaDeCola(
         if (cola.isEmpty() && onPrepararRespaldo == null && onRestaurarRespaldo == null) {
             RbEmptyState(
                 title = "No hay ninguna esperando",
-                hint = "Todas las ventas que cobraste ya llegaron al sistema del negocio.",
+                hint = hintColaVacia(feria),
                 actionLabel = "Volver",
                 onAction = onCerrar,
             )
@@ -235,7 +237,7 @@ fun PantallaDeCola(
                 item {
                     RbEmptyState(
                         title = "No hay ninguna esperando",
-                        hint = "Todas las ventas que cobraste ya llegaron al sistema del negocio.",
+                        hint = hintColaVacia(feria),
                         actionLabel = "Volver",
                         onAction = onCerrar,
                     )
