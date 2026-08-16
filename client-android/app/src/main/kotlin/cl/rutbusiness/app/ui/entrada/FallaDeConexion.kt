@@ -114,17 +114,17 @@ sealed class FallaDeConexion(
     )
 
     /**
-     * Llegamos al sistema del negocio y nos dijo que no.
+     * Llegamos y nos dijo que no: correo, clave o nombre corto no calzan.
      *
-     * El server contesta lo mismo para los tres campos —negocio, correo,
+     * El server contesta lo mismo para los tres campos —nombre corto, correo,
      * clave— así que el mensaje los nombra a los tres. Adivinar cuál de ellos
      * está mal sería inventar precisión que el server no nos dio.
      */
     class DatosQueNoCoinciden(tecnico: String? = null) : FallaDeConexion(
-        titulo = "El sistema no reconoce esos datos",
-        queHacer = "Llegamos bien al negocio, pero no aceptó lo que escribiste. Revisa el " +
-            "nombre corto del negocio, el correo y la clave. La clave distingue mayúsculas de " +
-            "minúsculas.",
+        titulo = "Ese correo o esa clave no calzan",
+        queHacer = "La conexión anda: lo que no calza es lo que escribiste. " +
+            "Revisá el nombre corto, el correo y la clave. " +
+            "La clave distingue mayúsculas de minúsculas.",
         tecnico = tecnico,
     )
 
