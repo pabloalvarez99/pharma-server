@@ -1939,7 +1939,7 @@ fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
                 if t.is_empty() {
                     return Some(ActionParse::Incomplete(
                         "¿A quién se lo fío y qué le vendiste? Por ejemplo: «anota 2 kg de \
-                         tomates fiado a Don Juan»."
+                         tomates a 2000 fiado a Don Juan»."
                             .into(),
                     ));
                 }
@@ -1947,7 +1947,7 @@ fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
             } else {
                 return Some(ActionParse::Incomplete(
                     "¿A quién se lo fío y qué le vendiste? Por ejemplo: «anota 2 kg de \
-                     tomates fiado a Don Juan»."
+                     tomates a 2000 fiado a Don Juan»."
                         .into(),
                 ));
             }
@@ -1957,7 +1957,7 @@ fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
     };
     Some(ActionParse::Incomplete(format!(
         "Anoté que {name} debería unos ${amount}, pero necesito qué le vendiste. \
-         Por ejemplo: «anota 2 kg de tomates fiado a {name}»."
+         Por ejemplo: «anota 2 kg de tomates a 2000 fiado a {name}»."
     )))
 }
 
@@ -4794,12 +4794,22 @@ mod tests {
     }
 
     /// Cuaderno: "Don Juan debe 5000" enseña, no inventa un SKU.
+    /// El ejemplo debe traer precio (`a 2000`) para que la siguiente frase no pida precio otra vez.
     #[test]
     fn parse_deuda_feria_nudge_pide_producto() {
         match parse_action("Don Juan debe 5000") {
             ActionParse::Incomplete(msg) => {
                 assert!(msg.contains("Juan") || msg.contains("juan"), "{msg}");
-                assert!(msg.contains("fiado") || msg.contains("vendiste"), "{msg}");
+                assert!(msg.contains("fiado"), "{msg}");
+                assert!(msg.contains("a 2000"), "{msg}");
+            }
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+        // Forma ASI_SE_FIA antigua: Incomplete con precio en el ejemplo, sin inventar SKU.
+        match parse_action("Don Juan me debe 5000") {
+            ActionParse::Incomplete(msg) => {
+                assert!(msg.contains("a 2000"), "{msg}");
+                assert!(msg.contains("fiado"), "{msg}");
             }
             other => panic!("expected Incomplete, got {other:?}"),
         }
