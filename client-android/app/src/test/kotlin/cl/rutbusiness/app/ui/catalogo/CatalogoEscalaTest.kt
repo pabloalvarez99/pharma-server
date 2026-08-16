@@ -23,6 +23,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.height
+import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.rubro.PACK_FARMACIA
 import cl.rutbusiness.core.rubro.PACK_FERIA
 import cl.rutbusiness.ui.theme.RbDefaultDimens
@@ -152,6 +153,48 @@ class CatalogoEscalaTest {
         compose.onNodeWithContentDescription("¿Cómo se llama?").assertIsDisplayed()
     }
 
+    // --- mesa del puesto -----------------------------------------------------
+
+    /**
+     * Cada cosa es una tarjeta táctil de la mesa: nombre grande, precio a la
+     * vista, mínimo 56dp. Si la fila se encoge, el puesto deja de ser tocable
+     * con el sol de la feria y el dedo gordo.
+     */
+    @Test
+    fun `la tarjeta de una cosa mide al menos el objetivo tactil`() {
+        montarTarjeta(escala = 1.0f)
+
+        val fila = compose.onNode(hasText("Tomate") and hasClickAction())
+        fila.assertIsDisplayed()
+        val caja = fila.getBoundsInRoot()
+        assertTrue(
+            "la tarjeta mide ${caja.height}, bajo $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+        compose.onNodeWithText("$1.200").assertIsDisplayed()
+        compose.onNodeWithText("Por kilo").assertIsDisplayed()
+    }
+
+    /**
+     * El vacío enseña con espacio y un solo CTA: la pista de feria y el botón
+     * de agregar. Sin segunda acción ni jerga de sistema.
+     */
+    @Test
+    fun `el vacio de feria ensena y tiene un solo cta primario`() {
+        val copy = copyCatalogo(PACK_FERIA)
+        montarVacio(escala = 1.0f, copy = copy)
+
+        compose.onNodeWithText(copy.vacioTitulo).assertIsDisplayed()
+        compose.onNodeWithText(copy.vacioPista, substring = true).assertIsDisplayed()
+        val cta = compose.onNode(hasText(copy.agregar) and hasClickAction())
+        cta.assertIsDisplayed()
+        val caja = cta.getBoundsInRoot()
+        assertTrue(
+            "el CTA del vacío mide ${caja.height}, bajo $objetivoTactil",
+            caja.height >= objetivoTactil,
+        )
+    }
+
     // --- herramientas --------------------------------------------------------
 
     private fun botonDeGuardar(): SemanticsNodeInteraction =
@@ -185,6 +228,45 @@ class CatalogoEscalaTest {
                         onGuardar = {},
                     )
                 }
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    private fun montarTarjeta(escala: Float) {
+        compose.setContent {
+            ConEscala(escala) {
+                FilaDeCosa(
+                    cosa = ProductDto(
+                        active = true,
+                        createdAt = "2026-01-01T00:00:00Z",
+                        id = "p1",
+                        name = "Tomate",
+                        physicalStock = false,
+                        prescriptionType = "none",
+                        price = "1200",
+                        slug = "tomate",
+                        stock = 0,
+                        updatedAt = "2026-01-01T00:00:00Z",
+                    ),
+                    unidad = "kilo",
+                    precio = "$1.200",
+                    onEditar = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    private fun montarVacio(escala: Float, copy: CopyCatalogo) {
+        compose.setContent {
+            ConEscala(escala) {
+                VacioDelCatalogo(
+                    titulo = copy.vacioTitulo,
+                    pista = copy.vacioPista,
+                    accion = copy.agregar,
+                    onAccion = {},
+                )
             }
         }
         compose.waitForIdle()
