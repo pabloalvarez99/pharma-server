@@ -30,7 +30,8 @@ import cl.rutbusiness.ui.theme.RbTheme
  *
  * El campo del monto va arriba de todo, con la deuda actual a la vista para no
  * tener que volver a mirarla: la pregunta del mostrador es "¿cuánto me das?" y
- * la referencia es cuánto debe.
+ * la referencia es cuánto debe. En feria se habla de plata y del día, no de
+ * cajón ni de computador.
  */
 @Composable
 fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
@@ -55,16 +56,16 @@ fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
 }
 
 /**
- * El formulario del abono, sin `ViewModel` detrás para poder medirlo.
+ * El formulario del pago, sin `ViewModel` detrás para poder medirlo.
  *
  * Misma disciplina de layout que [cl.rutbusiness.app.ui.caja.FormularioDeArqueo],
  * y por el mismo motivo: es un campo de plata con teclado numérico. Campo
  * primero, columna que scrollea con `imePadding`, botones a todo el ancho uno
  * debajo del otro.
  *
- * @param deudaActual el saldo que mandó el server, en su texto decimal. Se
+ * @param deudaActual el monto que mandó el server, en su texto decimal. Se
  *   muestra como referencia; no se resta nada contra él.
- * @param esFeria pack feria: el abono en efectivo cuenta en la plata del día
+ * @param esFeria pack feria: el pago en efectivo cuenta en la plata del día
  *   (puesto), no habla de cajón. El toggle se ofrece si hay sesión o se puede
  *   abrir el puesto.
  */
@@ -98,10 +99,13 @@ internal fun FormularioDeAbono(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        RbCard(title = "¿Cuánto te está pagando?") {
+        RbCard(title = tituloCuantoPaga()) {
             if (deudaActual != null) {
                 Text(
-                    text = "Debe ${moneda.formatear(deudaActual)}. Puede pagarte todo o una parte.",
+                    text = referenciaDeuda(
+                        feria = esFeria,
+                        montoFormateado = moneda.formatear(deudaActual),
+                    ),
                     style = RbTheme.typography.body,
                     color = colors.textSecondary,
                 )
@@ -110,7 +114,7 @@ internal fun FormularioDeAbono(
             RbTextField(
                 value = monto,
                 onValueChange = onMonto,
-                label = "Plata que te da",
+                label = labelMontoPago(),
                 placeholder = "0",
                 numeric = true,
                 keyboardType = tecladoDePlata(moneda),
@@ -122,16 +126,16 @@ internal fun FormularioDeAbono(
         // Feria: el puesto se puede abrir con $0; el toggle va aunque la sesión
         // todavía se esté asegurando (default efectivo = cuenta en el día).
         if (hayCajaAbierta || esFeria) {
-            RbCard(title = "¿Cómo te paga?") {
+            RbCard(title = tituloComoPaga()) {
                 RbChipRow {
                     RbChip(
-                        label = "En efectivo",
+                        label = chipEfectivo(),
                         tone = if (entraALaCaja) RbChipTone.Brand else RbChipTone.Neutral,
                         selected = entraALaCaja,
                         onClick = { onEntraALaCaja(true) },
                     )
                     RbChip(
-                        label = "Transferencia",
+                        label = chipTransferencia(),
                         tone = if (!entraALaCaja) RbChipTone.Brand else RbChipTone.Neutral,
                         selected = !entraALaCaja,
                         onClick = { onEntraALaCaja(false) },
@@ -145,12 +149,12 @@ internal fun FormularioDeAbono(
             }
         }
 
-        RbCard(title = "¿Algo que anotar?") {
+        RbCard(title = tituloNotaPago()) {
             RbTextField(
                 value = nota,
                 onValueChange = onNota,
-                label = "Nota del pago (opcional)",
-                placeholder = "Quedó de traer el resto el viernes",
+                label = labelNotaPago(),
+                placeholder = placeholderNotaPago(),
                 enabled = !guardando,
             )
         }
@@ -172,7 +176,7 @@ internal fun FormularioDeAbono(
             )
         } else {
             Text(
-                text = "Vas a anotar que te pagó:",
+                text = previaAnotarPago(),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -184,14 +188,14 @@ internal fun FormularioDeAbono(
         }
 
         RbButton(
-            label = if (guardando) "Anotando..." else "Anotar el pago",
+            label = ctaAnotarPago(guardando),
             onClick = onAnotar,
             enabled = !guardando && impedimento == null,
             fillWidth = true,
         )
 
         RbButton(
-            label = "Volver a la cuenta",
+            label = ctaVolverDelAbono(esFeria),
             onClick = onVolver,
             variant = RbButtonVariant.Secondary,
             enabled = !guardando,

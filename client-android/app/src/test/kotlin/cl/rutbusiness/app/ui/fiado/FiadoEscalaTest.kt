@@ -214,17 +214,17 @@ class FiadoEscalaTest {
      * El vacío que más veces se va a ver: el primer día nadie debe nada.
      *
      * En feria fiar no es una pantalla, es una frase — así que el vacío la
-     * enseña completa (`ASI_SE_FIA`), con nombre y monto, para que se copie
-     * tal cual.
+     * enseña completa (`EJEMPLO_FIADO_FERIA`), con nombre y monto, para que se
+     * copie tal cual.
      */
     @Test
     fun `en feria sin deudores se ensena como fiar`() {
         var hablado = false
         mostrarSinDeudores(escala = 1.0f, rubro = "feria", onIrAlAgente = { hablado = true })
 
-        compose.onNodeWithText("Nadie te debe").assertIsDisplayed()
+        compose.onNodeWithText("Nadie te debe ahora").assertIsDisplayed()
         compose
-            .onNodeWithText("anota 2 kg de tomates a 2000 fiado a Don Juan", substring = true)
+            .onNodeWithText(EJEMPLO_FIADO_FERIA, substring = true)
             .assertIsDisplayed()
         compose.onNodeWithText("Dile al agente", substring = true).assertIsDisplayed()
 
@@ -238,7 +238,7 @@ class FiadoEscalaTest {
     fun `en feria el vacio de deudas se lee entero al 200 por ciento`() {
         mostrarSinDeudores(escala = 2.0f, rubro = "feria", onIrAlAgente = {})
 
-        compose.onNodeWithText("Nadie te debe").assertIsDisplayed()
+        compose.onNodeWithText("Nadie te debe ahora").assertIsDisplayed()
         val cta = compose.onNodeWithText("Hablarle al agente")
         cta.assertIsDisplayed()
 

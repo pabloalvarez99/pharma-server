@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.agente.irAlAgente
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.rubro.esFeria
@@ -78,7 +77,7 @@ fun FiadoRoute(
  * Se lee como gente que te debe, no como un ledger: nombres grandes, plata a
  * la vista, vacío que enseña la frase del fiado.
  *
- * Regla de plata: ni el total ni los saldos se suman acá. Vienen del server.
+ * Regla de plata: ni el total ni los montos se suman acá. Vienen del server.
  */
 @Composable
 private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
@@ -101,19 +100,20 @@ private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
             title = when (vm.paso) {
-                PasoDeFiado.Lista -> "Quién me debe"
-                PasoDeFiado.Detalle -> vm.elegido?.name.orEmpty().ifBlank { "La cuenta" }
-                PasoDeFiado.Abono -> "Me está pagando"
+                PasoDeFiado.Lista -> tituloListaDeuda()
+                PasoDeFiado.Detalle ->
+                    vm.elegido?.name.orEmpty().ifBlank { tituloDetalleFallback(feria) }
+                PasoDeFiado.Abono -> tituloPasoAbono()
             },
             subtitle = when (vm.paso) {
                 // Cuando la lista salió del teléfono, la fecha va en el
-                // subtítulo: los saldos son plata, y un saldo viejo sin fecha
+                // subtítulo: la plata es plata, y un monto viejo sin fecha
                 // hace que la dueña cobre de menos o de más.
                 PasoDeFiado.Lista -> vm.guardadoEn?.let { guardadoEn ->
                     "Guardado en el teléfono, " +
                         Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
-                } ?: "Gente que te debe"
-                PasoDeFiado.Detalle -> "Lo que se llevó y lo que fue pagando"
+                } ?: subtituloListaDeuda()
+                PasoDeFiado.Detalle -> subtituloDetalle()
                 PasoDeFiado.Abono -> vm.elegido?.name
             },
             onBack = atras,
@@ -140,7 +140,7 @@ private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
             )
 
             vm.cargando && vm.deudores == null -> Column {
-                RbLoadingState(label = "Viendo quién te debe...")
+                RbLoadingState(label = cargandoListaDeuda())
                 RbSkeletonLines(lines = 5, modifier = Modifier.padding(dimens.space3))
             }
 
@@ -196,8 +196,8 @@ internal fun ListaDeDeudores(
             RbTextField(
                 value = consulta,
                 onValueChange = onConsulta,
-                label = "Buscar a quien vino a pagar",
-                placeholder = "Nombre o teléfono",
+                label = labelBuscarDeudor(),
+                placeholder = placeholderBuscarDeudor(),
                 modifier = Modifier.padding(dimens.space3),
                 keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Search,
@@ -223,10 +223,9 @@ internal fun ListaDeDeudores(
             }
 
             visibles.isEmpty() -> RbEmptyState(
-                title = "Nadie con ese nombre",
-                hint = "Revisa cómo lo escribiste, o borra la búsqueda para ver a todos los " +
-                    "que te deben.",
-                actionLabel = "Ver a todos",
+                title = vacioBusquedaTitulo(),
+                hint = vacioBusquedaPista(),
+                actionLabel = ctaVerTodos(),
                 onAction = { onConsulta("") },
             )
 
@@ -252,7 +251,7 @@ internal fun ListaDeDeudores(
                     FilaDeDeudor(
                         nombre = deudor.name,
                         detalle = subtituloDeDeudor(deudor),
-                        saldo = moneda.formatear(deudor.balance),
+                        monto = moneda.formatear(deudor.balance),
                         onClick = { onElegir(deudor) },
                     )
                 }
@@ -295,27 +294,21 @@ internal fun VacioDeFiado(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = if (feria) "Nadie te debe" else "Nadie te debe plata",
+                text = tituloVacioDeuda(feria),
                 style = RbTheme.typography.heading,
                 color = colors.textPrimary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.rbHeading(),
             )
             Text(
-                text = if (feria) {
-                    "Dile al agente: «$ASI_SE_FIA». " +
-                        "Queda acá hasta que te pague."
-                } else {
-                    "Cuando fíes una venta, la deuda de esa persona aparece acá hasta que " +
-                        "te la termine de pagar."
-                },
+                text = pistaVacioDeuda(feria),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
                 textAlign = TextAlign.Center,
             )
             if (onHablarleAlAgente != null) {
                 RbButton(
-                    label = "Hablarle al agente",
+                    label = ctaHablarleAlAgente(),
                     onClick = onHablarleAlAgente,
                 )
             }
@@ -333,7 +326,7 @@ internal fun VacioDeFiado(
 internal fun FilaDeDeudor(
     nombre: String,
     detalle: String,
-    saldo: String,
+    monto: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -371,7 +364,7 @@ internal fun FilaDeDeudor(
         },
         trailing = {
             RbAmount(
-                amount = saldo,
+                amount = monto,
                 emphasis = RbAmountEmphasis.Body,
             )
         },
@@ -384,18 +377,14 @@ private fun TotalPorCobrar(moneda: Moneda, deudores: DeudoresDto) {
     val dimens = RbTheme.dimens
 
     // Franja humana, no ERP: plata de personas, no "cuentas por cobrar".
-    RbCard(title = "Te deben") {
+    RbCard(title = tituloTotalPorCobrar()) {
         RbAmount(
             amount = moneda.formatear(deudores.total),
             emphasis = RbAmountEmphasis.Headline,
             modifier = Modifier.padding(vertical = dimens.space1),
         )
         Text(
-            text = if (deudores.cuantos == 1) {
-                "1 persona te debe."
-            } else {
-                "${deudores.cuantos} personas te deben."
-            },
+            text = cuantosTeDeben(deudores.cuantos),
             style = RbTheme.typography.body,
             color = colors.textSecondary,
             modifier = Modifier.fillMaxWidth(),
