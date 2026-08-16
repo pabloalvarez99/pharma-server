@@ -71,6 +71,23 @@ class AltaViewModelTest {
     }
 
     /**
+     * Aunque el destino de la nube sea un host tipo emulador, el camino de
+     * tres pasos no debe exponer la copy de validación del paso Donde
+     * (computador / 192.168…).
+     */
+    @Test
+    fun `con nube no se expone copy de direccion del computador`() {
+        val alta = vm("http://10.0.2.2:8080")
+
+        assertNull(alta.errorDeDireccion)
+        assertEquals("", alta.ayudaDeDireccion)
+        val falta = alta.impedimento().orEmpty()
+        assertFalse(falta.contains("computador", ignoreCase = true))
+        assertFalse(falta.contains("192.168"))
+        assertFalse(falta.contains("10.0.2.2"))
+    }
+
+    /**
      * En la nube compartida ya hay otros puestos. Preguntar
      * `GET /setup/status` y pintar "lugar ocupado" es el recuadro rojo que
      * vio el feriante: el servidor contesta, pero no para él.

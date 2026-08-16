@@ -261,7 +261,7 @@ class AltaEscalaTest {
      * separado es lo que hace que el botón cumpla lo que promete.
      */
     @Test
-    fun `el lugar ocupado manda a entrar y no a la pantalla anterior`() {
+    fun `el lugar ocupado local manda a entrar y no a la pantalla anterior`() {
         var entrando = false
         var atras = false
 
@@ -293,6 +293,7 @@ class AltaEscalaTest {
                     onAvanzar = {},
                     onCrear = {},
                     onIrAEntrar = { entrando = true },
+                    nube = false,
                 )
             }
         }
@@ -304,8 +305,60 @@ class AltaEscalaTest {
 
         assertTrue("el botón no llevó a entrar", entrando)
         assertTrue("el botón se comportó como la flecha de atrás", !atras)
-        revisarTactiles("200%, lugar ocupado")
-        revisarQueNadaSeCorte("200%, lugar ocupado")
+        revisarTactiles("200%, lugar ocupado local")
+        revisarQueNadaSeCorte("200%, lugar ocupado local")
+    }
+
+    /**
+     * En el APK de la nube el recuadro de "lugar ocupado" no puede hablar de
+     * computador ni de dirección: el feriante no instaló nada en un PC.
+     */
+    @Test
+    fun `el lugar ocupado de la nube no habla de computador ni direccion`() {
+        var entrando = false
+
+        compose.setContent {
+            ConEscala(2.0f) {
+                PantallaDeAlta(
+                    paso = PasoDelAlta.Negocio,
+                    indice = 0,
+                    total = 3,
+                    estado = EstadoDelAlta.LugarOcupado,
+                    falla = null,
+                    impedimento = null,
+                    puedeAvanzar = false,
+                    url = "",
+                    onUrl = {},
+                    ayudaDeDireccion = "",
+                    errorDeDireccion = null,
+                    nombre = "",
+                    onNombre = {},
+                    rubro = null,
+                    onRubro = {},
+                    email = "",
+                    onEmail = {},
+                    errorDeCorreo = null,
+                    clave = "",
+                    onClave = {},
+                    errorDeClave = null,
+                    onAtras = {},
+                    onAvanzar = {},
+                    onCrear = {},
+                    onIrAEntrar = { entrando = true },
+                    nube = true,
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Ese puesto ya está creado").assertIsDisplayed()
+        // El copy local no puede colarse.
+        compose.onNodeWithText("Ese computador ya tiene un negocio creado").assertDoesNotExist()
+        compose.onNodeWithText("Entrar a ese puesto").assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertTrue("el botón no llevó a entrar", entrando)
+        revisarTactiles("200%, lugar ocupado nube")
+        revisarQueNadaSeCorte("200%, lugar ocupado nube")
     }
 
     // --- las fallas ---------------------------------------------------------

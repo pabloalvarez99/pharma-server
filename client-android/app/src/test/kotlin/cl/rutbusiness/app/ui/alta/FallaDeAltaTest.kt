@@ -253,6 +253,66 @@ class FallaDeAltaTest {
         assertTrue(falla.queHacer.contains("ya están") || falla.queHacer.contains("ya hay"))
     }
 
+    /**
+     * SETUP_ALREADY_DONE en la nube: el host compilado (`10.0.2.2`, más adelante
+     * un dominio real) no es una dirección que el feriante haya escrito. Decírsela
+     * es un leak y suena a "computador".
+     */
+    @Test
+    fun `en la nube correo ya tiene negocio no nombra IP ni computador`() {
+        val falla = FallaDeAlta.CorreoYaTieneNegocio(
+            email = email,
+            donde = "http://10.0.2.2:8080",
+            nube = true,
+        )
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("10.0.2.2"))
+        assertFalse(falla.queHacer.contains("192.168"))
+        assertTrue(
+            "manda a entrar: ${falla.queHacer}",
+            falla.queHacer.contains("Entrar", ignoreCase = true),
+        )
+    }
+
+    @Test
+    fun `un 409 SETUP_ALREADY_DONE de nube no muestra host ni computador`() {
+        val falla = fallaDeAlta(
+            error = AppError.ErrorDelServidor(
+                status = 409,
+                code = "SETUP_ALREADY_DONE",
+                serverMessage = "Este servidor ya tiene una cuenta.",
+            ),
+            donde = "http://10.0.2.2:8080",
+            email = email,
+            nube = true,
+        )
+        assertTrue(falla is FallaDeAlta.CorreoYaTieneNegocio)
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("10.0.2.2"))
+        assertFalse(falla.queHacer.contains("192.168"))
+    }
+
+    /** En local el 409 sigue nombrando el host como lo escribió ella. */
+    @Test
+    fun `en local correo ya tiene negocio si nombra el host sin http`() {
+        val falla = FallaDeAlta.CorreoYaTieneNegocio(email, donde)
+        assertTrue(falla.queHacer.contains("192.168.1.10:8080"))
+        assertFalse(falla.queHacer.contains("http://"))
+    }
+
+    @Test
+    fun `en feria sin red manda a crear mi puesto`() {
+        val falla = FallaDeAlta.SinRed(esFeria = true)
+        assertTrue(falla.queHacer.contains("Crear mi puesto"))
+        assertFalse(falla.queHacer.contains("Crear mi negocio"))
+    }
+
+    @Test
+    fun `sin feria sin red manda a crear mi negocio`() {
+        val falla = FallaDeAlta.SinRed()
+        assertTrue(falla.queHacer.contains("Crear mi negocio"))
+    }
+
     @Test
     fun `los mensajes no muestran el esquema que agrego el normalizador`() {
         val falla = FallaDeAlta.ServicioNoResponde("http://192.168.1.10:8080")
