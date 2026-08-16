@@ -1,6 +1,9 @@
 package cl.rutbusiness.app.ui.cobrar
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
@@ -23,6 +27,7 @@ import cl.rutbusiness.app.ui.scanner.EstadoDelPermiso
 import cl.rutbusiness.app.ui.scanner.FORMATOS_DE_RETAIL
 import cl.rutbusiness.app.ui.scanner.ExplicacionDelPermiso
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
+import cl.rutbusiness.app.ui.scanner.MarcoDeLinterna
 import cl.rutbusiness.app.ui.scanner.PanelInferior
 import cl.rutbusiness.app.ui.scanner.SinCamara
 import cl.rutbusiness.ui.components.RbButton
@@ -36,15 +41,17 @@ import kotlinx.coroutines.delay
 /**
  * Escanear: la cámara puesta al servicio de una sola cosa, cargar el carrito.
  *
- * No es una pantalla aparte del cobro, es un paso de [CobrarScreen]: el carrito
- * es el mismo, y salir de acá deja la venta donde estaba. Por eso se lee un
- * producto tras otro sin cerrar nada -entrar y salir de la cámara por cada
- * artículo son dos segundos de arranque del sensor multiplicados por cada línea
- * de la boleta-.
+ * Se siente una **linterna**, no un lab: se apunta, se lee el código, vibra y
+ * sigue el siguiente producto. No es una pantalla aparte del cobro, es un paso
+ * de [CobrarScreen]: el carrito es el mismo, y salir de acá deja la venta donde
+ * estaba. Por eso se lee un producto tras otro sin cerrar nada -entrar y salir
+ * de la cámara por cada artículo son dos segundos de arranque del sensor
+ * multiplicados por cada línea de la boleta-.
  *
  * La cámara vive exactamente mientras este composable está en pantalla. Salir,
  * abrir el formulario de producto nuevo o irse a otra app la sueltan, porque en
- * los tres casos el visor deja de componerse.
+ * los tres casos el visor deja de componerse. El marco y el panel son sólo
+ * pintura: no tocan el analizador ni CameraX.
  */
 @Composable
 fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
@@ -76,10 +83,10 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier = modifier) {
         RbTopBar(
-            title = if (vm.creandoProducto) "Producto nuevo" else "Escanear",
+            title = if (vm.creandoProducto) "Producto nuevo" else "Leer código",
             subtitle = when {
                 vm.creandoProducto -> "No estaba en tu catálogo"
-                camara != null -> "Apunta al código de barras"
+                camara != null -> "Acerca el código a la luz"
                 else -> null
             },
             onBack = if (vm.creandoProducto) vm::cancelarCreacion else vm::cerrarEscaner,
@@ -96,13 +103,20 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             else -> {
                 val permiso = camara.recordarPermiso()
                 if (permiso.estado == EstadoDelPermiso.Concedido) {
-                    camara.Visor(
+                    // Visor + marco de linterna: el video sigue intacto; encima
+                    // sólo se pinta el cono para saber dónde apoyar el código.
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        formatos = FORMATOS_DE_RETAIL,
-                        onCodigo = vm::escanear,
-                    )
+                    ) {
+                        camara.Visor(
+                            modifier = Modifier.fillMaxSize(),
+                            formatos = FORMATOS_DE_RETAIL,
+                            onCodigo = vm::escanear,
+                        )
+                        MarcoDeLinterna(Modifier.fillMaxSize())
+                    }
                     PanelDeLectura(vm)
                 } else {
                     ExplicacionDelPermiso(
@@ -130,7 +144,7 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
  *
  * El cartel de arriba cambia; la fila de botones de abajo **no se mueve**. En un
  * teléfono que se usa sin mirar, un botón que cambia de lugar según el estado es
- * un toque equivocado por venta.
+ * un toque equivocado por venta. Botones ≥ 56 dp vía design system.
  */
 @Composable
 private fun PanelDeLectura(vm: CobrarViewModel) {
@@ -165,8 +179,8 @@ private fun PanelDeLectura(vm: CobrarViewModel) {
 
             else -> Cartel(
                 fondo = colors.surfaceVariant,
-                titulo = "Apunta al código de barras",
-                detalle = "Pasa un producto tras otro; no hace falta salir entre uno y otro.",
+                titulo = "Acerca el código de barras",
+                detalle = "Uno tras otro, sin salir entre medio. Como una linterna: apuntas y listo.",
             )
         }
 
@@ -218,7 +232,9 @@ private fun resumenDelCarrito(vm: CobrarViewModel): String {
  */
 @Composable
 private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = Modifier) {
+    val colors = RbTheme.colors
     val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
     val codigo = vm.codigoSinProducto
 
     Column(modifier = modifier) {
@@ -227,52 +243,67 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = dimens.space3, vertical = dimens.space2),
-            verticalArrangement = Arrangement.spacedBy(dimens.space2),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
-            Text(
-                text = "Código $codigo",
-                style = RbTheme.typography.numeric,
-                color = RbTheme.colors.textPrimary,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.border, colors.outlineStrong, shape)
+                    .padding(horizontal = dimens.space3, vertical = dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            ) {
+                Text(
+                    text = "Código leído",
+                    style = RbTheme.typography.support,
+                    color = colors.textSecondary,
+                )
+                Text(
+                    text = codigo.orEmpty(),
+                    style = RbTheme.typography.numeric,
+                    color = colors.textPrimary,
+                )
 
-            RbTextField(
-                value = vm.nombreNuevo,
-                onValueChange = vm::cambiarNombreNuevo,
-                label = "Nombre",
-                placeholder = "Como quieres verlo en la boleta",
-                enabled = !vm.guardandoProducto,
-                imeAction = ImeAction.Next,
-            )
+                RbTextField(
+                    value = vm.nombreNuevo,
+                    onValueChange = vm::cambiarNombreNuevo,
+                    label = "Nombre",
+                    placeholder = "Como quieres verlo en la boleta",
+                    enabled = !vm.guardandoProducto,
+                    imeAction = ImeAction.Next,
+                )
 
-            RbTextField(
-                value = vm.precioNuevo,
-                onValueChange = vm::cambiarPrecioNuevo,
-                label = "Precio",
-                placeholder = "Sólo números",
-                supportingText = vm.precioNuevo
-                    .takeIf { it.isNotBlank() }
-                    ?.let { "Se cobra ${vm.moneda.formatear(it)}" }
-                    ?: "El precio de venta al público.",
-                numeric = true,
-                keyboardType = KeyboardType.Number,
-                enabled = !vm.guardandoProducto,
-            )
+                RbTextField(
+                    value = vm.precioNuevo,
+                    onValueChange = vm::cambiarPrecioNuevo,
+                    label = "Precio",
+                    placeholder = "Sólo números",
+                    supportingText = vm.precioNuevo
+                        .takeIf { it.isNotBlank() }
+                        ?.let { "Se cobra ${vm.moneda.formatear(it)}" }
+                        ?: "El precio de venta al público.",
+                    numeric = true,
+                    keyboardType = KeyboardType.Number,
+                    enabled = !vm.guardandoProducto,
+                )
 
-            // El error va acá y no colgado de un campo: puede venir del nombre,
-            // del precio o del server, y colgarlo del campo equivocado manda a
-            // corregir donde no era.
-            vm.errorAlCrear?.let {
-                Cartel(fondo = RbTheme.colors.dangerContainer, titulo = it)
+                // El error va acá y no colgado de un campo: puede venir del nombre,
+                // del precio o del server, y colgarlo del campo equivocado manda a
+                // corregir donde no era.
+                vm.errorAlCrear?.let {
+                    Cartel(fondo = colors.dangerContainer, titulo = it)
+                }
+
+                Text(
+                    text = "Nace con una unidad en stock: la que tienes en la mano. El resto de la " +
+                        "ficha —categoría, costo, proveedor— se completa después con calma, " +
+                        "pidiéndoselo al agente.",
+                    style = RbTheme.typography.support,
+                    color = colors.textSecondary,
+                )
             }
-
-            Text(
-                text = "Nace con una unidad en stock: la que tienes en la mano. El resto de la " +
-                    "ficha —categoría, costo, proveedor— se completa después con calma, " +
-                    "pidiéndoselo al agente.",
-                style = RbTheme.typography.support,
-                color = RbTheme.colors.textSecondary,
-            )
         }
 
         PanelInferior {
