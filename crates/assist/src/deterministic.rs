@@ -339,23 +339,37 @@ async fn caja_actual(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> Dom
         },
     )
     .await?;
+    let feria = crate::feria_caja::es_feria(db, tenant).await?;
     let Some(session) = sessions.into_iter().next() else {
-        return Ok(
-            Answer::new(intent, "No hay ninguna caja abierta en este momento.")
-                .with_data(serde_json::json!({ "open": false })),
-        );
+        let text = if feria {
+            "El puesto todavía no arrancó el día."
+        } else {
+            "No hay ninguna caja abierta en este momento."
+        };
+        return Ok(Answer::new(intent, text).with_data(serde_json::json!({ "open": false })));
     };
     let (s, cash_sales, m_in, m_out, expected) =
         caja::compute_summary(db, tenant, &session.id).await?;
-    let text = format!(
-        "En la caja «{}» deberían haber {} (apertura {} + ventas efectivo {} + ingresos {} − retiros {}).",
-        s.register_name,
-        m.fmt(expected),
-        m.fmt(s.opening_cash),
-        m.fmt(cash_sales),
-        m.fmt(m_in),
-        m.fmt(m_out),
-    );
+    let text = if feria {
+        format!(
+            "En el puesto deberían haber {} (lo que anotaste al abrir {} + ventas en efectivo {} + ingresos {} − retiros {}).",
+            m.fmt(expected),
+            m.fmt(s.opening_cash),
+            m.fmt(cash_sales),
+            m.fmt(m_in),
+            m.fmt(m_out),
+        )
+    } else {
+        format!(
+            "En la caja «{}» deberían haber {} (apertura {} + ventas efectivo {} + ingresos {} − retiros {}).",
+            s.register_name,
+            m.fmt(expected),
+            m.fmt(s.opening_cash),
+            m.fmt(cash_sales),
+            m.fmt(m_in),
+            m.fmt(m_out),
+        )
+    };
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "open": true,
         "register": s.register_name,
