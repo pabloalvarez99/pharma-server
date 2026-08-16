@@ -50,11 +50,14 @@ internal fun Puerta(
     onEntrar: () -> Unit,
     onVerExplicacion: () -> Unit,
     onRecuperar: (() -> Unit)? = null,
-    /** APK de feria: no hay técnico ni computador que pedir. */
+    /** APK de feria / URL_NUBE: no hay técnico ni dirección de computador. */
     nube: Boolean = false,
+    /** Copy feria (ADR-0022): "puesto" en vez de "negocio". */
+    esFeria: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val cosa = if (esFeria) "puesto" else "negocio"
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
@@ -72,13 +75,18 @@ internal fun Puerta(
         ) {
             RbCard(title = "Es la primera vez") {
                 Text(
-                    text = "Creas tu negocio acá mismo: le pones nombre, dices a qué se dedica, " +
-                        "eliges tu correo y tu clave, y quedas adentro.",
+                    text = if (esFeria) {
+                        "Creas tu puesto acá mismo: le pones nombre, elegís tu correo y " +
+                            "tu clave, y quedás adentro."
+                    } else {
+                        "Creas tu negocio acá mismo: le pones nombre, dices a qué se dedica, " +
+                            "eliges tu correo y tu clave, y quedas adentro."
+                    },
                     style = RbTheme.typography.body,
                     color = RbTheme.colors.textPrimary,
                 )
                 RbButton(
-                    label = "Crear mi negocio",
+                    label = "Crear mi $cosa",
                     onClick = onCrear,
                     variant = if (yaEntroAlgunaVez) {
                         RbButtonVariant.Secondary
@@ -89,7 +97,7 @@ internal fun Puerta(
                 )
             }
 
-            RbCard(title = "Ya tienes un negocio") {
+            RbCard(title = "Ya tienes un $cosa") {
                 Text(
                     text = if (nube) {
                         "Lo creaste antes en este teléfono o en otro. " +
@@ -102,7 +110,7 @@ internal fun Puerta(
                     color = RbTheme.colors.textPrimary,
                 )
                 RbButton(
-                    label = "Entrar a mi negocio",
+                    label = "Entrar a mi $cosa",
                     onClick = onEntrar,
                     variant = if (yaEntroAlgunaVez) {
                         RbButtonVariant.Primary
@@ -116,7 +124,7 @@ internal fun Puerta(
             onRecuperar?.let { recuperar ->
                 RbCard(title = "Perdí mi teléfono") {
                     Text(
-                        text = "Si guardaste la tarjeta que la app te pidió anotar, tu negocio " +
+                        text = "Si guardaste la tarjeta que la app te pidió anotar, tu $cosa " +
                             "vuelve con ella. No hace falta tu clave.",
                         style = RbTheme.typography.body,
                         color = RbTheme.colors.textPrimary,

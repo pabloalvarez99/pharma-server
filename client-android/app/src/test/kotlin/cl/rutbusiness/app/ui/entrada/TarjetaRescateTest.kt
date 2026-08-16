@@ -62,6 +62,7 @@ class TarjetaRescateTest {
         }
         compose.waitForIdle()
         compose.onNodeWithText("Tu tarjeta de rescate").assertIsDisplayed()
+        compose.onNodeWithText("Esta es la llave de tu puesto").assertIsDisplayed()
         // Payload en card QR + texto de una página (2 nodos).
         compose.onAllNodesWithText("rutbusiness-rescue:v1:puesto-rosa:", substring = true)
             .assertCountEquals(2)

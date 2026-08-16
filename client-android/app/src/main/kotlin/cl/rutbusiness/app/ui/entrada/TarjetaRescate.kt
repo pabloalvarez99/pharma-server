@@ -109,7 +109,8 @@ fun TarjetaRescate(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = "Esta es la llave de tu negocio",
+                // Esta pantalla es day-1 feria (ADR-0022): "puesto", no "negocio".
+                text = "Esta es la llave de tu puesto",
                 style = RbTheme.typography.title,
                 color = colors.textPrimary,
                 modifier = Modifier.rbHeading(),

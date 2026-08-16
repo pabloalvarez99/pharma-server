@@ -211,7 +211,7 @@ class GoogleEntradaCopyTest {
             compose.onAllNodesWithText("Probar la dirección")
                 .fetchSemanticsNodes().size,
         )
-        compose.onNodeWithContentDescription("Nombre corto del negocio").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Nombre corto del puesto").assertIsDisplayed()
     }
 
     @Test
@@ -225,15 +225,22 @@ class GoogleEntradaCopyTest {
                         onEntrar = {},
                         onVerExplicacion = {},
                         nube = true,
+                        esFeria = true,
                     )
                 }
             }
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Crear mi negocio").assertIsDisplayed()
+        compose.onNodeWithText("Crear mi puesto").assertIsDisplayed()
+        compose.onNodeWithText("Creas tu puesto acá mismo", substring = true).assertIsDisplayed()
         assertEquals(
             0,
             compose.onAllNodesWithText("instaló", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("computador", substring = true)
                 .fetchSemanticsNodes().size,
         )
         assertEquals(
@@ -252,8 +259,131 @@ class GoogleEntradaCopyTest {
                 .joinToString(" ")
         }
         assertFalse("la feria no puede ver una IP", texto.contains("192.168"))
+        assertFalse(texto.contains("192.168.1.10"))
         assertFalse(texto.contains("computador del negocio"))
         assertFalse(texto.contains("quien instaló el sistema"))
+    }
+
+    /**
+     * TDD DoD feria/nube: el literal de ejemplo LAN no aparece en primer uso,
+     * formulario sin dirección, ni fallas de conexión del camino nube.
+     */
+    @Test
+    fun `nube y feria no filtran el literal 192_168_1_10 en primer uso entrada ni fallas`() {
+        val ip = "192.168.1.10"
+        val primerUso = pasosDelPrimerUso(googleDisponible = false, nube = true)
+            .joinToString(" ") { paso ->
+                listOf(
+                    paso.titulo,
+                    paso.encabezado,
+                    paso.parrafos.joinToString(" "),
+                    paso.lista.joinToString(" "),
+                    paso.remate.orEmpty(),
+                ).joinToString(" ")
+            }
+        assertFalse(primerUso.contains(ip))
+
+        val fallasNube = listOf(
+            FallaDeConexion.SinRed(nube = true),
+            FallaDeConexion.NadieContesta("https://nube.test.invalid", nube = true),
+            FallaDeConexion.ContestaPeroNoEsElSistema("https://nube.test.invalid", nube = true),
+            FallaDeConexion.DatosQueNoCoinciden(),
+            FallaDeConexion.FaltaNombreCorto(),
+        )
+        fallasNube.forEach { falla ->
+            val texto = "${falla.titulo} ${falla.queHacer}"
+            assertFalse("${falla.titulo} filtra $ip", texto.contains(ip))
+            assertFalse(
+                "${falla.titulo} nombra computador",
+                texto.contains("computador", ignoreCase = true),
+            )
+        }
+
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    FormularioDeEntrada(
+                        url = "https://nube.test.invalid",
+                        onUrl = {},
+                        pideDireccion = false,
+                        ayudaDeDireccion = "oculto",
+                        errorDeDireccion = null,
+                        negocio = "puesto-rosa",
+                        onNegocio = {},
+                        email = "rosa@feria.cl",
+                        onEmail = {},
+                        password = "x",
+                        onPassword = {},
+                        conexionConfirmada = true,
+                        falla = FallaDeConexion.NadieContesta(
+                            "https://nube.test.invalid",
+                            nube = true,
+                        ),
+                        impedimento = null,
+                        probando = false,
+                        enviando = false,
+                        puedeProbar = false,
+                        puedeEntrar = true,
+                        onProbar = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        rubroEsFeria = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(
+            0,
+            compose.onAllNodesWithText(ip, substring = true).fetchSemanticsNodes().size,
+        )
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("computador", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+        // Chip de LAN no se dibuja sin pideDireccion, aunque conexionConfirmada=true.
+        assertEquals(
+            0,
+            compose.onAllNodesWithText("Contestó tu", substring = true)
+                .fetchSemanticsNodes().size,
+        )
+    }
+
+    @Test
+    fun `feria con conexion LAN muestra chip de puesto`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize()) {
+                    FormularioDeEntrada(
+                        url = "192.168.1.10:8080",
+                        onUrl = {},
+                        pideDireccion = true,
+                        ayudaDeDireccion = "ok",
+                        errorDeDireccion = null,
+                        negocio = "puesto-rosa",
+                        onNegocio = {},
+                        email = "rosa@feria.cl",
+                        onEmail = {},
+                        password = "x",
+                        onPassword = {},
+                        conexionConfirmada = true,
+                        falla = null,
+                        impedimento = null,
+                        probando = false,
+                        enviando = false,
+                        puedeProbar = true,
+                        puedeEntrar = true,
+                        onProbar = {},
+                        onEntrar = {},
+                        onVerExplicacion = {},
+                        rubroEsFeria = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Contestó tu puesto").performScrollTo().assertIsDisplayed()
     }
 
     @Test

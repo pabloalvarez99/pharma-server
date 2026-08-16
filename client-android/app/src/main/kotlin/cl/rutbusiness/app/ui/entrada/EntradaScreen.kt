@@ -151,6 +151,7 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                 onRecuperar = { lugar = LugarDeLaEntrada.Rescate },
                 onVerExplicacion = { explicando = true },
                 nube = !servicios?.nube.isNullOrBlank(),
+                esFeria = rubroEsFeria,
             )
             return
         }
@@ -426,7 +427,14 @@ internal fun FormularioDeEntrada(
                     )
 
                     if (conexionConfirmada) {
-                        RbChip(label = "Contestó tu negocio", tone = RbChipTone.Brand)
+                        RbChip(
+                            label = if (rubroEsFeria) {
+                                "Contestó tu puesto"
+                            } else {
+                                "Contestó tu negocio"
+                            },
+                            tone = RbChipTone.Brand,
+                        )
                     }
 
                     RbButton(
@@ -448,10 +456,19 @@ internal fun FormularioDeEntrada(
                 RbTextField(
                     value = negocio,
                     onValueChange = onNegocio,
-                    label = "Nombre corto del negocio",
+                    label = if (rubroEsFeria) {
+                        "Nombre corto del puesto"
+                    } else {
+                        "Nombre corto del negocio"
+                    },
                     supportingText = if (pideDireccion) {
-                        "El que te dieron al crear el negocio. Suele ser una sola " +
-                            "palabra, sin espacios."
+                        if (rubroEsFeria) {
+                            "El que te dieron al crear el puesto. Suele ser una sola " +
+                                "palabra, sin espacios."
+                        } else {
+                            "El que te dieron al crear el negocio. Suele ser una sola " +
+                                "palabra, sin espacios."
+                        }
                     } else {
                         "Si lo tenés. Si no, alcanza con el correo y la clave."
                     },
