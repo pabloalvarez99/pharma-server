@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.diag.Latencia
 // El alta de productos ya no vive detrás del escáner: es del catálogo, y el
 // escáner es uno de sus dos usuarios (`ui/catalogo/ProductosApi.kt`).
+import cl.rutbusiness.app.ui.caja.ResultadoPuesto
+import cl.rutbusiness.app.ui.caja.asegurarPuestoAbierto
 import cl.rutbusiness.app.ui.catalogo.asegurarVentaSuelta
 import cl.rutbusiness.app.ui.catalogo.crearProducto
 import cl.rutbusiness.app.ui.catalogo.pegarCodigo
@@ -184,6 +186,15 @@ class CobrarViewModel(
     /** El catálogo que se pudo guardar, para buscar adentro sin red. */
     private var catalogoLocal: List<ProductDto> = emptyList()
 
+    /**
+     * Pack feria: la Screen llama [modoFeria]; al entrar a Cobrar se abre el
+     * puesto con $0 (o se trata el 409 como abierto) sin ritual de cajón.
+     */
+    private var esFeria = false
+
+    /** Una sola corrida de [asegurarPuestoAbierto] por vida del VM. */
+    private var puestoFeriaAsegurado = false
+
     init {
         viewModelScope.launch {
             sesion.apiActiva()?.let { moneda = MonedaRepository(it).resolver() }
@@ -208,6 +219,33 @@ class CobrarViewModel(
         // La ventana buena es el rato en que se arma el carrito: no cuesta
         // nada y es la diferencia entre elegir a Juan y mirar una lista vacía.
         cargarClientes()
+    }
+
+    /**
+     * Baja el flag de feria desde la Screen (`esFeria()` no se puede llamar acá).
+     *
+     * Si es feria y hay red, abre el puesto con $0 reusando [asegurarPuestoAbierto]
+     * (mismo POST que Caja; 409 = ya abierto = éxito).
+     */
+    fun modoFeria(v: Boolean = true) {
+        esFeria = v
+        if (v) asegurarPuestoSiFeria()
+    }
+
+    private fun asegurarPuestoSiFeria() {
+        if (!esFeria || puestoFeriaAsegurado || !hayConexion) return
+        val api = sesion.apiActiva() ?: return
+        puestoFeriaAsegurado = true
+        viewModelScope.launch {
+            when (asegurarPuestoAbierto(api)) {
+                is ResultadoPuesto.Abierto -> Unit
+                is ResultadoPuesto.Falla -> {
+                    // Se deja reintentar si la red volvió o el server contestó mal
+                    // una vez: no es un error de cobro, es preparación del día.
+                    puestoFeriaAsegurado = false
+                }
+            }
+        }
     }
 
     /**

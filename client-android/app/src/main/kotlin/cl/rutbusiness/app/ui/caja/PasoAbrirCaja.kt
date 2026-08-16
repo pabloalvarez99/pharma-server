@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
@@ -20,21 +21,22 @@ import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * Paso 1: abrir la caja.
+ * Paso 1: abrir la caja (o el puesto de feria).
  *
- * Es lo primero del día y tiene que costar un campo. Todo lo demás — qué caja,
- * qué anotar — es opcional y está debajo, para que quien tiene una sola caja
- * escriba el monto y toque el botón sin leer nada más.
+ * En retail es lo primero del día y tiene que costar un campo. En feria el
+ * puesto se abre solo con $0; si la dueña ve este formulario, el copy habla de
+ * puesto y el CTA es «Empezar el día».
  *
  * El campo del monto va **arriba de todo** y la pantalla scrollea con
  * `imePadding`: cuando el teclado numérico sube, el campo enfocado se lleva a la
- * vista y el botón queda alcanzable scrolleando. Es el error clásico de esta
- * pantalla y el que la arruina entera.
+ * vista y el botón queda alcanzable scrolleando.
  */
 @Composable
 fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val feria = vm.esFeria || esFeria()
+    val copy = copyAbrirCaja(feria)
 
     Column(
         modifier = modifier
@@ -44,11 +46,9 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        RbCard(title = "¿Con cuánta plata partes?") {
+        RbCard(title = copy.tituloCard) {
             Text(
-                text = "Cuenta lo que hay en el cajón para dar vuelto y escríbelo. " +
-                    "Desde que abres la caja, todo lo que vendas en efectivo se va sumando " +
-                    "solo hasta el cierre.",
+                text = copy.ayuda,
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -56,15 +56,17 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
             RbTextField(
                 value = vm.montoDeApertura,
                 onValueChange = vm::cambiarMontoDeApertura,
-                label = "Plata con la que parte el cajón",
+                label = copy.etiquetaMonto,
                 placeholder = "0",
-                supportingText = "Si el cajón arranca vacío, escribe 0.",
+                supportingText = copy.ayudaMonto,
                 numeric = true,
                 keyboardType = tecladoDePlata(vm.moneda),
                 enabled = !vm.guardando,
             )
         }
 
+        // Elegir caja física sólo tiene sentido con más de una. Con una (o
+        // ninguna) no se pregunta: feria casi nunca tiene cajones nombrados.
         if (vm.cajas.size > 1) {
             RbCard(title = "¿Cuál caja?") {
                 Text(
@@ -90,15 +92,17 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        RbCard(title = "¿Algo que anotar?") {
-            RbTextField(
-                value = vm.notaDeApertura,
-                onValueChange = vm::cambiarNotaDeApertura,
-                label = "Nota de la apertura (opcional)",
-                placeholder = "Por ejemplo: quedaron $5.000 de anoche",
-                supportingText = "Se guarda con la caja. Sirve para acordarse en el cierre.",
-                enabled = !vm.guardando,
-            )
+        if (!feria) {
+            RbCard(title = "¿Algo que anotar?") {
+                RbTextField(
+                    value = vm.notaDeApertura,
+                    onValueChange = vm::cambiarNotaDeApertura,
+                    label = "Nota de la apertura (opcional)",
+                    placeholder = "Por ejemplo: quedaron $5.000 de anoche",
+                    supportingText = "Se guarda con la caja. Sirve para acordarse en el cierre.",
+                    enabled = !vm.guardando,
+                )
+            }
         }
 
         vm.errorDeAccion?.let { error ->
@@ -119,7 +123,7 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
         }
 
         RbButton(
-            label = if (vm.guardando) "Abriendo..." else "Abrir la caja",
+            label = if (vm.guardando) copy.ctaGuardando else copy.cta,
             onClick = vm::abrirCaja,
             enabled = !vm.guardando && vm.impedimentoParaAbrir() == null,
             fillWidth = true,

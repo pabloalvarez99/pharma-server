@@ -24,6 +24,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
 import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
@@ -61,6 +62,13 @@ fun CobrarRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CobrarScreen(vm: CobrarViewModel) {
+    // Feria: al entrar a Cobrar se abre el puesto con $0 (o 409 = ya abierto).
+    // La Screen lee esFeria(); el VM no puede tocar CompositionLocal.
+    val feria = esFeria()
+    LaunchedEffect(feria) {
+        if (feria) vm.modoFeria(true)
+    }
+
     // Atrás desde el paso de pago vuelve a buscar, con el carrito intacto. Se
     // registra más adentro que el de `RutBusinessApp`, así que gana: primero se
     // deshace el paso, y recién cuando ya no hay paso que deshacer, atrás

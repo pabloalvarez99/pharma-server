@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
@@ -80,12 +81,19 @@ fun PasoCajaAbierta(vm: CajaViewModel, modifier: Modifier = Modifier) {
 private fun DeberiaHaber(vm: CajaViewModel) {
     val colors = RbTheme.colors
     val esperado = vm.arqueo?.session?.esperado
+    val feria = vm.esFeria || esFeria()
+    val copy = copyCajaAbierta(feria)
 
-    RbCard(title = "Debería haber en el cajón") {
+    RbCard(title = copy.tituloEsperado) {
         if (esperado == null) {
             Text(
-                text = "No pudimos traer la cuenta de la caja. La caja sigue abierta y puedes " +
-                    "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla.",
+                text = if (feria) {
+                    "No pudimos traer la cuenta del puesto. El día sigue abierto y puedes " +
+                        "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla."
+                } else {
+                    "No pudimos traer la cuenta de la caja. La caja sigue abierta y puedes " +
+                        "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla."
+                },
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -97,8 +105,13 @@ private fun DeberiaHaber(vm: CajaViewModel) {
             emphasis = RbAmountEmphasis.Headline,
         )
         Text(
-            text = "Lo calcula el computador del negocio con lo que pusiste al abrir, lo que " +
-                "vendiste en efectivo y lo que sacaste o metiste a mano.",
+            text = if (feria) {
+                "Lo calcula el sistema con lo del inicio del día, lo vendido en efectivo y " +
+                    "lo que sacaste o metiste a mano."
+            } else {
+                "Lo calcula el computador del negocio con lo que pusiste al abrir, lo que " +
+                    "vendiste en efectivo y lo que sacaste o metiste a mano."
+            },
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -144,6 +157,8 @@ private fun LineaDeDesglose(concepto: String, monto: String) {
 @Composable
 private fun Acciones(vm: CajaViewModel) {
     val dimens = RbTheme.dimens
+    val feria = vm.esFeria || esFeria()
+    val copy = copyCajaAbierta(feria)
 
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
         vm.errorDeAccion?.let { error ->
@@ -172,7 +187,7 @@ private fun Acciones(vm: CajaViewModel) {
             fillWidth = true,
         )
         RbButton(
-            label = "Cerrar la caja",
+            label = copy.ctaCerrar,
             onClick = vm::irAlArqueo,
             enabled = !vm.guardando,
             fillWidth = true,
