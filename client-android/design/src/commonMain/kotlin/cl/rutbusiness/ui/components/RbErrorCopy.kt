@@ -15,9 +15,10 @@ package cl.rutbusiness.ui.components
  * the failure is theirs. Same with "Ocurrió un error al cargar la información",
  * which says nothing actionable at all.
  *
- * Every message here follows one shape: **what happened, then what to do.** No
- * process names, no status codes, no "error". If there is genuinely nothing the
- * user can do, the copy says who can.
+ * **Tone = recado, not stacktrace.** Short title, plain Chilean Spanish, what
+ * happened then what to do. No process names, no status codes, no "error", no
+ * "servidor", no "sistema". If there is genuinely nothing the user can do, the
+ * copy says who can.
  */
 data class RbErrorCopy(
     val title: String,
@@ -66,16 +67,15 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
     )
 
     RbErrorKind.Timeout -> RbErrorCopy(
-        title = "Se demoró demasiado",
-        message = "La conexión está muy lenta y no alcanzamos a traer $what. " +
-            "Espera unos segundos y vuelve a intentar.",
+        title = "Se demoró",
+        message = "No alcanzamos a traer $what. Esperá un ratito e intentá de nuevo.",
         retryLabel = "Reintentar",
     )
 
     RbErrorKind.Forbidden -> RbErrorCopy(
-        title = "No tienes acceso a esto",
-        message = "Tu cuenta no puede ver $what. Si lo necesitas para trabajar, " +
-            "pídele al dueño del negocio que te lo habilite.",
+        title = "Esto no está para tu cuenta",
+        message = "No podés ver $what con esta cuenta. Si lo necesitás para trabajar, " +
+            "pedile a quien te dio la cuenta que te lo habilite.",
         // Retrying the same request with the same account cannot succeed.
         retryLabel = null,
     )
@@ -101,23 +101,23 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
     // texto, no el silencio: prometerle un rescate a alguien que ya está
     // perdido y no cumplirlo es peor que no decirle nada.
     RbErrorKind.Unauthorized -> RbErrorCopy(
-        title = "Tienes que entrar de nuevo",
-        message = "Por seguridad se cerró tu sesión. Te vamos a llevar a la pantalla " +
-            "de entrada para que ingreses con tu correo y tu clave.",
+        title = "Hay que entrar de nuevo",
+        message = "Por seguridad se cerró tu sesión. Te llevamos a la entrada para " +
+            "que pongas tu correo y tu clave.",
         retryLabel = null,
     )
 
     RbErrorKind.ServerFault -> RbErrorCopy(
-        title = "El sistema no respondió bien",
+        title = "No se pudo ahora",
         message = "No es culpa tuya y no perdiste nada de lo que hiciste. " +
-            "Vuelve a intentar en un momento.",
+            "Intentá de nuevo en un ratito.",
         retryLabel = "Reintentar",
     )
 
     RbErrorKind.Unknown -> RbErrorCopy(
-        title = "No pudimos mostrar esto",
-        message = "Algo falló al cargar $what. Vuelve a intentar; si sigue " +
-            "igual, cierra la aplicación y ábrela de nuevo.",
+        title = "No salió",
+        message = "No pudimos mostrar $what. Intentá de nuevo; si sigue igual, " +
+            "cerrá la app y abrila otra vez.",
         retryLabel = "Reintentar",
     )
 }

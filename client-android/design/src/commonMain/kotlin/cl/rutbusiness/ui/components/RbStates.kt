@@ -208,9 +208,8 @@ fun RbEmptyState(
  *
  * Announced assertively, matching the web helper's `role="alert"`.
  *
- * The message must say **what to do**, in plain Chilean Spanish, with no
- * technical jargon - see [RbErrorCopy], which is the ported and rewritten
- * version of `classifyFetchError`.
+ * Copy must read like a **recado** (what happened + what to do), never like a
+ * stacktrace — see [RbErrorCopy]. No process names, status codes, or "error".
  */
 @Composable
 fun RbErrorState(
