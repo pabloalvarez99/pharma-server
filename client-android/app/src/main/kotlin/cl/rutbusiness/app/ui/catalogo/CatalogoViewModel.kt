@@ -15,6 +15,7 @@ import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.money.MonedaRepository
 import cl.rutbusiness.core.net.Resultado
+import cl.rutbusiness.core.rubro.RubroPack
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbErrorCopy
 import kotlinx.coroutines.Job
@@ -26,6 +27,15 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /** Los dos momentos de esta pantalla: mirar la lista, o cargar una cosa. */
 enum class PasoDelCatalogo { Lista, Formulario }
+
+/**
+ * Si el alta de "Lo que vendo" usa `POST /products/ensure` en vez de create.
+ *
+ * Feria / agent_home: cositas nombradas (tomates) sin inventario, cashier+.
+ * Formal (farmacia, etc.) sigue con create (laboratorio, stock, admin+).
+ */
+fun usaEnsure(pack: RubroPack): Boolean =
+    pack.features.agentHome || pack.rubro.equals("feria", ignoreCase = true)
 
 /**
  * "Lo que vendo": la lista de lo que el negocio vende y el alta a mano.
@@ -44,6 +54,11 @@ class CatalogoViewModel(
     private val sesion: SessionRepository,
     /** Clave del atributo de unidad que declara el pack (`attrs.unidad`). */
     private val claveDeUnidad: String = CLAVE_UNIDAD,
+    /**
+     * Alta por ensure (feria). Formal deja `false` y usa [crearProducto].
+     * Se fija al armar el VM desde el pack; no se relee en cada guardar.
+     */
+    private val usaEnsure: Boolean = false,
 ) : ViewModel() {
 
     var paso by mutableStateOf(PasoDelCatalogo.Lista)
@@ -229,17 +244,28 @@ class CatalogoViewModel(
 
         viewModelScope.launch {
             val r = if (cosa == null) {
-                crearProducto(
-                    api = api,
-                    nombre = limpioNombre,
-                    precio = paraElServidor,
-                    // Nace con una unidad, igual que en el escáner: con cero el
-                    // server rechaza la venta por stock insuficiente y cargar la
-                    // cosa no habría servido de nada.
-                    stock = 1,
-                    unidad = unidadEscrita,
-                    claveDeUnidad = claveDeUnidad,
-                )
+                if (usaEnsure) {
+                    // Feria: ensure cashier+ e idempotente por nombre. El server
+                    // pone physical_stock=false / stock=0 / rb_simple; no se
+                    // inventa id en el cliente ni se reusa el centinela suelto.
+                    asegurarProducto(
+                        api = api,
+                        nombre = limpioNombre,
+                        precio = paraElServidor,
+                    )
+                } else {
+                    crearProducto(
+                        api = api,
+                        nombre = limpioNombre,
+                        precio = paraElServidor,
+                        // Nace con una unidad, igual que en el escáner: con cero el
+                        // server rechaza la venta por stock insuficiente y cargar la
+                        // cosa no habría servido de nada.
+                        stock = 1,
+                        unidad = unidadEscrita,
+                        claveDeUnidad = claveDeUnidad,
+                    )
+                }
             } else {
                 editarProducto(
                     api = api,

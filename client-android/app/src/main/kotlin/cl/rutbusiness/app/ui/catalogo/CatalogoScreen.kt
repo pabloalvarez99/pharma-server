@@ -42,11 +42,19 @@ import cl.rutbusiness.ui.theme.RbTheme
  */
 @Composable
 fun CatalogoRoute(sesion: SessionRepository, onCerrar: () -> Unit) {
-    val copy = copyCatalogo(packActual())
+    val pack = packActual()
+    val copy = copyCatalogo(pack)
+    val ensure = usaEnsure(pack)
     val vm: CatalogoViewModel = viewModel(
-        key = "catalogo:${copy.claveUnidad}",
+        key = "catalogo:${copy.claveUnidad}:ensure=$ensure",
         factory = viewModelFactory {
-            initializer { CatalogoViewModel(sesion, claveDeUnidad = copy.claveUnidad) }
+            initializer {
+                CatalogoViewModel(
+                    sesion,
+                    claveDeUnidad = copy.claveUnidad,
+                    usaEnsure = ensure,
+                )
+            }
         },
     )
     CatalogoScreen(vm = vm, copy = copy, onCerrar = onCerrar)
