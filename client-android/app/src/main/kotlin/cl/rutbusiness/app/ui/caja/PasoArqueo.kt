@@ -102,7 +102,7 @@ internal fun FormularioDeArqueo(
             .verticalScroll(rememberScrollState())
             .imePadding()
             .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space4),
     ) {
         RbCard(title = copy.tituloCard) {
             Text(

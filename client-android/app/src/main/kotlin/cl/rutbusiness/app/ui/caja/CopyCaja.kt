@@ -41,20 +41,37 @@ internal fun copyAbrirCaja(feria: Boolean): CopyAbrirCaja =
     }
 
 internal data class CopyCajaAbierta(
+    val chipEstado: String,
     val tituloEsperado: String,
     val ctaCerrar: String,
+    val tituloMovimientos: String,
+    val vacioMovimientos: String,
+    val ctaSacar: String,
+    val ctaMeter: String,
 )
 
 internal fun copyCajaAbierta(feria: Boolean): CopyCajaAbierta =
     if (feria) {
         CopyCajaAbierta(
+            chipEstado = "Puesto abierto",
             tituloEsperado = "Debería haber en el puesto",
             ctaCerrar = "Cerrar el día",
+            tituloMovimientos = "Plata que sacaste o metiste a mano",
+            vacioMovimientos = "Todavía no sacaste ni metiste plata a mano. " +
+                "Lo que cobrás en billete ya está contado arriba.",
+            ctaSacar = "Sacar plata",
+            ctaMeter = "Meter plata",
         )
     } else {
         CopyCajaAbierta(
+            chipEstado = "Caja abierta",
             tituloEsperado = "Debería haber en el cajón",
             ctaCerrar = "Cerrar la caja",
+            tituloMovimientos = "Lo que entró y salió a mano",
+            vacioMovimientos = "Todavía no sacaste ni metiste plata a mano. Las ventas en efectivo " +
+                "no aparecen acá: entran solas y ya están contadas arriba.",
+            ctaSacar = "Sacar plata",
+            ctaMeter = "Meter plata",
         )
     }
 
@@ -88,6 +105,65 @@ internal fun copyArqueoCaja(feria: Boolean): CopyArqueoCaja =
             ctaGuardando = "Cerrando...",
             confirmarTitulo = "¿Cerramos la caja?",
         )
+    }
+
+internal data class CopyMovimientoCaja(
+    val tituloCard: String,
+    val ayuda: String,
+    val etiquetaMonto: String,
+    val cta: String,
+    val ctaGuardando: String,
+    val ctaVolver: String,
+)
+
+/**
+ * Sacar o meter plata a mano: feria habla del día/puesto, retail del cajón.
+ */
+internal fun copyMovimientoCaja(feria: Boolean, esRetiro: Boolean): CopyMovimientoCaja =
+    if (feria) {
+        if (esRetiro) {
+            CopyMovimientoCaja(
+                tituloCard = "¿Cuánto sacás?",
+                ayuda = "La plata que sacás del puesto para pagar algo o para guardarla. " +
+                    "Se descuenta de lo que debería haber al cerrar el día.",
+                etiquetaMonto = "Plata que sacás",
+                cta = "Anotar que sacaste",
+                ctaGuardando = "Anotando...",
+                ctaVolver = "Volver al puesto",
+            )
+        } else {
+            CopyMovimientoCaja(
+                tituloCard = "¿Cuánto metés?",
+                ayuda = "La plata que le agregás al puesto: cambio que trajiste, un vuelto " +
+                    "que devolvieron. Se suma a lo que debería haber al cerrar el día.",
+                etiquetaMonto = "Plata que metés",
+                cta = "Anotar que metiste",
+                ctaGuardando = "Anotando...",
+                ctaVolver = "Volver al puesto",
+            )
+        }
+    } else {
+        if (esRetiro) {
+            CopyMovimientoCaja(
+                tituloCard = "¿Cuánto sacas?",
+                ayuda = "La plata que sacas del cajón para pagar algo o para guardarla. Se descuenta " +
+                    "de lo que debería haber al cerrar.",
+                etiquetaMonto = "Plata que sacas",
+                cta = "Anotar que sacaste",
+                ctaGuardando = "Anotando...",
+                ctaVolver = "Volver a la caja",
+            )
+        } else {
+            CopyMovimientoCaja(
+                tituloCard = "¿Cuánto metes?",
+                ayuda = "La plata que le agregas al cajón: cambio que trajiste, un vuelto que " +
+                    "devolvieron. Se suma a lo que debería haber al cerrar.",
+                etiquetaMonto = "Plata que metes",
+                cta = "Anotar que metiste",
+                ctaGuardando = "Anotando...",
+                ctaVolver = "Volver a la caja",
+            )
+        }
     }
 
 internal fun tituloPasoCaja(paso: PasoDeCaja, feria: Boolean, tipoMovimiento: String): String =

@@ -91,6 +91,9 @@ data class CopyDeDiferencia(
  * - **No hay signos de admiración, ni colores de alarma, ni la palabra
  *   "error".** El chip que acompaña usa el tono neutro justamente para eso.
  *
+ * Feria (`feria = true`) habla del **día** / **puesto**, no de «caja». El default
+ * `false` deja byte-estable el camino de farmacia.
+ *
  * Función pura para que el texto se pueda probar palabra por palabra sin montar
  * la pantalla: `DiferenciaTest` fija las frases, así que cambiarlas de gusto
  * rompe el build y obliga a pensarlo de nuevo.
@@ -100,6 +103,7 @@ fun copyDeDiferencia(
     contadoDelServidor: String?,
     esperadoDelServidor: String?,
     discrepanciaDelServidor: String?,
+    feria: Boolean = false,
 ): CopyDeDiferencia {
     val lectura = leerDiferencia(discrepanciaDelServidor)
     val contado = contadoDelServidor?.let { moneda.formatear(it) }
@@ -114,7 +118,7 @@ fun copyDeDiferencia(
 
     return when (lectura.cuadre) {
         Cuadre.Justo -> CopyDeDiferencia(
-            titular = "La caja cuadró",
+            titular = if (feria) "El día cuadró" else "La caja cuadró",
             explicacion = if (contado != null) {
                 "Contaste $contado y es justo lo que el sistema tenía anotado."
             } else {
@@ -138,17 +142,26 @@ fun copyDeDiferencia(
         )
 
         Cuadre.Desconocido -> CopyDeDiferencia(
-            titular = "Caja cerrada",
+            titular = if (feria) "Día cerrado" else "Caja cerrada",
             explicacion = if (contado != null) {
-                "La caja quedó cerrada con los $contado que contaste."
+                if (feria) {
+                    "El día quedó cerrado con los $contado que contaste."
+                } else {
+                    "La caja quedó cerrada con los $contado que contaste."
+                }
             } else {
                 comparacion
             },
             // Se dice que falta el dato en vez de mostrar un cero: "cuadró"
             // cuando en realidad no se pudo comparar es la única respuesta que
             // hace que la dueña deje de contar.
-            calma = "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
-                "guardado: vuelve a abrir la caja más tarde para ver cómo quedó.",
+            calma = if (feria) {
+                "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
+                    "guardado: volvé a abrir el puesto más tarde para ver cómo quedó."
+            } else {
+                "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
+                    "guardado: vuelve a abrir la caja más tarde para ver cómo quedó."
+            },
         )
     }
 }
