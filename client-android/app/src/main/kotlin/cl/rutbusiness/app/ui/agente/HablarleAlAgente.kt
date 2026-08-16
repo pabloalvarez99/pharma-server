@@ -52,5 +52,10 @@ fun irAlAgente(): (() -> Unit)? = LocalIrAlAgente.current
  */
 const val ASI_SE_ANOTA_UNA_VENTA = "vendí 2 kg de tomates a 2000"
 
-/** Ídem para fiar: quién y cuánto, en el orden en que se dice. */
-const val ASI_SE_FIA = "Don Juan me debe 5000"
+/**
+ * Ídem para fiar: una venta fiada completa (qué, a cuánto, a quién).
+ *
+ * "Don Juan me debe 5000" suena natural pero el parser lo deja Incomplete
+ * (pide el producto). Esta frase sí cierra el loop como Venta fiado.
+ */
+const val ASI_SE_FIA = "anota 2 kg de tomates a 2000 fiado a Don Juan"
