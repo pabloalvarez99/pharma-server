@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbLoadingState
@@ -107,7 +108,11 @@ fun TarjetaPropuesta(
             )
 
             EstadoPropuesta.Cancelada -> Cierre(
-                texto = "No lo hice. No cambió nada en tu negocio.",
+                texto = if (esFeria()) {
+                    "No lo hice. No cambió nada en tu puesto."
+                } else {
+                    "No lo hice. No cambió nada en tu negocio."
+                },
                 tono = Tono.Neutro,
             )
 

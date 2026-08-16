@@ -65,7 +65,7 @@ sealed class FallaDeAlta(
     ) : FallaDeAlta(
         titulo = "El servicio no está contestando",
         queHacer = if (nube) {
-            "Intentamos crear tu negocio y no hubo respuesta. Revisá que el teléfono tenga " +
+            "Intentamos crear tu puesto y no hubo respuesta. Revisá que el teléfono tenga " +
                 "internet, espera un momento y vuelve a intentar. Si al reintentar te dice que " +
                 "ese nombre o correo ya están, es que sí alcanzó a crearse: entra con tu correo " +
                 "y tu clave."
