@@ -8,8 +8,10 @@ import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.diag.Latencia
 // El alta de productos ya no vive detrás del escáner: es del catálogo, y el
 // escáner es uno de sus dos usuarios (`ui/catalogo/ProductosApi.kt`).
+import cl.rutbusiness.app.ui.caja.AccionErrorRed
 import cl.rutbusiness.app.ui.caja.ResultadoPuesto
 import cl.rutbusiness.app.ui.caja.asegurarPuestoAbierto
+import cl.rutbusiness.app.ui.caja.copyErrorRed
 import cl.rutbusiness.app.ui.catalogo.asegurarVentaSuelta
 import cl.rutbusiness.app.ui.catalogo.crearProducto
 import cl.rutbusiness.app.ui.catalogo.pegarCodigo
@@ -1093,9 +1095,7 @@ class CobrarViewModel(
     private fun copyDeCobroFallido(error: AppError): RbErrorCopy = when (error) {
         is AppError.ServidorNoResponde -> RbErrorCopy(
             title = "No llegó la venta",
-            message = "No alcanzamos a mandarle la venta al computador del negocio. Revisa que " +
-                "el teléfono tenga señal y toca «Reintentar»: aunque la mandes de nuevo, no se " +
-                "cobra dos veces.",
+            message = copyErrorRed(feria = esFeria, accion = AccionErrorRed.Cobro),
             retryLabel = "Reintentar",
         )
 

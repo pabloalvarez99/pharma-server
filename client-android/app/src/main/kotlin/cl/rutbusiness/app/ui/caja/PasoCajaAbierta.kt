@@ -105,13 +105,7 @@ private fun DeberiaHaber(vm: CajaViewModel) {
             emphasis = RbAmountEmphasis.Headline,
         )
         Text(
-            text = if (feria) {
-                "Lo calcula el sistema con lo del inicio del día, lo vendido en efectivo y " +
-                    "lo que sacaste o metiste a mano."
-            } else {
-                "Lo calcula el computador del negocio con lo que pusiste al abrir, lo que " +
-                    "vendiste en efectivo y lo que sacaste o metiste a mano."
-            },
+            text = copyEsperadoEnPuesto(feria),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
