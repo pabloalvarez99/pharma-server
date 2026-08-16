@@ -12,6 +12,7 @@
 pub mod actions;
 pub mod deterministic;
 pub mod feria_caja;
+pub mod feria_catalogo;
 pub mod intent;
 pub mod llm;
 pub mod money;
