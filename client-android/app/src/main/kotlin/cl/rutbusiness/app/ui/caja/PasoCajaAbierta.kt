@@ -63,7 +63,9 @@ fun PasoCajaAbierta(vm: CajaViewModel, modifier: Modifier = Modifier) {
         item("deberia-haber") { DeberiaHaber(vm, copy, feria) }
 
         item("desglose") {
-            if (arqueo != null) Desglose(moneda = vm.moneda, arqueo = arqueo)
+            if (arqueo != null) {
+                Desglose(moneda = vm.moneda, arqueo = arqueo, feria = feria)
+            }
         }
 
         item("acciones") { Acciones(vm, copy) }
@@ -108,13 +110,7 @@ private fun DeberiaHaber(vm: CajaViewModel, copy: CopyCajaAbierta, feria: Boolea
 
         if (esperado == null) {
             Text(
-                text = if (feria) {
-                    "No pudimos traer la cuenta del puesto. El día sigue abierto y puedes " +
-                        "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla."
-                } else {
-                    "No pudimos traer la cuenta de la caja. La caja sigue abierta y puedes " +
-                        "seguir vendiendo; toca «Actualizar» arriba para volver a pedirla."
-                },
+                text = copyErrorEsperadoAbierta(feria),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = dimens.space2),
@@ -136,15 +132,17 @@ private fun DeberiaHaber(vm: CajaViewModel, copy: CopyCajaAbierta, feria: Boolea
 }
 
 @Composable
-private fun Desglose(moneda: Moneda, arqueo: ArqueoDeCajaDto) {
-    RbCard(title = "De dónde sale") {
-        LineaDeDesglose("Con lo que abriste", moneda.formatear(arqueo.session.apertura))
+private fun Desglose(moneda: Moneda, arqueo: ArqueoDeCajaDto, feria: Boolean) {
+    val copy = copyDesgloseAbierta(feria)
+    RbCard(title = copy.titulo) {
+        // Montos del server tal cual: no se re-arman en el teléfono.
+        LineaDeDesglose(copy.apertura, moneda.formatear(arqueo.session.apertura))
         RbDivider()
-        LineaDeDesglose("Vendido en efectivo", moneda.formatear(arqueo.ventasEnEfectivo))
+        LineaDeDesglose(copy.ventasEfectivo, moneda.formatear(arqueo.ventasEnEfectivo))
         RbDivider()
-        LineaDeDesglose("Metiste a mano", moneda.formatear(arqueo.entradas))
+        LineaDeDesglose(copy.entradas, moneda.formatear(arqueo.entradas))
         RbDivider()
-        LineaDeDesglose("Sacaste a mano", moneda.formatear(arqueo.salidas))
+        LineaDeDesglose(copy.salidas, moneda.formatear(arqueo.salidas))
     }
 }
 
@@ -220,9 +218,7 @@ private fun FilaDeMovimiento(movimiento: MovimientoDeCajaDto, moneda: Moneda) {
             modifier = Modifier.fillMaxWidth(),
             content = {
                 Text(
-                    // La palabra dice el signo, no el color: quien no distingue
-                    // el rojo del verde lee exactamente lo mismo.
-                    text = if (movimiento.esRetiro) "Sacaste" else "Metiste",
+                    text = copyPalabraMovimiento(esRetiro = movimiento.esRetiro),
                     style = RbTheme.typography.bodyStrong,
                     color = colors.textPrimary,
                 )
