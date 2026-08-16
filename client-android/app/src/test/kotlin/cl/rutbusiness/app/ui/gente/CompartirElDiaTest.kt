@@ -158,7 +158,8 @@ class CompartirElDiaTest {
         compose.onNodeWithText("Contar cómo va el día").performScrollTo().performClick()
         compose.waitForIdle()
 
-        assertEquals(listOf("Hoy en el negocio: $45.000 en 12 boletas"), puerto.mandados)
+        // Feria: puesto (no negocio) + ventas (no boletas).
+        assertEquals(listOf("Hoy en el puesto: $45.000 en 12 ventas"), puerto.mandados)
     }
 
     @Test

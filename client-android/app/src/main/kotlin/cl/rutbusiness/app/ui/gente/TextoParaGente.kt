@@ -54,10 +54,13 @@ fun mensajeDeuda(nombre: String, pesos: Long): String =
  *   función no suma, no convierte y no infiere: si inventara un monto, el
  *   número del chat y el de la pantalla podrían discrepar, y el que la gente
  *   guarda es el del chat.
+ * @param feria en feria el día se cuenta en el **puesto**, no en el negocio
+ *   (ADR-0022). Default false = copy formal, para no romper call-sites ni tests.
  */
-fun mensajeHoy(resumenCorto: String): String {
+fun mensajeHoy(resumenCorto: String, feria: Boolean = false): String {
     val limpio = resumenCorto.trim()
-    return if (limpio.isEmpty()) "Hoy en el negocio." else "Hoy en el negocio: $limpio"
+    val donde = if (feria) "puesto" else "negocio"
+    return if (limpio.isEmpty()) "Hoy en el $donde." else "Hoy en el $donde: $limpio"
 }
 
 /**
