@@ -72,6 +72,7 @@ fun AssistScreen(
 
     // La Screen lee esFeria(); el VM no puede tocar CompositionLocal.
     val feria = esFeria()
+    val chrome = remember(feria) { copyAssistChrome(feria) }
     LaunchedEffect(feria) {
         if (feria) vm.modoFeria(true)
     }
@@ -132,22 +133,27 @@ fun AssistScreen(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             if (vm.recienEmpezando) {
-                item { Bienvenida(onElegir = vm::preguntar) }
+                item { Bienvenida(chrome = chrome, onElegir = vm::preguntar) }
             }
 
             items(
                 count = vm.mensajes.size,
                 key = { vm.mensajes[it].id },
             ) { indice ->
-                MensajeEnLista(vm = vm, mensaje = vm.mensajes[indice])
+                MensajeEnLista(
+                    vm = vm,
+                    mensaje = vm.mensajes[indice],
+                    reintentar = chrome.reintentar,
+                )
             }
 
             if (vm.pensando) {
-                item { RbLoadingState(label = "Estoy revisando tus datos…") }
+                item { RbLoadingState(label = chrome.pensando) }
             }
         }
 
         Redactor(
+            chrome = chrome,
             texto = vm.borrador,
             habilitado = !vm.pensando,
             onEscribir = vm::escribir,
@@ -171,7 +177,11 @@ fun AssistScreen(
 }
 
 @Composable
-private fun MensajeEnLista(vm: AssistViewModel, mensaje: Mensaje) {
+private fun MensajeEnLista(
+    vm: AssistViewModel,
+    mensaje: Mensaje,
+    reintentar: String,
+) {
     when (mensaje) {
         is Mensaje.Mia -> Burbuja(texto = mensaje.texto, mia = true)
 
@@ -188,6 +198,7 @@ private fun MensajeEnLista(vm: AssistViewModel, mensaje: Mensaje) {
 
         is Mensaje.Problema -> Problema(
             mensaje = mensaje,
+            reintentar = reintentar,
             onReintentar = { vm.preguntar(it) },
         )
     }
@@ -263,11 +274,15 @@ private fun Burbuja(texto: String, mia: Boolean) {
  * mensaje más de la conversación.
  */
 @Composable
-private fun Problema(mensaje: Mensaje.Problema, onReintentar: (String) -> Unit) {
+private fun Problema(
+    mensaje: Mensaje.Problema,
+    reintentar: String,
+    onReintentar: (String) -> Unit,
+) {
     RbErrorState(
         title = mensaje.titulo,
         message = mensaje.texto,
-        retryLabel = mensaje.preguntaParaReintentar?.let { "Volver a preguntar" },
+        retryLabel = mensaje.preguntaParaReintentar?.let { reintentar },
         onRetry = mensaje.preguntaParaReintentar?.let { pregunta -> { onReintentar(pregunta) } },
     )
 }
@@ -289,7 +304,10 @@ private fun Problema(mensaje: Mensaje.Problema, onReintentar: (String) -> Unit) 
  * acá", no como tags decorativos de un bot.
  */
 @Composable
-private fun Bienvenida(onElegir: (String) -> Unit) {
+private fun Bienvenida(
+    chrome: CopyAssistChrome,
+    onElegir: (String) -> Unit,
+) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val shapes = RbTheme.shapes
@@ -303,7 +321,7 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
     // enseña nada — el punto es que la dueña vea algo que tocar sin hacer nada.
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space4)) {
         Text(
-            text = "Pídeme lo que necesites",
+            text = chrome.tituloBienvenida,
             style = RbTheme.typography.heading,
             color = colors.textPrimary,
             modifier = Modifier.rbHeading(),
@@ -325,7 +343,7 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = "Toca una para empezar",
+                text = chrome.etiquetaChips,
                 style = RbTheme.typography.label,
                 color = colors.brandText,
             )
@@ -360,6 +378,7 @@ private fun Bienvenida(onElegir: (String) -> Unit) {
  */
 @Composable
 private fun Redactor(
+    chrome: CopyAssistChrome,
     texto: String,
     habilitado: Boolean,
     onEscribir: (String) -> Unit,
@@ -407,11 +426,11 @@ private fun Redactor(
                             dictado?.olvidarAviso()
                             onEscribir(escrito)
                         },
-                        label = "¿Qué necesitas?",
+                        label = chrome.etiquetaCampo,
                         placeholder = if (dictado == null) {
-                            "Escribe o toca una sugerencia"
+                            chrome.placeholderSinVoz
                         } else {
-                            "Habla o escribe"
+                            chrome.placeholderConVoz
                         },
                         enabled = habilitado,
                         imeAction = ImeAction.Send,
@@ -443,7 +462,7 @@ private fun Redactor(
             }
 
             RbButton(
-                label = "Enviar",
+                label = chrome.enviar,
                 onClick = onEnviar,
                 enabled = habilitado && texto.isNotBlank(),
                 fillWidth = true,
