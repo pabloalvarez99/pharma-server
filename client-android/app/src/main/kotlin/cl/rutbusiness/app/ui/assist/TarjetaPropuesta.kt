@@ -68,10 +68,9 @@ fun TarjetaPropuesta(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(colors.surface)
-            // Borde de marca y grueso: esta tarjeta tiene que separarse del
-            // resto de la conversación, porque es la única que pide una
-            // decisión.
+            // brandContainer: se lee como "te lo digo en voz alta", no como
+            // panel admin. El borde de marca sigue marcando la decisión.
+            .background(colors.brandContainer)
             .border(dimens.focusRing, colors.brandText, shape)
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
@@ -170,6 +169,8 @@ private fun Esperando(
             )
         }
 
+        // Un solo verbo primario a ancho completo: se siente como "sí, hazlo",
+        // no como un par de botones de chatbot simétricos.
         RbButton(
             label = etiquetaDeConfirmar(mensaje.propuesta.name),
             onClick = onConfirmar,
@@ -220,7 +221,17 @@ private fun Detalle(propuesta: PropuestaAccion) {
 
     if (lineas.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+    // Detalle sobre surface dentro del brandContainer de la tarjeta: se lee
+    // el desglose sin competir con el resumen hablado de arriba.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RbTheme.shapes.field)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, RbTheme.shapes.field)
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
         Text(
             text = "Esto es lo que voy a guardar",
             style = RbTheme.typography.label,
@@ -268,8 +279,10 @@ private fun Cierre(texto: String, tono: Tono) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
 
+    // La tarjeta ya es brandContainer; el cierre usa surface / surfaceVariant /
+    // dangerContainer para no fundirse con el fondo de la propuesta.
     val fondo = when (tono) {
-        Tono.Bien -> colors.brandContainer
+        Tono.Bien -> colors.surface
         Tono.Neutro -> colors.surfaceVariant
         Tono.Atencion -> colors.dangerContainer
     }
