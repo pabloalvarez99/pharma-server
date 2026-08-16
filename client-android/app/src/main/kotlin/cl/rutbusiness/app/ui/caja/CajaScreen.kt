@@ -163,10 +163,15 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
 
 private fun subtituloDelPaso(vm: CajaViewModel, feria: Boolean): String? = when (vm.paso) {
     PasoDeCaja.Abrir -> if (feria) "Sin contar monedas" else "Lo primero del día"
-    PasoDeCaja.Abierta -> vm.sesionDeCaja?.nombreDeCaja?.ifBlank { null }
-    PasoDeCaja.Movimiento -> "Queda anotado hasta el cierre"
-    PasoDeCaja.Arqueo -> "Cuenta primero, después cierra"
-    PasoDeCaja.Cerrada -> null
+    // Feria: el nombre del register suele ser "puesto"; no lo repite el subtítulo.
+    PasoDeCaja.Abierta -> if (feria) {
+        "Día en marcha"
+    } else {
+        vm.sesionDeCaja?.nombreDeCaja?.ifBlank { null }
+    }
+    PasoDeCaja.Movimiento -> if (feria) "Queda en la cuenta del día" else "Queda anotado hasta el cierre"
+    PasoDeCaja.Arqueo -> if (feria) "Contá primero, después cerrás" else "Cuenta primero, después cierra"
+    PasoDeCaja.Cerrada -> if (feria) "Listo por hoy" else null
 }
 
 /**

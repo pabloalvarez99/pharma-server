@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
@@ -26,19 +27,20 @@ import cl.rutbusiness.ui.theme.rbHeading
  * errara por un peso, estaría acusando a alguien de un peso que no falta.
  *
  * El texto lo arma [copyDeDiferencia], que es una función pura y está probada
- * palabra por palabra.
+ * palabra por palabra. Feria habla del día, no de la caja.
  */
 @Composable
 fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val cerrada = vm.cierre?.session
+    val feria = vm.esFeria || esFeria()
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space4),
     ) {
         TarjetaDeDiferencia(
             moneda = vm.moneda,
@@ -46,6 +48,7 @@ fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier =
             esperadoDelServidor = cerrada?.esperado,
             discrepanciaDelServidor = cerrada?.discrepancia,
             notaDeCierre = cerrada?.notaDeCierre,
+            feria = feria,
         )
 
         RbButton(
@@ -66,6 +69,7 @@ fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier =
  *   que grabó el cierre.
  * @param esperadoDelServidor `closing_cash_expected`, ídem.
  * @param discrepanciaDelServidor `discrepancia` = contado − esperado, ídem.
+ * @param feria copy de día/puesto (default false = farmacia byte-estable).
  */
 @Composable
 internal fun TarjetaDeDiferencia(
@@ -74,13 +78,16 @@ internal fun TarjetaDeDiferencia(
     esperadoDelServidor: String?,
     discrepanciaDelServidor: String?,
     notaDeCierre: String? = null,
+    feria: Boolean = false,
 ) {
     val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
     val copy = copyDeDiferencia(
         moneda = moneda,
         contadoDelServidor = contadoDelServidor,
         esperadoDelServidor = esperadoDelServidor,
         discrepanciaDelServidor = discrepanciaDelServidor,
+        feria = feria,
     )
 
     RbCard {
@@ -99,7 +106,9 @@ internal fun TarjetaDeDiferencia(
             text = copy.titular,
             style = rbAmountStyle(RbAmountEmphasis.Headline),
             color = colors.textPrimary,
-            modifier = Modifier.rbHeading(),
+            modifier = Modifier
+                .rbHeading()
+                .padding(bottom = dimens.space2),
         )
 
         Text(
@@ -112,6 +121,7 @@ internal fun TarjetaDeDiferencia(
             text = copy.calma,
             style = RbTheme.typography.support,
             color = colors.textSecondary,
+            modifier = Modifier.padding(top = dimens.space2),
         )
 
         notaDeCierre?.takeIf { it.isNotBlank() }?.let { nota ->
@@ -119,6 +129,7 @@ internal fun TarjetaDeDiferencia(
                 text = "Anotaste: «$nota»",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
+                modifier = Modifier.padding(top = dimens.space2),
             )
         }
     }

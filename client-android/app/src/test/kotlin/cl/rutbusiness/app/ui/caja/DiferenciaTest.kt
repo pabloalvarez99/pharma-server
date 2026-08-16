@@ -138,6 +138,19 @@ class DiferenciaTest {
     }
 
     @Test
+    fun `feria cuando cuadra habla del dia no de la caja`() {
+        val copy = copyDeDiferencia(
+            moneda = pesos,
+            contadoDelServidor = "17500",
+            esperadoDelServidor = "17500",
+            discrepanciaDelServidor = "0",
+            feria = true,
+        )
+        assertEquals("El día cuadró", copy.titular)
+        assertEquals("Listo por hoy.", copy.calma)
+    }
+
+    @Test
     fun `sin comparacion se dice que falta el dato`() {
         val copy = copyDeDiferencia(
             moneda = pesos,
@@ -149,6 +162,21 @@ class DiferenciaTest {
         assertEquals("Caja cerrada", copy.titular)
         assertEquals("La caja quedó cerrada con los $15.000 que contaste.", copy.explicacion)
         assert(copy.calma.contains("No pudimos traer la comparación"))
+    }
+
+    @Test
+    fun `feria sin comparacion habla del puesto`() {
+        val copy = copyDeDiferencia(
+            moneda = pesos,
+            contadoDelServidor = "15000",
+            esperadoDelServidor = null,
+            discrepanciaDelServidor = null,
+            feria = true,
+        )
+        assertEquals("Día cerrado", copy.titular)
+        assertEquals("El día quedó cerrado con los $15.000 que contaste.", copy.explicacion)
+        assert(copy.calma.lowercase().contains("puesto"))
+        assert(!copy.calma.lowercase().contains("caja"))
     }
 
     /**

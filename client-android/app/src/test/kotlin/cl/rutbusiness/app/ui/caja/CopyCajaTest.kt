@@ -38,7 +38,11 @@ class CopyCajaTest {
     fun `feria cierra el dia y pregunta cuanta plata hay`() {
         val abierta = copyCajaAbierta(feria = true)
         assertEquals("Cerrar el día", abierta.ctaCerrar)
+        assertEquals("Puesto abierto", abierta.chipEstado)
         assertFalse(abierta.tituloEsperado.lowercase().contains("cajón"))
+        assertFalse(abierta.vacioMovimientos.lowercase().contains("cajón"))
+        assertTrue(abierta.vacioMovimientos.lowercase().contains("billete") ||
+            abierta.tituloMovimientos.lowercase().contains("plata"))
 
         val arqueo = copyArqueoCaja(feria = true)
         assertEquals("¿Cuánta plata hay?", arqueo.tituloCard)
@@ -50,11 +54,31 @@ class CopyCajaTest {
     fun `retail cierra la caja con jerga de cajon`() {
         val abierta = copyCajaAbierta(feria = false)
         assertEquals("Cerrar la caja", abierta.ctaCerrar)
+        assertEquals("Caja abierta", abierta.chipEstado)
         assertTrue(abierta.tituloEsperado.lowercase().contains("cajón"))
 
         val arqueo = copyArqueoCaja(feria = false)
         assertTrue(arqueo.tituloCard.lowercase().contains("cajón"))
         assertEquals("Cerrar la caja", arqueo.cta)
+    }
+
+    @Test
+    fun `feria saca y mete plata del puesto sin cajon`() {
+        val sacar = copyMovimientoCaja(feria = true, esRetiro = true)
+        assertTrue(sacar.ayuda.lowercase().contains("puesto"))
+        assertFalse(sacar.ayuda.lowercase().contains("cajón"))
+        assertEquals("Volver al puesto", sacar.ctaVolver)
+
+        val meter = copyMovimientoCaja(feria = true, esRetiro = false)
+        assertTrue(meter.ayuda.lowercase().contains("puesto"))
+        assertFalse(meter.ayuda.lowercase().contains("cajón"))
+    }
+
+    @Test
+    fun `retail saca y mete del cajon`() {
+        val sacar = copyMovimientoCaja(feria = false, esRetiro = true)
+        assertTrue(sacar.ayuda.lowercase().contains("cajón"))
+        assertEquals("Volver a la caja", sacar.ctaVolver)
     }
 
     @Test

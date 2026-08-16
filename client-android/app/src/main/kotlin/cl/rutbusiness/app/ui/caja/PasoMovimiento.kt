@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
@@ -18,7 +19,7 @@ import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * Paso 3: sacar o meter plata del cajón, con motivo.
+ * Paso 3: sacar o meter plata del puesto / cajón, con motivo.
  *
  * El motivo es obligatorio y no por burocracia: en el cierre, un retiro sin
  * motivo se ve exactamente igual que plata que desapareció. Escribir "pagué el
@@ -34,6 +35,8 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val esRetiro = vm.tipoDeMovimiento == NuevoMovimiento.RETIRO
+    val feria = vm.esFeria || esFeria()
+    val copy = copyMovimientoCaja(feria = feria, esRetiro = esRetiro)
 
     Column(
         modifier = modifier
@@ -41,17 +44,11 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState())
             .imePadding()
             .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space4),
     ) {
-        RbCard(title = if (esRetiro) "¿Cuánto sacas?" else "¿Cuánto metes?") {
+        RbCard(title = copy.tituloCard) {
             Text(
-                text = if (esRetiro) {
-                    "La plata que sacas del cajón para pagar algo o para guardarla. Se descuenta " +
-                        "de lo que debería haber al cerrar."
-                } else {
-                    "La plata que le agregas al cajón: cambio que trajiste, un vuelto que " +
-                        "devolvieron. Se suma a lo que debería haber al cerrar."
-                },
+                text = copy.ayuda,
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -59,7 +56,7 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
             RbTextField(
                 value = vm.montoDelMovimiento,
                 onValueChange = vm::cambiarMontoDelMovimiento,
-                label = if (esRetiro) "Plata que sacas" else "Plata que metes",
+                label = copy.etiquetaMonto,
                 placeholder = "0",
                 numeric = true,
                 keyboardType = tecladoDePlata(vm.moneda),
@@ -96,18 +93,14 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
         }
 
         RbButton(
-            label = when {
-                vm.guardando -> "Anotando..."
-                esRetiro -> "Anotar que sacaste"
-                else -> "Anotar que metiste"
-            },
+            label = if (vm.guardando) copy.ctaGuardando else copy.cta,
             onClick = vm::guardarMovimiento,
             enabled = !vm.guardando && vm.impedimentoParaMover() == null,
             fillWidth = true,
         )
 
         RbButton(
-            label = "Volver a la caja",
+            label = copy.ctaVolver,
             onClick = vm::volverAlEstado,
             variant = RbButtonVariant.Secondary,
             enabled = !vm.guardando,
