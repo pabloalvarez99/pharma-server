@@ -79,6 +79,10 @@ class TextoParaGenteTest {
             "Hoy en el negocio: $45.000 en 12 boletas",
             mensajeHoy("$45.000 en 12 boletas"),
         )
+        assertEquals(
+            "Hoy en el negocio: $45.000 en 12 boletas",
+            mensajeHoy("$45.000 en 12 boletas", feria = false),
+        )
     }
 
     @Test
@@ -87,10 +91,24 @@ class TextoParaGenteTest {
         // la casa un día que el server no contestó. El cero se cree.
         assertEquals("Hoy en el negocio.", mensajeHoy(""))
         assertEquals("Hoy en el negocio.", mensajeHoy("   "))
+        assertEquals("Hoy en el negocio.", mensajeHoy("", feria = false))
     }
 
     @Test
     fun `el resumen no arrastra espacios del borde`() {
         assertEquals("Hoy en el negocio: $45.000 en 1 boleta", mensajeHoy("  $45.000 en 1 boleta "))
+    }
+
+    @Test
+    fun `en feria el dia se cuenta en el puesto y no en el negocio`() {
+        val conResumen = mensajeHoy("$45.000 en 12 ventas", feria = true)
+        assertEquals("Hoy en el puesto: $45.000 en 12 ventas", conResumen)
+        assertTrue(conResumen.startsWith("Hoy en el puesto"))
+        assertFalse(conResumen.contains("negocio"))
+
+        val vacio = mensajeHoy("", feria = true)
+        assertEquals("Hoy en el puesto.", vacio)
+        assertTrue(vacio.startsWith("Hoy en el puesto"))
+        assertFalse(vacio.contains("negocio"))
     }
 }

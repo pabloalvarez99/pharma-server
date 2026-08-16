@@ -283,6 +283,7 @@ internal fun TarjetaDelDia(
                                 monto = moneda.formatear(vendidoHoy),
                                 conteo = boletas,
                             ),
+                            feria = feria,
                         ),
                     )
                 },
