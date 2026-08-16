@@ -129,7 +129,7 @@ async fn el_segundo_feriante_crea_su_negocio_en_la_misma_nube() {
 }
 
 #[tokio::test]
-async fn alta_rechaza_el_mismo_nombre_corto() {
+async fn alta_rechaza_el_mismo_nombre_corto_y_sugiere_siguiente() {
     let tdb = spawn_db().await;
     let db = tdb.db;
     primer_negocio(&db).await;
@@ -138,16 +138,89 @@ async fn alta_rechaza_el_mismo_nombre_corto() {
         .oneshot(post(
             "/api/v1/alta",
             serde_json::json!({
-                "business_name": "Puesto de Juan",
-                "email": "otro@feria.cl",
+                "business_name": "Huevos de Marta",
+                "email": "marta@feria.cl",
                 "password": "clave-segura-2",
                 "vertical": "feria",
             }),
         ))
         .await
         .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_json(res).await["tenant_slug"], "huevos-de-marta");
+
+    let res = app(&db)
+        .oneshot(post(
+            "/api/v1/alta",
+            serde_json::json!({
+                "business_name": "Huevos de Marta",
+                "email": "otra@feria.cl",
+                "password": "clave-segura-3",
+                "vertical": "feria",
+            }),
+        ))
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
-    assert_eq!(body_json(res).await["error"]["code"], "SLUG_TOMADO");
+    let err = body_json(res).await;
+    assert_eq!(err["error"]["code"], "SLUG_TOMADO");
+    assert_eq!(err["error"]["details"]["suggested_slug"], "huevos-de-marta-2");
+    let msg = err["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("huevos-de-marta-2"),
+        "message debe incluir el slug sugerido: {msg}"
+    );
+    // Sin secretos en el envelope.
+    let raw = err.to_string();
+    assert!(!raw.contains("password"));
+    assert!(!raw.contains("clave-segura"));
+}
+
+#[tokio::test]
+async fn alta_sugiere_el_tercer_nombre_corto_si_el_segundo_tambien_esta() {
+    let tdb = spawn_db().await;
+    let db = tdb.db;
+    primer_negocio(&db).await;
+
+    for (name, email) in [
+        ("Huevos de Marta", "marta@feria.cl"),
+        ("Huevos de Marta 2", "marta2@feria.cl"),
+    ] {
+        let res = app(&db)
+            .oneshot(post(
+                "/api/v1/alta",
+                serde_json::json!({
+                    "business_name": name,
+                    "email": email,
+                    "password": "clave-segura-2",
+                    "vertical": "feria",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "alta de {name}");
+    }
+
+    let res = app(&db)
+        .oneshot(post(
+            "/api/v1/alta",
+            serde_json::json!({
+                "business_name": "Huevos de Marta",
+                "email": "marta3@feria.cl",
+                "password": "clave-segura-3",
+                "vertical": "feria",
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CONFLICT);
+    let err = body_json(res).await;
+    assert_eq!(err["error"]["code"], "SLUG_TOMADO");
+    assert_eq!(err["error"]["details"]["suggested_slug"], "huevos-de-marta-3");
+    assert!(err["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .contains("huevos-de-marta-3"));
 }
 
 #[tokio::test]
@@ -169,7 +242,10 @@ async fn alta_rechaza_el_mismo_correo_en_otro_puesto() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::CONFLICT);
-    assert_eq!(body_json(res).await["error"]["code"], "CORREO_TOMADO");
+    let err = body_json(res).await;
+    assert_eq!(err["error"]["code"], "CORREO_TOMADO");
+    // CORREO_TOMADO no gana suggested_slug ni cambia de forma.
+    assert!(err["error"]["details"].is_null() || err["error"].get("details").is_none());
 }
 
 #[tokio::test]
