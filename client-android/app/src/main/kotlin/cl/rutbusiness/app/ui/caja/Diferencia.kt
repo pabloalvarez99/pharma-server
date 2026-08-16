@@ -3,15 +3,15 @@ package cl.rutbusiness.app.ui.caja
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.money.Moneda
 
-/** Cómo terminó el arqueo. */
+/** Cómo terminó el cierre del día. */
 enum class Cuadre {
     /** La plata contada es exactamente la anotada. */
     Justo,
 
-    /** Hay menos plata en el cajón que la anotada. */
+    /** Hay menos plata de la que se había anotado. */
     Falta,
 
-    /** Hay más plata en el cajón que la anotada. */
+    /** Hay más plata de la que se había anotado. */
     Sobra,
 
     /** El server no mandó diferencia. Nunca se inventa una. */
@@ -44,7 +44,7 @@ data class LecturaDeDiferencia(
  * no produce un monto nuevo.
  *
  * Un texto que no se entiende cae en [Cuadre.Desconocido] y **no** en "cuadró".
- * Decirle a la dueña que la caja cuadró cuando en realidad no se pudo leer la
+ * Decirle a la dueña que cuadró cuando en realidad no se pudo leer la
  * diferencia es la peor de las respuestas posibles: es la única que hace que
  * deje de contar.
  */
@@ -64,7 +64,7 @@ fun leerDiferencia(discrepanciaDelServidor: String?): LecturaDeDiferencia {
 }
 
 /**
- * Lo que la dueña lee cuando la caja cierra con diferencia.
+ * Lo que la dueña lee cuando el día cierra con diferencia.
  *
  * @param titular la frase corta y grande: "Faltan $2.500".
  * @param explicacion los dos números que la producen, sin interpretarlos.
@@ -77,11 +77,20 @@ data class CopyDeDiferencia(
 )
 
 /**
+ * Etiqueta del botón que cierra esta pantalla.
+ *
+ * En feria no es un "Listo" muerto de formulario: cierra el cuaderno del día.
+ * Retail mantiene "Listo". La navegación sigue siendo [onListo] del paso.
+ */
+fun labelListoCierre(feria: Boolean = false): String =
+    if (feria) "Listo por hoy" else "Listo"
+
+/**
  * El texto exacto del cierre.
  *
  * Es la pantalla más delicada del día. Si se siente como una auditoría, la dueña
- * deja de cerrar caja — y una caja que no se cierra no sirve para nada. Tres
- * reglas de redacción, y las tres tienen consecuencia:
+ * deja de cerrar — y un día que no se cierra no sirve para nada. Tres reglas de
+ * redacción, y las tres tienen consecuencia:
  *
  * - **Nadie es el sujeto de la falta.** Se dice "Faltan $2.500", nunca "te
  *   faltan" ni "hay un faltante de". La plata falta; la persona no falló.
@@ -91,8 +100,9 @@ data class CopyDeDiferencia(
  * - **No hay signos de admiración, ni colores de alarma, ni la palabra
  *   "error".** El chip que acompaña usa el tono neutro justamente para eso.
  *
- * Feria (`feria = true`) habla del **día** / **puesto**, no de «caja». El default
- * `false` deja byte-estable el camino de farmacia.
+ * Feria (`feria = true`) habla del **día** / **puesto** / **lo anotado**. Nunca
+ * de sistema, cajón, arqueo, sesión ni transacción. El default `false` deja
+ * byte-estable el camino de farmacia/retail.
  *
  * Función pura para que el texto se pueda probar palabra por palabra sin montar
  * la pantalla: `DiferenciaTest` fija las frases, así que cambiarlas de gusto
@@ -110,17 +120,32 @@ fun copyDeDiferencia(
     val esperado = esperadoDelServidor?.let { moneda.formatear(it) }
     val diferencia = lectura.magnitud?.let { moneda.formatear(it) }
 
-    val comparacion = if (contado != null && esperado != null) {
-        "Contaste $contado y el sistema tenía anotados $esperado."
+    val comparacion = when {
+        contado != null && esperado != null && feria ->
+            "Contaste $contado y lo anotado del día era $esperado."
+        contado != null && esperado != null ->
+            "Contaste $contado y el sistema tenía anotados $esperado."
+        feria ->
+            "El día quedó guardado con lo que contaste."
+        else ->
+            "El cierre quedó guardado con lo que contaste."
+    }
+
+    val mananaOtraVez = if (feria) {
+        "Queda guardado así y mañana empezás de nuevo."
     } else {
-        "El cierre quedó guardado con lo que contaste."
+        "Queda guardado así y mañana empiezas de nuevo."
     }
 
     return when (lectura.cuadre) {
         Cuadre.Justo -> CopyDeDiferencia(
             titular = if (feria) "El día cuadró" else "La caja cuadró",
             explicacion = if (contado != null) {
-                "Contaste $contado y es justo lo que el sistema tenía anotado."
+                if (feria) {
+                    "Contaste $contado y es justo lo que se había anotado."
+                } else {
+                    "Contaste $contado y es justo lo que el sistema tenía anotado."
+                }
             } else {
                 comparacion
             },
@@ -131,14 +156,14 @@ fun copyDeDiferencia(
             titular = "Faltan ${diferencia ?: "algo"}",
             explicacion = comparacion,
             calma = "Casi siempre es un vuelto de más o una compra chica que no se alcanzó a " +
-                "anotar. Queda guardado así y mañana empiezas de nuevo.",
+                "anotar. $mananaOtraVez",
         )
 
         Cuadre.Sobra -> CopyDeDiferencia(
             titular = "Sobran ${diferencia ?: "algo"}",
             explicacion = comparacion,
             calma = "Suele ser una venta que se cobró en efectivo y quedó anotada de otra " +
-                "forma. Queda guardado así y mañana empiezas de nuevo.",
+                "forma. $mananaOtraVez",
         )
 
         Cuadre.Desconocido -> CopyDeDiferencia(

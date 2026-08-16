@@ -3,6 +3,7 @@ package cl.rutbusiness.app.ui.caja
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,7 +20,7 @@ import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
- * Paso 5: la caja quedó cerrada y ésta es la diferencia.
+ * Paso 5: el día quedó cerrado y ésta es la diferencia.
  *
  * La pantalla más delicada del día. Lo que se muestra es lo que el server grabó
  * en el cierre — `closing_cash_counted`, `closing_cash_expected` y
@@ -27,7 +28,7 @@ import cl.rutbusiness.ui.theme.rbHeading
  * errara por un peso, estaría acusando a alguien de un peso que no falta.
  *
  * El texto lo arma [copyDeDiferencia], que es una función pura y está probada
- * palabra por palabra. Feria habla del día, no de la caja.
+ * palabra por palabra. Feria cierra el cuaderno del día, no un arqueo.
  */
 @Composable
 fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier = Modifier) {
@@ -51,10 +52,14 @@ fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier =
             feria = feria,
         )
 
+        // ≥56 dp via RbButton; label hablado en feria ("Listo por hoy"), no un
+        // "Listo" de formulario. onListo no cambia: el contrato de navegación
+        // es el mismo.
         RbButton(
-            label = "Listo",
+            label = labelListoCierre(feria),
             onClick = onListo,
             fillWidth = true,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
@@ -64,6 +69,9 @@ fun PasoCajaCerrada(vm: CajaViewModel, onListo: () -> Unit, modifier: Modifier =
  *
  * Recibe datos y no el `ViewModel` a propósito: es la parte que hay que poder
  * medir al 200% de escala y leer palabra por palabra sin un server detrás.
+ *
+ * Calma de cuaderno: montos grandes ([RbAmountEmphasis.Headline]), sin rojo de
+ * alarma. La palabra del titular ya dice de qué lado quedó.
  *
  * @param contadoDelServidor `closing_cash_counted`, en el texto decimal exacto
  *   que grabó el cierre.
@@ -100,28 +108,32 @@ internal fun TarjetaDeDiferencia(
         //
         // Ni un chip de estado ni un color de alarma: la palabra ya dice de qué
         // lado quedó, y un rojo convertiría el cierre en una acusación. El
-        // producto necesita que la dueña cierre caja todos los días, no que le
-        // tenga miedo a esta pantalla.
+        // producto necesita que la dueña cierre todos los días, no que le tenga
+        // miedo a esta pantalla.
         Text(
             text = copy.titular,
             style = rbAmountStyle(RbAmountEmphasis.Headline),
             color = colors.textPrimary,
             modifier = Modifier
                 .rbHeading()
-                .padding(bottom = dimens.space2),
+                .padding(bottom = dimens.space2)
+                .fillMaxWidth(),
         )
 
         Text(
             text = copy.explicacion,
             style = RbTheme.typography.body,
             color = colors.textPrimary,
+            modifier = Modifier.fillMaxWidth(),
         )
 
         Text(
             text = copy.calma,
             style = RbTheme.typography.support,
             color = colors.textSecondary,
-            modifier = Modifier.padding(top = dimens.space2),
+            modifier = Modifier
+                .padding(top = dimens.space2)
+                .fillMaxWidth(),
         )
 
         notaDeCierre?.takeIf { it.isNotBlank() }?.let { nota ->
@@ -129,7 +141,9 @@ internal fun TarjetaDeDiferencia(
                 text = "Anotaste: «$nota»",
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
-                modifier = Modifier.padding(top = dimens.space2),
+                modifier = Modifier
+                    .padding(top = dimens.space2)
+                    .fillMaxWidth(),
             )
         }
     }
