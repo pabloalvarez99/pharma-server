@@ -53,7 +53,13 @@ data class EstadoDelServidor(
     @SerialName("needs_setup") val necesitaAlta: Boolean,
 )
 
-/** Cuerpo de `POST /api/v1/setup`. */
+/**
+ * Cuerpo de `POST /api/v1/setup` y `POST /api/v1/alta`.
+ *
+ * [tenantSlug] sólo va en la nube cuando el server ya rechazó el slug
+ * derivado del nombre y ofreció otro (`SLUG_TOMADO` + «Probá con …»).
+ * Con `null` no se serializa (Json sin `encodeDefaults` / `explicitNulls=false`).
+ */
 @Serializable
 private data class AltaDeNegocio(
     @SerialName("business_name") val nombreDelNegocio: String,
@@ -61,6 +67,7 @@ private data class AltaDeNegocio(
     val password: String,
     /** La clave del rubro. Ver [RUBROS]. */
     val vertical: String,
+    @SerialName("tenant_slug") val tenantSlug: String? = null,
 )
 
 /**
@@ -119,8 +126,11 @@ suspend fun crearNegocio(
     email: String,
     clave: String,
     enLaNube: Boolean = false,
+    /** Slug sugerido por un 409 `SLUG_TOMADO` anterior; sólo se manda en la nube. */
+    slugSugerido: String? = null,
 ): Resultado<NegocioCreado> = llamar(api) {
     val camino = if (enLaNube) "/api/v1/alta" else "/api/v1/setup"
+    val slug = if (enLaNube) slugSugerido?.trim()?.takeIf { it.isNotEmpty() } else null
     api.http.post("${api.baseUrl}$camino") {
         contentType(ContentType.Application.Json)
         setBody(
@@ -129,6 +139,7 @@ suspend fun crearNegocio(
                 email = email,
                 password = clave,
                 vertical = rubro,
+                tenantSlug = slug,
             ),
         )
     }.exigirExito(api.baseUrl).body()
