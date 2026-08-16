@@ -90,6 +90,19 @@ class FallaDeAltaTest {
         )
         assertTrue(falla is FallaDeAlta.DatosRechazados)
         assertEquals(delServer, falla.queHacer)
+        // Título hablado: no culpa a un «sistema».
+        assertEquals("Esos datos no sirvieron", falla.titulo)
+        assertFalse(falla.titulo.contains("sistema", ignoreCase = true))
+    }
+
+    @Test
+    fun `datos rechazados sin mensaje manda a revisar lo escrito`() {
+        val falla = FallaDeAlta.DatosRechazados("")
+        assertEquals("Esos datos no sirvieron", falla.titulo)
+        assertTrue(falla.queHacer.contains("Revisá", ignoreCase = true))
+        assertFalse(falla.titulo.contains("sistema", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("sistema", ignoreCase = true))
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
     }
 
     // --- 3. sin internet ----------------------------------------------------
@@ -257,8 +270,41 @@ class FallaDeAltaTest {
         )
         assertTrue(falla is FallaDeAlta.DatosRechazados)
         assertTrue(falla.queHacer.contains("otro puesto"))
+        assertFalse(falla.titulo.contains("sistema", ignoreCase = true))
+        assertFalse(falla.titulo.contains("computador", ignoreCase = true))
         assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
         assertFalse(falla.queHacer.contains("nube.test.invalid"))
+        assertFalse(falla.titulo.contains("192.168"))
+        assertFalse(falla.titulo.contains("10.0.2.2"))
+    }
+
+    /**
+     * Día 1 feria/nube: los títulos de falla no culpan al «sistema», no
+     * nombran computador ni filtran IP. La dueña lee una instrucción, no un
+     * diagnóstico de infra.
+     */
+    @Test
+    fun `titulos feria y nube nunca dicen sistema computador ni IP`() {
+        val fallas = listOf(
+            FallaDeAlta.SinRed(esFeria = true),
+            FallaDeAlta.ServicioNoResponde("http://10.0.2.2:8080", nube = true),
+            FallaDeAlta.CorreoYaTieneNegocio(email, "http://10.0.2.2:8080", nube = true),
+            FallaDeAlta.ClaveDebil(),
+            FallaDeAlta.DatosRechazados("Ese nombre corto ya lo usa otro puesto."),
+            FallaDeAlta.CreadoPeroNoEntro("huevos-de-marta", esPuesto = true),
+        )
+        val prohibidasEnTitulo = listOf(
+            "sistema", "computador", "192.168", "10.0.2.2",
+        )
+        fallas.forEach { falla ->
+            val halladas = prohibidasEnTitulo.filter {
+                falla.titulo.contains(it, ignoreCase = true)
+            }
+            assertTrue(
+                "título feria/nube filtró $halladas: «${falla.titulo}»",
+                halladas.isEmpty(),
+            )
+        }
     }
 
     @Test

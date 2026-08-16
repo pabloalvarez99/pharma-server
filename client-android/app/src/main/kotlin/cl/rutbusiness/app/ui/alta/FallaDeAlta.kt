@@ -131,16 +131,18 @@ sealed class FallaDeAlta(
     )
 
     /**
-     * El server rechazó algo que nosotros dimos por bueno.
+     * Algo de lo escrito no sirvió.
      *
-     * Muestra el mensaje del server tal cual: ya viene en español y escrito
-     * para la dueña (`ApiError::invalid` en `crates/api/src/setup.rs`).
+     * Título honesto, sin culpar a un «sistema» ni a un computador: la dueña
+     * tiene que revisar lo que puso. El cuerpo es el mensaje del server tal
+     * cual —ya viene en español y escrito para ella (`ApiError::invalid` en
+     * `crates/api/src/setup.rs`)— o, si viniera vacío, la instrucción corta.
      * Traducirlo de nuevo acá sería inventar una segunda versión que se
      * desincroniza con la primera.
      */
     class DatosRechazados(mensajeDelServidor: String, tecnico: String? = null) : FallaDeAlta(
-        titulo = "El sistema no aceptó esos datos",
-        queHacer = mensajeDelServidor,
+        titulo = "Esos datos no sirvieron",
+        queHacer = mensajeDelServidor.ifBlank { "Revisá lo que escribiste." },
         tecnico = tecnico,
     )
 
