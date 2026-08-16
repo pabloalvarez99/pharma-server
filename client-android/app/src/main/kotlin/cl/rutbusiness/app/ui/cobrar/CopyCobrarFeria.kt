@@ -37,8 +37,9 @@ internal fun copySubtituloBuscar(feria: Boolean): String =
 /**
  * Resumen de la barra inferior del carrito.
  *
- * Feria habla de "cosas"; retail conserva "productos". Sin total (offline) se
- * dice con palabras, no con un número inventado en el teléfono.
+ * Feria habla de "cosas"; retail conserva "productos". Sin total (offline o
+ * el server no mandó número) se dice con palabras: el teléfono no inventa
+ * un monto. Feria no nombra "sistema" — el cobro confirma el total.
  */
 internal fun copyBarraCarrito(unidades: Int, total: String?, feria: Boolean): String {
     if (unidades <= 0) {
@@ -49,9 +50,26 @@ internal fun copyBarraCarrito(unidades: Int, total: String?, feria: Boolean): St
     } else {
         if (unidades == 1) "1 producto" else "$unidades productos"
     }
-    val monto = total ?: "el sistema confirma el total al cobrar"
+    val monto = when {
+        total != null -> total
+        // Mesa de feria: palabras honestas, sin "sistema" ni cifra inventada.
+        feria -> "se confirma al cobrar"
+        else -> "el sistema confirma el total al cobrar"
+    }
     return "$cosa · $monto"
 }
+
+/**
+ * Ayuda del buscador cuando el listado viene del teléfono (sin red).
+ *
+ * Feria no habla de "stock" de góndola: solo de cuándo se guardó.
+ */
+internal fun copyAyudaCatalogoGuardado(feria: Boolean, antiguedad: String): String =
+    if (feria) {
+        "Guardado $antiguedad. Puede no estar al día."
+    } else {
+        "Guardado $antiguedad. El stock puede haber cambiado."
+    }
 
 /** Título de la tarjeta del carrito en el paso de pago. */
 internal fun copyTituloCarrito(feria: Boolean): String =

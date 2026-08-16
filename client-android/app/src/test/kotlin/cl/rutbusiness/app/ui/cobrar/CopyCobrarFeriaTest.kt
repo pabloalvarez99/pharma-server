@@ -107,12 +107,55 @@ class CopyCobrarFeriaTest {
     }
 
     @Test
+    fun `barra feria sin total no dice sistema ni inventa un monto`() {
+        val s = copyBarraCarrito(unidades = 2, total = null, feria = true)
+        assertEquals("2 cosas · se confirma al cobrar", s)
+        assertFalse("feria no dice sistema: era \"$s\"", s.contains("sistema", ignoreCase = true))
+        // Unidades "2" es conteo real; no hay cifra inventada de total ($…).
+        assertFalse("no inventa total con \$: era \"$s\"", s.contains('$'))
+        assertFalse(s.contains("192.168"))
+        assertFalse(s.contains("export", ignoreCase = true))
+        assertFalse(s.contains("checkout", ignoreCase = true))
+    }
+
+    @Test
+    fun `barra retail sin total puede nombrar el sistema`() {
+        val s = copyBarraCarrito(unidades = 1, total = null, feria = false)
+        assertTrue(s.contains("sistema", ignoreCase = true))
+        assertTrue(s.contains("1 producto"))
+    }
+
+    @Test
     fun `barra retail conserva productos`() {
         assertEquals("Sin productos todavía", copyBarraCarrito(0, null, feria = false))
         assertEquals(
             "3 productos · $4.470",
             copyBarraCarrito(3, "\$4.470", feria = false),
         )
+    }
+
+    @Test
+    fun `feria bar offline empty sin jerga de sistema ip export checkout`() {
+        val bar = copyBarraCarrito(unidades = 3, total = null, feria = true)
+        val offline = copyOfflinePago(feria = true)
+        val vacio = copyBarraCarrito(unidades = 0, total = null, feria = true)
+        val ayuda = copyAyudaCatalogoGuardado(feria = true, antiguedad = "hace un rato")
+        for (s in listOf(bar, offline, vacio, ayuda)) {
+            assertFalse("no sistema: era \"$s\"", s.contains("sistema", ignoreCase = true))
+            assertFalse("no IP: era \"$s\"", s.contains("192.168"))
+            assertFalse("no export: era \"$s\"", s.contains("export", ignoreCase = true))
+            assertFalse("no checkout: era \"$s\"", s.contains("checkout", ignoreCase = true))
+            assertFalse("no computador: era \"$s\"", s.contains("computador", ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `ayuda catalogo guardado feria no habla de stock de gondola`() {
+        val feria = copyAyudaCatalogoGuardado(feria = true, antiguedad = "hace 5 min")
+        assertTrue(feria.contains("Guardado hace 5 min"))
+        assertFalse(feria.contains("stock", ignoreCase = true))
+        val retail = copyAyudaCatalogoGuardado(feria = false, antiguedad = "hace 5 min")
+        assertTrue(retail.contains("stock", ignoreCase = true))
     }
 
     @Test
