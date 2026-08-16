@@ -22,6 +22,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
+import cl.rutbusiness.app.ui.rubro.LocalRubro
+import cl.rutbusiness.app.ui.rubro.ServiciosDeRubro
+import cl.rutbusiness.core.rubro.RubroPackRepository
 import cl.rutbusiness.ui.theme.RbDefaultDimens
 import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.serialization.json.Json
@@ -83,15 +86,24 @@ class TarjetaPropuestaEscalaTest {
         estado = EstadoPropuesta.Esperando,
     )
 
+    /**
+     * @param rubro pack local para [LocalRubro]. `null` = retail genérico
+     *   (comportamiento histórico de la prueba). `"feria"` = voz de puesto.
+     */
     private fun mostrar(
         escala: Float,
         mensaje: Mensaje.Propuesta = propuestaDeGasto(),
         onConfirmar: () -> Unit = {},
+        rubro: String? = null,
     ) {
+        val servicios = rubro?.let {
+            ServiciosDeRubro(RubroPackRepository().apply { usarLocal(it) })
+        }
         compose.setContent {
             val base = LocalDensity.current
             CompositionLocalProvider(
                 LocalDensity provides Density(base.density, fontScale = escala),
+                LocalRubro provides servicios,
             ) {
                 RbTheme(darkTheme = true, reducedMotion = true) {
                     // La tarjeta vive dentro de una lista que scrollea; el
@@ -283,6 +295,56 @@ class TarjetaPropuestaEscalaTest {
             .performScrollTo()
             .assertIsDisplayed()
 
+        revisarTactiles(2.0f)
+    }
+
+    /**
+     * En feria la tarjeta se lee como alguien repitiendo lo oído en el puesto,
+     * no como un diálogo de "confirmación" de admin.
+     */
+    @Test
+    fun `en feria los botones suenan a puesto y se leen al 200 por ciento`() {
+        mostrar(escala = 2.0f, rubro = "feria")
+
+        compose.onNodeWithText("Antes de hacerlo, revisa")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("Sí, anotá eso")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("Mejor no")
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("Tienes unos minutos para decirme que sí.")
+            .performScrollTo()
+            .assertIsDisplayed()
+
+        // Retail no se cuela en el puesto.
+        assertTrue(
+            compose.onAllNodes(hasText("Sí, registrar el gasto")).fetchSemanticsNodes().isEmpty(),
+        )
+        assertTrue(
+            compose.onAllNodes(hasText("No, déjalo así")).fetchSemanticsNodes().isEmpty(),
+        )
+
+        revisarTactiles(2.0f)
+    }
+
+    @Test
+    fun `en feria una propuesta vencida ofrece decirlo de nuevo`() {
+        mostrar(
+            escala = 2.0f,
+            rubro = "feria",
+            mensaje = propuestaDeGasto().copy(
+                estado = EstadoPropuesta.YaNoSirve(
+                    "Se me pasó el tiempo para anotarlo y no guardé nada. Decímelo de nuevo.",
+                ),
+            ),
+        )
+
+        compose.onNodeWithText("Decírmelo de nuevo")
+            .performScrollTo()
+            .assertIsDisplayed()
         revisarTactiles(2.0f)
     }
 }

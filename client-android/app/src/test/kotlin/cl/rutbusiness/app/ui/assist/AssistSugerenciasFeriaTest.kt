@@ -3,6 +3,7 @@ package cl.rutbusiness.app.ui.assist
 import cl.rutbusiness.core.rubro.PACK_FARMACIA
 import cl.rutbusiness.core.rubro.PACK_FERIA
 import cl.rutbusiness.core.rubro.PACK_OTRO
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,9 +38,19 @@ class AssistSugerenciasFeriaTest {
     }
 
     @Test
-    fun `intro feria habla de puesto`() {
+    fun `intro feria habla de puesto y no de asistente virtual`() {
         val intro = AssistSugerencias.intro(PACK_FERIA)
         assertTrue(intro.contains("puesto", ignoreCase = true))
+        assertTrue(
+            "intro feria tiene que sonar hablado (anotar / decir de vuelta): $intro",
+            intro.contains("anotar", ignoreCase = true) ||
+                intro.contains("de vuelta", ignoreCase = true),
+        )
+        assertFalse(
+            "intro feria no puede sonar a chatbot: $intro",
+            intro.contains("asistente", ignoreCase = true) ||
+                intro.contains("virtual", ignoreCase = true),
+        )
     }
 
     @Test
@@ -49,5 +60,17 @@ class AssistSugerenciasFeriaTest {
         assertFalse(farma.any { it.contains("2 kg de tomates") })
         assertFalse(otro.any { it.contains("2 kg de tomates") })
         assertTrue(farma.contains("¿Cuánto vendí hoy?"))
+    }
+
+    @Test
+    fun `botones de la propuesta en feria suenan hablados`() {
+        assertEquals("Sí, anotá eso", etiquetaDeConfirmar("registrar_venta", feria = true))
+        assertEquals("Sí, anotá eso", etiquetaDeConfirmar("registrar_fiado", feria = true))
+        assertEquals("Mejor no", etiquetaDeCancelar(feria = true))
+        assertEquals("No, déjalo así", etiquetaDeCancelar(feria = false))
+        assertEquals(
+            "Tienes unos minutos para decirme que sí.",
+            vencimientoEnPalabras(180, feria = true),
+        )
     }
 }

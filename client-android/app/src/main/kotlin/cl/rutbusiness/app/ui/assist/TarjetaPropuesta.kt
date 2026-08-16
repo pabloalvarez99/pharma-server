@@ -31,14 +31,12 @@ import kotlinx.coroutines.delay
  * agente entienda mal. Si acá dice algo ambiguo, se registra un gasto que no
  * era o se ajusta un stock que no correspondía. Todo lo de abajo sale de eso:
  *
- * - **Encabezado que dice qué es esto**, no "Confirmación". La dueña tiene que
- *   saber en un vistazo que todavía no pasó nada.
- * - **El resumen del server, grande.** Es la frase que el server armó con los
- *   datos reales; va en el cuerpo más grande de la pantalla.
+ * - **Encabezado honesto**, no "Confirmación". Todavía no pasó nada.
+ * - **Se lee en voz alta**: en feria suena a alguien repitiendo lo que oyó en
+ *   el puesto ("Sí, anotá eso" / "Mejor no"), no a un admin de ERP.
+ * - **El resumen del server, grande.** Es la frase armada con datos reales.
  * - **El detalle campo por campo** ([TarjetaDetalleAccion]), con la plata
  *   formateada. El resumen se lee rápido; el detalle pilla un cero de más.
- * - **Botones con verbo**, no "Aceptar". "Sí, registrar el gasto" se entiende
- *   incluso si alguien no leyó el resto.
  * - **El vencimiento en palabras.** Un timestamp no le sirve a nadie.
  *
  * A 200% de escala esta tarjeta es el peor caso de toda la app: la que más
@@ -58,6 +56,7 @@ fun TarjetaPropuesta(
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
     val shape = RbTheme.shapes.card
+    val feria = esFeria()
 
     Column(
         modifier = modifier
@@ -70,6 +69,8 @@ fun TarjetaPropuesta(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
+        // Honestidad primero: todavía no se anotó nada. Misma frase en feria
+        // y retail; el tono del puesto vive en los botones y el cierre.
         Text(
             text = "Antes de hacerlo, revisa",
             style = RbTheme.typography.heading,
@@ -89,12 +90,15 @@ fun TarjetaPropuesta(
             EstadoPropuesta.Esperando -> Esperando(
                 mensaje = mensaje,
                 segundosRestantes = segundosRestantes,
+                feria = feria,
                 onConfirmar = onConfirmar,
                 onCancelar = onCancelar,
                 onVencer = onVencer,
             )
 
-            EstadoPropuesta.Confirmando -> RbLoadingState(label = "Guardándolo…")
+            EstadoPropuesta.Confirmando -> RbLoadingState(
+                label = if (feria) "Anotándolo…" else "Guardándolo…",
+            )
 
             is EstadoPropuesta.Hecha -> Cierre(
                 texto = estado.texto,
@@ -102,8 +106,8 @@ fun TarjetaPropuesta(
             )
 
             EstadoPropuesta.Cancelada -> Cierre(
-                texto = if (esFeria()) {
-                    "No lo hice. No cambió nada en tu puesto."
+                texto = if (feria) {
+                    "Listo, no lo anoté. En tu puesto no cambió nada."
                 } else {
                     "No lo hice. No cambió nada en tu negocio."
                 },
@@ -115,7 +119,7 @@ fun TarjetaPropuesta(
             ) {
                 Cierre(texto = estado.texto, tono = Tono.Atencion)
                 RbButton(
-                    label = "Pedirlo de nuevo",
+                    label = if (feria) "Decírmelo de nuevo" else "Pedirlo de nuevo",
                     onClick = { onVolverAPedir(mensaje.pregunta) },
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
@@ -136,6 +140,7 @@ fun TarjetaPropuesta(
 private fun Esperando(
     mensaje: Mensaje.Propuesta,
     segundosRestantes: Long?,
+    feria: Boolean,
     onConfirmar: () -> Unit,
     onCancelar: () -> Unit,
     onVencer: () -> Unit,
@@ -158,7 +163,7 @@ private fun Esperando(
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         restantes?.let {
             Text(
-                text = Vencimiento.enPalabras(it),
+                text = vencimientoEnPalabras(it, feria),
                 style = RbTheme.typography.support,
                 color = RbTheme.colors.textSecondary,
             )
@@ -167,13 +172,13 @@ private fun Esperando(
         // Un solo verbo primario a ancho completo: se siente como "sí, hazlo",
         // no como un par de botones de chatbot simétricos.
         RbButton(
-            label = etiquetaDeConfirmar(mensaje.propuesta.name),
+            label = etiquetaDeConfirmar(mensaje.propuesta.name, feria),
             onClick = onConfirmar,
             variant = RbButtonVariant.Primary,
             fillWidth = true,
         )
         RbButton(
-            label = "No, déjalo así",
+            label = etiquetaDeCancelar(feria),
             onClick = onCancelar,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
@@ -184,27 +189,46 @@ private fun Esperando(
 /**
  * El verbo exacto de lo que va a pasar.
  *
- * "Confirmar" no dice nada. Una etiqueta que nombra la acción es lo único que
- * alguien lee seguro, incluso apurado, así que ahí es donde tiene que estar la
- * información. Las etiquetas salen de `Action::label` en
- * `crates/assist/src/actions.rs`; una que no conozcamos cae en una frase
- * genérica pero honesta en vez de inventar un verbo equivocado.
+ * En feria es una sola frase hablada ("Sí, anotá eso"): en el puesto nadie
+ * dice "registrar la venta". En retail el botón nombra la acción del server
+ * (`Action::label` en `crates/assist`); una desconocida cae en genérico
+ * honesto, nunca en un verbo inventado.
  */
-internal fun etiquetaDeConfirmar(nombreDeAccion: String): String = when (nombreDeAccion) {
-    "registrar_gasto" -> "Sí, registrar el gasto"
-    "registrar_abono" -> "Sí, registrar el abono"
-    "crear_cliente" -> "Sí, crear el cliente"
-    "crear_proveedor" -> "Sí, crear el proveedor"
-    "crear_producto_rapido" -> "Sí, crear el producto"
-    "ajustar_precio" -> "Sí, cambiar el precio"
-    "ajustar_stock" -> "Sí, ajustar el stock"
-    "abrir_caja" -> "Sí, abrir la caja"
-    "cerrar_caja" -> "Sí, cerrar la caja"
-    "crear_orden_compra_draft" -> "Sí, crear la orden de compra"
-    "dispensar_receta" -> "Sí, dispensar la receta"
-    "registrar_venta" -> "Sí, registrar la venta"
-    "registrar_fiado" -> "Sí, registrar el fiado"
-    else -> "Sí, hazlo"
+internal fun etiquetaDeConfirmar(nombreDeAccion: String, feria: Boolean = false): String {
+    if (feria) return "Sí, anotá eso"
+    return when (nombreDeAccion) {
+        "registrar_gasto" -> "Sí, registrar el gasto"
+        "registrar_abono" -> "Sí, registrar el abono"
+        "crear_cliente" -> "Sí, crear el cliente"
+        "crear_proveedor" -> "Sí, crear el proveedor"
+        "crear_producto_rapido" -> "Sí, crear el producto"
+        "ajustar_precio" -> "Sí, cambiar el precio"
+        "ajustar_stock" -> "Sí, ajustar el stock"
+        "abrir_caja" -> "Sí, abrir la caja"
+        "cerrar_caja" -> "Sí, cerrar la caja"
+        "crear_orden_compra_draft" -> "Sí, crear la orden de compra"
+        "dispensar_receta" -> "Sí, dispensar la receta"
+        "registrar_venta" -> "Sí, registrar la venta"
+        "registrar_fiado" -> "Sí, registrar el fiado"
+        else -> "Sí, hazlo"
+    }
+}
+
+/** Salida sin escribir nada. Feria suena a conversación; retail, a deshacer. */
+internal fun etiquetaDeCancelar(feria: Boolean): String =
+    if (feria) "Mejor no" else "No, déjalo así"
+
+/**
+ * Tiempo que queda, en castellano hablado. Nunca un timestamp crudo.
+ * Feria: "anotar" / "decirme que sí". Retail: el tramo de [Vencimiento].
+ */
+internal fun vencimientoEnPalabras(segundosRestantes: Long, feria: Boolean): String {
+    if (!feria) return Vencimiento.enPalabras(segundosRestantes)
+    return when {
+        segundosRestantes <= 0 -> "Ya se me pasó el tiempo para anotarlo."
+        segundosRestantes <= 45 -> "Queda poquito para anotarlo."
+        else -> "Tienes unos minutos para decirme que sí."
+    }
 }
 
 /** El detalle campo por campo — tarjeta legible del puesto. */
