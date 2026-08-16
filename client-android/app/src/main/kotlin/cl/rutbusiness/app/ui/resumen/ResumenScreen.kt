@@ -187,7 +187,7 @@ private fun VendidoHoy(vm: ResumenViewModel) {
  * real de un negocio chico.
  *
  * En feria y antes de la primera venta del día, la tarjeta se cambia entera por
- * [HoySinVentas]: ver "$0 · 0 boletas · menos que ayer" es enterarse tres veces
+ * [HoySinVentas]: ver "$0 · 0 ventas · menos que ayer" es enterarse tres veces
  * de lo mismo y no saber qué hacer con eso.
  *
  * @param vendidoHoy monto en el texto decimal exacto que mandó el server.
@@ -203,7 +203,8 @@ internal fun TarjetaDelDia(
 ) {
     // `boletas` y no el monto: cuántas ventas hubo lo cuenta el server, y una
     // venta regalada -monto cero, boleta uno- es un día que ya empezó.
-    if (esFeria() && boletas == 0L) {
+    val feria = esFeria()
+    if (feria && boletas == 0L) {
         HoySinVentas(onHablarleAlAgente = irAlAgente())
         return
     }
@@ -225,11 +226,7 @@ internal fun TarjetaDelDia(
         )
 
         Text(
-            text = when (boletas) {
-                0L -> "Todavía no hay ninguna venta."
-                1L -> "1 boleta."
-                else -> "$boletas boletas."
-            },
+            text = copyTarjetaConteo(feria = feria, conteo = boletas),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -277,25 +274,23 @@ internal fun TarjetaDelDia(
         val compartir = compartirConGente()
         if (compartir != null && boletas > 0L) {
             RbButton(
-                label = if (esFeria()) "Contar cómo va el día" else "Compartir el resumen",
-                onClick = { compartir(mensajeHoy(resumenDelDia(moneda, vendidoHoy, boletas))) },
+                label = if (feria) "Contar cómo va el día" else "Compartir el resumen",
+                onClick = {
+                    compartir(
+                        mensajeHoy(
+                            copyResumenDelDia(
+                                feria = feria,
+                                monto = moneda.formatear(vendidoHoy),
+                                conteo = boletas,
+                            ),
+                        ),
+                    )
+                },
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
             )
         }
     }
-}
-
-/**
- * Lo mismo que dicen las dos primeras líneas de la tarjeta, en una sola.
- *
- * Se arma con la misma [Moneda] y el mismo `boletas` que ya se dibujaron, y no
- * con una consulta nueva: el mensaje que sale por el chat tiene que decir el
- * número que la dueña estaba mirando cuando tocó el botón.
- */
-private fun resumenDelDia(moneda: Moneda, vendidoHoy: String, boletas: Long): String {
-    val monto = moneda.formatear(vendidoHoy)
-    return if (boletas == 1L) "$monto en 1 boleta" else "$monto en $boletas boletas"
 }
 
 /**
@@ -333,12 +328,10 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
             enCaja != null -> {
                 RbAmount(amount = vm.moneda.formatear(enCaja))
                 Text(
-                    text = buildString {
-                        append("Es lo que debería haber ahora")
-                        vm.nombreDeCaja?.let { append(" en «$it»") }
-                        append(". Lo calcula el computador del negocio con la apertura, ")
-                        append("las ventas en efectivo y los movimientos.")
-                    },
+                    text = copyEnCajaExplicacion(
+                        feria = esFeria(),
+                        nombreDeCaja = vm.nombreDeCaja,
+                    ),
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
