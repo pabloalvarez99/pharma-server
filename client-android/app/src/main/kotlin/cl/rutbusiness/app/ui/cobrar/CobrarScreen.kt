@@ -144,9 +144,9 @@ private fun CobrarScreen(vm: CobrarViewModel) {
                             if (vm.ventaEncolada != null) "Guardada" else "Listo"
                     },
                     subtitle = when (vm.paso) {
-                        PasoDeCobro.Buscar -> "Busca el producto y agrégalo"
+                        PasoDeCobro.Buscar -> copySubtituloBuscar(feria)
                         PasoDeCobro.MontoSuelto -> "Sin buscar nada"
-                        PasoDeCobro.Pago -> "Revisa lo que lleva y elige el pago"
+                        PasoDeCobro.Pago -> "Revisa lo que se lleva y elige el pago"
                         PasoDeCobro.Comprobante -> null
                     },
                     onBack = when (vm.paso) {

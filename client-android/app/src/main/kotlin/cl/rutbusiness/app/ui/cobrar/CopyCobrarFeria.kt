@@ -1,12 +1,13 @@
 package cl.rutbusiness.app.ui.cobrar
 
 /**
- * Copy de Cobrar / Vender según [barcode] del pack (ADR-0022).
+ * Copy de Cobrar / Vender según pack (ADR-0022).
  *
- * Extraído de [PasoBuscar] para tests unitarios sin montar el ViewModel ni
- * la cámara: feria (`barcode=false`) habla de nombre/atado; retail formal
- * sigue con código de barras.
+ * Extraído de las pantallas para tests unitarios sin montar ViewModel ni
+ * cámara: feria habla de nombre/atado/puesto; retail formal sigue con
+ * código de barras y "producto".
  */
+
 internal data class CopyBuscarCobrar(
     val etiqueta: String,
     val placeholder: String,
@@ -18,14 +19,53 @@ internal fun copyBuscarCobrar(barcode: Boolean): CopyBuscarCobrar =
         CopyBuscarCobrar(
             etiqueta = "Buscar producto",
             placeholder = "Nombre o código de barras",
-            ayudaOnline = "Escribe parte del nombre, o el código de barras completo.",
+            // Una línea calmada: no es un tutorial, es un campo de búsqueda.
+            ayudaOnline = "Nombre o código de barras.",
         )
     } else {
         CopyBuscarCobrar(
             etiqueta = "¿Qué vendiste?",
-            placeholder = "Nombre (tomate, cilantro…)",
-            ayudaOnline = "Escribe el nombre de lo que vendes (tomate, atado, bolsa…).",
+            placeholder = "Tomate, cilantro…",
+            ayudaOnline = "Escribí el nombre (tomate, atado, bolsa…).",
         )
+    }
+
+/** Subtítulo del paso buscar: mesa del puesto, no panel de POS. */
+internal fun copySubtituloBuscar(feria: Boolean): String =
+    if (feria) "Anotá lo que se lleva" else "Busca el producto y agrégalo"
+
+/**
+ * Resumen de la barra inferior del carrito.
+ *
+ * Feria habla de "cosas"; retail conserva "productos". Sin total (offline) se
+ * dice con palabras, no con un número inventado en el teléfono.
+ */
+internal fun copyBarraCarrito(unidades: Int, total: String?, feria: Boolean): String {
+    if (unidades <= 0) {
+        return if (feria) "Nada en la venta todavía" else "Sin productos todavía"
+    }
+    val cosa = if (feria) {
+        if (unidades == 1) "1 cosa" else "$unidades cosas"
+    } else {
+        if (unidades == 1) "1 producto" else "$unidades productos"
+    }
+    val monto = total ?: "el sistema confirma el total al cobrar"
+    return "$cosa · $monto"
+}
+
+/** Título de la tarjeta del carrito en el paso de pago. */
+internal fun copyTituloCarrito(feria: Boolean): String =
+    if (feria) "Lo que se lleva" else "Lo que lleva"
+
+/** Aviso offline en el paso de pago: feria sin "sistema del negocio". */
+internal fun copyOfflinePago(feria: Boolean): String =
+    if (feria) {
+        "Sin señal. La venta queda en el teléfono y se anota sola cuando vuelva " +
+            "la red. El total se confirma al enviarse."
+    } else {
+        "Sin conexión con el sistema del negocio. La venta se guarda en el " +
+            "teléfono y se envía sola cuando vuelva la señal. El total se confirma " +
+            "cuando se envíe."
     }
 
 /** `true` si la UI debe ofrecer el botón de cámara. */
