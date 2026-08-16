@@ -6,7 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.ui.caja.CajaApi
+import cl.rutbusiness.app.ui.caja.ResultadoPuesto
 import cl.rutbusiness.app.ui.caja.SesionDeCajaDto
+import cl.rutbusiness.app.ui.caja.asegurarPuestoAbierto
 import cl.rutbusiness.app.ui.common.aCopy
 import cl.rutbusiness.app.ui.common.esMasQueCero
 import cl.rutbusiness.app.ui.common.montoParaElServidor
@@ -151,7 +153,7 @@ class FiadoViewModel(
         private set
 
     /**
-     * Si el billete entra al cajón.
+     * Si el billete entra a la caja / cuenta en el día (feria).
      *
      * Arranca en `true` porque el fiado del barrio se paga en efectivo y en el
      * mostrador. Apagarlo es para el que transfiere: esa plata no está en la
@@ -160,8 +162,46 @@ class FiadoViewModel(
     var entraALaCaja by mutableStateOf(true)
         private set
 
+    /**
+     * Pack feria: la Screen llama [modoFeria]; el ViewModel no lee
+     * CompositionLocals. Con feria el abono en efectivo abre el puesto con $0
+     * (o trata el 409 como abierto) sin ritual de cajón/computador.
+     */
+    var esFeria by mutableStateOf(false)
+        private set
+
     init {
         cargar()
+    }
+
+    /**
+     * Baja el flag de feria desde la Screen (`esFeria()` no se puede llamar acá).
+     *
+     * Si es feria y hay red, abre el puesto con $0 reusando [asegurarPuestoAbierto]
+     * (mismo POST que Caja/Cobrar; 409 = ya abierto = éxito) y deja
+     * [entraALaCaja] en true.
+     */
+    fun modoFeria(v: Boolean = true) {
+        esFeria = v
+        if (v) asegurarPuestoSiFalta()
+    }
+
+    /**
+     * En feria deja el puesto listo: sesión abierta + efectivo cuenta en el día.
+     * Idempotente; 409 / "ya tiene caja" = éxito vía [asegurarPuestoAbierto].
+     */
+    private fun asegurarPuestoSiFalta() {
+        if (!esFeria || !hayConexion) return
+        val api = sesion.apiActiva() ?: return
+        viewModelScope.launch {
+            when (val r = asegurarPuestoAbierto(api)) {
+                is ResultadoPuesto.Abierto -> {
+                    cajaAbierta = r.sesion
+                    entraALaCaja = true
+                }
+                is ResultadoPuesto.Falla -> Unit
+            }
+        }
     }
 
     fun cargar() {
@@ -206,10 +246,24 @@ class FiadoViewModel(
                 }
             }
 
-            // Que no haya caja abierta no es un error: es un negocio que todavía
-            // no abrió. Sólo cambia si el abono puede entrar al cajón.
-            cajaAbierta = (CajaApi(api).sesionAbierta() as? Resultado.Ok)?.valor
-            if (cajaAbierta == null) entraALaCaja = false
+            if (esFeria) {
+                // Feria: el puesto se abre solo ($0). 409 = ya abierto = OK.
+                when (val r = asegurarPuestoAbierto(api)) {
+                    is ResultadoPuesto.Abierto -> {
+                        cajaAbierta = r.sesion
+                        entraALaCaja = true
+                    }
+                    is ResultadoPuesto.Falla -> {
+                        cajaAbierta = (CajaApi(api).sesionAbierta() as? Resultado.Ok)?.valor
+                        if (cajaAbierta == null) entraALaCaja = false
+                    }
+                }
+            } else {
+                // Retail: sin caja abierta no es error; el abono en efectivo no
+                // entra al arqueo hasta que abran el cajón.
+                cajaAbierta = (CajaApi(api).sesionAbierta() as? Resultado.Ok)?.valor
+                if (cajaAbierta == null) entraALaCaja = false
+            }
 
             cargando = false
         }
@@ -261,7 +315,13 @@ class FiadoViewModel(
         notaDelAbono = ""
         avisoDeAbono = null
         errorDeAccion = null
-        entraALaCaja = cajaAbierta != null
+        if (esFeria) {
+            // Efectivo cuenta en el día; si el puesto aún no está, se abre.
+            entraALaCaja = true
+            asegurarPuestoSiFalta()
+        } else {
+            entraALaCaja = cajaAbierta != null
+        }
         paso = PasoDeFiado.Abono
     }
 
@@ -280,6 +340,11 @@ class FiadoViewModel(
     }
 
     fun cambiarEntraALaCaja(entra: Boolean) {
+        if (entra && esFeria) {
+            entraALaCaja = true
+            if (cajaAbierta == null) asegurarPuestoSiFalta()
+            return
+        }
         entraALaCaja = entra && cajaAbierta != null
     }
 
@@ -310,6 +375,18 @@ class FiadoViewModel(
         errorDeAccion = null
 
         viewModelScope.launch {
+            // Feria + efectivo: el billete tiene que caer en el puesto. Si aún
+            // no hay sesión, se abre con $0 (409 = ya abierta = éxito).
+            if (esFeria && entraALaCaja && cajaAbierta == null) {
+                when (val r = asegurarPuestoAbierto(api)) {
+                    is ResultadoPuesto.Abierto -> {
+                        cajaAbierta = r.sesion
+                        entraALaCaja = true
+                    }
+                    is ResultadoPuesto.Falla -> Unit
+                }
+            }
+
             val fiado = FiadoApi(api)
             val abono = NuevoAbono(
                 amount = monto,
@@ -328,7 +405,7 @@ class FiadoViewModel(
                         append("Listo, quedó anotado que te pagó $abonado.")
                         actualizada?.let { append(" Ahora debe ${moneda.formatear(it.balance)}.") }
                         if (entraALaCaja && cajaAbierta != null) {
-                            append(" Esa plata entró a la caja y va a estar en el cierre.")
+                            append(remateAbonoEfectivo(feria = esFeria))
                         }
                     }
                     montoDelAbono = ""
