@@ -33,17 +33,17 @@ import cl.rutbusiness.ui.theme.rbHeading
 import kotlinx.coroutines.launch
 
 /**
- * Las ventas que todavía no llegaron al sistema del negocio.
+ * Las ventas que todavía no se anotaron (quedan en el teléfono).
  *
  * **Esta pantalla es la mitad del encargo.** Una cola que anda sola pero no se
  * ve no sirve de nada: la dueña que cobró seis ventas sin señal necesita poder
  * mirar el teléfono y contar seis, o no va a creerle a la app — y con razón.
  *
- * Se lee como **cola de ventas esperando** (notas del día), no como un panel
- * de sync ni un error de red. Lo que **no** se muestra acá es plata. Ni el
- * total de cada venta ni la suma de la cola: esos números los pone el server
- * cuando la venta llegue. Se dicen los productos y la hora, que es lo que la
- * dueña usa para reconocer cuál venta es cuál.
+ * Se lee como **cola de ventas esperando** (notas del día / recado), no como un
+ * panel de sync ni un error de red. Lo que **no** se muestra acá es plata. Ni
+ * el total de cada venta ni la suma de la cola: esos números se confirman al
+ * anotar. Se dicen los productos y la hora, que es lo que la dueña usa para
+ * reconocer cuál venta es cuál.
  */
 /**
  * Estado del último "Preparar respaldo" (ADR-0022).
@@ -269,6 +269,7 @@ fun PantallaDeCola(
                 FilaDeVentaEnCola(
                     venta = venta,
                     ahora = ahora,
+                    feria = feria,
                     onDescartar = { alcance.launch { onDescartar(venta.clave) } },
                 )
             }
@@ -327,6 +328,7 @@ internal fun VacioDeCola(
 private fun FilaDeVentaEnCola(
     venta: VentaEnCola,
     ahora: Long,
+    feria: Boolean,
     onDescartar: () -> Unit,
 ) {
     val colors = RbTheme.colors
@@ -342,7 +344,7 @@ private fun FilaDeVentaEnCola(
         )
 
         Text(
-            text = detalleDeLineas(venta),
+            text = detalleDeLineas(venta, feria),
             style = RbTheme.typography.body,
             color = colors.textPrimary,
             modifier = Modifier.padding(top = dimens.space1),
@@ -350,23 +352,22 @@ private fun FilaDeVentaEnCola(
 
         if (venta.rechazada) {
             RbChip(
-                label = "No se anotó",
+                label = etiquetaNoSeAnoto(),
                 tone = RbChipTone.Danger,
                 modifier = Modifier.padding(top = dimens.space2),
             )
             Text(
-                text = venta.motivo ?: "El sistema no la aceptó.",
+                text = venta.motivo ?: motivoRechazoSinDetalle(feria),
                 style = RbTheme.typography.body,
                 color = colors.dangerText,
             )
             Text(
-                text = "No se va a reintentar sola. Revisa qué pasó y vuelve a cobrarla si " +
-                    "corresponde; recién ahí descártala de acá.",
+                text = ayudaVentaRechazada(feria),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
             RbButton(
-                label = "Descartar",
+                label = etiquetaDescartar(),
                 onClick = onDescartar,
                 variant = RbButtonVariant.Destructive,
             )
@@ -402,12 +403,14 @@ private fun tituloDeVenta(cobradaEn: Long, ahora: Long): String {
     return if (antiguedad == "recién") "Venta recién cobrada" else "Venta de $antiguedad"
 }
 
-/** "3 productos" — sin plata, que la pone el server cuando la venta llegue. */
-private fun detalleDeLineas(venta: VentaEnCola): String {
+/** "3 productos" — sin plata; el total se confirma al anotar, no se inventa acá. */
+private fun detalleDeLineas(venta: VentaEnCola, feria: Boolean): String {
     val unidades = venta.solicitud.items.sumOf { it.quantity }
-    val productos = if (venta.lineas == 1) "1 producto" else "${venta.lineas} productos"
-    val piezas = if (unidades == 1) "1 unidad" else "$unidades unidades"
-    return "$productos · $piezas · el total lo confirma el sistema al recibirla"
+    return detalleLineasCola(
+        lineas = venta.lineas,
+        unidades = unidades,
+        feria = feria,
+    )
 }
 
 /** Pastilla corta del estado: se lee de reojo, sin sonar a error de red. */
