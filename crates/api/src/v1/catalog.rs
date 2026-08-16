@@ -12,6 +12,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
+use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::middleware::auth::AuthUser;
@@ -19,7 +20,7 @@ use crate::AppState;
 
 use domain::catalog::{model::*, service};
 
-use crate::role::admin_plus;
+use crate::role::{admin_plus, cashier_plus};
 
 fn tenant_of(claims: &auth::Claims) -> Result<Thing, ApiError> {
     surrealdb::sql::thing(&claims.tenant_id).map_err(|_| ApiError::unauthorized_invalid_token())
@@ -30,7 +31,8 @@ fn db_of(s: &AppState) -> Result<Arc<db::Db>, ApiError> {
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
-    // Static path segments before `{id}` so `by-barcode` is not captured as an id.
+    // Static path segments before `{id}` so `by-barcode` / `ensure` are not
+    // captured as an id.
     let reads = Router::new()
         .route("/api/v1/products", get(list_products))
         .route("/api/v1/products/stats", get(product_stats))
@@ -63,9 +65,24 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/api/v1/categories/{id}",
             axum::routing::patch(update_category).delete(delete_category),
         )
-        .route_layer(crate::role::layer(state, admin_plus()));
+        .route_layer(crate::role::layer(state.clone(), admin_plus()));
 
-    reads.merge(writes)
+    // Dueña en el puesto = cashier/owner: ensure simple (feria) sin bajar el
+    // layer admin+ del resto de writes. Router aparte, como assist ask/act.
+    let ensure = Router::new()
+        .route("/api/v1/products/ensure", post(ensure_simple_product))
+        .route_layer(crate::role::layer(state, cashier_plus()));
+
+    reads.merge(writes).merge(ensure)
+}
+
+/// Body de `POST /api/v1/products/ensure` — cosa de feria: nombre + precio.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct EnsureSimpleProduct {
+    pub name: String,
+    #[serde(with = "rust_decimal::serde::str")]
+    #[schema(value_type = String)]
+    pub price: rust_decimal::Decimal,
 }
 
 // --- products: reads -------------------------------------------------------
@@ -352,6 +369,25 @@ pub async fn export_products(
 }
 
 // --- products: writes ------------------------------------------------------
+
+/// Asegura un producto simple de feria (nombre + precio, sin inventario).
+/// Idempotente por nombre (case-insensitive). Cashier+.
+#[utoipa::path(post, path = "/api/v1/products/ensure", tag = "Catalog",
+    request_body = EnsureSimpleProduct,
+    responses((status = 200, body = ProductDto), (status = 401, body = crate::error::ErrorEnvelope),
+        (status = 403, body = crate::error::ErrorEnvelope), (status = 400, body = crate::error::ErrorEnvelope)),
+    security(("bearer_jwt" = [])))]
+pub async fn ensure_simple_product(
+    State(s): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Json(input): Json<EnsureSimpleProduct>,
+) -> Result<Json<ProductDto>, ApiError> {
+    let db = db_of(&s)?;
+    let t = tenant_of(&claims)?;
+    Ok(Json(
+        domain::catalog::feria::ensure_simple_product(&db, &t, &input.name, input.price).await?,
+    ))
+}
 
 /// Crea un producto. Requiere admin+.
 #[utoipa::path(post, path = "/api/v1/products", tag = "Catalog",
