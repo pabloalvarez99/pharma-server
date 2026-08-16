@@ -37,6 +37,7 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
     val esRetiro = vm.tipoDeMovimiento == NuevoMovimiento.RETIRO
     val feria = vm.esFeria || esFeria()
     val copy = copyMovimientoCaja(feria = feria, esRetiro = esRetiro)
+    val motivo = copyMotivoMovimiento(feria = feria, esRetiro = esRetiro)
 
     Column(
         modifier = modifier
@@ -64,13 +65,13 @@ fun PasoMovimiento(vm: CajaViewModel, modifier: Modifier = Modifier) {
             )
         }
 
-        RbCard(title = "¿Por qué?") {
+        RbCard(title = motivo.tituloCard) {
             RbTextField(
                 value = vm.motivoDelMovimiento,
                 onValueChange = vm::cambiarMotivoDelMovimiento,
-                label = "Motivo",
-                placeholder = if (esRetiro) "Le pagué al del pan" else "Traje cambio de mi casa",
-                supportingText = "Con esto vas a saber en el cierre qué pasó con esa plata.",
+                label = motivo.etiqueta,
+                placeholder = motivo.placeholder,
+                supportingText = motivo.ayuda,
                 enabled = !vm.guardando,
             )
         }
