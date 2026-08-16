@@ -3,50 +3,83 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f4c4a" />
-  <meta name="description" content="RutAgent — el cuaderno de la feria que te entiende cuando le hablás. Sin IP, sin menús, sin manual." />
+  <meta name="theme-color" content="#0b3d3b" />
+  <meta name="color-scheme" content="light" />
+  <meta name="description" content="RutAgent — el cuaderno de la feria en el celular. Hablale: vendé, fiá y cerrá el día. Sin IP, sin menús, sin manual." />
+  <meta property="og:title" content="RutAgent — hablale al puesto" />
+  <meta property="og:description" content="El cuaderno de la feria, en el celular. Vendé, fiá y cerrá el día con la voz." />
+  <meta property="og:locale" content="es_CL" />
+  <meta name="twitter:card" content="summary" />
   <title>RutAgent — hablale, no tipees IP</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="papel" aria-hidden="true"></div>
-  <div class="hojas" aria-hidden="true">
-    <span class="hoja h1"></span>
-    <span class="hoja h2"></span>
-    <span class="hoja h3"></span>
+  <div class="fondo" aria-hidden="true">
+    <span class="mancha m1"></span>
+    <span class="mancha m2"></span>
+    <span class="mancha m3"></span>
   </div>
 
   <main class="cartel">
-    <p class="sello">RutAgent · feria y calle</p>
+    <div class="cinta" aria-hidden="true"></div>
+
+    <header class="cabeza">
+      <p class="sello">RutAgent · feria y calle</p>
+      <p class="hoy" aria-label="Hoy en el puesto">HOY</p>
+    </header>
 
     <h1 class="titulo">
       Hablale al puesto.<br />
-      Él anota.
+      <span class="titulo-line2">Él anota.</span>
     </h1>
 
+    <p class="lema">Como el cuaderno — pero en el celu.</p>
+
     <p class="frase">
-      El cuaderno de la feria, en el celular: vendé, fiá y cerrá el día con la voz —
-      sin menús raros ni tecnicismos.
+      Vendé, fiá y cerrá el día con la voz.
+      Sin menús raros. Sin tecnicismos. Sin pedir IP.
     </p>
 
-    <div class="pill" role="note">
-      <span class="pill-icon" aria-hidden="true">✓</span>
-      <p>
+    <div class="aviso" role="note">
+      <span class="aviso-marca" aria-hidden="true">✓</span>
+      <div class="aviso-texto">
         <strong>La app no pide una IP.</strong>
-        Abrís, hablás, y listo — la nube del lab ya está conectada.
-      </p>
+        <span>Abrís, hablás, y listo — la nube del lab ya está conectada.</span>
+      </div>
     </div>
 
-    <ul class="chips" aria-label="Qué podés decir">
-      <li>«Vendí dos kilos de tomate a dos mil»</li>
-      <li>«Fié cinco lucas a la señora Rosa»</li>
-      <li>«¿Cuánto vendí hoy?»</li>
+    <section class="dichos" aria-labelledby="dichos-titulo">
+      <h2 id="dichos-titulo" class="dichos-titulo">Decile así</h2>
+      <ul class="chips">
+        <li>
+          <span class="chip-nro" aria-hidden="true">1</span>
+          <span class="chip-txt">«Vendí dos kilos de tomate a dos mil»</span>
+        </li>
+        <li>
+          <span class="chip-nro" aria-hidden="true">2</span>
+          <span class="chip-txt">«Fié cinco lucas a la señora Rosa»</span>
+        </li>
+        <li>
+          <span class="chip-nro" aria-hidden="true">3</span>
+          <span class="chip-txt">«¿Cuánto vendí hoy?»</span>
+        </li>
+        <li>
+          <span class="chip-nro" aria-hidden="true">4</span>
+          <span class="chip-txt">«¿Quién me debe?»</span>
+        </li>
+      </ul>
+    </section>
+
+    <ul class="sellos-pie" aria-label="Promesas">
+      <li>Gratis pa’ partir</li>
+      <li>Celu viejo sirve</li>
+      <li>Sin manual</li>
     </ul>
 
     <footer class="pie">
       <span class="marca">RutAgent</span>
       <span class="sep" aria-hidden="true">·</span>
-      <span>ERP chileno para el cuaderno de verdad</span>
+      <span>ERP chileno pa’l cuaderno de verdad</span>
     </footer>
   </main>
 </body>
