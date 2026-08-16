@@ -1,0 +1,12 @@
+# Ejemplo de firewall UFW. Revisar y aplicar a mano en la caja.
+# No es un script auto-ejecutable; el capitán lo corre si quiere.
+#
+#   sudo sh ufw.ejemplo
+# o línea por línea.
+
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable

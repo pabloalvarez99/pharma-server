@@ -1,0 +1,15 @@
+# Timer diario de backup. Persistent=true: si la caja estaba apagada,
+# corre al volver.
+# Copiar a /etc/systemd/system/backup-rutbusiness.timer
+# enable: sudo systemctl enable --now backup-rutbusiness.timer
+
+[Unit]
+Description=Timer backup diario SurrealKV (RutBusiness nube)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=backup-rutbusiness.service
+
+[Install]
+WantedBy=timers.target

@@ -1,9 +1,12 @@
-# systemd — API de RutBusiness en la nube de feria (Hetzner CX22).
+# systemd — API de RutBusiness en la nube de feria.
 # Copiar a /etc/systemd/system/rutbusiness-api.service
 #
 # Usuario de sistema `rutbusiness` (no root). Env en
 # /etc/rutbusiness/api.env (root:rutbusiness, 640). El binario escucha
 # solo loopback; Caddy termina 443.
+#
+# Tras install: systemd-analyze security rutbusiness-api
+# (no Perfect; sí más estricto que el unit mínimo).
 
 [Unit]
 Description=RutBusiness API (nube feria)
@@ -16,14 +19,28 @@ Group=rutbusiness
 EnvironmentFile=-/etc/rutbusiness/api.env
 WorkingDirectory=/var/lib/rutbusiness
 ExecStart=/opt/rutbusiness/bin/pharma-api
-Restart=on-failure
+Restart=always
 RestartSec=5
+LimitNOFILE=65535
+UMask=0077
 
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
 ReadWritePaths=/var/lib/rutbusiness
+
+# Sin WatchdogSec: pharma-api no hace sd_notify.
+# Sin MemoryDenyWriteExecute: puede romper allocators de un binario Rust.
 
 [Install]
 WantedBy=multi-user.target
