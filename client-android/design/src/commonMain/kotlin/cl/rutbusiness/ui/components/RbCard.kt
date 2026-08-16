@@ -17,13 +17,18 @@ import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
- * A card shell.
+ * A card shell — a piece of the mesa del puesto, not a floating SaaS panel.
  *
  * Ported from `.ui-card` / `.rb-card`. The CSS carried a drop shadow
- * (`--rb-shadow`, a 40px blur); this draws a 1.5dp border instead. Two reasons,
+ * (`--rb-shadow`, a 40px blur); this draws a real edge instead. Two reasons,
  * and both come from the hardware floor: a large-radius shadow is a real GPU
  * cost per frame on the reference device, and a shadow is invisible against a
  * light surface in daylight while a border is not.
+ *
+ * The edge uses [cl.rutbusiness.ui.theme.RbColors.outlineStrong] (>= 3.0), not
+ * the decorative hairline: under feria sun a 1.27 outline disappears and the
+ * card melts into the kraft background. Padding and section gaps stay generous
+ * so the content reads as a thick mesa tile, not a dense admin widget.
  *
  * @param title optional heading. Rendered as a heading for TalkBack.
  * @param actions optional trailing slot in the header - put an [RbButton] here.
@@ -44,14 +49,14 @@ fun RbCard(
             .fillMaxWidth()
             .clip(shape)
             .background(colors.surface)
-            .border(dimens.border, colors.outline, shape)
-            .padding(dimens.space3),
-        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+            .border(dimens.border, colors.outlineStrong, shape)
+            .padding(dimens.space4),
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
         if (title != null || actions != null) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(dimens.space2),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (title != null) {
@@ -59,7 +64,11 @@ fun RbCard(
                         text = title,
                         style = RbTheme.typography.heading,
                         color = colors.textPrimary,
-                        modifier = Modifier.rbHeading(),
+                        // weight keeps a long heading from shoving actions off
+                        // the row at 200% font scale.
+                        modifier = Modifier
+                            .weight(1f)
+                            .rbHeading(),
                     )
                 }
                 actions?.invoke()

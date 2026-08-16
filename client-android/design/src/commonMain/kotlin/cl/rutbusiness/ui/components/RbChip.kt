@@ -1,7 +1,10 @@
 package cl.rutbusiness.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -10,9 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -54,7 +60,7 @@ fun RbChipRow(
 }
 
 /**
- * A chip.
+ * A chip — a paper label on the mesa, not a Material filter.
  *
  * Two shapes in one component, because they differ only in whether they react:
  * a **status pill** ([onClick] null) that labels a row, and a **filter chip**
@@ -65,6 +71,12 @@ fun RbChipRow(
  * tappable. Here the text is on the scaling ramp, and a chip that reacts gets
  * the full 56dp target - a non-interactive pill correctly does not, since
  * padding a label to 56dp would wreck the row rhythm for no gain.
+ *
+ * Status pills carry a soft filled body (existing containers / surfaceVariant)
+ * so they read under feria sun; selected filters thicken the brand edge rather
+ * than relying on hue alone. Press feedback is color only — never translateY —
+ * and runs through [cl.rutbusiness.ui.theme.RbMotion.quick] so reduced motion
+ * snaps.
  *
  * @param selected only meaningful when [onClick] is set; announced to TalkBack.
  */
@@ -78,6 +90,7 @@ fun RbChip(
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
+    val motion = RbTheme.motion
     val shape = RbTheme.shapes.pill
 
     val contentColor = when (tone) {
@@ -88,9 +101,19 @@ fun RbChip(
         RbChipTone.Info -> colors.infoText
     }
 
-    // Selection is carried by a filled background AND a thicker border, not by
+    // Soft body per tone: a paper label on the mesa, not a hairline ghost.
+    // Only brand/danger have dedicated containers; the rest sit on surfaceVariant
+    // so warn/info still have body without inventing tokens.
+    val toneBody = when (tone) {
+        RbChipTone.Neutral -> colors.surface
+        RbChipTone.Brand -> colors.brandContainer
+        RbChipTone.Danger -> colors.dangerContainer
+        RbChipTone.Warn, RbChipTone.Info -> colors.surfaceVariant
+    }
+
+    // Selection is carried by a filled brand body AND a thicker border, not by
     // hue alone - the same reason the text field thickens its edge on error.
-    val background = if (selected) colors.brandContainer else colors.surface
+    val restBackground = if (selected) colors.brandContainer else toneBody
     val borderColor = when {
         selected -> colors.brandText
         // A toned chip borders in its own tone. The neutral outline is a warm
@@ -102,9 +125,26 @@ fun RbChip(
     val borderWidth = if (selected) dimens.focusRing else dimens.border
     val labelColor = if (selected) colors.textPrimary else contentColor
 
+    // Always own an interaction source so press color is a single code path;
+    // a non-clickable chip never receives presses, so the source stays idle.
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val pressedBackground = if (colors.isDark) {
+        restBackground.copy(alpha = 0.82f).compositeOverOpaque(colors.surface)
+    } else {
+        restBackground.copy(alpha = 0.86f).compositeOverOpaque(colors.background)
+    }
+
+    val animatedBackground by animateColorAsState(
+        targetValue = if (pressed && onClick != null) pressedBackground else restBackground,
+        animationSpec = motion.quick(),
+        label = "RbChip background",
+    )
+
     val base = modifier
         .clip(shape)
-        .background(background)
+        .background(animatedBackground)
         .border(borderWidth, borderColor, shape)
 
     val interactive = if (onClick != null) {
@@ -113,6 +153,7 @@ fun RbChip(
                 onClick = onClick,
                 role = Role.Tab,
                 shape = shape,
+                interactionSource = interactionSource,
             )
             .rbTouchTarget()
             .semantics { this.selected = selected }
@@ -122,6 +163,8 @@ fun RbChip(
 
     Box(
         modifier = interactive.padding(
+            // Horizontal air so a short filter ("Hoy") still feels like a
+            // real finger target once rbTouchTarget lifts it to 56dp.
             horizontal = dimens.space3,
             vertical = dimens.space2,
         ),
@@ -133,4 +176,15 @@ fun RbChip(
             color = labelColor,
         )
     }
+}
+
+/** Flatten a translucent color onto an opaque one (same rule as RbButton). */
+private fun Color.compositeOverOpaque(background: Color): Color {
+    val a = alpha
+    return Color(
+        red = red * a + background.red * (1 - a),
+        green = green * a + background.green * (1 - a),
+        blue = blue * a + background.blue * (1 - a),
+        alpha = 1f,
+    )
 }
