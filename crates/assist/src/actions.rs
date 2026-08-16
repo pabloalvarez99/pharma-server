@@ -190,6 +190,9 @@ pub enum Action {
         /// es-CL drug-interaction warnings for this cart, so the owner reads
         /// them BEFORE confirming (see [`interaction_warnings`]).
         warnings: Vec<String>,
+        /// Feria sin sesión abierta al proponer: al confirmar se abre el puesto
+        /// con $0. La prosa de confirmación avisa; no aplica en farmacia.
+        abre_puesto: bool,
     },
     /// The same sale, charged to the customer's cuenta corriente (`pos_fiado`):
     /// the drawer takes no cash and `post_sale` posts the cargo through
@@ -367,12 +370,18 @@ impl Action {
                 total,
                 customer_name,
                 warnings,
+                abre_puesto,
                 ..
             } => {
                 let mut s = format!("Vender:\n{}\n", venta_lineas_text(lines, m));
                 s.push_str(&format!("Total a cobrar: {} en efectivo.", m.fmt(*total)));
                 if let Some(c) = customer_name {
                     s.push_str(&format!("\nSe la anoto a {c}."));
+                }
+                if *abre_puesto {
+                    s.push_str(
+                        "\nEl puesto no tenía el día abierto: lo abro con $0 y cobro.",
+                    );
                 }
                 s.push_str(&warnings_text(warnings));
                 s
@@ -535,6 +544,7 @@ impl Action {
                 customer_id,
                 customer_name,
                 warnings,
+                abre_puesto,
             } => serde_json::json!({
                 "lines": venta_lineas_json(lines),
                 "subtotal": subtotal.to_string(),
@@ -543,6 +553,7 @@ impl Action {
                 "customer_id": customer_id,
                 "customer_name": customer_name,
                 "warnings": warnings,
+                "abre_puesto": abre_puesto,
             }),
             Action::FiarVenta {
                 lines,
@@ -2965,26 +2976,20 @@ async fn build_venta(
     // Cash needs an open drawer: the sale's cash lands in the OPEN session's
     // running total (migración 0030), so selling with the drawer closed would
     // put money in a till that no arqueo will ever count. Fiado takes no cash.
+    // Feria: no Reject — el puesto se abre en execute (build no tiene user).
+    let mut abre_puesto = false;
     if !fiado {
-        use domain::cash_register::model::SessionFilters;
-        use domain::cash_register::service as caja;
-        let open = caja::list_sessions(
-            db,
-            tenant,
-            SessionFilters {
-                status: Some("open".into()),
-                user: None,
-                limit: Some(1),
-                offset: None,
-            },
-        )
-        .await?;
-        if open.is_empty() {
-            return Ok(BuildOutcome::Reject(
-                "No tienes la caja abierta, así que todavía no puedo cobrar. Ábrela primero \
-                 («abre la caja con $50.000») y te la registro al tiro."
-                    .into(),
-            ));
+        let abierta = crate::feria_caja::hay_caja_abierta(db, tenant).await?;
+        if !abierta {
+            if crate::feria_caja::es_feria(db, tenant).await? {
+                abre_puesto = true;
+            } else {
+                return Ok(BuildOutcome::Reject(
+                    "No tienes la caja abierta, así que todavía no puedo cobrar. Ábrela primero \
+                     («abre la caja con $50.000») y te la registro al tiro."
+                        .into(),
+                ));
+            }
         }
     }
 
@@ -3141,6 +3146,7 @@ async fn build_venta(
         customer_id,
         customer_name,
         warnings,
+        abre_puesto,
     }))
 }
 
@@ -3717,6 +3723,14 @@ pub async fn execute(
             customer_name,
             ..
         } => {
+            // Feria day-1: open the puesto with $0 before posting so the cash
+            // counts in the arqueo. Fiado never opens. No actor → skip open
+            // (post_sale still records the order without a cash session).
+            if crate::feria_caja::es_feria(db, tenant).await? {
+                if let Some(user) = actor {
+                    crate::feria_caja::asegurar_caja_feria(db, tenant, user).await?;
+                }
+            }
             // `cash_amount` = the frozen total: the lines and their prices are
             // the same ones `post_sale` re-totals, so the drawer's running cash
             // and the order's total can never drift apart.
@@ -4859,6 +4873,7 @@ mod tests {
             customer_id: None,
             customer_name: None,
             warnings: vec![],
+            abre_puesto: false,
         };
         let s = a.summary(&Money::default());
         assert!(s.contains("2 × Paracetamol 500 mg"), "{s}");
@@ -4897,6 +4912,7 @@ mod tests {
             customer_id: Some("customer:1".into()),
             customer_name: Some("Juan".into()),
             warnings: vec![],
+            abre_puesto: false,
         };
         let p = a.params();
         assert_eq!(p["total"], "1980");
