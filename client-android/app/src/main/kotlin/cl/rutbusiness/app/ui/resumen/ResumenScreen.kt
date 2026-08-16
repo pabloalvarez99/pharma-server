@@ -16,8 +16,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import cl.rutbusiness.app.ui.agente.ASI_SE_ANOTA_UNA_VENTA
-import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.agente.irAlAgente
 import cl.rutbusiness.app.ui.gente.RecadoParaGente
 import cl.rutbusiness.app.ui.gente.etiquetaCompartirDia
@@ -108,7 +106,7 @@ private fun ResumenScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
-            title = if (feria) "Hoy" else "Tu día",
+            title = tituloHoy(feria),
             // Cuando lo que se muestra es la copia guardada, el subtítulo lo
             // dice ahí mismo: es la primera línea que se lee y no se puede
             // saltar. "Cómo va el negocio hoy" arriba de cifras de anoche sería
@@ -117,10 +115,10 @@ private fun ResumenScreen(
                 "Datos guardados en el teléfono, " +
                     Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
             } ?: vm.nombreDelPuesto?.takeIf { feria && it.isNotBlank() }
-                ?: if (feria) "Cómo va el puesto hoy" else "Cómo va el negocio hoy",
+                ?: subtituloHoy(feria),
             actions = {
                 RbButton(
-                    label = "Actualizar",
+                    label = labelActualizarHoy(feria),
                     onClick = vm::cargar,
                     variant = RbButtonVariant.Secondary,
                     enabled = !vm.cargando,
@@ -139,7 +137,7 @@ private fun ResumenScreen(
             )
 
             vm.cargando && vm.ventasHoy == null -> Column {
-                RbLoadingState(label = "Sacando la cuenta del día...")
+                RbLoadingState(label = cargandoHoy(feria))
                 RbSkeletonLines(lines = 4, modifier = Modifier.padding(dimens.space3))
             }
 
@@ -219,7 +217,7 @@ internal fun TarjetaDelDia(
     // callado. No es un tablero de filas — es una tarjeta de puesto.
     RbCard {
         Text(
-            text = "Vendiste hoy",
+            text = tituloVendidoHoy(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
             modifier = Modifier.rbHeading(),
@@ -242,12 +240,7 @@ internal fun TarjetaDelDia(
             verticalArrangement = Arrangement.spacedBy(dimens.space2),
         ) {
             RbChip(
-                label = when (comparacion) {
-                    Comparacion.Mejor -> "Mejor que ayer"
-                    Comparacion.Igual -> "Igual que ayer"
-                    Comparacion.Peor -> "Menos que ayer"
-                    Comparacion.SinDatoDeAyer -> "Sin comparación"
-                },
+                label = etiquetaComparacion(comparacion),
                 // El tono acompaña, no informa: la palabra ya lo dice completo.
                 // Quien no distingue los colores lee exactamente lo mismo.
                 tone = when (comparacion) {
@@ -258,15 +251,10 @@ internal fun TarjetaDelDia(
             )
 
             Text(
-                text = if (vendidoAyer == null) {
-                    "No pudimos traer lo de ayer para comparar. Toca «Actualizar»."
-                } else {
-                    // Se dice "día completo" porque es lo que se está
-                    // comparando: hoy va a medias y ayer ya terminó. Sin esa
-                    // palabra, a las diez de la mañana la pantalla parecería
-                    // decir que el negocio se cayó.
-                    "Ayer, día completo: ${moneda.formatear(vendidoAyer)}."
-                },
+                text = pistaComparacion(
+                    feria = feria,
+                    vendidoAyerFormateado = vendidoAyer?.let { moneda.formatear(it) },
+                ),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -321,22 +309,21 @@ private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = "Todavía no vendiste nada hoy",
+                text = tituloHoySinVentas(),
                 style = RbTheme.typography.heading,
                 color = colors.textPrimary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.rbHeading(),
             )
             Text(
-                text = "Dile al agente: «$ASI_SE_ANOTA_UNA_VENTA». " +
-                    "Acá vas a ver cuánto llevas, sin sumar a mano.",
+                text = pistaHoySinVentas(),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
                 textAlign = TextAlign.Center,
             )
             if (onHablarleAlAgente != null) {
                 RbButton(
-                    label = "Hablarle al agente",
+                    label = ctaHablarleAlAgenteHoy(),
                     onClick = onHablarleAlAgente,
                 )
             }
@@ -350,14 +337,17 @@ private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
 private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
     val colors = RbTheme.colors
     val enCaja = vm.enCaja
+    // Card solo se monta en retail formal, pero el helper acepta feria por si
+    // algún día se muestra: copyEnCajaExplicacion ya es honesto en ambos.
+    val feria = esFeria()
 
-    RbCard(title = "En la caja") {
+    RbCard(title = tituloEnCajaHoy()) {
         when {
             enCaja != null -> {
                 RbAmount(amount = vm.moneda.formatear(enCaja))
                 Text(
                     text = copyEnCajaExplicacion(
-                        feria = esFeria(),
+                        feria = feria,
                         nombreDeCaja = vm.nombreDeCaja,
                     ),
                     style = RbTheme.typography.support,
@@ -366,8 +356,7 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
             }
 
             vm.sinCajaAbierta -> Text(
-                text = "No hay ninguna caja abierta. Abrir la caja es lo primero del día: " +
-                    "desde ahí se empieza a contar la plata que entra.",
+                text = sinCajaAbiertaHoy(),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -375,8 +364,7 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
             // "Arqueo" es la palabra del contador, no la de la dueña. Y el
             // mensaje tenía que decir qué hacer, no sólo qué faltó.
             else -> Text(
-                text = "No pudimos traer la cuenta de la caja. El resto sí está al día: toca " +
-                    "«Actualizar» arriba para volver a pedirla.",
+                text = errorEnCajaHoy(feria),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -386,7 +374,7 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
         // cuando no hay ninguna abierta el botón es el principal de la tarjeta y
         // no una acción secundaria escondida.
         RbButton(
-            label = if (vm.sinCajaAbierta) "Abrir la caja" else "Ver la caja",
+            label = ctaCajaHoy(sinCajaAbierta = vm.sinCajaAbierta),
             onClick = onIrALaCaja,
             variant = if (vm.sinCajaAbierta) RbButtonVariant.Primary else RbButtonVariant.Secondary,
             fillWidth = true,
@@ -405,11 +393,10 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
     val feria = esFeria()
 
     // Franja humana, no ERP: plata que te deben personas, no "cuentas por cobrar".
-    RbCard(title = "Te deben") {
+    RbCard(title = tituloTeDebenHoy()) {
         when {
             deuda == null -> Text(
-                text = "No pudimos traer lo del fiado. El resto sí está al día: toca " +
-                    "«Actualizar» arriba para volver a pedirlo.",
+                text = errorFiadoHoy(feria),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -418,12 +405,7 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
             // frase. El vacío la enseña acá, que es donde la dueña se está
             // preguntando por la deuda, y no en una pantalla más adentro.
             !hayDeuda -> Text(
-                text = if (feria) {
-                    "Nadie te debe. Cuando fíes, díselo al agente: «$ASI_SE_FIA»."
-                } else {
-                    "Nadie te debe plata. Cuando fíes una venta, la deuda aparece acá hasta " +
-                        "que te la paguen."
-                },
+                text = vacioFiadoHoy(feria),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -434,11 +416,7 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
                     modifier = Modifier.padding(vertical = dimens.space1),
                 )
                 Text(
-                    text = if (deuda.deudores == 1) {
-                        "1 persona te debe."
-                    } else {
-                        "${deuda.deudores} personas te deben."
-                    },
+                    text = cuantosTeDebenHoy(deuda.deudores),
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
@@ -449,7 +427,7 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
         // esconderla dejaría sin forma de llegar a la cuenta de alguien que ya
         // terminó de pagar.
         RbButton(
-            label = if (hayDeuda) "Ver quién me debe" else "Quién me debe",
+            label = ctaFiadoHoy(hayDeuda),
             onClick = onIrAlFiado,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
