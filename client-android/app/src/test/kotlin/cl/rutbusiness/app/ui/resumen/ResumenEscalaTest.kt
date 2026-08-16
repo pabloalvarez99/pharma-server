@@ -328,6 +328,63 @@ class ResumenEscalaTest {
                 .isEmpty(),
         )
     }
+
+    // --- feria: después de la primera venta (venta, no boleta) ----------------
+
+    /**
+     * Con ventas del día, feria dice «ventas» y nunca «boleta».
+     *
+     * La tarjeta ya no está en el vacío de HoySinVentas: es el camino que la
+     * dueña ve todo el día, y el feriante no llama boleta a lo que anotó.
+     */
+    @Test
+    fun `en feria con ventas se lee ventas y no boleta`() {
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "1234567",
+            boletas = 42L,
+            rubro = "feria",
+        )
+
+        compose.onNodeWithText("42 ventas.", substring = true).assertIsDisplayed()
+        assertTrue(
+            "feria no debe mostrar la palabra boleta en la tarjeta del día",
+            compose.onAllNodes(hasText("boleta", substring = true)).fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `en feria una sola venta se dice en singular`() {
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "1500",
+            boletas = 1L,
+            rubro = "feria",
+        )
+
+        compose.onNodeWithText("1 venta.", substring = true).assertIsDisplayed()
+        assertTrue(
+            "singular de feria tampoco dice boleta",
+            compose.onAllNodes(hasText("boleta", substring = true)).fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
+    /** La farmacia no hereda el vocabulario de feria en el conteo. */
+    @Test
+    fun `con pack formal el conteo sigue siendo boletas`() {
+        mostrar(
+            escala = 1.0f,
+            vendidoHoy = "1234567",
+            boletas = 42L,
+            rubro = "farmacia",
+        )
+
+        compose.onNodeWithText("42 boletas.", substring = true).assertIsDisplayed()
+        assertTrue(
+            "retail formal no dice «ventas» en el conteo de la tarjeta",
+            compose.onAllNodes(hasText("42 ventas.")).fetchSemanticsNodes().isEmpty(),
+        )
+    }
 }
 
 /**
