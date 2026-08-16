@@ -97,13 +97,15 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         feria = feria,
         // Sin señal, la línea de ayuda cede el lugar a la fecha de lo que se
         // está mostrando. No se suman las dos: en un panel de 640dp cada
-        // renglón extra arriba se lo saca a la lista de productos, que es lo
-        // que la cajera vino a tocar. Y de las dos frases, "de cuándo es este
-        // stock" es la que decide una venta.
+        // renglón extra arriba se lo saca a la lista, que es lo que la
+        // cajera vino a tocar. Y de las dos frases, "de cuándo es esto" es
+        // la que decide una venta.
         ayuda = when {
             !vm.hayConexion && vm.catalogoGuardadoEn != null ->
-                "Guardado ${Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora)}. " +
-                    "El stock puede haber cambiado."
+                copyAyudaCatalogoGuardado(
+                    feria = feria,
+                    antiguedad = Fechado(Unit, vm.catalogoGuardadoEn!!).antiguedad(ahora),
+                )
             else -> copy.ayudaOnline
         },
         // Cámara + pack.barcode: feria apaga el escáner (ADR-0022) aunque el
