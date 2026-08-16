@@ -14,18 +14,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.offline.VentaEnCola
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
-import cl.rutbusiness.ui.components.RbEmptyState
+import cl.rutbusiness.ui.components.RbChip
+import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbHeading
 import kotlinx.coroutines.launch
 
 /**
@@ -35,12 +39,11 @@ import kotlinx.coroutines.launch
  * ve no sirve de nada: la dueña que cobró seis ventas sin señal necesita poder
  * mirar el teléfono y contar seis, o no va a creerle a la app — y con razón.
  *
- * Lo que **no** se muestra acá es plata. Ni el total de cada venta ni la suma
- * de la cola: esos números los pone el server cuando la venta llegue, y un
- * total calculado en el teléfono al lado de una venta que todavía no se cobró
- * en el sistema sería exactamente el número inventado que este producto no
- * muestra. Se dicen los productos y la hora, que es lo que la dueña usa para
- * reconocer cuál venta es cuál.
+ * Se lee como **cola de ventas esperando** (notas del día), no como un panel
+ * de sync ni un error de red. Lo que **no** se muestra acá es plata. Ni el
+ * total de cada venta ni la suma de la cola: esos números los pone el server
+ * cuando la venta llegue. Se dicen los productos y la hora, que es lo que la
+ * dueña usa para reconocer cuál venta es cuál.
  */
 /**
  * Estado del último "Preparar respaldo" (ADR-0022).
@@ -98,7 +101,7 @@ fun PantallaDeCola(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Ventas por enviar",
+            title = "Ventas esperando",
             subtitle = when {
                 cola.isEmpty() -> null
                 esperando > 0 && conectado -> "Se están mandando solas."
@@ -109,18 +112,23 @@ fun PantallaDeCola(
         )
 
         if (cola.isEmpty() && onPrepararRespaldo == null && onRestaurarRespaldo == null) {
-            RbEmptyState(
-                title = "No hay ninguna esperando",
-                hint = hintColaVacia(feria),
-                actionLabel = "Volver",
-                onAction = onCerrar,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(dimens.space3),
+            ) {
+                VacioDeCola(
+                    hint = hintColaVacia(feria),
+                    onVolver = onCerrar,
+                )
+            }
             return@Column
         }
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            // space4: se leen de a una nota, no como filas de un panel de sync.
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
             if (onPrepararRespaldo != null) {
                 item {
@@ -235,11 +243,9 @@ fun PantallaDeCola(
 
             if (cola.isEmpty()) {
                 item {
-                    RbEmptyState(
-                        title = "No hay ninguna esperando",
+                    VacioDeCola(
                         hint = hintColaVacia(feria),
-                        actionLabel = "Volver",
-                        onAction = onCerrar,
+                        onVolver = onCerrar,
                     )
                 }
                 return@LazyColumn
@@ -270,6 +276,53 @@ fun PantallaDeCola(
     }
 }
 
+/**
+ * Nada en la cola: se lee como un recado aliviado, no como un empty de sistema.
+ *
+ * Misma vara que Hoy / fiado: aire, una frase y un solo CTA. Sin asset.
+ */
+@Composable
+internal fun VacioDeCola(
+    hint: String,
+    onVolver: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+
+    RbCard(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = dimens.space4),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        ) {
+            Text(
+                text = "No hay ninguna esperando",
+                style = RbTheme.typography.heading,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.rbHeading(),
+            )
+            Text(
+                text = hint,
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
+                textAlign = TextAlign.Center,
+            )
+            RbButton(
+                label = "Volver",
+                onClick = onVolver,
+            )
+        }
+    }
+}
+
+/**
+ * Una venta de la cola: se lee como una nota del día (cuándo · qué · estado),
+ * no como una fila de un log de sync.
+ */
 @Composable
 private fun FilaDeVentaEnCola(
     venta: VentaEnCola,
@@ -277,18 +330,30 @@ private fun FilaDeVentaEnCola(
     onDescartar: () -> Unit,
 ) {
     val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
 
-    RbCard(
-        title = tituloDeVenta(venta.cobradaEn, ahora),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    RbCard(modifier = Modifier.fillMaxWidth()) {
+        // Cuándo: callado, arriba. La dueña reconoce la venta por la hora
+        // relativa, no por un título de sistema.
+        Text(
+            text = tituloDeVenta(venta.cobradaEn, ahora),
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
+        )
+
         Text(
             text = detalleDeLineas(venta),
             style = RbTheme.typography.body,
             color = colors.textPrimary,
+            modifier = Modifier.padding(top = dimens.space1),
         )
 
         if (venta.rechazada) {
+            RbChip(
+                label = "No se anotó",
+                tone = RbChipTone.Danger,
+                modifier = Modifier.padding(top = dimens.space2),
+            )
             Text(
                 text = venta.motivo ?: "El sistema no la aceptó.",
                 style = RbTheme.typography.body,
@@ -306,6 +371,11 @@ private fun FilaDeVentaEnCola(
                 variant = RbButtonVariant.Destructive,
             )
         } else {
+            RbChip(
+                label = etiquetaDeEspera(venta, ahora),
+                tone = RbChipTone.Brand,
+                modifier = Modifier.padding(top = dimens.space2),
+            )
             Text(
                 text = estadoDeEspera(venta, ahora),
                 style = RbTheme.typography.support,
@@ -338,6 +408,13 @@ private fun detalleDeLineas(venta: VentaEnCola): String {
     val productos = if (venta.lineas == 1) "1 producto" else "${venta.lineas} productos"
     val piezas = if (unidades == 1) "1 unidad" else "$unidades unidades"
     return "$productos · $piezas · el total lo confirma el sistema al recibirla"
+}
+
+/** Pastilla corta del estado: se lee de reojo, sin sonar a error de red. */
+private fun etiquetaDeEspera(venta: VentaEnCola, ahora: Long): String = when {
+    venta.intentos == 0 -> "Esperando"
+    venta.proximoIntentoEn > ahora -> "A reintentar"
+    else -> "En camino"
 }
 
 private fun estadoDeEspera(venta: VentaEnCola, ahora: Long): String = when {

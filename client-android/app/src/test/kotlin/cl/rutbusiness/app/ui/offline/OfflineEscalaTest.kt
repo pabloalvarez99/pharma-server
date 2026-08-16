@@ -155,20 +155,24 @@ class OfflineEscalaTest {
 
     private fun revisarCola(escala: Float) {
         enLaCola("Venta de hace 3 minutos").assertIsDisplayed()
-        // Las dos ventas de la prueba llevan lo mismo, así que la línea de
-        // detalle aparece dos veces. Se cuenta en vez de pedir una sola: pedir
-        // "el nodo" fallaría por la forma del dato de prueba y no por un bug.
-        assertEquals(
-            2,
-            compose.onAllNodes(
-                hasText("2 productos · 3 unidades · el total lo confirma el sistema al recibirla"),
-            ).fetchSemanticsNodes().size,
+        // El detalle se repite en las dos notas. Al 100% las dos están
+        // compuestas; al 200% con aire LazyColumn puede traer una sola. Se
+        // scrollea si hace falta y se pide al menos una, no un conteo fijo.
+        val detalle =
+            "2 productos · 3 unidades · el total lo confirma el sistema al recibirla"
+        if (compose.onAllNodes(hasText(detalle)).fetchSemanticsNodes().isEmpty()) {
+            compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(detalle))
+        }
+        assertTrue(
+            "el detalle de productos se tiene que leer",
+            compose.onAllNodes(hasText(detalle)).fetchSemanticsNodes().isNotEmpty(),
         )
         revisarTactiles(escala)
         revisarQueNadaSeCorte(escala)
 
         enLaCola("Venta de hace 12 minutos").assertIsDisplayed()
         enLaCola("No queda stock de Arroz Grado 1 kg.").assertIsDisplayed()
+        enLaCola("No se anotó").assertIsDisplayed()
         revisarTactiles(escala)
         revisarQueNadaSeCorte(escala)
     }
