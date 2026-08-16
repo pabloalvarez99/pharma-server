@@ -63,6 +63,7 @@ class AltaViewModel(
     private val probador: ProbadorDeServidor,
     private val red: RedDelTelefono?,
     nube: String?,
+    private val esFeria: Boolean = false,
 ) : ViewModel() {
 
     /** La nube en forma canónica, o `null` si este APK no trae ninguna. */
@@ -159,7 +160,8 @@ class AltaViewModel(
             "Escribe la dirección del computador donde se va a guardar todo."
         paso == PasoDelAlta.Donde && destino == null ->
             "Revisa la dirección: todavía no se entiende."
-        paso == PasoDelAlta.Negocio && nombre.isBlank() -> "Escribe el nombre de tu negocio."
+        paso == PasoDelAlta.Negocio && nombre.isBlank() ->
+            if (esFeria) "Escribe el nombre de tu puesto." else "Escribe el nombre de tu negocio."
         paso == PasoDelAlta.Rubro && rubro == null -> "Toca el rubro que más se parezca al tuyo."
         paso == PasoDelAlta.Cuenta && email.isBlank() -> "Falta tu correo."
         paso == PasoDelAlta.Cuenta && errorDeCorreo != null -> "Revisa el correo."

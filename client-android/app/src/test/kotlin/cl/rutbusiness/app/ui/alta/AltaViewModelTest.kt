@@ -39,13 +39,14 @@ class AltaViewModelTest {
             error("esta prueba no habla con ningún server")
     }
 
-    private fun vm(nube: String?): AltaViewModel {
+    private fun vm(nube: String?, esFeria: Boolean = false): AltaViewModel {
         val app = RuntimeEnvironment.getApplication()
         return AltaViewModel(
             sesion = SessionRepository(AlmacenamientoPlataforma(app)),
             probador = nuncaSondea,
             red = null,
             nube = nube,
+            esFeria = esFeria,
         )
     }
 
@@ -120,6 +121,10 @@ class AltaViewModelTest {
 
         assertFalse(alta.puedeAvanzar)
         assertEquals("Escribe el nombre de tu negocio.", alta.impedimento())
+        assertEquals(
+            "Escribe el nombre de tu puesto.",
+            vm("https://api.rutbusiness.cl", esFeria = true).impedimento(),
+        )
 
         alta.cambiarNombre("Almacén Doña Rosa")
         assertTrue(alta.puedeAvanzar)

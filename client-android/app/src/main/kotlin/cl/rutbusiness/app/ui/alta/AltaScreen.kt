@@ -67,6 +67,7 @@ fun AltaRoute(
                     probador = ServidorPorHttp(sesion),
                     red = servicios?.red,
                     nube = servicios?.nube,
+                    esFeria = servicios?.preferencias?.rubroElegido() == "feria",
                 )
             }
         },
