@@ -14,8 +14,10 @@
 //! Delete: [`service::delete_variant`] (soft + free barcode). Edit: generic
 //! [`service::update_product`] (incluye `barcode` opcional).
 
+pub mod feria;
 pub mod model;
 pub mod repo;
 pub mod service;
 
+pub use feria::ensure_simple_product;
 pub use model::*;
