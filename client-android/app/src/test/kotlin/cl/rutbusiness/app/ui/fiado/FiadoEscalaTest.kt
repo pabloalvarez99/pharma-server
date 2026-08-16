@@ -17,6 +17,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -140,7 +141,8 @@ class FiadoEscalaTest {
     private fun revisarLista(escala: Float) {
         // El total arriba, en grande, sin partirse aunque tenga siete dígitos.
         enLaLista("$1.235.820").assertIsDisplayed()
-        enLaLista("3 personas con cuenta pendiente.").assertIsDisplayed()
+        // Gente que te debe, no "cuentas pendientes" de ledger.
+        enLaLista("3 personas te deben.").assertIsDisplayed()
 
         // Y cada deudor con su nombre y su saldo, en el orden del server.
         listOf(
@@ -199,13 +201,21 @@ class FiadoEscalaTest {
 
         compose.onNodeWithText("Nadie te debe plata").assertIsDisplayed()
         compose.onNodeWithText("Cuando fíes una venta", substring = true).assertIsDisplayed()
+        // Sin deuda no hay a quién buscar: el vacío enseña, no filtra.
+        assertEquals(
+            0,
+            compose.onAllNodes(hasContentDescription("Buscar a quien vino a pagar"))
+                .fetchSemanticsNodes()
+                .size,
+        )
     }
 
     /**
      * El vacío que más veces se va a ver: el primer día nadie debe nada.
      *
      * En feria fiar no es una pantalla, es una frase — así que el vacío la
-     * enseña completa, con nombre y monto, para que se copie tal cual.
+     * enseña completa (`ASI_SE_FIA`), con nombre y monto, para que se copie
+     * tal cual.
      */
     @Test
     fun `en feria sin deudores se ensena como fiar`() {
@@ -216,6 +226,7 @@ class FiadoEscalaTest {
         compose
             .onNodeWithText("anota 2 kg de tomates a 2000 fiado a Don Juan", substring = true)
             .assertIsDisplayed()
+        compose.onNodeWithText("Dile al agente", substring = true).assertIsDisplayed()
 
         compose.onNodeWithText("Hablarle al agente").performClick()
         compose.waitForIdle()

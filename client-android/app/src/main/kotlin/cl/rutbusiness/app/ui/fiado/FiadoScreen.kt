@@ -1,30 +1,37 @@
 package cl.rutbusiness.app.ui.fiado
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import cl.rutbusiness.core.money.Dinero
-import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.agente.irAlAgente
 import cl.rutbusiness.app.ui.offline.LocalOffline
 import cl.rutbusiness.app.ui.rubro.esFeria
+import cl.rutbusiness.core.money.Dinero
+import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
@@ -35,12 +42,15 @@ import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorState
-import cl.rutbusiness.ui.components.RbListRow
 import cl.rutbusiness.ui.components.RbLoadingState
+import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbHeading
+import cl.rutbusiness.ui.theme.rbTouchTarget
 
 @Composable
 fun FiadoRoute(
@@ -64,6 +74,9 @@ fun FiadoRoute(
  * deben. El buscador queda fijo sobre la lista porque el caso de uso es alguien
  * parado en el mostrador con la plata en la mano — tener que scrollear hasta el
  * buscador es exactamente el momento en que se pierde.
+ *
+ * Se lee como gente que te debe, no como un ledger: nombres grandes, plata a
+ * la vista, vacío que enseña la frase del fiado.
  *
  * Regla de plata: ni el total ni los saldos se suman acá. Vienen del server.
  */
@@ -97,9 +110,9 @@ private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
                 // subtítulo: los saldos son plata, y un saldo viejo sin fecha
                 // hace que la dueña cobre de menos o de más.
                 PasoDeFiado.Lista -> vm.guardadoEn?.let { guardadoEn ->
-                    "Saldos guardados en el teléfono, " +
+                    "Guardado en el teléfono, " +
                         Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
-                } ?: "El fiado del negocio"
+                } ?: "Gente que te debe"
                 PasoDeFiado.Detalle -> "Lo que se llevó y lo que fue pagando"
                 PasoDeFiado.Abono -> vm.elegido?.name
             },
@@ -173,40 +186,41 @@ internal fun ListaDeDeudores(
     val colors = RbTheme.colors
     val feria = esFeria()
     val alAgente = irAlAgente()
+    val sinDeuda = deudores != null && (deudores.cuantos == 0 || esCero(deudores.total))
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Fijo sobre la lista y no como primer ítem de ella: con cincuenta
-        // deudores, un buscador que se scrollea se pierde justo cuando alguien
-        // está esperando en el mostrador. Además, quedando arriba, el teclado
-        // tapa la lista y nunca el campo donde se escribe.
-        RbTextField(
-            value = consulta,
-            onValueChange = onConsulta,
-            label = "Buscar a quien vino a pagar",
-            placeholder = "Nombre o teléfono",
-            modifier = Modifier.padding(dimens.space3),
-            keyboardType = KeyboardType.Text,
-            imeAction = ImeAction.Search,
-        )
+        // Con gente que debe, el buscador queda fijo: alguien viene a pagar y
+        // no se puede perder scrolleando. Sin deuda no hay a quién filtrar —
+        // el vacío enseña a fiar, no a buscar.
+        if (!sinDeuda) {
+            RbTextField(
+                value = consulta,
+                onValueChange = onConsulta,
+                label = "Buscar a quien vino a pagar",
+                placeholder = "Nombre o teléfono",
+                modifier = Modifier.padding(dimens.space3),
+                keyboardType = KeyboardType.Text,
+                imeAction = ImeAction.Search,
+            )
+        }
 
         when {
             deudores == null -> Unit
 
-            // El vacío que más veces se va a ver: el primer día nadie debe nada.
-            // En feria tiene que enseñar **cómo se fía**, que es una frase y no
-            // un formulario; el botón lleva a decirla y desaparece si desde acá
-            // no se puede llegar al agente.
-            deudores.cuantos == 0 || esCero(deudores.total) -> RbEmptyState(
-                title = if (feria) "Nadie te debe" else "Nadie te debe plata",
-                hint = if (feria) {
-                    "Cuando fíes, díselo al agente: «$ASI_SE_FIA». Queda acá hasta que te pague."
-                } else {
-                    "Cuando fíes una venta, la deuda de esa persona aparece acá hasta que " +
-                        "te la termine de pagar."
-                },
-                actionLabel = if (feria) alAgente?.let { "Hablarle al agente" } else null,
-                onAction = if (feria) alAgente else null,
-            )
+            // El vacío del primer día: nadie debe. Se lee como gente (no como
+            // ledger en cero). En feria enseña la frase completa del fiado.
+            sinDeuda -> Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(dimens.space3),
+            ) {
+                VacioDeFiado(
+                    feria = feria,
+                    onHablarleAlAgente = if (feria) alAgente else null,
+                )
+            }
 
             visibles.isEmpty() -> RbEmptyState(
                 title = "Nadie con ese nombre",
@@ -228,19 +242,19 @@ internal fun ListaDeDeudores(
                     end = dimens.space3,
                     bottom = dimens.space3,
                 ),
-                verticalArrangement = Arrangement.spacedBy(dimens.space2),
+                // space3 entre tarjetas: se leen de a una persona, no como
+                // filas de un extracto.
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {
                 item("total") { TotalPorCobrar(moneda = moneda, deudores = deudores) }
 
                 items(items = visibles, key = { it.customer }) { deudor ->
-                    RbCard {
-                        RbListRow(
-                            title = deudor.name,
-                            subtitle = subtituloDeDeudor(deudor),
-                            value = moneda.formatear(deudor.balance),
-                            onClick = { onElegir(deudor) },
-                        )
-                    }
+                    FilaDeDeudor(
+                        nombre = deudor.name,
+                        detalle = subtituloDeDeudor(deudor),
+                        saldo = moneda.formatear(deudor.balance),
+                        onClick = { onElegir(deudor) },
+                    )
                 }
 
                 if (consulta.isNotBlank()) {
@@ -257,22 +271,132 @@ internal fun ListaDeDeudores(
     }
 }
 
+/**
+ * Nadie te debe todavía.
+ *
+ * Misma vara que el vacío de "Hoy": aire, un ejemplo hablado (feria) y un solo
+ * CTA. Sin asset de ilustración — el APK del teléfono viejo no paga eso.
+ */
+@Composable
+internal fun VacioDeFiado(
+    feria: Boolean,
+    onHablarleAlAgente: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+
+    RbCard(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = dimens.space4),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        ) {
+            Text(
+                text = if (feria) "Nadie te debe" else "Nadie te debe plata",
+                style = RbTheme.typography.heading,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.rbHeading(),
+            )
+            Text(
+                text = if (feria) {
+                    "Dile al agente: «$ASI_SE_FIA». " +
+                        "Queda acá hasta que te pague."
+                } else {
+                    "Cuando fíes una venta, la deuda de esa persona aparece acá hasta que " +
+                        "te la termine de pagar."
+                },
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
+                textAlign = TextAlign.Center,
+            )
+            if (onHablarleAlAgente != null) {
+                RbButton(
+                    label = "Hablarle al agente",
+                    onClick = onHablarleAlAgente,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Una persona que te debe.
+ *
+ * Nombre grande, plata numérica, tarjeta entera tocable (≥56 dp). No es una
+ * fila de extracto: es gente del barrio con un monto.
+ */
+@Composable
+internal fun FilaDeDeudor(
+    nombre: String,
+    detalle: String,
+    saldo: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    RbReflowRow(
+        spacing = dimens.space3,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, shape)
+            .rbClickable(
+                onClick = onClick,
+                role = Role.Button,
+                shape = shape,
+            )
+            .rbTouchTarget()
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
+                Text(
+                    text = nombre,
+                    style = RbTheme.typography.heading,
+                    color = colors.textPrimary,
+                )
+                Text(
+                    text = detalle,
+                    style = RbTheme.typography.support,
+                    color = colors.textSecondary,
+                )
+            }
+        },
+        trailing = {
+            RbAmount(
+                amount = saldo,
+                emphasis = RbAmountEmphasis.Body,
+            )
+        },
+    )
+}
+
 @Composable
 private fun TotalPorCobrar(moneda: Moneda, deudores: DeudoresDto) {
     val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
 
-    RbCard(title = "Te deben en total") {
+    // Franja humana, no ERP: plata de personas, no "cuentas por cobrar".
+    RbCard(title = "Te deben") {
         RbAmount(
             amount = moneda.formatear(deudores.total),
             emphasis = RbAmountEmphasis.Headline,
+            modifier = Modifier.padding(vertical = dimens.space1),
         )
         Text(
             text = if (deudores.cuantos == 1) {
-                "1 persona con cuenta pendiente."
+                "1 persona te debe."
             } else {
-                "${deudores.cuantos} personas con cuenta pendiente."
+                "${deudores.cuantos} personas te deben."
             },
-            style = RbTheme.typography.support,
+            style = RbTheme.typography.body,
             color = colors.textSecondary,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -282,12 +406,11 @@ private fun TotalPorCobrar(moneda: Moneda, deudores: DeudoresDto) {
 private fun subtituloDeDeudor(deudor: DeudorDto): String {
     val telefono = deudor.phone?.takeIf { it.isNotBlank() }
     val fecha = fechaCorta(deudor.ultimoMovimiento)
-    // "última vez" y no "último movimiento": es más corto -- la fila entra en un
-    // renglón en vez de dos junto al teléfono -- y además es como lo diría una
-    // persona. El encargo pide cero jerga contable.
+    // "Vino el …" y no "último movimiento": es cómo se dice en el puesto, no
+    // en un extracto. Junto al teléfono entra en un renglón.
     return listOfNotNull(
         telefono,
-        fecha?.let { "última vez: $it" },
+        fecha?.let { "vino el $it" },
     ).joinToString(" · ").ifBlank { "Sin más datos" }
 }
 
