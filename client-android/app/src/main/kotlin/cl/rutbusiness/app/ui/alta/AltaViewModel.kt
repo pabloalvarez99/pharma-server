@@ -103,6 +103,15 @@ class AltaViewModel(
     var falla by mutableStateOf<FallaDeAlta?>(null)
         private set
 
+    /**
+     * Slug del último 409 `SLUG_TOMADO`, para el **siguiente** toque de crear.
+     *
+     * No se reintenta solo en el mismo click: el mensaje ya nombra la
+     * alternativa y la dueña decide. Si cambia el nombre del puesto se borra,
+     * porque la sugerencia era para el nombre anterior.
+     */
+    private var slugParaReintento: String? = null
+
     val paso: PasoDelAlta get() = pasos[indice]
 
     /** A dónde va el alta, o `null` mientras no se entienda la dirección. */
@@ -178,7 +187,11 @@ class AltaViewModel(
     }
 
     fun cambiarUrl(valor: String) { url = valor; falla = null }
-    fun cambiarNombre(valor: String) { nombre = valor; falla = null }
+    fun cambiarNombre(valor: String) {
+        nombre = valor
+        falla = null
+        slugParaReintento = null
+    }
     fun elegirRubro(valor: Rubro) { rubro = valor; falla = null }
     fun cambiarEmail(valor: String) { email = valor; falla = null }
     fun cambiarClave(valor: String) { clave = valor; falla = null }
@@ -300,19 +313,26 @@ class AltaViewModel(
                 email = email.trim().lowercase(),
                 clave = clave,
                 enLaNube = nube != null,
+                slugSugerido = if (nube != null) slugParaReintento else null,
             )
             when (creado) {
                 is Resultado.Falla -> {
-                    falla = fallaDeAlta(
+                    val mapeada = fallaDeAlta(
                         creado.error,
                         donde,
                         email.trim().lowercase(),
                         nube != null,
                     )
+                    // Prefill del próximo POST: no auto-reintentar en este click.
+                    slugSugeridoEn(mapeada.queHacer)?.let { slugParaReintento = it }
+                    falla = mapeada
                     estado = EstadoDelAlta.Preguntando
                 }
 
-                is Resultado.Ok -> entrarAlNegocioReciencreado(donde, creado.valor)
+                is Resultado.Ok -> {
+                    slugParaReintento = null
+                    entrarAlNegocioReciencreado(donde, creado.valor)
+                }
             }
         }
     }
@@ -328,7 +348,11 @@ class AltaViewModel(
             }
 
             is Resultado.Falla -> {
-                falla = FallaDeAlta.CreadoPeroNoEntro(creado.nombreCorto, r.error.technical)
+                falla = FallaDeAlta.CreadoPeroNoEntro(
+                    nombreCorto = creado.nombreCorto,
+                    tecnico = r.error.technical,
+                    esPuesto = nube != null || esFeria,
+                )
                 estado = EstadoDelAlta.Preguntando
             }
         }

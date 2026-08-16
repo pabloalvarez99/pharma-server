@@ -152,6 +152,40 @@ class FallaDeAltaTest {
         assertTrue(falla.titulo.contains("quedó creado"))
         assertTrue(falla.queHacer.contains("almacen-dona-rosa"))
         assertTrue(falla.queHacer.contains("Entrar a mi negocio"))
+        assertTrue(falla.queHacer.contains("negocio es: almacen-dona-rosa"))
+    }
+
+    @Test
+    fun `creado sin poder entrar en feria o nube habla de puesto`() {
+        val falla = FallaDeAlta.CreadoPeroNoEntro("huevos-de-marta", esPuesto = true)
+
+        assertTrue(falla.titulo.contains("puesto"))
+        assertTrue(falla.queHacer.contains("puesto es: huevos-de-marta"))
+        assertFalse(falla.queHacer.contains("negocio es:"))
+        assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
+    }
+
+    // --- slug sugerido en SLUG_TOMADO ---------------------------------------
+
+    @Test
+    fun `slugSugeridoEn lee el token despues de Proba con`() {
+        val msg = "Ese nombre corto ya lo usa otro puesto. Probá con huevos-de-marta-2."
+        assertEquals("huevos-de-marta-2", slugSugeridoEn(msg))
+    }
+
+    @Test
+    fun `slugSugeridoEn acepta Proba sin tilde`() {
+        assertEquals(
+            "puesto-rosa-3",
+            slugSugeridoEn("Ese nombre corto ya lo usa otro puesto. Proba con puesto-rosa-3."),
+        )
+    }
+
+    @Test
+    fun `slugSugeridoEn en correo tomado devuelve null`() {
+        assertNull(
+            slugSugeridoEn("Ese correo ya tiene un puesto. Entrá con tu clave, no crees otro."),
+        )
     }
 
     /** Cuatro fallas que dicen lo mismo son una sola falla con cuatro nombres. */

@@ -151,15 +151,28 @@ sealed class FallaDeAlta(
      * crear tu negocio", la dueña lo intentaría de nuevo, chocaría con "ahí ya
      * hay un negocio" y creería que la app está rota. Se dice lo que pasó y se
      * la manda a la puerta que sí va a funcionar, con los datos ya listos.
+     *
+     * [esPuesto] = feria o nube: se habla de «puesto», no de «negocio».
      */
     class CreadoPeroNoEntro(
         nombreCorto: String,
         tecnico: String? = null,
+        esPuesto: Boolean = false,
     ) : FallaDeAlta(
-        titulo = "Tu negocio quedó creado, pero no pudimos entrar",
-        queHacer = "El negocio existe y tus datos quedaron guardados. Vuelve atrás, toca " +
-            "«Entrar a mi negocio» y entra con tu correo y tu clave. El nombre corto de tu " +
-            "negocio es: $nombreCorto",
+        titulo = if (esPuesto) {
+            "Tu puesto quedó creado, pero no pudimos entrar"
+        } else {
+            "Tu negocio quedó creado, pero no pudimos entrar"
+        },
+        queHacer = if (esPuesto) {
+            "El puesto existe y tus datos quedaron guardados. Vuelve atrás, toca " +
+                "«Entrar» y entra con tu correo y tu clave. El nombre corto de tu " +
+                "puesto es: $nombreCorto"
+        } else {
+            "El negocio existe y tus datos quedaron guardados. Vuelve atrás, toca " +
+                "«Entrar a mi negocio» y entra con tu correo y tu clave. El nombre corto de tu " +
+                "negocio es: $nombreCorto"
+        },
         tecnico = tecnico,
     )
 }
@@ -257,3 +270,26 @@ internal fun deLaConexion(
 private fun hablaDeLaClave(error: AppError.ErrorDelServidor): Boolean =
     error.userMessage.contains("contraseña", ignoreCase = true) ||
         error.userMessage.contains("clave", ignoreCase = true)
+
+/**
+ * El slug que el server propuso en un 409 `SLUG_TOMADO`.
+ *
+ * No se parsea el envelope (`details.suggested_slug`): [AppError.ErrorDelServidor]
+ * no lo trae. El mensaje de alta ya lo nombra («…Probá con huevos-de-marta-2.»);
+ * se toma el token que sigue a «Probá con » / «Proba con » y se le saca el
+ * punto final si lo trae.
+ */
+internal fun slugSugeridoEn(mensaje: String): String? {
+    val marcas = listOf("Probá con ", "Proba con ")
+    for (marca in marcas) {
+        val i = mensaje.indexOf(marca)
+        if (i < 0) continue
+        val token = mensaje
+            .substring(i + marca.length)
+            .trimStart()
+            .takeWhile { !it.isWhitespace() }
+            .trimEnd('.')
+        if (token.isNotEmpty()) return token
+    }
+    return null
+}
