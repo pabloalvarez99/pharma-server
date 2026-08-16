@@ -5,7 +5,7 @@ package cl.rutbusiness.app.ui.impresora
  *
  * Feria no tiene computador de día 1 (ADR-0022): la venta quedó anotada y no se
  * promete reimprimir en un PC. Farmacia / retail formal conserva la salida por
- * el computador del negocio.
+ * el computador del negocio. Habla del aparato y de la venta, no de un driver.
  */
 internal fun copyQueHacerSinBluetooth(feria: Boolean): String =
     if (feria) {
@@ -40,9 +40,11 @@ data class ImpresoraElegida(
  * Todo lo que puede salir mal entre el teléfono y el papel, en categorías que
  * la dueña entiende.
  *
- * La regla, la misma que en `AppError`: cada caso dice **qué hacer**, no qué
- * falló por dentro. "Error de impresión" no le sirve a nadie parado frente a un
- * cliente; "puede estar apagada o lejos, enciéndela y toca Reintentar" sí.
+ * Habla del **aparato** (luz, rollo, cerca, tapa), no de un driver (socket,
+ * MAC, timeout). La regla es la de `AppError`: cada caso dice **qué hacer**,
+ * no qué falló por dentro. "Error de impresión" no le sirve a nadie parado
+ * frente a un cliente; "puede estar apagada o lejos, enciéndela y toca
+ * Reintentar" sí.
  *
  * @param sePuedeReintentar `false` cuando volver a tocar el botón no puede
  *   cambiar nada y hay que ir a arreglar algo afuera de la app.
@@ -128,9 +130,9 @@ sealed class FallaDeImpresion(
         sePuedeReintentar = true,
     )
 
-    /** Se cayó la conexión con la boleta a medio salir. */
+    /** Se cayó el papel a medio salir: se habla del rollo, no del socket. */
     class SeCortoAMitad(nombre: String, tecnico: String? = null) : FallaDeImpresion(
-        titulo = "Se cortó la impresión",
+        titulo = "Se cortó el papel a medias",
         queHacer = "Puede que la boleta haya salido a medias. Revisa el papel y toca " +
             "«Reintentar»: reimprimir no vuelve a cobrar.",
         sePuedeReintentar = true,

@@ -2,15 +2,18 @@ package cl.rutbusiness.app.ui.impresora
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -19,7 +22,8 @@ import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
-import cl.rutbusiness.ui.components.RbDivider
+import cl.rutbusiness.ui.components.RbChip
+import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbListRow
 import cl.rutbusiness.ui.components.RbLoadingState
@@ -87,14 +91,14 @@ fun impresoraViewModel(): ImpresoraViewModel? {
 }
 
 /**
- * La boleta, en la pantalla de "la venta quedó".
+ * La impresora, en la pantalla de "la venta quedó".
  *
- * **La venta ya se cobró antes de que esto se dibuje.** Toda la tarjeta está
- * escrita alrededor de esa frase: no hay un solo camino que bloquee la
- * pantalla, que exija resolver la impresora para seguir, o que sugiera que la
- * venta corre peligro. En cada estado de falla hay una salida que no es
- * arreglar la impresora — "Seguir sin boleta" —, y el botón de cobrar la venta
- * siguiente vive **afuera** de esta tarjeta y nunca se apaga.
+ * Se siente un **aparato del puesto**, no un panel de driver: se ve qué máquina
+ * va a soltar el papel, se toca un botón grueso, y si falla se habla de luz /
+ * rollo / cerca — no de sockets ni MACs. **La venta ya se cobró** antes de que
+ * esto se dibuje: ningún camino bloquea la pantalla ni sugiere que la plata
+ * corre peligro. En cada falla hay "Seguir sin boleta", y el CTA de cobrar la
+ * siguiente vive **afuera** de esta tarjeta.
  *
  * @param ordenId la venta a imprimir. `null` mientras el comprobante no llegó:
  *   sin id no hay nada que pedirle al server, y se dice en vez de fallar.
@@ -105,7 +109,7 @@ fun TarjetaDeImpresion(
     ordenId: String?,
     modifier: Modifier = Modifier,
 ) {
-    RbCard(title = "Boleta", modifier = modifier) {
+    RbCard(title = "La impresora", modifier = modifier) {
         CuerpoDeImpresion(vm = vm) {
             EnReposoParaImprimir(vm = vm, ordenId = ordenId)
         }
@@ -127,21 +131,22 @@ fun TarjetaDeReimpresion(
     modifier: Modifier = Modifier,
 ) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
 
-    RbCard(title = "Reimprimir la última boleta", modifier = modifier) {
+    RbCard(title = "Otra copia del papel", modifier = modifier) {
         CuerpoDeImpresion(vm = vm, onListo = onCerrar) {
-            Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
                 if (vm.hayUltimaBoleta) {
+                    Text(
+                        text = "Sale la misma boleta de la última venta. Reimprimir no vuelve " +
+                            "a cobrar.",
+                        style = RbTheme.typography.body,
+                        color = colors.textSecondary,
+                    )
                     RbButton(
                         label = "Imprimir de nuevo",
                         onClick = vm::reimprimir,
                         fillWidth = true,
-                    )
-                    Text(
-                        text = "Sale la misma boleta de la última venta. Reimprimir no vuelve " +
-                            "a cobrar.",
-                        style = RbTheme.typography.support,
-                        color = RbTheme.colors.textSecondary,
                     )
                 } else {
                     Text(
@@ -149,7 +154,7 @@ fun TarjetaDeReimpresion(
                             "Cobra una venta y en la pantalla de «Listo» va a aparecer el botón " +
                             "de imprimir; después vuelve a estar acá para repetirla.",
                         style = RbTheme.typography.body,
-                        color = RbTheme.colors.textSecondary,
+                        color = colors.textSecondary,
                     )
                 }
                 RbButton(
@@ -177,8 +182,6 @@ private fun CuerpoDeImpresion(
     onListo: (() -> Unit)? = null,
     enReposo: @Composable () -> Unit,
 ) {
-    val dimens = RbTheme.dimens
-
     // El lanzador de permisos vive acá porque un `ActivityResultLauncher` sólo
     // se puede recordar dentro de una composición. Lo que la pantalla sabe es
     // que hay una lista de permisos que pedir; **cuáles** son, y si este
@@ -194,6 +197,9 @@ private fun CuerpoDeImpresion(
         vm.reintentar()
     }
 
+    val dimens = RbTheme.dimens
+    val nombre = vm.impresora?.nombre ?: "la impresora"
+
     when (val estado = vm.estado) {
         EstadoDeImpresion.Reposo -> enReposo()
 
@@ -202,7 +208,8 @@ private fun CuerpoDeImpresion(
         is EstadoDeImpresion.EligiendoAncho -> ElegirAncho(vm, estado.impresora)
 
         EstadoDeImpresion.Imprimiendo -> RbLoadingState(
-            label = "Mandando la boleta a «${vm.impresora?.nombre ?: "la impresora"}»...",
+            // Habla del aparato soltando papel, no de un socket abriéndose.
+            label = "La impresora «$nombre» está sacando el papel…",
         )
 
         EstadoDeImpresion.Impresa -> Impresa(vm, onListo)
@@ -214,7 +221,7 @@ private fun CuerpoDeImpresion(
         )
 
         EstadoDeImpresion.SinBoleta -> Column(
-            verticalArrangement = Arrangement.spacedBy(dimens.space2),
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
                 text = "Seguiste sin boleta. La venta quedó guardada igual.",
@@ -234,24 +241,19 @@ private fun CuerpoDeImpresion(
 @Composable
 private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
     val elegida = vm.impresora
 
-    Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         if (ordenId == null) {
             Text(
                 text = "Todavía no tenemos el detalle de esta venta para imprimirlo. " +
                     "La venta sí quedó registrada.",
                 style = RbTheme.typography.body,
-                color = RbTheme.colors.textSecondary,
+                color = colors.textSecondary,
             )
             return@Column
         }
-
-        RbButton(
-            label = "Imprimir boleta",
-            onClick = { vm.imprimir(ordenId) },
-            fillWidth = true,
-        )
 
         if (elegida == null) {
             // Se avisa antes de tocar, no después: la primera vez el botón abre
@@ -260,15 +262,26 @@ private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
             Text(
                 text = "La primera vez te vamos a preguntar cuál es tu impresora. Después " +
                     "sale sola.",
-                style = RbTheme.typography.support,
-                color = RbTheme.colors.textSecondary,
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
             )
         } else {
-            Text(
-                text = "Sale por «${elegida.nombre}», rollo de ${elegida.ancho.etiqueta}.",
-                style = RbTheme.typography.support,
-                color = RbTheme.colors.textSecondary,
+            // Placa del aparato: se lee qué máquina y qué rollo, sin MAC ni
+            // jerga de driver. El CTA de imprimir va después.
+            PlacaDelAparato(
+                nombre = elegida.nombre,
+                detalle = "Sale por «${elegida.nombre}», rollo de ${elegida.ancho.etiqueta}.",
+                chip = elegida.ancho.etiqueta,
             )
+        }
+
+        RbButton(
+            label = "Imprimir boleta",
+            onClick = { vm.imprimir(ordenId) },
+            fillWidth = true,
+        )
+
+        if (elegida != null) {
             RbButton(
                 label = "Cambiar impresora",
                 onClick = vm::cambiarImpresora,
@@ -279,16 +292,79 @@ private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
     }
 }
 
+/**
+ * La placa del aparato: nombre grande, chip del rollo, una línea de apoyo.
+ *
+ * Superficie callada (como una etiqueta pegada en la máquina), no una fila de
+ * configuración de Windows.
+ */
+@Composable
+private fun PlacaDelAparato(
+    nombre: String,
+    detalle: String,
+    chip: String? = null,
+    tono: RbChipTone = RbChipTone.Brand,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.field
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surfaceVariant)
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        Text(
+            text = "Tu impresora",
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
+        )
+        Text(
+            text = nombre,
+            style = RbTheme.typography.bodyStrong,
+            color = colors.textPrimary,
+        )
+        if (chip != null) {
+            RbChip(label = "Rollo $chip", tone = tono)
+        }
+        Text(
+            text = detalle,
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
+        )
+    }
+}
+
 @Composable
 private fun Impresa(vm: ImpresoraViewModel, onListo: (() -> Unit)?) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+    val nombre = vm.impresora?.nombre
 
-    Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
-        Text(
-            text = "Boleta impresa.",
-            style = RbTheme.typography.bodyStrong,
-            color = RbTheme.colors.textPrimary,
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RbTheme.shapes.field)
+                .background(colors.brandContainer)
+                .padding(dimens.space3),
+            verticalArrangement = Arrangement.spacedBy(dimens.space1),
+        ) {
+            Text(
+                text = if (nombre != null) "«$nombre» soltó el papel" else "El papel salió",
+                style = RbTheme.typography.bodyStrong,
+                color = colors.brandText,
+            )
+            // Frase canónica que las pruebas y el resto de la app reconocen.
+            Text(
+                text = "Boleta impresa.",
+                style = RbTheme.typography.body,
+                color = colors.textPrimary,
+            )
+        }
         RbButton(
             label = "Imprimir otra copia",
             onClick = vm::reintentar,
@@ -328,7 +404,7 @@ private fun Fallida(
         falla.queHacer
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         RbErrorState(
             title = falla.titulo,
             message = queHacer,
@@ -374,34 +450,42 @@ private fun Fallida(
  * scrollea —un `LazyColumn` adentro de un scroll vertical revienta por
  * restricciones infinitas— y la lista está acotada por cuántos aparatos puede
  * tener emparejados un teléfono, que son unos pocos y no crecen con el negocio.
+ *
+ * **Sin MAC en pantalla**: la dirección es lo que identifica al aparato por
+ * dentro, pero mostrarla es cara de driver. La dueña elige por el nombre que
+ * le puso en Ajustes.
  */
 @Composable
 private fun ListaDeImpresoras(vm: ImpresoraViewModel, disponibles: List<ImpresoraConocida>) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(dimens.space1),
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
         Text(
             text = "¿Cuál es tu impresora?",
             style = RbTheme.typography.bodyStrong,
-            color = RbTheme.colors.textPrimary,
+            color = colors.textPrimary,
         )
         Text(
             text = "Estas son las que este teléfono ya tiene emparejadas. Si la tuya no está, " +
                 "enciéndela y emparéjala desde Ajustes › Bluetooth.",
             style = RbTheme.typography.support,
-            color = RbTheme.colors.textSecondary,
+            color = colors.textSecondary,
         )
 
-        disponibles.forEach { impresora ->
-            RbListRow(
-                title = impresora.nombre,
-                subtitle = impresora.direccion,
-                onClick = { vm.elegirImpresora(impresora) },
-            )
-            RbDivider()
+        Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+            disponibles.forEach { impresora ->
+                RbListRow(
+                    title = impresora.nombre,
+                    // Sin dirección: se elige el aparato por nombre, como se
+                    // eligen los audífonos.
+                    subtitle = "Toca para usarla",
+                    onClick = { vm.elegirImpresora(impresora) },
+                )
+            }
         }
 
         RbButton(
@@ -418,22 +502,31 @@ private fun ListaDeImpresoras(vm: ImpresoraViewModel, disponibles: List<Impresor
  *
  * Se pregunta con la regla en la mano, no con el número: "58 mm" no le dice
  * nada a quien nunca compró papel térmico, y del ancho depende que la boleta
- * salga cortada o con la mitad en blanco.
+ * salga cortada o con la mitad en blanco. Primero la descripción del papel,
+ * después la medida.
  */
 @Composable
 private fun ElegirAncho(vm: ImpresoraViewModel, impresora: ImpresoraConocida) {
     val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
 
-    Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         Text(
             text = "¿De qué ancho es el papel de «${impresora.nombre}»?",
             style = RbTheme.typography.bodyStrong,
-            color = RbTheme.colors.textPrimary,
+            color = colors.textPrimary,
+        )
+        Text(
+            text = "Mirá el rollo que le pusiste: el angosto cabe en la palma; el ancho es " +
+                "el de supermercado.",
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
         )
 
         AnchoDePapel.entries.forEach { ancho ->
             RbButton(
-                label = "${ancho.etiqueta} — ${ancho.descripcion}",
+                // Descripción primero (aparato), medida después (dato).
+                label = "${ancho.descripcion} (${ancho.etiqueta})",
                 onClick = { vm.elegirAncho(impresora, ancho) },
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -443,7 +536,7 @@ private fun ElegirAncho(vm: ImpresoraViewModel, impresora: ImpresoraConocida) {
         Text(
             text = "Si te equivocas no pasa nada: se cambia después desde «Cambiar impresora».",
             style = RbTheme.typography.support,
-            color = RbTheme.colors.textSecondary,
+            color = colors.textSecondary,
         )
     }
 }
