@@ -73,8 +73,14 @@ impl AssistProvider for Deterministic {
             Intent::RecetasMes => recetas_mes(q.db, q.tenant, &q.intent).await,
             Intent::ComprasPendientes => compras_pendientes(q.db, q.tenant, &m, &q.intent).await,
             Intent::Proveedores => proveedores(q.db, q.tenant, &q.intent).await,
-            Intent::Ayuda => Ok(ayuda(&q.intent)),
-            Intent::Unknown => Ok(unknown(&q.intent)),
+            Intent::Ayuda => {
+                let feria = crate::feria_caja::es_feria(q.db, q.tenant).await?;
+                Ok(ayuda(&q.intent, feria))
+            }
+            Intent::Unknown => {
+                let feria = crate::feria_caja::es_feria(q.db, q.tenant).await?;
+                Ok(unknown(&q.intent, feria))
+            }
         }
     }
 }
@@ -1194,7 +1200,16 @@ async fn iva_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainR
     })))
 }
 
-fn ayuda(intent: &Intent) -> Answer {
+fn ayuda(intent: &Intent, feria: bool) -> Answer {
+    if feria {
+        return Answer::new(
+            intent,
+            "Hablame como en el cuaderno. Por ejemplo: «vendí tomates a 2000», \
+             «le fío a don Juan 2000», «¿cuánto vendí hoy?», «¿quién me debe?» \
+             o «¿cuánto me deben?». También: «doña Rosa me pagó 5000» para anotar \
+             un abono, o «ventas de ayer» si querés el día anterior.",
+        );
+    }
     Answer::new(
         intent,
         "Pídeme «prepárame el día» y te doy el resumen de la mañana de un vistazo \
@@ -1219,7 +1234,14 @@ fn ayuda(intent: &Intent) -> Answer {
     )
 }
 
-fn unknown(intent: &Intent) -> Answer {
+fn unknown(intent: &Intent, feria: bool) -> Answer {
+    if feria {
+        return Answer::new(
+            intent,
+            "No entendí. Probá «vendí tomates a 2000» o «cuánto vendí hoy». \
+             Escribí «ayuda» para ver más.",
+        );
+    }
     Answer::new(
         intent,
         "No entendí la pregunta. Probá con algo como «ventas hoy», «qué se vence», \
