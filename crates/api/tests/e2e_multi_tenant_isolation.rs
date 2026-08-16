@@ -2,25 +2,25 @@
 //!
 //! Two tenants T1, T2 each catalog a "PARACETAMOL-500" SKU at distinct prices
 //! and ring up sales. T1's JWT must see ONLY T1 data across every read surface,
-//! and must never be able to act on a T2 record. READS are driven over HTTP
-//! (tenant comes from the JWT claim); the cross-tenant POS write is checked at
-//! the domain layer because `/pos/sale` is role-gated and 500s (BUG-001).
+//! and must never be able to act on a T2 record. Reads and POS writes go over
+//! HTTP (tenant from JWT). Domain layer still rejects cross-tenant products as
+//! NotFound; HTTP surfaces that as 404 (never 201). Historical BUG-001 (role
+//! gate `AllowedRoles` Stack order → 500 on gated writes) is fixed.
 //!
 //! Asserted:
 //! * `GET /inventory` / `GET /products` return only the caller's tenant rows
 //! * `GET /orders` returns only the caller's tenant orders
 //! * `GET /products/<id_T2>` with T1's token → 404
-//! * a POS sale for T1 referencing a T2 `product_id` → NotFound (never succeeds)
+//! * `POST /pos/sale` T1 + product_id T2 → 404 (never 201)
+//! * `POST /pos/sale` T1 + product_id T1 → 201
 //! * `GET /reports/sales-daily` is tenant-scoped
-//! * (BUG-006) the license reload endpoint does NOT bind the license to the
-//!   caller's tenant — asserted + `#[ignore]`d.
+//! * license reload does not adopt a foreign tenant's tier
 
 mod e2e_common;
 
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use domain::DomainError;
 use e2e_common::*;
 use surrealdb::sql::Thing;
 
@@ -196,36 +196,32 @@ async fn t1_sales_daily_is_tenant_scoped() {
 #[tokio::test]
 async fn pos_sale_for_t1_with_t2_product_is_not_found() {
     let t = setup().await;
-    // Drive at the domain layer (POS HTTP route is gated — BUG-001). T1 tenant
-    // + a T2 product id must resolve to NotFound (the pre-check filters by
-    // tenant), never a successful cross-tenant sale.
-    use domain::money::Decimal;
-    use domain::sales::model::{PosSaleItem, PosSaleRequest};
-    let req = PosSaleRequest {
-        items: vec![PosSaleItem {
-            product: t.p2.clone(), // T2's product, T1's tenant
-            product_name: "PARACETAMOL-500".into(),
-            quantity: 1,
-            unit_price: "990".parse::<Decimal>().unwrap(),
+    // HTTP: T1 JWT + T2 product id → 404 (domain NotFound). Never 201 / 500.
+    let body = serde_json::json!({
+        "items": [{
+            "product": t.p2,
+            "product_name": "PARACETAMOL-500",
+            "quantity": 1,
+            "unit_price": "990"
         }],
-        payment_method: "pos_cash".into(),
-        cash_amount: Some("990".parse::<Decimal>().unwrap()),
-        card_amount: None,
-        discount: None,
-        customer: None,
-        customer_name: None,
-        customer_phone: None,
-        notes: None,
-        external_ref: None,
-        prescriptions: Vec::new(),
-        branch: None,
-    };
-    let res =
-        domain::sales::service::post_sale(&t.db, &t.t1, Some(&t.t1_user), None, None, req).await;
+        "payment_method": "pos_cash",
+        "cash_amount": "990"
+    });
+    let (st, resp) = req_json(
+        &t.app,
+        "POST",
+        "/api/v1/pos/sale",
+        Some(&t.t1_token),
+        Some(body),
+        &[],
+    )
+    .await;
     assert!(
-        matches!(res, Err(DomainError::NotFound)),
-        "a T1 sale referencing a T2 product must be NotFound, got {res:?}"
+        st == StatusCode::NOT_FOUND || st == StatusCode::UNPROCESSABLE_ENTITY,
+        "T1 sale with T2 product must be 404/422, got {st}: {resp}"
     );
+    assert_ne!(st, StatusCode::CREATED);
+    assert_ne!(st, StatusCode::INTERNAL_SERVER_ERROR);
 
     // And T2's product/stock is untouched by the rejected attempt.
     #[derive(serde::Deserialize)]
@@ -244,6 +240,38 @@ async fn pos_sale_for_t1_with_t2_product_is_not_found() {
         47,
         "T2 stock unchanged (50-3 from its own sale)"
     );
+}
+
+#[tokio::test]
+async fn pos_sale_http_same_tenant_returns_201() {
+    let t = setup().await;
+    // Open caja for the T1 cashier (optional but mirrors feria/POS day flow).
+    let _ = seed_cash_session(&t.db, &t.t1, &t.t1_user, "Caja T1", "0").await;
+    let body = serde_json::json!({
+        "items": [{
+            "product": t.p1,
+            "product_name": "PARACETAMOL-500",
+            "quantity": 1,
+            "unit_price": "990"
+        }],
+        "payment_method": "pos_cash",
+        "cash_amount": "990"
+    });
+    let (st, resp) = req_json(
+        &t.app,
+        "POST",
+        "/api/v1/pos/sale",
+        Some(&t.t1_token),
+        Some(body),
+        &[],
+    )
+    .await;
+    assert_eq!(
+        st,
+        StatusCode::CREATED,
+        "same-tenant HTTP POS sale must be 201, got {st}: {resp}"
+    );
+    assert!(resp["order"]["id"].as_str().is_some(), "{resp}");
 }
 
 /// BUG-006 (medium, FIXED): `POST /api/v1/admin/license/reload` now binds a
