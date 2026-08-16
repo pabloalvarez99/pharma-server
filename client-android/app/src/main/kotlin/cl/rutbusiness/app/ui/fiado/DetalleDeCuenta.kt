@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import cl.rutbusiness.app.ui.agente.ASI_SE_FIA
 import cl.rutbusiness.app.ui.gente.RecadoParaGente
 import cl.rutbusiness.app.ui.gente.etiquetaCompartirDeuda
 import cl.rutbusiness.app.ui.gente.mensajeDeuda
@@ -19,7 +18,6 @@ import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
-import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
@@ -30,26 +28,26 @@ import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * La cuenta corriente de una persona: qué se llevó fiado y qué fue pagando.
+ * Lo que una persona te debe: qué se llevó y qué fue pagando.
  *
  * Arriba lo único que se pregunta en el mostrador — **cuánto debe ahora** — y
- * abajo los movimientos que lo explican, del más nuevo al más viejo, tal como
- * los ordena el server.
+ * abajo las líneas que lo explican, del más nuevo al más viejo, tal como
+ * las ordena el server. En feria se lee «Te debe $X», no «saldo de cuenta».
  *
- * `LazyColumn` porque una cuenta vieja de un cliente frecuente son cientos de
- * líneas, y montarlas todas es justamente lo que el aparato de referencia no
- * puede pagar.
+ * `LazyColumn` porque una persona frecuente son cientos de líneas, y montarlas
+ * todas es justamente lo que el aparato de referencia no puede pagar.
  */
 @Composable
 fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val feria = esFeria()
     val cuenta = vm.cuenta
 
     // El mismo texto que dibuja la tarjeta de arriba, y los pesos detrás de ese
     // texto para saber si hay algo que recordar. Se leen una sola vez acá para
     // que el recado y la tarjeta no puedan discrepar.
-    val saldoEnPantalla = cuenta?.let { vm.moneda.formatear(it.balance) }
+    val montoEnPantalla = cuenta?.let { vm.moneda.formatear(it.balance) }
     val pesosQueDebe = cuenta?.let { Dinero.deTextoDeServidor(it.balance)?.unidades }
 
     LazyColumn(
@@ -60,7 +58,7 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
         vm.avisoDeAbono?.let { aviso ->
             item("aviso") {
                 RbCard {
-                    RbChip(label = "Quedó anotado", tone = RbChipTone.Brand)
+                    RbChip(label = chipQuedoAnotado(), tone = RbChipTone.Brand)
                     Text(
                         text = aviso,
                         style = RbTheme.typography.body,
@@ -81,11 +79,11 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        item("saldo") { SaldoDelCliente(vm) }
+        item("debe") { DebeAhora(vm, feria = feria) }
 
         item("cobrar") {
             RbButton(
-                label = "Me está pagando",
+                label = ctaMeEstaPagando(),
                 onClick = vm::irAlAbono,
                 // Sin conexión el botón queda apagado, y el motivo va debajo.
                 // Dejarlo tocable para que el formulario falle al final sería
@@ -97,21 +95,21 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
         }
 
         // Recordarle a alguien lo que debe es la otra mitad de esta pantalla: la
-        // dueña ya está mirando el saldo y el nombre, que es exactamente lo que
-        // el recado necesita. Va acá, pegado al saldo, y no en un menú.
+        // dueña ya está mirando el monto y el nombre, que es exactamente lo que
+        // el recado necesita. Va acá, pegado al monto, y no en un menú.
         //
         // Sólo con deuda viva. Mandar "me debes $0" a quien terminó de pagar es
-        // cobrarle de nuevo, y esa cuenta se abre igual —es la única forma de
-        // ver los movimientos de un cliente que ya se puso al día. Sin puerto el
+        // cobrarle de nuevo, y esta persona se abre igual —es la única forma de
+        // ver lo que se llevó y pagó alguien que ya se puso al día. Sin puerto el
         // recado no se dibuja.
-        if (saldoEnPantalla != null && pesosQueDebe != null && pesosQueDebe > 0L) {
+        if (montoEnPantalla != null && pesosQueDebe != null && pesosQueDebe > 0L) {
             item("compartir") {
                 RecadoParaGente(
                     mensaje = mensajeDeuda(
                         nombre = vm.elegido?.name.orEmpty(),
-                        monto = saldoEnPantalla,
+                        monto = montoEnPantalla,
                     ),
-                    etiqueta = etiquetaCompartirDeuda(esFeria()),
+                    etiqueta = etiquetaCompartirDeuda(feria),
                 )
             }
         }
@@ -128,7 +126,7 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
 
         item("titulo-movimientos") {
             Text(
-                text = "Lo que se llevó y lo que pagó",
+                text = tituloMovimientos(),
                 style = RbTheme.typography.heading,
                 color = colors.textPrimary,
             )
@@ -136,16 +134,15 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
 
         when {
             cuenta == null && vm.cargandoCuenta -> item("cargando") {
-                RbLoadingState(label = "Trayendo la cuenta...")
+                RbLoadingState(label = cargandoDetalle(feria))
             }
 
-            // Sin la cuenta no hay lista que mostrar, pero dejar el título
-            // "Lo que se llevó y lo que pagó" seguido de nada se lee como
-            // "esta persona nunca compró", que es una respuesta distinta.
+            // Sin detalle no hay lista que mostrar, pero dejar el título
+            // seguido de nada se lee como "esta persona nunca compró", que es
+            // una respuesta distinta.
             cuenta == null -> item("sin-cuenta") {
                 Text(
-                    text = "No alcanzamos a traer los movimientos. No quiere decir que no " +
-                        "haya: vuelve a abrir esta cuenta en un momento.",
+                    text = sinMovimientosCargados(feria),
                     style = RbTheme.typography.body,
                     color = colors.textSecondary,
                 )
@@ -153,45 +150,38 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
 
             cuenta.entries.isEmpty() -> item("sin-movimientos") {
                 Text(
-                    // Antes decía "Esta cuenta no tiene movimientos todavía" y
-                    // se quedaba ahí: informaba en vez de enseñar. Ahora dice de
-                    // dónde salen las líneas, que es lo que hace falta saber la
-                    // primera vez que se abre una cuenta recién creada.
-                    //
                     // En feria no se manda a «Cobrar»: esa pestaña se llama
                     // "Vender" y fiar se hace hablando. Mandar a alguien a una
                     // pestaña que no existe es peor que no decirle nada.
-                    text = if (esFeria()) {
-                        "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando le " +
-                            "fíes algo — «$ASI_SE_FIA» — y cuando anotes que te pagó."
-                    } else {
-                        "Todavía no hay movimientos en esta cuenta. Aparecen solos: cuando " +
-                            "le fíes una venta desde «Cobrar», y cuando anotes que te pagó."
-                    },
+                    text = vacioMovimientos(feria),
                     style = RbTheme.typography.body,
                     color = colors.textSecondary,
                 )
             }
 
             else -> items(items = cuenta.entries, key = { it.id }) { movimiento ->
-                FilaDeCuenta(movimiento = movimiento, moneda = vm.moneda)
+                FilaDeMovimiento(
+                    movimiento = movimiento,
+                    moneda = vm.moneda,
+                    feria = feria,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SaldoDelCliente(vm: FiadoViewModel) {
+private fun DebeAhora(vm: FiadoViewModel, feria: Boolean) {
     val colors = RbTheme.colors
     val cuenta = vm.cuenta
 
-    RbCard(title = "Debe ahora") {
+    RbCard(title = tituloDebeAhora(feria)) {
         if (cuenta == null) {
             Text(
                 text = if (vm.cargandoCuenta) {
-                    "Trayendo la cuenta..."
+                    cargandoDetalle(feria)
                 } else {
-                    errorSinCuenta(feria = esFeria())
+                    errorSinCuenta(feria = feria)
                 },
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
@@ -199,6 +189,7 @@ private fun SaldoDelCliente(vm: FiadoViewModel) {
             return@RbCard
         }
 
+        // El monto viene del server (`cuenta.balance`); acá no se calcula.
         RbAmount(
             amount = vm.moneda.formatear(cuenta.balance),
             emphasis = RbAmountEmphasis.Headline,
@@ -206,13 +197,13 @@ private fun SaldoDelCliente(vm: FiadoViewModel) {
 
         RbDivider()
 
-        LineaDeCuenta("Se llevó fiado en total", vm.moneda.formatear(cuenta.totalFiado))
-        LineaDeCuenta("Te ha pagado en total", vm.moneda.formatear(cuenta.totalAbonado))
+        LineaDeResumen(totalSeLlevo(), vm.moneda.formatear(cuenta.totalFiado))
+        LineaDeResumen(totalTePago(), vm.moneda.formatear(cuenta.totalAbonado))
     }
 }
 
 @Composable
-private fun LineaDeCuenta(concepto: String, monto: String) {
+private fun LineaDeResumen(concepto: String, monto: String) {
     RbReflowRow(
         spacing = RbTheme.dimens.space2,
         modifier = Modifier.fillMaxWidth(),
@@ -228,7 +219,11 @@ private fun LineaDeCuenta(concepto: String, monto: String) {
 }
 
 @Composable
-private fun FilaDeCuenta(movimiento: MovimientoDeCuentaDto, moneda: Moneda) {
+private fun FilaDeMovimiento(
+    movimiento: MovimientoDeCuentaDto,
+    moneda: Moneda,
+    feria: Boolean,
+) {
     val colors = RbTheme.colors
 
     RbCard {
@@ -240,7 +235,10 @@ private fun FilaDeCuenta(movimiento: MovimientoDeCuentaDto, moneda: Moneda) {
                     // La palabra dice el signo. Nada distingue sólo por color:
                     // quien no ve la diferencia entre el verde y el gris lee
                     // exactamente lo mismo.
-                    text = if (movimiento.esAbono) "Te pagó" else "Se llevó fiado",
+                    text = etiquetaMovimiento(
+                        esAbono = movimiento.esAbono,
+                        feria = feria,
+                    ),
                     style = RbTheme.typography.bodyStrong,
                     color = colors.textPrimary,
                 )
