@@ -55,14 +55,13 @@ enum class RbErrorKind {
  *   phrasing that works when the caller has nothing specific to say.
  */
 fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = when (kind) {
-    // Nombra las dos causas, en orden de probabilidad, porque desde el teléfono
-    // se ven idénticas. La versión anterior culpaba sólo al teléfono ("no está
-    // llegando a internet") y mandaba a revisar la señal a quien tenía el
-    // computador del negocio apagado: media hora perdida en el lugar equivocado.
+    // Genérico (catálogo, Hoy, fallbacks): no nombra PC ni "negocio" — en feria
+    // es un puesto y en nube no hay computador del local. Lo accionable es la
+    // red del teléfono; pantallas con copy propio (entrada/caja) no pasan por acá.
     RbErrorKind.Offline -> RbErrorCopy(
-        title = "No llegamos a tu negocio",
-        message = "No pudimos traer $what. Revisa que el teléfono tenga wifi o datos " +
-            "prendidos, y que el computador del negocio esté encendido.",
+        title = "No llegamos",
+        message = "No pudimos traer $what. Revisá que el teléfono tenga wifi o datos " +
+            "prendidos e intentá de nuevo.",
         retryLabel = "Reintentar",
     )
 

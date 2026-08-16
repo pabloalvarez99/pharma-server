@@ -5,26 +5,23 @@ package cl.rutbusiness.core.error
  * el usuario entiende.
  *
  * La regla: cada caso trae un mensaje que dice **qué hacer**, no qué falló por
- * dentro. "No pudimos conectar" es inútil solo; "revisa que el PC del negocio
- * esté prendido" es accionable. Los detalles técnicos van en [technical], que
- * nunca se muestra salvo que el operador abra el detalle.
+ * dentro. Los detalles técnicos van en [technical], que nunca se muestra salvo
+ * que el operador abra el detalle. [ServidorNoResponde] no nombra host ni PC:
+ * en nube/feria no hay "computador del negocio" que prender.
  */
 sealed class AppError(
     val userMessage: String,
     val technical: String? = null,
 ) {
     /**
-     * No se pudo hablar con el server: sin red en el teléfono, PC apagado,
-     * dirección equivocada o el server caído.
-     *
-     * A propósito **no** se separa "sin internet" de "server apagado": desde el
-     * teléfono las dos se ven igual, y prometer precisión que no tenemos manda
-     * al usuario a revisar lo que no era. Un mensaje que cubre los dos casos y
-     * los nombra en orden de probabilidad sirve más.
+     * No se pudo hablar con el server: sin red en el teléfono, host caído o
+     * dirección equivocada. Desde el teléfono se ven igual; el mensaje manda a
+     * lo que la persona sí controla (datos/wifi). El host queda en [baseUrl] y
+     * en [technical], no en el texto visible.
      */
     class ServidorNoResponde(val baseUrl: String, technical: String? = null) : AppError(
-        userMessage = "No pudimos conectar con $baseUrl. Revisa que tu teléfono tenga internet, que el PC del negocio esté prendido y que la dirección esté bien escrita.",
-        technical = technical,
+        userMessage = "No pudimos conectar. Revisá que el teléfono tenga internet e intentá de nuevo.",
+        technical = technical ?: baseUrl,
     )
 
     /** La dirección que escribió el operador no es una URL usable. */
