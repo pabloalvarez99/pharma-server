@@ -1,6 +1,21 @@
 package cl.rutbusiness.app.ui.impresora
 
 /**
+ * Qué hacer cuando el teléfono no tiene Bluetooth, según rubro.
+ *
+ * Feria no tiene computador de día 1 (ADR-0022): la venta quedó anotada y no se
+ * promete reimprimir en un PC. Farmacia / retail formal conserva la salida por
+ * el computador del negocio.
+ */
+internal fun copyQueHacerSinBluetooth(feria: Boolean): String =
+    if (feria) {
+        "No se puede imprimir desde este teléfono. La venta igual quedó anotada."
+    } else {
+        "No se puede imprimir desde acá. La venta igual quedó registrada y la " +
+            "boleta se puede imprimir después desde el computador del negocio."
+    }
+
+/**
  * Una impresora que el teléfono ya conoce.
  *
  * @param direccion la MAC. Es lo que identifica de verdad a la impresora: el
@@ -56,11 +71,17 @@ sealed class FallaDeImpresion(
         sePuedeReintentar = true,
     )
 
-    /** Tablet o teléfono sin radio Bluetooth. Raro, pero existe. */
-    class SinBluetooth : FallaDeImpresion(
+    /**
+     * Tablet o teléfono sin radio Bluetooth. Raro, pero existe.
+     *
+     * @param feria pack feria (ADR-0022): no manda a un computador ni habla de
+     *   boleta; la venta se anotó y listo. Default `false` para los call sites
+     *   del enlace Bluetooth (sin CompositionLocal); la UI re-escribe con
+     *   [copyQueHacerSinBluetooth] si el rubro es feria.
+     */
+    class SinBluetooth(feria: Boolean = false) : FallaDeImpresion(
         titulo = "Este teléfono no tiene Bluetooth",
-        queHacer = "No se puede imprimir desde acá. La venta igual quedó registrada y la " +
-            "boleta se puede imprimir después desde el computador del negocio.",
+        queHacer = copyQueHacerSinBluetooth(feria),
         sePuedeReintentar = false,
     )
 
