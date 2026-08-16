@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbTextField
@@ -27,6 +28,8 @@ import cl.rutbusiness.ui.theme.RbTheme
  * abierto quedan ~320dp de panel, y al 200% de escala un campo con su rótulo más
  * un botón ya es todo lo que entra. Cualquier cosa que se agregue acá empuja el
  * botón fuera de la pantalla justo cuando el cliente está esperando el vuelto.
+ *
+ * Visual: campo calmado, CTA brand fill 56dp, pie feria con "puesto".
  */
 @Composable
 fun PasoMontoSuelto(vm: CobrarViewModel, modifier: Modifier = Modifier) {
@@ -39,6 +42,7 @@ fun PasoMontoSuelto(vm: CobrarViewModel, modifier: Modifier = Modifier) {
         preparando = vm.preparandoMontoSuelto,
         onConfirmar = vm::confirmarMontoSuelto,
         onCancelar = vm::cancelarMontoSuelto,
+        feria = esFeria(),
     )
 }
 
@@ -59,6 +63,7 @@ internal fun MontoSueltoContenido(
     onConfirmar: () -> Unit,
     onCancelar: () -> Unit,
     modifier: Modifier = Modifier,
+    feria: Boolean = false,
 ) {
     val dimens = RbTheme.dimens
 
@@ -70,6 +75,8 @@ internal fun MontoSueltoContenido(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
+        // Campo + CTA primario: con teclado numérico y letra al 200% no cabe
+        // nada más arriba sin empujar el botón fuera del panel de ~320dp.
         RbTextField(
             value = monto,
             onValueChange = onMonto,
@@ -86,6 +93,7 @@ internal fun MontoSueltoContenido(
             onImeAction = onConfirmar,
         )
 
+        // Brand fill Primary + fillWidth + ≥56dp (rbTouchTarget).
         RbButton(
             label = if (preparando) "Preparando…" else "Cobrar este monto",
             onClick = onConfirmar,
@@ -102,10 +110,10 @@ internal fun MontoSueltoContenido(
         )
 
         // Qué va a quedar anotado, dicho antes y no después. La venta existe en
-        // el sistema como cualquier otra -entra a la caja, al resumen del día y
-        // al comprobante-, y esa línea es lo que la dueña va a ver mañana.
+        // el sistema como cualquier otra -entra al día, a la caja/puesto y al
+        // papel-, y esa línea es lo que la dueña va a ver mañana. Feria: "puesto".
         Text(
-            text = "Queda anotada como \"Venta suelta\" en tu día y en la caja.",
+            text = copyNotaMontoSuelto(feria),
             style = RbTheme.typography.support,
             color = RbTheme.colors.textSecondary,
         )

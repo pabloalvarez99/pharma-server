@@ -68,6 +68,55 @@ internal fun copyOfflinePago(feria: Boolean): String =
             "cuando se envíe."
     }
 
+/**
+ * Pie del cobro rápido: feria habla del puesto; retail de la caja.
+ *
+ * La venta suelta entra al mismo ledger en ambos casos; lo que cambia es cómo
+ * se nombra el lugar del día.
+ */
+internal fun copyNotaMontoSuelto(feria: Boolean): String =
+    if (feria) {
+        "Queda anotada como \"Venta suelta\" en tu día y en el puesto."
+    } else {
+        "Queda anotada como \"Venta suelta\" en tu día y en la caja."
+    }
+
+/**
+ * Cuando el cobro pasó pero el detalle del papel no llegó.
+ *
+ * Feria no nombra "sistema del negocio": el cobro ya está y «Tu día» lo cuenta.
+ */
+internal fun copySinDetalleComprobante(feria: Boolean): String =
+    if (feria) {
+        "No alcanzamos a traer el detalle del papel, pero el cobro ya está hecho. " +
+            "Lo ves en «Tu día», que ya cuenta esta venta."
+    } else {
+        "No alcanzamos a traer el detalle del comprobante, pero el cobro ya " +
+            "está hecho. Lo ves en «Tu día», que ya cuenta esta venta."
+    }
+
+/**
+ * Pie de la venta encolada offline: sin total porque el server no la confirmó.
+ */
+internal fun copyPieVentaEncolada(feria: Boolean, unidades: Int): String {
+    val unidadesTxt = if (unidades == 1) "1 unidad" else "$unidades unidades"
+    return if (feria) {
+        "$unidadesTxt · el total se confirma cuando vuelva la señal"
+    } else {
+        "$unidadesTxt · el total lo confirma el sistema cuando reciba la venta"
+    }
+}
+
+/**
+ * Referencia quieta del papel — no "ticket fiscal" con la palabra Comprobante.
+ *
+ * El folio completo a veces es un UUID; basta un tramo corto para reconocerlo.
+ */
+internal fun copyRefPapel(folio: String): String {
+    val corto = folio.trim().take(8)
+    return if (corto.isEmpty()) "Sin número" else "Nº $corto"
+}
+
 /** `true` si la UI debe ofrecer el botón de cámara. */
 internal fun escanerVisible(barcode: Boolean, hayCamara: Boolean): Boolean =
     barcode && hayCamara
