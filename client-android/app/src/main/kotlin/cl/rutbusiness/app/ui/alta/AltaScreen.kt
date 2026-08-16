@@ -1,6 +1,7 @@
 package cl.rutbusiness.app.ui.alta
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -28,14 +30,19 @@ import cl.rutbusiness.app.ui.entrada.LocalEntrada
 import cl.rutbusiness.app.ui.entrada.ServidorPorHttp
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
-import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbAssertive
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
  * "Crear mi negocio": de una app recién instalada a estar adentro, sin que
  * nadie tenga que dictar nada.
+ *
+ * Se siente un **cartel**, no un wizard: una pregunta grande a la vez, mucho
+ * aire, un solo CTA de marca abajo y las fallas como tarjeta legible (no un
+ * muro rojo). El piso de hardware —persona mayor, 720p, 200% de letra— manda
+ * sobre el adorno.
  *
  * Al terminar no navega a ninguna parte: abre la sesión, y el árbol de arriba
  * ([cl.rutbusiness.app.ui.RutBusinessApp]) cambia solo de pantalla porque está
@@ -191,8 +198,9 @@ internal fun PantallaDeAlta(
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(scroll)
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                // space4 vertical: cartel con aire, no formulario apretado.
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
             when (paso) {
                 PasoDelAlta.Donde -> PasoDonde(
@@ -229,12 +237,12 @@ internal fun PantallaDeAlta(
                 )
             }
 
+            // Tarjeta, no muro rojo: la instrucción se lee como el resto del
+            // cartel, no como un banner de sistema gritando.
             falla?.let {
-                RbErrorState(
-                    title = it.titulo,
-                    message = it.queHacer,
-                    retryLabel = null,
-                    onRetry = null,
+                TarjetaDeFalla(
+                    titulo = it.titulo,
+                    queHacer = it.queHacer,
                 )
             }
 
@@ -265,6 +273,7 @@ internal fun PantallaDeAlta(
                 )
                 .padding(dimens.space3),
         ) {
+            // Primary = brand fill (56dp vía RbButton). Un solo verbo abajo.
             RbButton(
                 label = etiquetaDelBoton(estado, ultimo, esFeria),
                 onClick = if (ultimo) onCrear else onAvanzar,
@@ -280,6 +289,7 @@ internal fun PantallaDeAlta(
  *
  * No es una falla del alta sino su respuesta correcta: no hay nada que crear
  * acá. Se dice antes de pedir un solo dato y se ofrece la puerta que sí sirve.
+ * Mismo lenguaje de cartel: una tarjeta con aire y un CTA de marca.
  *
  * @param nube en el APK de la nube no hay "computador" ni "dirección" que
  *   revisar: el feriante entra con correo y clave.
@@ -291,7 +301,9 @@ private fun LugarOcupado(
     nube: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val colors = RbTheme.colors
     val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
     val tituloBarra = if (nube) "Ahí ya hay un puesto" else "Ahí ya hay un negocio"
     val titulo = if (nube) {
         "Ese puesto ya está creado"
@@ -317,31 +329,41 @@ private fun LugarOcupado(
                 .weight(1f)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(dimens.space3),
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                .padding(horizontal = dimens.space3, vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
         ) {
-            Text(
-                text = titulo,
-                style = RbTheme.typography.title,
-                color = RbTheme.colors.textPrimary,
-                modifier = Modifier.rbHeading(),
-            )
-            Text(
-                text = cuerpo,
-                style = RbTheme.typography.body,
-                color = RbTheme.colors.textPrimary,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.surfaceRaised)
+                    .border(dimens.focusRing, colors.outlineStrong, shape)
+                    .padding(horizontal = dimens.space3, vertical = dimens.space4),
+                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+            ) {
+                Text(
+                    text = titulo,
+                    style = RbTheme.typography.title,
+                    color = colors.textPrimary,
+                    modifier = Modifier.rbHeading(),
+                )
+                Text(
+                    text = cuerpo,
+                    style = RbTheme.typography.body,
+                    color = colors.textPrimary,
+                )
+            }
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(RbTheme.colors.outline),
+                .background(colors.outline),
         )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(RbTheme.colors.surfaceRaised)
+                .background(colors.surfaceRaised)
                 .windowInsetsPadding(
                     WindowInsets.safeDrawing.only(
                         WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
@@ -355,6 +377,47 @@ private fun LugarOcupado(
                 fillWidth = true,
             )
         }
+    }
+}
+
+/**
+ * Falla del alta dibujada como **tarjeta**, no como muro rojo.
+ *
+ * Título + qué hacer, con el mismo peso visual que el cartel del paso. El
+ * borde grueso y la superficie elevada la hacen visible sin pintar la pantalla
+ * de dangerContainer (que al sol y al 200% se lee como alarma, no como ayuda).
+ */
+@Composable
+internal fun TarjetaDeFalla(
+    titulo: String,
+    queHacer: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surfaceRaised)
+            .border(dimens.focusRing, colors.outlineStrong, shape)
+            .padding(dimens.space3)
+            .rbAssertive(),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        Text(
+            text = titulo,
+            style = RbTheme.typography.heading,
+            color = colors.textPrimary,
+            modifier = Modifier.rbHeading(),
+        )
+        Text(
+            text = queHacer,
+            style = RbTheme.typography.body,
+            color = colors.textPrimary,
+        )
     }
 }
 
