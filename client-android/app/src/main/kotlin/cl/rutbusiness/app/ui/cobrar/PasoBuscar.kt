@@ -23,6 +23,7 @@ import cl.rutbusiness.app.diag.Latencia
 import cl.rutbusiness.app.ui.catalogo.abrirCatalogo
 import cl.rutbusiness.app.ui.catalogo.copyCatalogo
 import cl.rutbusiness.app.ui.offline.LocalOffline
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 import cl.rutbusiness.core.api.models.ProductDto
@@ -68,10 +69,12 @@ fun PasoBuscar(vm: CobrarViewModel, modifier: Modifier = Modifier) {
     // pantalla: en feria el botón dice "Agregar una cosa" y en farmacia "Agregar
     // un producto", porque lo dice `vocab` (ADR-0022).
     val copyDelCatalogo = copyCatalogo(pack)
+    val feria = esFeria()
     BuscarContenido(
         modifier = modifier,
         consulta = vm.consulta,
         onConsulta = vm::cambiarConsulta,
+        feria = feria,
         // Sin señal, la línea de ayuda cede el lugar a la fecha de lo que se
         // está mostrando. No se suman las dos: en un panel de 640dp cada
         // renglón extra arriba se lo saca a la lista de productos, que es lo
@@ -168,6 +171,8 @@ internal fun BuscarContenido(
     onMontoSuelto: (() -> Unit)? = null,
     /** El monto suelto que ya está en el carrito, formateado. */
     montoSueltoPuesto: String? = null,
+    /** Pack feria: el miss de búsqueda enseña venderle al agente. */
+    feria: Boolean = false,
 ) {
     val dimens = RbTheme.dimens
 
@@ -269,11 +274,12 @@ internal fun BuscarContenido(
             },
             emptyHint = if (consulta.isBlank()) {
                 pistaSinCatalogo
-            } else if (onCargarLoQueVendo != null) {
-                "Revisa cómo se escribe, prueba con una palabra más corta, " +
-                    "o agrégalo si todavía no está cargado."
             } else {
-                "Revisa cómo se escribe, o prueba con una palabra más corta."
+                pistaBusquedaVacia(
+                    feria = feria,
+                    consulta = consulta,
+                    puedeCargar = onCargarLoQueVendo != null,
+                )
             },
             emptyActionLabel = if (onCargarLoQueVendo != null) etiquetaCargar else null,
             onEmptyAction = onCargarLoQueVendo,
