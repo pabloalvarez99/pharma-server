@@ -102,4 +102,49 @@ class CopyCajaTest {
             ),
         )
     }
+
+    @Test
+    fun `error de red feria no nombra computador ni IP`() {
+        for (accion in AccionErrorRed.entries) {
+            val msg = copyErrorRed(feria = true, accion = accion)
+            assertFalse(
+                "feria $accion no debe hablar de computador: $msg",
+                msg.lowercase().contains("computador"),
+            )
+            assertFalse(
+                "feria $accion no debe mostrar IP local: $msg",
+                msg.contains("192.168"),
+            )
+            assertTrue("feria $accion debe hablar de señal: $msg", msg.lowercase().contains("señal"))
+        }
+    }
+
+    @Test
+    fun `error de red retail sigue con computador del negocio`() {
+        for (accion in AccionErrorRed.entries) {
+            val msg = copyErrorRed(feria = false, accion = accion)
+            assertTrue(
+                "retail $accion nombra computador: $msg",
+                msg.lowercase().contains("computador"),
+            )
+        }
+    }
+
+    @Test
+    fun `cobro feria recuerda que no se cobra dos veces`() {
+        val msg = copyErrorRed(feria = true, accion = AccionErrorRed.Cobro)
+        assertTrue(msg.lowercase().contains("no se cobra dos veces"))
+        assertTrue(msg.lowercase().contains("reintentar") || msg.contains("Reintentar"))
+    }
+
+    @Test
+    fun `esperado en puesto feria sin computador`() {
+        val feria = copyEsperadoEnPuesto(feria = true)
+        assertTrue(feria.lowercase().contains("puesto"))
+        assertFalse(feria.lowercase().contains("computador"))
+        assertFalse(feria.contains("192.168"))
+
+        val retail = copyEsperadoEnPuesto(feria = false)
+        assertTrue(retail.lowercase().contains("computador"))
+    }
 }

@@ -115,3 +115,64 @@ fun esCajaYaAbierta(error: cl.rutbusiness.core.error.AppError): Boolean {
         msg.contains("caja abierta") ||
         msg.contains("already has an open")
 }
+
+/**
+ * Qué acción falló por red — el cuerpo del mensaje cambia; feria nunca nombra
+ * «computador del negocio».
+ */
+internal enum class AccionErrorRed {
+    Apertura,
+    Cierre,
+    Cobro,
+}
+
+/**
+ * Mensaje de [AppError.ServidorNoResponde] en Caja / Cobrar.
+ *
+ * Feria: señal del teléfono, sin IP ni «computador». Retail/farmacia on-prem
+ * sigue con la frase del computador del negocio.
+ */
+internal fun copyErrorRed(feria: Boolean, accion: AccionErrorRed = AccionErrorRed.Apertura): String =
+    when (accion) {
+        AccionErrorRed.Apertura ->
+            if (feria) {
+                "No llegamos. Revisá la señal del teléfono y reintentá; si el puesto " +
+                    "igual quedó abierto, lo vas a ver al actualizar."
+            } else {
+                "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
+                    "señal y vuelve a intentar; si la caja igual quedó abierta, la vas a " +
+                    "ver al actualizar."
+            }
+
+        AccionErrorRed.Cierre ->
+            if (feria) {
+                "No llegamos. Revisá la señal del teléfono y reintentá: si el día ya " +
+                    "se había cerrado, te lo vamos a decir."
+            } else {
+                "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
+                    "señal y vuelve a intentar: si ya se había cerrado, te lo vamos a decir."
+            }
+
+        AccionErrorRed.Cobro ->
+            if (feria) {
+                "No alcanzó a anotarse la venta. Revisá la señal y tocá «Reintentar»: " +
+                    "aunque la mandes de nuevo, no se cobra dos veces."
+            } else {
+                "No alcanzamos a mandarle la venta al computador del negocio. Revisa que " +
+                    "el teléfono tenga señal y toca «Reintentar»: aunque la mandes de nuevo, " +
+                    "no se cobra dos veces."
+            }
+    }
+
+/**
+ * Ayuda bajo el monto «debería haber»: de dónde sale el número.
+ *
+ * Feria habla del puesto; retail sigue con el computador del negocio.
+ */
+internal fun copyEsperadoEnPuesto(feria: Boolean): String =
+    if (feria) {
+        "Lo calcula el puesto con lo que anotaste al abrir, lo que cobraste y los movimientos."
+    } else {
+        "Lo calcula el computador del negocio con lo que pusiste al abrir, lo que " +
+            "vendiste en efectivo y lo que sacaste o metiste a mano."
+    }

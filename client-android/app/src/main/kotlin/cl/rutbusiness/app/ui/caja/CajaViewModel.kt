@@ -494,10 +494,8 @@ class CajaViewModel(
         )
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
-            title = "No pudimos abrir la caja",
-            message = "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
-                "señal y vuelve a intentar; si la caja igual quedó abierta, la vas a ver al " +
-                "actualizar.",
+            title = if (esFeria) "No pudimos abrir el puesto" else "No pudimos abrir la caja",
+            message = copyErrorRed(feria = esFeria, accion = AccionErrorRed.Apertura),
             retryLabel = "Reintentar",
         )
 
@@ -532,9 +530,8 @@ class CajaViewModel(
         )
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
-            title = "No pudimos cerrar la caja",
-            message = "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
-                "señal y vuelve a intentar: si ya se había cerrado, te lo vamos a decir.",
+            title = if (esFeria) "No pudimos cerrar el día" else "No pudimos cerrar la caja",
+            message = copyErrorRed(feria = esFeria, accion = AccionErrorRed.Cierre),
             retryLabel = "Reintentar",
         )
 
