@@ -17,8 +17,10 @@ class CopyCobrarFeriaTest {
     fun `feria sin barcode habla de nombre no de EAN`() {
         val c = copyBuscarCobrar(barcode = false)
         assertEquals("¿Qué vendiste?", c.etiqueta)
-        assertTrue(c.placeholder.lowercase().contains("tomate") ||
-            c.placeholder.lowercase().contains("cilantro"))
+        assertTrue(
+            c.placeholder.lowercase().contains("tomate") ||
+                c.placeholder.lowercase().contains("cilantro"),
+        )
         assertFalse(c.ayudaOnline.contains("código de barras", ignoreCase = true))
         assertTrue(c.ayudaOnline.contains("nombre", ignoreCase = true))
     }
@@ -90,5 +92,46 @@ class CopyCobrarFeriaTest {
                 puedeCargar = false,
             ),
         )
+    }
+
+    @Test
+    fun `barra feria habla de cosas no de productos`() {
+        assertEquals("Nada en la venta todavía", copyBarraCarrito(0, null, feria = true))
+        assertEquals(
+            "2 cosas · $3.000",
+            copyBarraCarrito(2, "\$3.000", feria = true),
+        )
+        assertFalse(
+            copyBarraCarrito(3, "\$1", feria = true).contains("producto", ignoreCase = true),
+        )
+    }
+
+    @Test
+    fun `barra retail conserva productos`() {
+        assertEquals("Sin productos todavía", copyBarraCarrito(0, null, feria = false))
+        assertEquals(
+            "3 productos · $4.470",
+            copyBarraCarrito(3, "\$4.470", feria = false),
+        )
+    }
+
+    @Test
+    fun `offline feria no nombra computador ni sistema del negocio`() {
+        val s = copyOfflinePago(feria = true)
+        assertFalse(s.contains("computador", ignoreCase = true))
+        assertFalse(s.contains("sistema del negocio", ignoreCase = true))
+        assertTrue(s.contains("señal", ignoreCase = true) || s.contains("red", ignoreCase = true))
+    }
+
+    @Test
+    fun `offline retail puede nombrar el sistema del negocio`() {
+        val s = copyOfflinePago(feria = false)
+        assertTrue(s.contains("sistema del negocio", ignoreCase = true))
+    }
+
+    @Test
+    fun `subtitulo feria es de mesa`() {
+        assertEquals("Anotá lo que se lleva", copySubtituloBuscar(feria = true))
+        assertEquals("Busca el producto y agrégalo", copySubtituloBuscar(feria = false))
     }
 }

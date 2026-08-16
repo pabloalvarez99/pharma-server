@@ -1,7 +1,10 @@
 package cl.rutbusiness.app.ui.cobrar
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,12 +13,20 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -28,21 +39,30 @@ import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.app.ui.scanner.LocalCamaraDeCodigos
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.offline.Fechado
+import cl.rutbusiness.ui.components.RbAmount
+import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbDivider
+import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorCopy
-import cl.rutbusiness.ui.components.RbList
-import cl.rutbusiness.ui.components.RbListRow
+import cl.rutbusiness.ui.components.RbErrorState
+import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbReflowRow
+import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
-import androidx.compose.material3.Text
+import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /**
  * Paso 1: buscar y agregar.
+ *
+ * Se siente la mesa del puesto, no un POS de retail: campo calmado, cada
+ * resultado es una tarjeta gruesa (nombre + precio), y el botón Cobrar es
+ * brand fill de 56dp anclado abajo.
  *
  * El campo de búsqueda acepta lo mismo que va a mandar la cámara cuando entre:
  * si lo tipeado son ocho dígitos o más, se resuelve como código de barras antes
@@ -188,22 +208,12 @@ internal fun BuscarContenido(
     val escribiendo = consulta.isNotBlank()
 
     Column(modifier = modifier) {
-        // El buscador va arriba de la lista y **acotado a su alto natural**.
+        // Campo de búsqueda **calmado**: alto natural, sin tutorial largo, fijo
+        // fuera de la lista para que con el teclado no se coma los resultados.
         //
-        // Antes esta misma columna llevaba `wrapContentHeight(unbounded = true)`
-        // para tapar un `fillMaxSize()` que `RbTextField` ya no tiene, y el
-        // efecto era que el bloque de búsqueda pedía todo el alto que hubiera.
-        // Con el teclado abierto en 720x1280 la lista de resultados quedaba en
-        // **cero**: el producto se encontraba y no se veía hasta cerrar el
-        // teclado. Al 200% de escala, además, la barra de total y el botón
-        // Cobrar quedaban fuera de la pantalla.
-        //
-        // Meterlo adentro del `LazyColumn` como primer ítem también le da el
-        // alto sobrante a la lista, pero se midió y es peor: el encabezado ocupa
-        // 190dp de los 175dp de lista que deja el teclado, así que no se ve
-        // ninguna fila hasta scrollear, y al scrollear el campo se recicla y el
-        // teclado se cierra solo. Fijo y chico, el campo no se mueve nunca y las
-        // filas empiezan justo debajo.
+        // Antes un `wrapContentHeight(unbounded)` le daba al bloque de búsqueda
+        // todo el alto sobrante y la lista quedaba en cero. Fijo y chico, el
+        // campo no se mueve y las tarjetas empiezan justo debajo.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -259,83 +269,156 @@ internal fun BuscarContenido(
 
         RbDivider()
 
-        RbList(
-            items = resultados,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            loading = buscando && resultados.isEmpty(),
-            error = errorBusqueda,
-            onRetry = onBuscarAhora,
-            emptyTitle = if (consulta.isBlank()) {
-                tituloSinCatalogo
-            } else {
-                "Nada con \"${consulta.trim()}\""
-            },
-            emptyHint = if (consulta.isBlank()) {
-                pistaSinCatalogo
-            } else {
-                pistaBusquedaVacia(
-                    feria = feria,
-                    consulta = consulta,
-                    puedeCargar = onCargarLoQueVendo != null,
+        // Mesa: tarjetas con aire, no filas de extracto con divisor a borde.
+        // (RbList trae divisor y no da el aire de tarjeta que pide el puesto.)
+        val listaMod = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+
+        when {
+            errorBusqueda != null -> Column(
+                modifier = listaMod.verticalScroll(rememberScrollState()),
+            ) {
+                RbErrorState(
+                    title = errorBusqueda.title,
+                    message = errorBusqueda.message,
+                    modifier = Modifier.padding(dimens.space3),
+                    retryLabel = errorBusqueda.retryLabel,
+                    onRetry = onBuscarAhora,
                 )
-            },
-            emptyActionLabel = if (onCargarLoQueVendo != null) etiquetaCargar else null,
-            onEmptyAction = onCargarLoQueVendo,
-            key = { it.id },
-        ) { producto ->
-            FilaDeProducto(
-                producto = producto,
-                enCarrito = cantidadEnCarrito(producto.id),
-                precio = precioDe(producto),
-                onAgregar = { onAgregar(producto) },
-            )
+            }
+
+            buscando && resultados.isEmpty() -> Column(modifier = listaMod) {
+                RbLoadingState(label = "Buscando…")
+                RbSkeletonLines(
+                    lines = 5,
+                    modifier = Modifier.padding(dimens.space3),
+                )
+            }
+
+            resultados.isEmpty() -> Column(
+                modifier = listaMod.verticalScroll(rememberScrollState()),
+            ) {
+                RbEmptyState(
+                    title = if (consulta.isBlank()) {
+                        tituloSinCatalogo
+                    } else {
+                        "Nada con \"${consulta.trim()}\""
+                    },
+                    hint = if (consulta.isBlank()) {
+                        pistaSinCatalogo
+                    } else {
+                        pistaBusquedaVacia(
+                            feria = feria,
+                            consulta = consulta,
+                            puedeCargar = onCargarLoQueVendo != null,
+                        )
+                    },
+                    actionLabel = if (onCargarLoQueVendo != null) etiquetaCargar else null,
+                    onAction = onCargarLoQueVendo,
+                )
+            }
+
+            else -> LazyColumn(
+                modifier = listaMod,
+                contentPadding = PaddingValues(
+                    horizontal = dimens.space3,
+                    vertical = dimens.space2,
+                ),
+                verticalArrangement = Arrangement.spacedBy(dimens.space2),
+            ) {
+                items(items = resultados, key = { it.id }) { producto ->
+                    FilaDeProducto(
+                        producto = producto,
+                        enCarrito = cantidadEnCarrito(producto.id),
+                        precio = precioDe(producto),
+                        feria = feria,
+                        onAgregar = { onAgregar(producto) },
+                    )
+                }
+            }
         }
 
         BarraDeTotal(
             unidades = unidades,
             total = total,
+            feria = feria,
             onCobrar = onCobrar,
         )
     }
 }
 
 /**
- * Una fila del catálogo.
+ * Una cosa de la mesa: tarjeta gruesa, nombre grande, precio numérico, ≥56dp.
  *
- * El chip de la derecha está **siempre**, y ése es el punto: pasa de "Agregar"
- * a "2" cuando el producto entra al carrito, y como el texto se achica nunca
- * fuerza un salto de línea nuevo. Si el chip apareciera recién al agregar, la
- * fila crecería bajo el dedo y la siguiente se movería justo cuando la cajera
- * va a tocarla.
+ * En feria no se grita stock ni "Servicio": el puesto no cuenta unidades en
+ * góndola. En retail sí se avisa sin stock / disponibles.
  */
 @Composable
 private fun FilaDeProducto(
     producto: ProductDto,
     enCarrito: Int,
     precio: String,
+    feria: Boolean,
     onAgregar: () -> Unit,
 ) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
     val sinStock = producto.physicalStock && producto.stock <= 0
-    RbListRow(
-        title = producto.name,
-        subtitle = if (!producto.physicalStock) {
-            "Servicio"
-        } else if (sinStock) {
-            "Sin stock"
-        } else {
-            "${producto.stock} disponibles"
-        },
-        value = precio,
-        trailing = {
-            if (enCarrito > 0) {
-                RbChip(label = "$enCarrito", tone = RbChipTone.Brand)
-            } else {
-                RbChip(label = "Agregar", tone = RbChipTone.Neutral)
+    val detalle: String? = when {
+        feria -> null
+        !producto.physicalStock -> "Servicio"
+        sinStock -> "Sin stock"
+        else -> "${producto.stock} disponibles"
+    }
+
+    RbReflowRow(
+        spacing = dimens.space3,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            .border(dimens.border, colors.outline, shape)
+            .rbClickable(
+                onClick = onAgregar,
+                role = Role.Button,
+                shape = shape,
+            )
+            .rbTouchTarget()
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
+                Text(
+                    text = producto.name,
+                    style = RbTheme.typography.heading,
+                    color = colors.textPrimary,
+                )
+                if (detalle != null) {
+                    Text(
+                        text = detalle,
+                        style = RbTheme.typography.support,
+                        color = if (sinStock) colors.dangerText else colors.textSecondary,
+                    )
+                }
             }
         },
-        onClick = onAgregar,
+        trailing = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(dimens.space1),
+                horizontalAlignment = Alignment.End,
+            ) {
+                RbAmount(
+                    amount = precio,
+                    emphasis = RbAmountEmphasis.Body,
+                )
+                if (enCarrito > 0) {
+                    RbChip(label = "$enCarrito", tone = RbChipTone.Brand)
+                } else {
+                    RbChip(label = "Agregar", tone = RbChipTone.Neutral)
+                }
+            }
+        },
     )
 }
 
@@ -350,16 +433,13 @@ private fun FilaDeProducto(
  * botón de cobrar tienen que verse con el teclado abierto y con la letra al
  * 200%, que es cuando menos pantalla hay.
  *
- * Por eso también es una fila y no dos renglones apilados. El total al lado del
- * botón mide unos 46dp menos, y esos 46dp se los queda la lista de resultados —
- * que con el teclado arriba es lo único que estaba faltando. [RbReflowRow] los
- * baja a dos renglones sola, y sólo cuando al texto no le alcanza el ancho sin
- * partir una palabra por la mitad.
+ * El botón es brand fill (Primary) y ≥56dp vía [RbButton].
  */
 @Composable
 private fun BarraDeTotal(
     unidades: Int,
     total: String?,
+    feria: Boolean,
     onCobrar: () -> Unit,
 ) {
     val colors = RbTheme.colors
@@ -379,11 +459,7 @@ private fun BarraDeTotal(
             .padding(horizontal = dimens.space3, vertical = dimens.space2),
         content = {
             Text(
-                text = if (unidades == 0) {
-                    "Sin productos todavía"
-                } else {
-                    "$unidades ${if (unidades == 1) "producto" else "productos"} · ${total ?: "el sistema confirma el total al cobrar"}"
-                },
+                text = copyBarraCarrito(unidades = unidades, total = total, feria = feria),
                 style = RbTheme.typography.bodyStrong,
                 color = colors.textPrimary,
                 textAlign = TextAlign.Start,
@@ -394,6 +470,7 @@ private fun BarraDeTotal(
                 label = "Cobrar",
                 onClick = onCobrar,
                 enabled = unidades > 0,
+                // Brand fill Primary por default; 56dp vía rbTouchTarget.
             )
         },
     )
