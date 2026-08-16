@@ -322,11 +322,15 @@ class FiadoEscalaTest {
 
     // --- el pago -------------------------------------------------------------
 
-    private fun mostrarAbono(escala: Float, hayCaja: Boolean = true) {
+    private fun mostrarAbono(
+        escala: Float,
+        hayCaja: Boolean = true,
+        esFeria: Boolean = false,
+    ) {
         compose.setContent {
             var monto by remember { mutableStateOf("") }
             var nota by remember { mutableStateOf("") }
-            var enEfectivo by remember { mutableStateOf(hayCaja) }
+            var enEfectivo by remember { mutableStateOf(hayCaja || esFeria) }
             ConEscala(escala) {
                 FormularioDeAbono(
                     moneda = Moneda.de("CLP"),
@@ -338,6 +342,7 @@ class FiadoEscalaTest {
                     hayCajaAbierta = hayCaja,
                     entraALaCaja = enEfectivo,
                     onEntraALaCaja = { enEfectivo = it },
+                    esFeria = esFeria,
                     impedimento = if (monto.isBlank()) "Escribe cuánto te está pagando." else null,
                     error = null,
                     guardando = false,
@@ -347,6 +352,19 @@ class FiadoEscalaTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun `feria abono en efectivo no habla de cajon y cuenta en el dia`() {
+        mostrarAbono(escala = 1.0f, hayCaja = true, esFeria = true)
+        compose.onNodeWithText("Esta plata cuenta en el día.").assertIsDisplayed()
+        assertEquals(
+            0,
+            compose.onAllNodes(hasText("cajón", substring = true, ignoreCase = true))
+                .fetchSemanticsNodes()
+                .size,
+        )
+        compose.onNodeWithText("Anotar el pago").performScrollTo().assertIsDisplayed()
     }
 
     @Test

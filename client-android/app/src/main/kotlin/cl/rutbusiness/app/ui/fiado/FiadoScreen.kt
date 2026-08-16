@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -69,6 +70,13 @@ fun FiadoRoute(
 @Composable
 private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
     val dimens = RbTheme.dimens
+
+    // Feria: al entrar a Fiado se abre el puesto con $0 (o 409 = ya abierto).
+    // La Screen lee esFeria(); el VM no puede tocar CompositionLocal.
+    val feria = esFeria()
+    LaunchedEffect(feria) {
+        if (feria) vm.modoFeria(true)
+    }
 
     val atras: () -> Unit = when (vm.paso) {
         PasoDeFiado.Detalle -> vm::volverALaLista

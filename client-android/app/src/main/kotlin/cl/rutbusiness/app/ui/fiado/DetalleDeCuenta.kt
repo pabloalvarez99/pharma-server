@@ -196,9 +196,7 @@ private fun SaldoDelCliente(vm: FiadoViewModel) {
                 text = if (vm.cargandoCuenta) {
                     "Trayendo la cuenta..."
                 } else {
-                    "No pudimos traer la cuenta de esta persona. Toca atrás y vuelve a " +
-                        "abrirla; si sigue igual, revisa que el computador del negocio esté " +
-                        "encendido."
+                    errorSinCuenta(feria = esFeria())
                 },
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,

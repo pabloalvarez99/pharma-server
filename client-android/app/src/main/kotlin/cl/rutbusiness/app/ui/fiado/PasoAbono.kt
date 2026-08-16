@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import cl.rutbusiness.app.ui.caja.tecladoDePlata
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbButton
@@ -43,6 +44,7 @@ fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
         hayCajaAbierta = vm.cajaAbierta != null,
         entraALaCaja = vm.entraALaCaja,
         onEntraALaCaja = vm::cambiarEntraALaCaja,
+        esFeria = esFeria(),
         impedimento = vm.impedimentoParaAbonar(),
         error = vm.errorDeAccion,
         guardando = vm.guardando,
@@ -62,6 +64,9 @@ fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
  *
  * @param deudaActual el saldo que mandó el server, en su texto decimal. Se
  *   muestra como referencia; no se resta nada contra él.
+ * @param esFeria pack feria: el abono en efectivo cuenta en la plata del día
+ *   (puesto), no habla de cajón. El toggle se ofrece si hay sesión o se puede
+ *   abrir el puesto.
  */
 @Composable
 internal fun FormularioDeAbono(
@@ -80,6 +85,7 @@ internal fun FormularioDeAbono(
     onAnotar: () -> Unit,
     onVolver: () -> Unit,
     modifier: Modifier = Modifier,
+    esFeria: Boolean = false,
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
@@ -112,9 +118,10 @@ internal fun FormularioDeAbono(
             )
         }
 
-        // La pregunta sólo tiene sentido con caja abierta. Sin ella no hay
-        // arqueo que tocar, y ofrecerlo sería prometer algo que no pasa.
-        if (hayCajaAbierta) {
+        // Retail: sólo con caja abierta hay arqueo que tocar.
+        // Feria: el puesto se puede abrir con $0; el toggle va aunque la sesión
+        // todavía se esté asegurando (default efectivo = cuenta en el día).
+        if (hayCajaAbierta || esFeria) {
             RbCard(title = "¿Cómo te paga?") {
                 RbChipRow {
                     RbChip(
@@ -131,12 +138,7 @@ internal fun FormularioDeAbono(
                     )
                 }
                 Text(
-                    text = if (entraALaCaja) {
-                        "El billete entra a la caja y va a estar en el cierre de hoy."
-                    } else {
-                        "No toca la caja: esa plata no está en el cajón, así que no aparece " +
-                            "en el cierre."
-                    },
+                    text = ayudaComoPaga(feria = esFeria, entraALaCaja = entraALaCaja),
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
