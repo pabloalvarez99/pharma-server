@@ -172,6 +172,7 @@ class EscanerEscalaTest {
         mostrar(1.0f) {
             ExplicacionDelPermiso(EstadoDelPermiso.SinPedir, modifier = Modifier.fillMaxSize())
         }
+        compose.onNodeWithText("La cámara es la linterna").assertIsDisplayed()
         compose.onNodeWithText("código de barras", substring = true).assertIsDisplayed()
         compose.onNodeWithText("no sale de acá", substring = true).assertIsDisplayed()
     }
