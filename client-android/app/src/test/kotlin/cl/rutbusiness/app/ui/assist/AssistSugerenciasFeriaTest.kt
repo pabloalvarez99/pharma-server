@@ -28,6 +28,11 @@ class AssistSugerenciasFeriaTest {
             "falta total del día: $texto",
             chips.any { it.contains("hoy", ignoreCase = true) },
         )
+        // precio_dicho (feria_catalogo): cola ` a 2000` / ` a 1500` para 1ª venta sin SKU
+        assertTrue(
+            "falta precio dicho (a 2000 / a 1500): $texto",
+            chips.any { it.contains(" a 2000") || it.contains(" a 1500") },
+        )
         assertTrue(chips.size >= 3)
     }
 

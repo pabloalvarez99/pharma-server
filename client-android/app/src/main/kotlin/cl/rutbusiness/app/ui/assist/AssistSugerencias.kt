@@ -20,14 +20,16 @@ object AssistSugerencias {
     )
 
     /**
-     * Day-1 feria: venta por kg, fiado con nombre, total del día.
+     * Day-1 feria: venta por kg con precio dicho, fiado con nombre, total del día.
+     * ` a 2000` / ` a 1500` alimentan `precio_dicho` (primera venta sin SKU).
      * kg/atado/granel se limpian en `clean_venta_product` del server.
+     * Precio va **antes** de «fiado a …» para que el parse no se coma la cola.
      */
     val feria: List<String> = listOf(
-        "Vendí 2 kg de tomates",
-        "Anota 2 kg de tomates fiado a Don Juan",
+        "Vendí 2 kg de tomates a 2000",
+        "Anota 2 kg de tomates a 2000 fiado a Don Juan",
         "¿Cuánto vendí hoy?",
-        "Fiado 1 atado de cilantro a doña Ana",
+        "Anota 1 atado de cilantro a 1500 fiado a doña Ana",
         "¿Quién me debe plata?",
     )
 
