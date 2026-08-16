@@ -115,7 +115,7 @@ private fun ResumenScreen(
                 "Datos guardados en el teléfono, " +
                     Fechado(Unit, guardadoEn).antiguedad(vm.relojDePared)
             } ?: vm.nombreDelPuesto?.takeIf { feria && it.isNotBlank() }
-                ?: "Cómo va el negocio hoy",
+                ?: if (feria) "Cómo va el puesto hoy" else "Cómo va el negocio hoy",
             actions = {
                 RbButton(
                     label = "Actualizar",

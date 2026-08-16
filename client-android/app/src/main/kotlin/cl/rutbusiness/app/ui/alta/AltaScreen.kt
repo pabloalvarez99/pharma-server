@@ -258,7 +258,7 @@ internal fun PantallaDeAlta(
                 .padding(dimens.space3),
         ) {
             RbButton(
-                label = etiquetaDelBoton(estado, ultimo),
+                label = etiquetaDelBoton(estado, ultimo, esFeria),
                 onClick = if (ultimo) onCrear else onAvanzar,
                 enabled = puedeAvanzar,
                 fillWidth = true,
@@ -349,8 +349,17 @@ internal fun tituloDelPaso(paso: PasoDelAlta, esFeria: Boolean = false): String 
  * que dice "Creando tu negocio..." está contando algo; una que dice "Cargando"
  * sólo está pidiendo paciencia.
  */
-internal fun etiquetaDelBoton(estado: EstadoDelAlta, ultimo: Boolean): String = when (estado) {
+internal fun etiquetaDelBoton(
+    estado: EstadoDelAlta,
+    ultimo: Boolean,
+    esFeria: Boolean = false,
+): String = when (estado) {
     EstadoDelAlta.RevisandoElLugar -> "Revisando..."
-    EstadoDelAlta.Creando -> "Creando tu negocio..."
-    else -> if (ultimo) "Crear mi negocio" else "Siguiente"
+    EstadoDelAlta.Creando ->
+        if (esFeria) "Creando tu puesto..." else "Creando tu negocio..."
+    else -> when {
+        ultimo && esFeria -> "Crear mi puesto"
+        ultimo -> "Crear mi negocio"
+        else -> "Siguiente"
+    }
 }

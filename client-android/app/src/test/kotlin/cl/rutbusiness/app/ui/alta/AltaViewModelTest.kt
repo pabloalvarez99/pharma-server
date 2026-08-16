@@ -55,6 +55,9 @@ class AltaViewModelTest {
     fun `en feria el alta pregunta por el puesto, no por el negocio`() {
         assertEquals("¿Cómo te dicen en la feria?", tituloDelPaso(PasoDelAlta.Negocio, true))
         assertEquals("¿Cómo se llama tu negocio?", tituloDelPaso(PasoDelAlta.Negocio, false))
+        assertEquals("Crear mi puesto", etiquetaDelBoton(EstadoDelAlta.Preguntando, true, true))
+        assertEquals("Creando tu puesto...", etiquetaDelBoton(EstadoDelAlta.Creando, true, true))
+        assertEquals("Crear mi negocio", etiquetaDelBoton(EstadoDelAlta.Preguntando, true, false))
     }
 
     @Test
