@@ -38,7 +38,7 @@ import cl.rutbusiness.ui.theme.rbTouchTarget
 enum class RbButtonVariant { Primary, Secondary, Destructive }
 
 /**
- * The product's button.
+ * The product's button — the chunky control on the mesa del puesto.
  *
  * Hardware-floor properties, all of them measured rather than asserted:
  *
@@ -46,9 +46,10 @@ enum class RbButtonVariant { Primary, Secondary, Destructive }
  *   pushes the label past it;
  * - the label is `sp` and wraps to a second line instead of ellipsing, because
  *   a truncated "Confirmar venta" is a button whose meaning is gone at 200%;
- * - no press transform. `ui.ts` shipped `translateY(1px)`; a control that
- *   shifts under the finger is harder to hit. Press feedback is a color change,
- *   which costs nothing on a 60 Hz panel and survives reduced-motion.
+ * - **no press transform.** `ui.ts` shipped `translateY(1px)`; a control that
+ *   shifts under the finger is harder to hit. Press feedback is a color change
+ *   through [cl.rutbusiness.ui.theme.RbMotion.quick], which snaps to the end
+ *   state under reduced motion.
  *
  * @param fillWidth stretch to the parent's width. The default `false` keeps a
  *   button hugging its label; the showcase and dialogs pass `true`.
@@ -75,12 +76,16 @@ fun RbButton(
 
     when (variant) {
         RbButtonVariant.Primary -> {
+            // Flat brand fill — no gradient (gradients make contrast unmeasurable
+            // and cost a shader on the reference panel).
             container = colors.brandFill
             content = colors.onBrandFill
             border = null
         }
 
         RbButtonVariant.Secondary -> {
+            // Solid surface + outlineStrong so the secondary reads outdoors as a
+            // real control, not a washed-out ghost on kraft paper.
             container = colors.surface
             content = colors.textPrimary
             border = BorderStroke(dimens.border, colors.outlineStrong)
@@ -94,7 +99,8 @@ fun RbButton(
     }
 
     // Press state darkens or lightens the fill toward the surface it sits on,
-    // so the feedback is visible in both themes without a second token.
+    // so the feedback is visible in both themes without a second token and
+    // without moving the control under the finger.
     val pressedContainer = if (colors.isDark) {
         container.copy(alpha = 0.82f).compositeOverOpaque(colors.surface)
     } else {
@@ -136,15 +142,17 @@ fun RbButton(
             )
             .rbTouchTarget()
             .padding(
+                // Wider horizontal air than a SaaS pill: the finger lands on a
+                // real mesa control, not a 48dp Material stub.
                 PaddingValues(
-                    horizontal = dimens.space3,
+                    horizontal = dimens.space4,
                     vertical = dimens.space2,
                 ),
             ),
         contentAlignment = Alignment.Center,
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(RbTheme.dimens.space2),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space2),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
