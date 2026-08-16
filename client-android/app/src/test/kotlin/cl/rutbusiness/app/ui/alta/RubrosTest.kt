@@ -2,6 +2,8 @@ package cl.rutbusiness.app.ui.alta
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -111,5 +113,47 @@ class RubrosTest {
     @Test
     fun `no hay claves repetidas`() {
         assertEquals(RUBROS.size, RUBROS.map { it.clave }.toSet().size)
+    }
+
+    /**
+     * Feria es el primer cartel: se lee sin scrollear en un teléfono chico y es
+     * el foco de producto (ADR-0022). Si alguien reordena el catálogo del
+     * server, este test y el de sincronía fallan juntos.
+     */
+    @Test
+    fun `feria es el primer cartel y el natural`() {
+        assertEquals(RUBRO_NATURAL, RUBROS.first().clave)
+        assertTrue(RUBROS.first().esNatural())
+        assertFalse(RUBROS.last().esNatural())
+        assertTrue(RUBROS.none { it.clave != RUBRO_NATURAL && it.esNatural() })
+    }
+
+    /**
+     * Sólo feria anuncia chip cuando nadie eligió todavía: el resto de carteles
+     * van limpios. Si todos trajeran pastilla, la pantalla se siente a combo.
+     */
+    @Test
+    fun `solo feria trae chip cuando el cartel esta libre`() {
+        assertEquals(CHIP_RUBRO_NATURAL, RUBROS.first().chipCuandoLibre())
+        RUBROS.drop(1).forEach { rubro ->
+            assertNull("el cartel ${rubro.clave} no debe anunciar chip suelto", rubro.chipCuandoLibre())
+        }
+    }
+
+    /** Elegido se dice igual en todos: no hay jerga ni "selected". */
+    @Test
+    fun `elegido se dice en espanol en cualquier cartel`() {
+        RUBROS.forEach { rubro ->
+            assertEquals(CHIP_RUBRO_ELEGIDO, rubro.chipCuandoElegido())
+        }
+    }
+
+    /** La ayuda del paso habla de cartel y de feria, no de combo ni wizard. */
+    @Test
+    fun `la ayuda del paso habla de cartel y de feria`() {
+        assertTrue(AYUDA_DE_RUBROS.contains("feria", ignoreCase = true))
+        assertTrue(AYUDA_DE_RUBROS.contains("cartel", ignoreCase = true))
+        assertFalse(AYUDA_DE_RUBROS.contains("combo", ignoreCase = true))
+        assertFalse(AYUDA_DE_RUBROS.contains("wizard", ignoreCase = true))
     }
 }

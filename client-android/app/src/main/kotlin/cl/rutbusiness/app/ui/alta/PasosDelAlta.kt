@@ -13,9 +13,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import cl.rutbusiness.ui.components.RbChip
-import cl.rutbusiness.ui.components.RbChipTone
-import cl.rutbusiness.ui.components.RbListRow
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
@@ -105,14 +102,13 @@ internal fun PasoNegocio(
 /**
  * A qué se dedica.
  *
- * Las ocho opciones de [RUBROS], en filas de lista y no en una grilla de
- * tarjetas: una grilla de dos columnas al 200% de escala parte las etiquetas
- * largas ("Minimarket / Almacén", "Restaurant / Comida") en tres renglones de
- * dos palabras, y una fila entera por opción es además un objetivo táctil que
- * no hay que apuntar.
+ * Los nueve [RUBROS] se pintan como carteles apilados ([CartelesDeRubro]), no
+ * como filas de lista ni grilla de dos columnas: al 200% una grilla parte las
+ * etiquetas largas, y un combo se siente a menú de sistema. Un cartel entero
+ * por opción es un objetivo táctil de 56dp que no hay que apuntar.
  *
- * Ninguna viene elegida. Un rubro elegido de verdad prende y apaga módulos de
- * la app; uno puesto por defecto sólo se ve elegido.
+ * Ninguna viene elegida. Feria va primero y se anuncia; un rubro elegido de
+ * verdad prende y apaga módulos de la app, uno puesto por descarte no.
  */
 @Composable
 internal fun PasoRubro(
@@ -127,31 +123,15 @@ internal fun PasoRubro(
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
         Text(
-            text = "Elige el que más se parezca. Con esto la app se acomoda a tu negocio: qué " +
-                "campos te pide y qué te muestra.",
+            text = AYUDA_DE_RUBROS,
             style = RbTheme.typography.body,
             color = RbTheme.colors.textPrimary,
         )
-
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            // space2: se leen de a un rubro, no como menú denso.
-            verticalArrangement = Arrangement.spacedBy(dimens.space2),
-        ) {
-            RUBROS.forEach { rubro ->
-                val esElegido = rubro.clave == elegido?.clave
-                RbListRow(
-                    title = rubro.etiqueta,
-                    subtitle = rubro.frase,
-                    trailing = if (esElegido) {
-                        { RbChip(label = "Elegido", tone = RbChipTone.Brand) }
-                    } else {
-                        null
-                    },
-                    onClick = if (habilitado) ({ onElegir(rubro) }) else null,
-                )
-            }
-        }
+        CartelesDeRubro(
+            elegido = elegido,
+            onElegir = onElegir,
+            habilitado = habilitado,
+        )
     }
 }
 

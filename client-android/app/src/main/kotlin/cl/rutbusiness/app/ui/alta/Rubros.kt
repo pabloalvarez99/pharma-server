@@ -1,5 +1,26 @@
 package cl.rutbusiness.app.ui.alta
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import cl.rutbusiness.ui.components.RbChip
+import cl.rutbusiness.ui.components.RbChipTone
+import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbTouchTarget
+
 /**
  * Los nueve rubros del catálogo, copiados del server.
  *
@@ -50,3 +71,147 @@ val RUBROS: List<Rubro> = listOf(
     Rubro("servicios", "Servicios / Oficios", "Tu oficio, facturado."),
     Rubro("otro", "Otro", "Tu negocio, a tu manera."),
 )
+
+/** Clave del rubro que se siente natural al abrir el alta (ADR-0022). */
+const val RUBRO_NATURAL: String = "feria"
+
+/** Chip de la tarjeta libre de feria: se anuncia sin forzar la elección. */
+const val CHIP_RUBRO_NATURAL: String = "El de la feria"
+
+/** Chip cuando la dueña ya tocó un cartel. */
+const val CHIP_RUBRO_ELEGIDO: String = "Elegido"
+
+/** Texto de aire encima de los carteles. */
+const val AYUDA_DE_RUBROS: String =
+    "La feria va primero. Toca el cartel que más se parezca a lo tuyo: con eso " +
+        "la app se acomoda — qué te pide y qué te muestra."
+
+/** El rubro del puesto de calle: primero en la lista y en la vista. */
+fun Rubro.esNatural(): Boolean = clave == RUBRO_NATURAL
+
+/**
+ * Etiqueta del chip cuando el cartel no está elegido.
+ *
+ * Sólo feria trae una: se lee como invitación, no como default marcado. El resto
+ * no lleva chip suelto — un menú de nueve pastillas se siente a combo.
+ */
+fun Rubro.chipCuandoLibre(): String? =
+    if (esNatural()) CHIP_RUBRO_NATURAL else null
+
+/** Etiqueta del chip cuando el cartel está elegido. */
+fun Rubro.chipCuandoElegido(): String = CHIP_RUBRO_ELEGIDO
+
+/**
+ * Los rubros como carteles apilados, no como filas de lista ni como combo.
+ *
+ * Cada opción es un cartel con borde grueso y piso táctil de 56dp: se lee de
+ * lejos bajo el sol, se toca con el pulgar y no se confunde con un menú denso.
+ * Feria va arriba y se anuncia con su chip; no viene pre-elegida.
+ */
+@Composable
+fun CartelesDeRubro(
+    elegido: Rubro?,
+    onElegir: (Rubro) -> Unit,
+    habilitado: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val dimens = RbTheme.dimens
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        RUBROS.forEach { rubro ->
+            CartelDeRubro(
+                rubro = rubro,
+                elegido = rubro.clave == elegido?.clave,
+                habilitado = habilitado,
+                onClick = { onElegir(rubro) },
+            )
+        }
+    }
+}
+
+/**
+ * Un solo cartel de rubro.
+ *
+ * Feria (el natural) y el elegido se pintan con más peso visual — borde brand y
+ * superficie de marca — para que el ojo caiga ahí sin que nadie elija por
+ * descarte.
+ */
+@Composable
+internal fun CartelDeRubro(
+    rubro: Rubro,
+    elegido: Boolean,
+    habilitado: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+    val natural = rubro.esNatural()
+
+    val fondo = when {
+        elegido -> colors.brandContainer
+        natural -> colors.surfaceRaised
+        else -> colors.surface
+    }
+    val bordeColor = when {
+        elegido || natural -> colors.brandText
+        else -> colors.outlineStrong
+    }
+    val bordeAncho = when {
+        elegido || natural -> dimens.focusRing
+        else -> dimens.border
+    }
+    val chip = if (elegido) rubro.chipCuandoElegido() else rubro.chipCuandoLibre()
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(fondo)
+            .border(bordeAncho, bordeColor, shape)
+            .rbClickable(
+                onClick = onClick,
+                enabled = habilitado,
+                role = Role.Button,
+                onClickLabel = if (elegido) null else "Elegir ${rubro.etiqueta}",
+                shape = shape,
+            )
+            .rbTouchTarget()
+            .semantics { selected = elegido }
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space1),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(dimens.space2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = rubro.etiqueta,
+                style = if (natural || elegido) {
+                    RbTheme.typography.bodyStrong
+                } else {
+                    RbTheme.typography.body
+                },
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            if (chip != null) {
+                RbChip(
+                    label = chip,
+                    tone = RbChipTone.Brand,
+                    selected = elegido,
+                )
+            }
+        }
+        Text(
+            text = rubro.frase,
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
+        )
+    }
+}
