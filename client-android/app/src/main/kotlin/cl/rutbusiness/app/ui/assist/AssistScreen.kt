@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import cl.rutbusiness.app.ui.catalogo.abrirCatalogo
 import cl.rutbusiness.app.ui.catalogo.copyCatalogo
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
@@ -57,6 +58,12 @@ fun AssistScreen(
 ) {
     val dimens = RbTheme.dimens
     val lista = rememberLazyListState()
+
+    // La Screen lee esFeria(); el VM no puede tocar CompositionLocal.
+    val feria = esFeria()
+    LaunchedEffect(feria) {
+        if (feria) vm.modoFeria(true)
+    }
 
     // Al llegar un mensaje nuevo, se baja hasta el final. Sin esto la dueña
     // manda una pregunta y la respuesta aparece fuera de pantalla.
