@@ -25,7 +25,7 @@ class BarraFeriaCopyTest {
     val compose = createComposeRule()
 
     @Test
-    fun `con agent_home se lee Vender y Hoy`() {
+    fun `con agent_home se lee Hablar Vender y Hoy`() {
         compose.setContent {
             RbTheme(darkTheme = true, reducedMotion = true) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -38,7 +38,7 @@ class BarraFeriaCopyTest {
             }
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Agente").assertIsDisplayed()
+        compose.onNodeWithText("Hablar").assertIsDisplayed()
         compose.onNodeWithText("Vender").assertIsDisplayed()
         compose.onNodeWithText("Hoy").assertIsDisplayed()
     }
@@ -57,7 +57,26 @@ class BarraFeriaCopyTest {
             }
         }
         compose.waitForIdle()
+        compose.onNodeWithText("Agente").assertIsDisplayed()
         compose.onNodeWithText("Cobrar").assertIsDisplayed()
         compose.onNodeWithText("Tu día").assertIsDisplayed()
+    }
+
+    @Test
+    fun `feria no muestra Caja en la barra`() {
+        compose.setContent {
+            RbTheme(darkTheme = true, reducedMotion = true) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                    BarraDeNavegacion(
+                        actual = Destino.Resumen,
+                        onElegir = {},
+                        agentHome = true,
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Caja").assertDoesNotExist()
+        compose.onNodeWithText("caja").assertDoesNotExist()
     }
 }
