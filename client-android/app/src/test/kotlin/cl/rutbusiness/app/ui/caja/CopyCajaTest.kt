@@ -9,9 +9,32 @@ import org.junit.Test
 /**
  * Gate de copy feria en Caja (ADR-0022).
  *
- * Puro JVM: si alguien reescribe «cajón» en el CTA de feria, este test lo atrapa.
+ * Puro JVM: si alguien reescribe «cajón» / «arqueo» / «sesión» en el CTA o el
+ * flujo de cerrar el día feria, este test lo atrapa.
  */
 class CopyCajaTest {
+
+    /** Palabras de cajero formal que el feriante no debe ver. */
+    private fun assertSinJergaCajaFormal(donde: String, texto: String) {
+        val lower = texto.lowercase()
+        assertFalse(
+            "$donde no debe decir «cajón»: $texto",
+            lower.contains("cajón") || lower.contains("cajon"),
+        )
+        assertFalse(
+            "$donde no debe decir «arqueo»: $texto",
+            lower.contains("arqueo"),
+        )
+        assertFalse(
+            "$donde no debe decir «sesión»: $texto",
+            lower.contains("sesión") || lower.contains("sesion"),
+        )
+        assertFalse(
+            "$donde no debe usar inglés de caja: $texto",
+            lower.contains("session") || lower.contains("cash register") || lower.contains("drawer"),
+        )
+    }
+
 
     @Test
     fun `feria abre el puesto con Empezar el dia y sin cajon como instruccion`() {
@@ -35,7 +58,7 @@ class CopyCajaTest {
     }
 
     @Test
-    fun `feria cierra el dia y pregunta cuanta plata hay`() {
+    fun `feria cierra el dia contando la plata sin jerga de arqueo`() {
         val abierta = copyCajaAbierta(feria = true)
         assertEquals("Cerrar el día", abierta.ctaCerrar)
         assertEquals("Puesto abierto", abierta.chipEstado)
@@ -45,9 +68,47 @@ class CopyCajaTest {
             abierta.tituloMovimientos.lowercase().contains("plata"))
 
         val arqueo = copyArqueoCaja(feria = true)
-        assertEquals("¿Cuánta plata hay?", arqueo.tituloCard)
+        assertEquals("Contar la plata", arqueo.tituloCard)
         assertEquals("Cerrar el día", arqueo.cta)
-        assertFalse(arqueo.tituloCard.lowercase().contains("cajón"))
+        assertEquals("¿Cerramos el día?", arqueo.confirmarTitulo)
+        assertTrue(
+            "feria invita a contar el puesto o el día",
+            arqueo.ayuda.lowercase().contains("puesto") ||
+                arqueo.ayuda.lowercase().contains("día"),
+        )
+        assertTrue(
+            "nota feria invita vuelto mal o cambio en chileno",
+            arqueo.placeholderNota.lowercase().contains("vuelto") ||
+                arqueo.placeholderNota.lowercase().contains("cambio"),
+        )
+        assertTrue(arqueo.ayudaNota.lowercase().contains("vuelto"))
+        // Gate de regresión: el feriante no ve ritual de cajero formal.
+        for (s in listOf(
+            arqueo.tituloCard,
+            arqueo.ayuda,
+            arqueo.etiquetaMonto,
+            arqueo.ayudaMonto,
+            arqueo.tituloNota,
+            arqueo.etiquetaNota,
+            arqueo.placeholderNota,
+            arqueo.ayudaNota,
+            arqueo.cta,
+            arqueo.ctaGuardando,
+            arqueo.ctaVolver,
+            arqueo.confirmarTitulo,
+            arqueo.confirmarLabel,
+            arqueo.cancelarLabel,
+        )) {
+            assertSinJergaCajaFormal("copy arqueo feria", s)
+        }
+        assertSinJergaCajaFormal(
+            "confirm cierre feria",
+            copyConfirmarCierre(feria = true, montoFormateado = "$15.000"),
+        )
+        val confirm = copyConfirmarCierre(feria = true, montoFormateado = "$15.000")
+        assertTrue(confirm.lowercase().contains("día") || confirm.lowercase().contains("puesto"))
+        assertTrue(confirm.lowercase().contains("no se puede deshacer") ||
+            confirm.lowercase().contains("mañana"))
     }
 
     @Test
@@ -60,6 +121,14 @@ class CopyCajaTest {
         val arqueo = copyArqueoCaja(feria = false)
         assertTrue(arqueo.tituloCard.lowercase().contains("cajón"))
         assertEquals("Cerrar la caja", arqueo.cta)
+        assertTrue(arqueo.ayudaMonto.lowercase().contains("cajón"))
+        val confirm = copyConfirmarCierre(feria = false, montoFormateado = "$15.000")
+        assertTrue(confirm.lowercase().contains("caja"))
+        assertFalse(
+            "retail confirm no usa inglés",
+            confirm.contains("session", ignoreCase = true) ||
+                confirm.contains("cash", ignoreCase = true),
+        )
     }
 
     @Test

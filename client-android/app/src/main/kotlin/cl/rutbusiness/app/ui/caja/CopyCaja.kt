@@ -75,35 +75,84 @@ internal fun copyCajaAbierta(feria: Boolean): CopyCajaAbierta =
         )
     }
 
+/**
+ * Copy del paso «contar la plata» / cierre.
+ *
+ * En feria es cerrar el cuaderno del día: puesto, contar, sin «arqueo» ni
+ * «cajón» ni «sesión». En retail sigue el ritual del cajón.
+ */
 internal data class CopyArqueoCaja(
     val tituloCard: String,
     val ayuda: String,
+    val etiquetaMonto: String,
     val ayudaMonto: String,
+    val tituloNota: String,
+    val etiquetaNota: String,
+    val placeholderNota: String,
+    val ayudaNota: String,
     val cta: String,
     val ctaGuardando: String,
+    val ctaVolver: String,
     val confirmarTitulo: String,
+    val confirmarLabel: String,
+    val cancelarLabel: String,
 )
+
+/**
+ * Mensaje del diálogo de confirmación del cierre: calmado, irreversible, sin
+ * inglés. [montoFormateado] ya viene con símbolo/separadores de la moneda.
+ */
+internal fun copyConfirmarCierre(
+    feria: Boolean,
+    montoFormateado: String,
+): String =
+    if (feria) {
+        "El día queda cerrado con los $montoFormateado que contaste. No se " +
+            "puede deshacer: mañana se abre el puesto de nuevo."
+    } else {
+        "La caja queda cerrada con los $montoFormateado que contaste. Después " +
+            "no se puede volver a abrir la misma caja: mañana se abre una nueva."
+    }
 
 internal fun copyArqueoCaja(feria: Boolean): CopyArqueoCaja =
     if (feria) {
         CopyArqueoCaja(
-            tituloCard = "¿Cuánta plata hay?",
-            ayuda = "Contá la plata del día y escribí el total. Después te " +
-                "mostramos cómo quedó contra lo anotado en el sistema.",
-            ayudaMonto = "Si no quedó plata, escribí 0.",
+            tituloCard = "Contar la plata",
+            ayuda = "Contá la plata del puesto, como en el cuaderno, y escribí " +
+                "el total. Después te mostramos cómo quedó el día.",
+            etiquetaMonto = "Plata contada",
+            ayudaMonto = "Solo lo que tenés en la mano. Si no quedó plata, escribí 0.",
+            tituloNota = "¿Algo que anotar?",
+            etiquetaNota = "Nota del día (opcional)",
+            placeholderNota = "El vuelto que se dio mal, compré cambio…",
+            ayudaNota = "Si ya sabés que algo no va a cuadrar — el vuelto que se " +
+                "dio mal, compré cambio, un gasto suelto — escribilo acá. Después " +
+                "de cerrar el día no se puede agregar.",
             cta = "Cerrar el día",
-            ctaGuardando = "Cerrando...",
+            ctaGuardando = "Cerrando el día…",
+            ctaVolver = "Todavía no",
             confirmarTitulo = "¿Cerramos el día?",
+            confirmarLabel = "Sí, cerrar",
+            cancelarLabel = "Seguir contando",
         )
     } else {
         CopyArqueoCaja(
             tituloCard = "¿Cuánta plata hay en el cajón?",
             ayuda = "Saca la plata, cuéntala tranquila y escribe el total. Recién después de " +
                 "cerrar te mostramos cómo quedó contra lo que el sistema tenía anotado.",
+            etiquetaMonto = "Plata contada",
             ayudaMonto = "Cuenta billetes y monedas. Si el cajón quedó vacío, escribe 0.",
+            tituloNota = "¿Algo que anotar?",
+            etiquetaNota = "Nota del cierre (opcional)",
+            placeholderNota = "Le di mal el vuelto a un cliente",
+            ayudaNota = "Si ya sabes que algo no va a cuadrar, escríbelo acá: después de " +
+                "cerrar no se puede agregar.",
             cta = "Cerrar la caja",
             ctaGuardando = "Cerrando...",
+            ctaVolver = "Todavía no",
             confirmarTitulo = "¿Cerramos la caja?",
+            confirmarLabel = "Sí, cerrar",
+            cancelarLabel = "Seguir contando",
         )
     }
 

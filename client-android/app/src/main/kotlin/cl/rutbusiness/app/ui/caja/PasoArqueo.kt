@@ -25,19 +25,22 @@ import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * Paso 4: contar la plata antes de cerrar.
+ * Paso 4: contar la plata antes de cerrar el día (o la caja).
  *
  * Esta pantalla **no muestra cuánto debería haber**, y es a propósito. Si el
  * número está a la vista, contar deja de ser contar y pasa a ser copiar: la
- * dueña escribe lo que dice la pantalla, el cierre siempre cuadra y la caja deja
- * de servir para lo único que sirve. El dato está en la pantalla anterior, a un
- * toque, para quien lo quiera mirar; acá el campo va en blanco.
+ * dueña escribe lo que dice la pantalla, el cierre siempre cuadra y deja de
+ * servir para lo único que sirve. El dato está en la pantalla anterior, a un
+ * toque; acá el campo va en blanco.
+ *
+ * En feria el tono es el del cuaderno: puesto, contar la plata, cerrar el día —
+ * nunca «arqueo», «cajón» ni «sesión».
  *
  * La nota va **antes** del cierre porque es cuando el server la acepta: el
  * cierre graba `closing_notes` en la misma llamada y no hay endpoint para
  * agregarla después. Por eso la ayuda del campo invita a escribir lo que ya se
- * sabe — el vuelto que se dio mal, la compra que no se anotó — sin esperar a ver
- * la diferencia.
+ * sabe — el vuelto que se dio mal, compré cambio — sin esperar a ver la
+ * diferencia.
  */
 @Composable
 fun PasoArqueo(vm: CajaViewModel, modifier: Modifier = Modifier) {
@@ -58,7 +61,7 @@ fun PasoArqueo(vm: CajaViewModel, modifier: Modifier = Modifier) {
 }
 
 /**
- * El formulario del arqueo, sin `ViewModel` detrás.
+ * El formulario de contar la plata, sin `ViewModel` detrás.
  *
  * Recibe datos y callbacks para poder montarse en una prueba sin server ni
  * caja abierta — mismo criterio que
@@ -69,7 +72,8 @@ fun PasoArqueo(vm: CajaViewModel, modifier: Modifier = Modifier) {
  *
  * Tres cosas del layout que no son estéticas:
  *
- * - **El campo del monto va primero**, arriba de todo lo demás.
+ * - **El campo del monto va primero**, arriba de todo lo demás (numérico, piso
+ *   táctil 56 dp del design system).
  * - La columna **scrollea** y lleva `imePadding`, así el teclado numérico empuja
  *   el contenido en vez de taparlo y el botón de cerrar sigue alcanzable.
  * - Los botones van **uno debajo del otro y a todo el ancho**: en fila, al 200%,
@@ -111,10 +115,12 @@ internal fun FormularioDeArqueo(
                 color = colors.textSecondary,
             )
 
+            // Campo grande de monto primero: tipografía numérica + piso 56 dp
+            // (RbTextField). Al 200% de escala crece con sp; no se fija en px.
             RbTextField(
                 value = montoContado,
                 onValueChange = onMontoContado,
-                label = "Plata contada",
+                label = copy.etiquetaMonto,
                 placeholder = "0",
                 supportingText = copy.ayudaMonto,
                 numeric = true,
@@ -123,14 +129,13 @@ internal fun FormularioDeArqueo(
             )
         }
 
-        RbCard(title = "¿Algo que anotar?") {
+        RbCard(title = copy.tituloNota) {
             RbTextField(
                 value = nota,
                 onValueChange = onNota,
-                label = "Nota del cierre (opcional)",
-                placeholder = "Le di mal el vuelto a un cliente",
-                supportingText = "Si ya sabes que algo no va a cuadrar, escríbelo acá: después de " +
-                    "cerrar no se puede agregar.",
+                label = copy.etiquetaNota,
+                placeholder = copy.placeholderNota,
+                supportingText = copy.ayudaNota,
                 enabled = !guardando,
             )
         }
@@ -160,7 +165,7 @@ internal fun FormularioDeArqueo(
         )
 
         RbButton(
-            label = "Todavía no",
+            label = copy.ctaVolver,
             onClick = onVolver,
             variant = RbButtonVariant.Secondary,
             enabled = !guardando,
@@ -169,22 +174,15 @@ internal fun FormularioDeArqueo(
     }
 
     if (confirmando) {
+        val montoFormateado = moneda.formatear(montoContado.replace(',', '.'))
         RbConfirmDialog(
             title = copy.confirmarTitulo,
             // Se dice qué es lo que no se puede deshacer, sin adjetivos: cerrar
             // no es peligroso, pero es definitivo, y la dueña tiene derecho a
             // saberlo antes y no después.
-            message = if (feria) {
-                "El día queda cerrado con los " +
-                    "${moneda.formatear(montoContado.replace(',', '.'))} que contaste. Después no " +
-                    "se puede volver a abrir el mismo día: mañana se abre de nuevo."
-            } else {
-                "La caja queda cerrada con los " +
-                    "${moneda.formatear(montoContado.replace(',', '.'))} que contaste. Después no " +
-                    "se puede volver a abrir la misma caja: mañana se abre una nueva."
-            },
-            confirmLabel = "Sí, cerrar",
-            cancelLabel = "Seguir contando",
+            message = copyConfirmarCierre(feria, montoFormateado),
+            confirmLabel = copy.confirmarLabel,
+            cancelLabel = copy.cancelarLabel,
             onConfirm = {
                 confirmando = false
                 onCerrar()
