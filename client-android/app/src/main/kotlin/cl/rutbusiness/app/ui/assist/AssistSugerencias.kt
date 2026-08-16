@@ -8,6 +8,10 @@ import cl.rutbusiness.core.rubro.RubroPack
  * Frases **completas y tocables** que el parser de `crates/assist` reconoce.
  * Extraídas de la UI para tests sin montar Compose: si alguien "mejora" el
  * copy y rompe kg/fiado/hoy, el test de feria lo atrapa.
+ *
+ * No inventar sintaxis: cada chip es una frase que day-1 ya parsea
+ * (`crates/assist` / feria_chips). Venta suelta, fiado con nombre, total del
+ * día y "quién me debe" bastan para enseñar el lenguaje del puesto.
  */
 object AssistSugerencias {
 
@@ -38,8 +42,9 @@ object AssistSugerencias {
 
     fun intro(pack: RubroPack): String =
         if (pack.features.agentHome || pack.rubro == "feria") {
-            "Hablame como en el puesto. Antes de anotar nada, te lo muestro " +
-                "para que lo revises."
+            // Hablado, de puesto: sin "asistente virtual" ni jerga de app.
+            "Hablame como en el puesto — vendí, fié, ¿cuánto saqué hoy? " +
+                "Antes de anotar nada, te lo digo de vuelta para que lo revises."
         } else {
             "Escríbeme como le hablarías a un empleado de confianza. " +
                 "Antes de guardar nada, te lo muestro para que lo revises."
