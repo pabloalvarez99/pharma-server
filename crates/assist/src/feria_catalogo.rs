@@ -1,74 +1,20 @@
-//! Asegura un producto simple de feria para la primera venta sin SKU.
-//!
-//! Merge: si landed catalog/feria.rs, delegar a ensure_simple_product.
+//! Primera venta feria sin SKU: parse de precio dicho + ensure de dominio.
 
 use db::Db;
-use domain::catalog::model::{NewProduct, ProductDto, ProductFilters};
-use domain::catalog::service as catalog;
-use domain::{DomainError, DomainResult};
+use domain::catalog::feria::ensure_simple_product;
+use domain::catalog::model::ProductDto;
+use domain::DomainResult;
 use rust_decimal::Decimal;
 use surrealdb::sql::Thing;
 
-/// Idempotente por nombre exacto (case-insensitive): si ya existe, lo devuelve
-/// sin tocar el precio; si no, lo crea como ítem simple de feria
-/// (`physical_stock=false`, `stock=0`, `attrs.rb_simple=true`).
+/// Delegado a [`domain::catalog::feria::ensure_simple_product`].
 pub async fn asegurar_cosa_feria(
     db: &Db,
     tenant: &Thing,
     name: &str,
     price: Decimal,
 ) -> DomainResult<ProductDto> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(DomainError::Invalid("nombre requerido".into()));
-    }
-    if price < Decimal::ZERO {
-        return Err(DomainError::Invalid("precio no puede ser negativo".into()));
-    }
-
-    let products = catalog::list_products(
-        db,
-        tenant,
-        ProductFilters {
-            search: Some(name.to_string()),
-            active: Some(true),
-            limit: Some(10),
-            ..ProductFilters::default()
-        },
-    )
-    .await?;
-
-    if let Some(existing) = products
-        .into_iter()
-        .find(|p| p.name.eq_ignore_ascii_case(name))
-    {
-        return Ok(existing);
-    }
-
-    catalog::create_product(
-        db,
-        tenant,
-        NewProduct {
-            name: name.to_string(),
-            slug: None,
-            description: None,
-            price,
-            cost_price: None,
-            stock: 0,
-            physical_stock: Some(false),
-            category: None,
-            image_url: None,
-            external_id: None,
-            laboratory: None,
-            therapeutic_action: None,
-            active_ingredient: None,
-            prescription_type: None,
-            presentation: None,
-            discount_percent: None,
-            attrs: Some(serde_json::json!({ "rb_simple": true })),
-        },
-    )
-    .await
+    ensure_simple_product(db, tenant, name, price).await
 }
 
 /// Extrae un monto de colas tipo ` a 2000`, ` a $2.000`, ` por 1500`, ` precio 2000`.
@@ -102,6 +48,35 @@ pub fn precio_dicho(raw_linea: &str) -> Option<Decimal> {
     }
 
     best.and_then(|(at, _)| parse_monto_from(&raw_linea[at..]))
+}
+
+/// Quita la cola de precio (« a 2000», « a $2.000») del nombre del producto.
+pub fn sin_precio_cola(name: &str) -> String {
+    let lower = name.to_lowercase();
+    const CUES: &[&str] = &[
+        " a $",
+        " a ",
+        " por $",
+        " por ",
+        " precio $",
+        " precio ",
+    ];
+    let mut cut_at: Option<usize> = None;
+    for cue in CUES {
+        let mut from = 0;
+        while let Some(rel) = lower[from..].find(cue) {
+            let pos = from + rel;
+            let amount_at = pos + cue.len();
+            if parse_monto_from(&name[amount_at..]).is_some() {
+                cut_at = Some(pos);
+            }
+            from = pos + 1;
+        }
+    }
+    match cut_at {
+        Some(i) => name[..i].trim().to_string(),
+        None => name.trim().to_string(),
+    }
 }
 
 fn parse_monto_from(tail: &str) -> Option<Decimal> {
@@ -140,5 +115,8 @@ mod tests {
         assert_eq!(precio_dicho("cilantro por 1500"), Some(d("1500")));
         assert_eq!(precio_dicho("lechuga precio 2000"), Some(d("2000")));
         assert_eq!(precio_dicho("tomates"), None);
+        assert_eq!(sin_precio_cola("tomates a $2.000"), "tomates");
+        assert_eq!(sin_precio_cola("tomates a 2000"), "tomates");
+        assert_eq!(sin_precio_cola("arroz a granel"), "arroz a granel");
     }
 }

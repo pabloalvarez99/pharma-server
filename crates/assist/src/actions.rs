@@ -887,6 +887,8 @@ pub enum ActionParse {
 pub struct VentaLineaParse {
     pub product_name: String,
     pub quantity: i64,
+    /// Precio oído en la misma frase («tomates a 2000»). None = usar catálogo.
+    pub unit_price: Option<Decimal>,
 }
 
 /// Imperative verbs that introduce a CREATE request (gasto, cliente, producto,
@@ -2287,7 +2289,11 @@ fn parse_venta(q: &str, raw: &str) -> Option<ActionParse> {
     let mut lines = Vec::new();
     for seg in split_venta_lineas(&items) {
         let (quantity, rest) = take_quantity(&seg);
-        let product_name = clean_venta_product(rest);
+        let unit_price = crate::feria_catalogo::precio_dicho(&seg);
+        let mut product_name = clean_venta_product(rest);
+        if unit_price.is_some() {
+            product_name = crate::feria_catalogo::sin_precio_cola(&product_name);
+        }
         if product_name.is_empty() {
             continue;
         }
@@ -2300,6 +2306,7 @@ fn parse_venta(q: &str, raw: &str) -> Option<ActionParse> {
         lines.push(VentaLineaParse {
             product_name,
             quantity,
+            unit_price,
         });
     }
     if lines.is_empty() {
@@ -3012,13 +3019,6 @@ async fn build_venta(
         )
         .await?;
         let p = match pick_venta_product(&products, &want.product_name) {
-            VentaMatch::Ninguno => {
-                return Ok(BuildOutcome::Reject(format!(
-                    "No encontré ningún producto que se llame «{}». Revisa el nombre o créalo \
-                     primero.",
-                    want.product_name
-                )));
-            }
             VentaMatch::Varios(names) => {
                 return Ok(BuildOutcome::Reject(format!(
                     "Tengo varios productos que coinciden con «{}»: {}. ¿Cuál te compraron?",
@@ -3026,7 +3026,35 @@ async fn build_venta(
                     names.join(", "),
                 )));
             }
-            VentaMatch::Uno(p) => p,
+            VentaMatch::Uno(p) => p.clone(),
+            VentaMatch::Ninguno => {
+                if crate::feria_caja::es_feria(db, tenant).await? {
+                    match want.unit_price {
+                        Some(price) => {
+                            crate::feria_catalogo::asegurar_cosa_feria(
+                                db,
+                                tenant,
+                                &want.product_name,
+                                price,
+                            )
+                            .await?
+                        }
+                        None => {
+                            return Ok(BuildOutcome::Reject(format!(
+                                "No tengo «{}» en lo que vendes. Decime el precio, por ejemplo: \
+                                 «vendí {} a 2000».",
+                                want.product_name, want.product_name
+                            )));
+                        }
+                    }
+                } else {
+                    return Ok(BuildOutcome::Reject(format!(
+                        "No encontré ningún producto que se llame «{}». Revisa el nombre o créalo \
+                         primero.",
+                        want.product_name
+                    )));
+                }
+            }
         };
         // A multi-SKU parent is not sellable: `post_sale` refuses it too, but
         // saying so before the confirmation saves the owner a dead end.
@@ -4638,6 +4666,7 @@ mod tests {
         VentaLineaParse {
             product_name: name.into(),
             quantity: qty,
+            unit_price: None,
         }
     }
 
@@ -4725,6 +4754,18 @@ mod tests {
         let (lines, cliente, _) = venta("vendeme 2 arroz a granel");
         assert_eq!(lines, vec![linea("arroz", 2)]);
         assert_eq!(cliente, None);
+    }
+
+    #[test]
+    fn parse_venta_feria_con_precio_dicho() {
+        let (lines, _, _) = venta("vendeme 1 tomates a 2000");
+        assert_eq!(lines[0].product_name, "tomates");
+        assert_eq!(lines[0].quantity, 1);
+        assert_eq!(lines[0].unit_price, Some(dec("2000")));
+        let (lines, _, _) = venta("vendí 2 kg de tomates a $2.000");
+        assert_eq!(lines[0].product_name, "tomates");
+        assert_eq!(lines[0].quantity, 2);
+        assert_eq!(lines[0].unit_price, Some(dec("2000")));
     }
 
     /// Feria / calle (ADR-0022): kg, atado, bolsa se despegan del producto.
