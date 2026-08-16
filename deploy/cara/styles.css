@@ -1,0 +1,281 @@
+/* Cara pública RutAgent — afiche de feria, mobile-first. Sin deps. */
+
+:root {
+  --papel: #f4e9d4;
+  --papel-sombra: #e8d7b5;
+  --tinta: #1a2e2c;
+  --teal: #0f4c4a;
+  --teal-claro: #1a6b66;
+  --hoja: #2d6a4f;
+  --tomate: #c45c26;
+  --tomate-suave: #e8a070;
+  --crema: #fff8eb;
+  --sombra: rgba(26, 46, 44, 0.12);
+  --radio: 1.25rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  color: var(--tinta);
+  background: var(--papel);
+  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1.5rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Fondo papel: grano + viñeta suave (CSS only) */
+.papel {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 120% 80% at 50% 0%, rgba(255, 248, 235, 0.7), transparent 55%),
+    radial-gradient(ellipse 90% 70% at 100% 100%, rgba(196, 92, 38, 0.08), transparent 50%),
+    radial-gradient(ellipse 70% 50% at 0% 80%, rgba(15, 76, 74, 0.1), transparent 45%),
+    linear-gradient(165deg, var(--crema) 0%, var(--papel) 40%, var(--papel-sombra) 100%);
+}
+
+.papel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+
+/* Hojas decorativas (tomate / feria) */
+.hojas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hoja {
+  position: absolute;
+  width: 4.5rem;
+  height: 7rem;
+  background: linear-gradient(145deg, var(--hoja), var(--teal));
+  border-radius: 0 70% 40% 70%;
+  opacity: 0.14;
+  transform-origin: center;
+}
+
+.hoja::before {
+  content: "";
+  position: absolute;
+  left: 48%;
+  top: 8%;
+  bottom: 8%;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 1px;
+}
+
+.h1 {
+  top: -1rem;
+  right: 8%;
+  transform: rotate(25deg) scale(1.2);
+}
+
+.h2 {
+  bottom: 5%;
+  left: -1rem;
+  width: 3.5rem;
+  height: 5.5rem;
+  transform: rotate(-40deg);
+  opacity: 0.12;
+}
+
+.h3 {
+  top: 40%;
+  right: -1.5rem;
+  width: 3rem;
+  height: 4.5rem;
+  background: linear-gradient(145deg, var(--tomate), #a3441a);
+  transform: rotate(55deg);
+  opacity: 0.1;
+}
+
+/* Cartel principal */
+.cartel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 28rem);
+  background: var(--crema);
+  border: 3px solid var(--teal);
+  border-radius: var(--radio);
+  padding: 1.75rem 1.35rem 1.5rem;
+  box-shadow:
+    0 0 0 6px var(--papel),
+    0 0 0 9px rgba(15, 76, 74, 0.25),
+    0 18px 40px var(--sombra);
+}
+
+.sello {
+  margin: 0 0 1rem;
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--crema);
+  background: var(--teal);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+}
+
+.titulo {
+  margin: 0 0 1rem;
+  font-size: clamp(1.85rem, 7.5vw, 2.45rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  color: var(--teal);
+}
+
+.frase {
+  margin: 0 0 1.35rem;
+  font-size: clamp(1.05rem, 3.8vw, 1.15rem);
+  color: var(--tinta);
+  max-width: 36ch;
+}
+
+.pill {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 0 0 1.35rem;
+  padding: 0.9rem 1rem;
+  background: rgba(15, 76, 74, 0.08);
+  border: 2px dashed var(--teal-claro);
+  border-radius: calc(var(--radio) - 0.35rem);
+}
+
+.pill-icon {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--teal);
+  color: var(--crema);
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-top: 0.1rem;
+}
+
+.pill p {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.4;
+}
+
+.pill strong {
+  display: block;
+  color: var(--teal);
+  font-size: 1.05rem;
+  margin-bottom: 0.15rem;
+}
+
+.chips {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.chips li {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.95rem;
+  font-style: italic;
+  color: var(--tinta);
+  background: var(--papel);
+  border-left: 4px solid var(--tomate);
+  border-radius: 0 0.5rem 0.5rem 0;
+  box-shadow: 0 1px 0 var(--sombra);
+}
+
+.pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  padding-top: 1rem;
+  border-top: 2px solid rgba(15, 76, 74, 0.15);
+  font-size: 0.82rem;
+  color: rgba(26, 46, 44, 0.75);
+}
+
+.marca {
+  font-weight: 800;
+  color: var(--tomate);
+  letter-spacing: 0.02em;
+}
+
+.sep {
+  opacity: 0.5;
+}
+
+/* Pantallas un poco más anchas */
+@media (min-width: 480px) {
+  .cartel {
+    padding: 2.25rem 2rem 1.75rem;
+  }
+
+  .chips {
+    gap: 0.65rem;
+  }
+}
+
+/* Preferencia: menos movimiento */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Contraste alto del sistema */
+@media (prefers-contrast: more) {
+  .cartel {
+    border-width: 4px;
+  }
+
+  .pill {
+    border-style: solid;
+  }
+
+  .frase,
+  .chips li,
+  .pie {
+    color: #000;
+  }
+}
