@@ -92,6 +92,21 @@ sealed interface EstadoPropuesta {
  * almacenamiento de `:core`, que es de otro carril; hoy cerrar la app la
  * borra.
  */
+/**
+ * Título del top bar del agente.
+ *
+ * Sin nombre: feria dice **puesto**; farmacia/retail sigue con **negocio**.
+ * Con nombre: siempre `"Pídele a $nombre"`.
+ */
+internal fun tituloAgente(nombre: String?, feria: Boolean): String {
+    val limpio = nombre?.takeIf { it.isNotBlank() }
+    return when {
+        limpio != null -> "Pídele a $limpio"
+        feria -> "Pídele a tu puesto"
+        else -> "Pídele a tu negocio"
+    }
+}
+
 class AssistViewModel(
     private val sesion: SessionRepository,
     /** El reloj, inyectable para poder probar el vencimiento sin esperar. */
@@ -117,16 +132,28 @@ class AssistViewModel(
     var nombreDelPuesto by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Pack feria: la Screen llama [modoFeria]; el ViewModel no lee
+     * CompositionLocals (`esFeria()`).
+     */
+    var esFeria by mutableStateOf(false)
+        private set
+
     val titulo: String
-        get() = nombreDelPuesto
-            ?.takeIf { it.isNotBlank() }
-            ?.let { "Pídele a $it" }
-            ?: "Pídele a tu negocio"
+        get() = tituloAgente(nombreDelPuesto, esFeria)
 
     init {
         viewModelScope.launch {
             nombreDelPuesto = sesion.nombreDelPuesto()
         }
+    }
+
+    /**
+     * Baja el flag de feria desde la Screen (`esFeria()` no se puede llamar acá).
+     * Solo cambia el copy del título cuando no hay nombre del puesto.
+     */
+    fun modoFeria(v: Boolean = true) {
+        esFeria = v
     }
 
     fun escribir(texto: String) {
