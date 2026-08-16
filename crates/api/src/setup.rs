@@ -279,7 +279,8 @@ async fn alta(
     };
 
     if slug_tomado(db, &slug).await? {
-        return Err(error_slug_tomado());
+        let sug = sugerir_slug_libre(db, &slug).await?;
+        return Err(error_slug_tomado(sug.as_deref()));
     }
     if correo_tomado(db, &email).await? {
         return Err(error_correo_tomado());
@@ -304,7 +305,8 @@ async fn alta(
         Ok(None) | Err(_) => {
             // Carrera: otro POST pasó el probe y el UNIQUE de slug ganó.
             if slug_tomado(db, &slug).await.unwrap_or(false) {
-                return Err(error_slug_tomado());
+                let sug = sugerir_slug_libre(db, &slug).await.ok().flatten();
+                return Err(error_slug_tomado(sug.as_deref()));
             }
             return Err(ApiError::service_unavailable());
         }
@@ -370,12 +372,22 @@ async fn alta(
     }))
 }
 
-fn error_slug_tomado() -> ApiError {
-    ApiError::new(
-        StatusCode::CONFLICT,
-        "SLUG_TOMADO",
-        "Ese nombre corto ya lo usa otro puesto. Probá con otro nombre.",
-    )
+/// 409 SLUG_TOMADO. Si hay un slug libre, lo mete en `details.suggested_slug`
+/// y en el mensaje (es-CL) para que la dueña no tenga que inventar.
+fn error_slug_tomado(sugerido: Option<&str>) -> ApiError {
+    match sugerido {
+        Some(s) => ApiError::new(
+            StatusCode::CONFLICT,
+            "SLUG_TOMADO",
+            format!("Ese nombre corto ya lo usa otro puesto. Probá con {s}."),
+        )
+        .with_details(serde_json::json!({ "suggested_slug": s })),
+        None => ApiError::new(
+            StatusCode::CONFLICT,
+            "SLUG_TOMADO",
+            "Ese nombre corto ya lo usa otro puesto. Probá con otro nombre.",
+        ),
+    }
 }
 
 fn error_correo_tomado() -> ApiError {
@@ -384,6 +396,30 @@ fn error_correo_tomado() -> ApiError {
         "CORREO_TOMADO",
         "Ese correo ya tiene un puesto. Entrá con tu clave, no crees otro.",
     )
+}
+
+/// Primera alternativa libre: `{base}-2` … `{base}-9`, luego `{base}-{4 hex}`.
+async fn sugerir_slug_libre(db: &db::Db, base: &str) -> Result<Option<String>, ApiError> {
+    for n in 2..=9 {
+        let candidate = format!("{base}-{n}");
+        if !slug_tomado(db, &candidate).await? {
+            return Ok(Some(candidate));
+        }
+    }
+    // Sufijo de 4 hex desde un uuid (estable por intento; no se fija el RNG).
+    for _ in 0..8 {
+        let hex: String = uuid::Uuid::new_v4()
+            .simple()
+            .to_string()
+            .chars()
+            .take(4)
+            .collect();
+        let candidate = format!("{base}-{hex}");
+        if !slug_tomado(db, &candidate).await? {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
 }
 
 async fn slug_tomado(db: &db::Db, slug: &str) -> Result<bool, ApiError> {
