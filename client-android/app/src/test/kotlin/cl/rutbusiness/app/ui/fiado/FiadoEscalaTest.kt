@@ -213,7 +213,9 @@ class FiadoEscalaTest {
         mostrarSinDeudores(escala = 1.0f, rubro = "feria", onIrAlAgente = { hablado = true })
 
         compose.onNodeWithText("Nadie te debe").assertIsDisplayed()
-        compose.onNodeWithText("Don Juan me debe 5000", substring = true).assertIsDisplayed()
+        compose
+            .onNodeWithText("anota 2 kg de tomates a 2000 fiado a Don Juan", substring = true)
+            .assertIsDisplayed()
 
         compose.onNodeWithText("Hablarle al agente").performClick()
         compose.waitForIdle()
