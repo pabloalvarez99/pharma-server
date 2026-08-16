@@ -59,7 +59,19 @@ sudo systemctl enable --now rutbusiness-api
 systemd-analyze security rutbusiness-api
 ```
 
-## 4. Caddy
+## 4. Comprobar
+
+Tras copiar binario, env y units (y rellenar `CAMBIAME`), en la VPS:
+
+```bash
+sudo bash deploy/nube/comprobar.sh
+```
+
+El script valida rutas, que `api.env` ya no tenga `CAMBIAME`, que
+`PHARMA__BIND` sea loopback, y `systemctl is-active` de la API (y Caddy
+si está). **No** imprime JWT ni el contenido de `api.env`.
+
+## 5. Caddy
 
 Instalar Caddy 2. Exportar el hostname real del capitán:
 
@@ -81,7 +93,7 @@ Ubuntu 24.04 no se asume con módulos extra.
 ni a tickets: puede contener headers sensibles si un cliente los mandó
 mal. Rotar en la caja; no reenviar Authorization/cookies/tokens.
 
-## 5. Backup diario (timer)
+## 6. Backup diario (timer)
 
 SurrealKV **no comparte el file lock**: el script para la API un
 momento (`systemctl stop`), hace tar, y la levanta de nuevo.
@@ -101,7 +113,7 @@ Retención: tarballs `data-*.tar.gz` en `DESTINO` más viejos que 7 días
 se borran al inicio de cada corrida. Un solo backup a la vez
 (`flock /run/rutbusiness-backup.lock`). Cero rclone en este pack.
 
-## 6. ¿Anduvo?
+## 7. ¿Anduvo?
 
 Desde la caja: `curl -sS http://127.0.0.1:8080/health/ready` tiene que
 contestar JSON. Desde afuera, lo mismo por `https://<host>/health/ready`
