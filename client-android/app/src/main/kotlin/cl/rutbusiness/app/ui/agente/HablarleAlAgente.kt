@@ -50,7 +50,7 @@ fun irAlAgente(): (() -> Unit)? = LocalIrAlAgente.current
  * distintos: si se separan, cada pantalla le enseña otra manera de hablar al
  * mismo agente.
  */
-const val ASI_SE_ANOTA_UNA_VENTA = "vendí 3 kilos de papa a 1200"
+const val ASI_SE_ANOTA_UNA_VENTA = "vendí 2 kg de tomates a 2000"
 
 /** Ídem para fiar: quién y cuánto, en el orden en que se dice. */
 const val ASI_SE_FIA = "Don Juan me debe 5000"
