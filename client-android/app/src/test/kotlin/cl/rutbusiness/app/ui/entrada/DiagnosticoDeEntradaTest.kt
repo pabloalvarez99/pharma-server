@@ -73,9 +73,14 @@ class DiagnosticoDeEntradaTest {
     fun `los datos que no coinciden se dicen recien despues de llegar`() {
         val falla = fallaDeLogin(AppError.CredencialesInvalidas(), direccion)
         assertTrue(falla is FallaDeConexion.DatosQueNoCoinciden)
+        assertEquals("Ese correo o esa clave no calzan", falla.titulo)
+        assertFalse(falla.titulo.contains("sistema", ignoreCase = true))
         // La dueña ya sabe que la dirección está bien: mandarla a revisar el
         // wifi acá sería el error que este encargo vino a arreglar.
         assertFalse(falla.queHacer.contains("wifi"))
+        assertTrue(falla.queHacer.contains("nombre corto"))
+        assertTrue(falla.queHacer.contains("correo"))
+        assertTrue(falla.queHacer.contains("clave"))
     }
 
     @Test
