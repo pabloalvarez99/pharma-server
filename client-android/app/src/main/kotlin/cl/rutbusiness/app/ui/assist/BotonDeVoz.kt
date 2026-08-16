@@ -2,6 +2,7 @@ package cl.rutbusiness.app.ui.assist
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -34,22 +35,20 @@ internal const val ETIQUETA_ESCUCHANDO = "Te escucho"
 /**
  * El control de voz del agente.
  *
- * **Dibujo y palabra, no sólo el dibujo.** Un micrófono suelto es un ícono que
- * hay que interpretar; con la palabra al lado no hay nada que adivinar, y es lo
- * que ya prometen el primer uso ("anotás una venta con la voz o el teclado") y
- * el tagline del rubro ("Puesto, voz, fiado"). El ícono existe igual porque en
- * un puesto se mira de reojo y una forma se reconoce antes que una palabra.
+ * **No es un micrófono chico en la esquina.** En el puesto se toca con sol,
+ * a veces con una mano ocupada y sin mirar el ícono: el control tiene que
+ * verse como botón de verdad (marca, 56 dp de piso, palabra legible) y no
+ * como un glyph de toolbar de 24 dp. El micrófono va grande al lado de la
+ * palabra porque la forma se reconoce de reojo y la etiqueta saca la duda.
  *
  * Se construye a mano y no con [cl.rutbusiness.ui.components.RbButton] porque
- * ese componente no tiene ranura para un ícono, pero usa exactamente sus mismas
- * piezas del design system: `brandFill`/`onBrandFill` para el contraste ya
- * medido, `rbClickable` para el anillo de foco y el rol de botón, y
- * `rbTouchTarget` -el piso de 56 dp- **sobre el nodo clickeable**, que es la
- * única forma de que el dedo reciba lo que la captura de pantalla muestra.
+ * ese componente no tiene ranura para un ícono, pero usa las mismas piezas
+ * del design system: `brandFill`/`onBrandFill`, `rbClickable` y
+ * `rbTouchTarget` sobre el nodo clickeable.
  *
- * El estado se dice de dos maneras a la vez, porque una sola falla: la palabra
- * cambia ("Hablar" -> "Te escucho") y el micrófono pasa de contorno a relleno.
- * Quien no lee rápido ve la forma; quien no distingue la forma lee la palabra.
+ * El estado se dice de dos maneras a la vez: la palabra cambia
+ * ("Hablar" → "Te escucho") y el micrófono pasa de contorno a relleno. Quien
+ * no lee rápido ve la forma; quien no distingue la forma lee la palabra.
  */
 @Composable
 internal fun BotonDeVoz(
@@ -60,31 +59,53 @@ internal fun BotonDeVoz(
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
-    val shape = RbTheme.shapes.field
+    // Píldora gruesa: se lee como control del puesto, no como ícono suelto.
+    val shape = RbTheme.shapes.pill
 
-    val fondo = if (habilitado) colors.brandFill else colors.surfaceVariant
+    val fondo = when {
+        !habilitado -> colors.surfaceVariant
+        escuchando -> colors.brandFill
+        else -> colors.brandFill
+    }
     val tinta = if (habilitado) colors.onBrandFill else colors.textTertiary
+    // Borde que sobrevive al sol: sin él, brandFill se funde con el cielo o
+    // con un fondo claro barato. Al escuchar el borde se engrosa (focusRing)
+    // para que "está abierto" se vea sin leer la etiqueta.
+    val trazoBorde = if (escuchando && habilitado) dimens.focusRing else dimens.border
+    val colorBorde = when {
+        !habilitado -> colors.outline
+        escuchando -> colors.onBrandFill
+        else -> colors.onBrandFill.copy(alpha = 0.35f)
+    }
+
+    // El micrófono va más grande que `iconSize` (24): un trazo de toolbar se
+    // pierde al sol y se siente "app de retail". 32 dp se ve al costado del
+    // campo sin pelear con la etiqueta a 200%.
+    val tamanoMicro = 32.dp
 
     Row(
         modifier = modifier
             .clip(shape)
             .background(fondo)
+            .border(trazoBorde, colorBorde, shape)
             .rbClickable(
                 onClick = onTocar,
                 enabled = habilitado,
                 role = Role.Button,
                 shape = shape,
             )
-            .rbTouchTarget()
+            // 56 dp de piso en ambos ejes; el ancho mínimo evita un botón
+            // cuadradito al lado del campo cuando la etiqueta es corta.
+            .rbTouchTarget(minWidth = 120.dp)
             .padding(horizontal = dimens.space3, vertical = dimens.space2),
-        horizontalArrangement = Arrangement.spacedBy(dimens.space1),
+        horizontalArrangement = Arrangement.spacedBy(dimens.space2),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Decorativo para el lector de pantalla: la etiqueta de al lado dice lo
-        // mismo, y anunciarlo dos veces es ruido.
+        // Decorativo para el lector de pantalla: la etiqueta de al lado dice
+        // lo mismo, y anunciarlo dos veces es ruido.
         Canvas(
             modifier = Modifier
-                .size(dimens.iconSize)
+                .size(tamanoMicro)
                 .clearAndSetSemantics { },
         ) {
             dibujarMicrofono(color = tinta, lleno = escuchando)
@@ -103,15 +124,15 @@ internal fun BotonDeVoz(
 /**
  * Un micrófono: cápsula, arco, pie.
  *
- * El grosor del trazo sale del tamaño y nunca baja de 2 dp -la misma regla que
- * los íconos de la barra de navegación-: un trazo de un pixel desaparece en un
- * panel barato bajo el sol, que es la condición de trabajo del puesto.
+ * El grosor del trazo sale del tamaño y nunca baja de 2.5 dp -más grueso que
+ * un ícono de barra-: un trazo de un pixel desaparece en un panel barato bajo
+ * el sol, que es la condición de trabajo del puesto.
  */
 private fun DrawScope.dibujarMicrofono(color: Color, lleno: Boolean) {
-    val trazo = Stroke(width = (size.minDimension / 9f).coerceAtLeast(2.dp.toPx()))
+    val trazo = Stroke(width = (size.minDimension / 8f).coerceAtLeast(2.5.dp.toPx()))
 
-    val anchoCapsula = size.width * 0.40f
-    val altoCapsula = size.height * 0.52f
+    val anchoCapsula = size.width * 0.42f
+    val altoCapsula = size.height * 0.54f
     val izquierda = (size.width - anchoCapsula) / 2f
 
     drawRoundRect(
@@ -125,7 +146,7 @@ private fun DrawScope.dibujarMicrofono(color: Color, lleno: Boolean) {
     )
 
     // El arco que abraza la cápsula.
-    val radioArco = size.width * 0.34f
+    val radioArco = size.width * 0.36f
     val centroArco = size.height * 0.58f
     drawArc(
         color = color,
@@ -142,13 +163,13 @@ private fun DrawScope.dibujarMicrofono(color: Color, lleno: Boolean) {
     drawLine(
         color = color,
         start = Offset(size.width / 2f, abajoDelArco),
-        end = Offset(size.width / 2f, size.height),
+        end = Offset(size.width / 2f, size.height * 0.96f),
         strokeWidth = trazo.width,
     )
     drawLine(
         color = color,
-        start = Offset(size.width * 0.28f, size.height),
-        end = Offset(size.width * 0.72f, size.height),
+        start = Offset(size.width * 0.26f, size.height * 0.96f),
+        end = Offset(size.width * 0.74f, size.height * 0.96f),
         strokeWidth = trazo.width,
     )
 }

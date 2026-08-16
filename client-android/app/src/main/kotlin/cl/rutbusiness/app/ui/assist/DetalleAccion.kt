@@ -1,5 +1,21 @@
 package cl.rutbusiness.app.ui.assist
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.dp
+import cl.rutbusiness.ui.components.RbReflowRow
+import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -149,6 +165,90 @@ object DetalleAccion {
     /** `payment_method` -> `Payment method`, para una clave que no conocemos. */
     private fun humanizar(clave: String): String =
         clave.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * La tarjeta del desglose: lo que la dueña lee línea a línea antes de decir sí.
+ *
+ * Vive acá (no enterrada en la tarjeta de propuesta) porque el detalle es la
+ * defensa contra un cero de más, y tiene que leerse como un papel del puesto:
+ * superficie clara, borde que se ve al sol, plata en monoespaciado, valor
+ * más fuerte que la etiqueta. Sin `maxLines`: al 200% se envuelve, no se corta.
+ *
+ * @return si [lineas] viene vacío no dibuja nada (no hay un vacío decorativo).
+ */
+@Composable
+fun TarjetaDetalleAccion(
+    lineas: List<LineaDetalle>,
+    modifier: Modifier = Modifier,
+) {
+    if (lineas.isEmpty()) return
+
+    val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+    // Card del design system (radio de tarjeta, no de campo): el desglose se
+    // siente un papel aparte, no un input.
+    val shape = RbTheme.shapes.card
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surface)
+            // outlineStrong: surface sobre brandContainer se pierde al sol con
+            // un hairline; el borde de control (>= 3.0) se mantiene.
+            .border(dimens.border, colors.outlineStrong, shape)
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space3),
+    ) {
+        Text(
+            text = "Esto es lo que voy a guardar",
+            style = RbTheme.typography.label,
+            color = colors.textSecondary,
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(colors.outline)
+                .clearAndSetSemantics { },
+        )
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(dimens.space2),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            lineas.forEach { linea ->
+                val esPlata = linea.valor.startsWith("$") || linea.valor.startsWith("-$")
+                RbReflowRow(
+                    spacing = dimens.space3,
+                    modifier = Modifier.fillMaxWidth(),
+                    content = {
+                        Text(
+                            text = linea.etiqueta,
+                            style = RbTheme.typography.support,
+                            color = colors.textSecondary,
+                        )
+                    },
+                    trailing = {
+                        // La plata en monoespaciado (numeric): los dígitos se
+                        // alinean y un cero de más se pilla de un vistazo. El
+                        // resto va en bodyStrong: el valor es la decisión.
+                        Text(
+                            text = linea.valor,
+                            style = if (esPlata) {
+                                RbTheme.typography.numeric
+                            } else {
+                                RbTheme.typography.bodyStrong
+                            },
+                            color = colors.textPrimary,
+                        )
+                    },
+                )
+            }
+        }
+    }
 }
 
 /**
