@@ -10,7 +10,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -34,7 +36,6 @@ import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
-import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbSkeletonLines
@@ -146,8 +147,9 @@ private fun ResumenScreen(
             // de la pantalla y la lista termina dibujada encima del título.
             else -> LazyColumn(
                 modifier = Modifier.weight(1f),
+                // space4 entre tarjetas: se leen de a una, no como grilla de KPI.
                 contentPadding = PaddingValues(dimens.space3),
-                verticalArrangement = Arrangement.spacedBy(dimens.space3),
+                verticalArrangement = Arrangement.spacedBy(dimens.space4),
             ) {
                 // Feria (ADR-0022): Hoy + deudas primero. Caja/FEFO son
                 // retail formal y empujan el fiado fuera del pliegue.
@@ -212,26 +214,32 @@ internal fun TarjetaDelDia(
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
 
+    // Aire extra: la cifra es lo único que se mira de lejos; el resto baja
+    // callado. No es un tablero de filas — es una tarjeta de puesto.
     RbCard {
         Text(
             text = "Vendiste hoy",
-            style = RbTheme.typography.heading,
-            color = colors.textPrimary,
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
             modifier = Modifier.rbHeading(),
         )
 
         RbAmount(
             amount = moneda.formatear(vendidoHoy),
             emphasis = RbAmountEmphasis.Headline,
+            modifier = Modifier.padding(vertical = dimens.space2),
         )
 
         Text(
             text = copyTarjetaConteo(feria = feria, conteo = boletas),
-            style = RbTheme.typography.support,
+            style = RbTheme.typography.body,
             color = colors.textSecondary,
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
+        Column(
+            modifier = Modifier.padding(top = dimens.space2),
+            verticalArrangement = Arrangement.spacedBy(dimens.space2),
+        ) {
             RbChip(
                 label = when (comparacion) {
                     Comparacion.Mejor -> "Mejor que ayer"
@@ -298,9 +306,9 @@ internal fun TarjetaDelDia(
  * "Hoy", antes de la primera venta del día.
  *
  * Un cuaderno en blanco tampoco dice nada, y sin embargo la dueña sabe qué hacer
- * con él: anotar. Esto es eso — la frase exacta que hay que decirle al agente, y
- * el botón que lleva a decírsela. Lo que sigue debajo ("acá vas a ver cuánto
- * llevas") es la parte que el cuaderno no puede: la suma sale sola.
+ * con él: anotar. Misma tarjeta del día, con aire: un ejemplo hablado y el
+ * botón que lleva a decirlo. Sin asset de ilustración (pesa en el APK del
+ * teléfono viejo); el vacío se resuelve con tipografía y espacio.
  *
  * Sin [onHablarleAlAgente] el botón no se dibuja. La frase sigue enseñando el
  * paso, y en feria el agente está a un toque en la barra de abajo; un botón que
@@ -308,13 +316,39 @@ internal fun TarjetaDelDia(
  */
 @Composable
 private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
-    RbEmptyState(
-        title = "Todavía no vendiste nada hoy",
-        hint = "Cuéntale al agente lo que vayas vendiendo — «$ASI_SE_ANOTA_UNA_VENTA» — y acá " +
-            "vas a ver cuánto llevas hecho, sin sumar a mano.",
-        actionLabel = onHablarleAlAgente?.let { "Hablarle al agente" },
-        onAction = onHablarleAlAgente,
-    )
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+
+    RbCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = dimens.space4),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
+        ) {
+            Text(
+                text = "Todavía no vendiste nada hoy",
+                style = RbTheme.typography.heading,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.rbHeading(),
+            )
+            Text(
+                text = "Dile al agente: «$ASI_SE_ANOTA_UNA_VENTA». " +
+                    "Acá vas a ver cuánto llevas, sin sumar a mano.",
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
+                textAlign = TextAlign.Center,
+            )
+            if (onHablarleAlAgente != null) {
+                RbButton(
+                    label = "Hablarle al agente",
+                    onClick = onHablarleAlAgente,
+                )
+            }
+        }
+    }
 }
 
 // --- 3: cuánta plata hay en caja -------------------------------------------
@@ -372,13 +406,16 @@ private fun EnCaja(vm: ResumenViewModel, onIrALaCaja: () -> Unit) {
 @Composable
 private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
     val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
     val deuda = vm.porCobrar
     val hayDeuda = deuda != null && deuda.deudores > 0 && !esCero(deuda.total)
+    val feria = esFeria()
 
+    // Franja humana, no ERP: plata que te deben personas, no "cuentas por cobrar".
     RbCard(title = "Te deben") {
         when {
             deuda == null -> Text(
-                text = "No pudimos traer el fiado. El resto sí está al día: toca " +
+                text = "No pudimos traer lo del fiado. El resto sí está al día: toca " +
                     "«Actualizar» arriba para volver a pedirlo.",
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
@@ -388,7 +425,7 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
             // frase. El vacío la enseña acá, que es donde la dueña se está
             // preguntando por la deuda, y no en una pantalla más adentro.
             !hayDeuda -> Text(
-                text = if (esFeria()) {
+                text = if (feria) {
                     "Nadie te debe. Cuando fíes, díselo al agente: «$ASI_SE_FIA»."
                 } else {
                     "Nadie te debe plata. Cuando fíes una venta, la deuda aparece acá hasta " +
@@ -399,12 +436,15 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
             )
 
             else -> {
-                RbAmount(amount = vm.moneda.formatear(deuda.total))
+                RbAmount(
+                    amount = vm.moneda.formatear(deuda.total),
+                    modifier = Modifier.padding(vertical = dimens.space1),
+                )
                 Text(
                     text = if (deuda.deudores == 1) {
-                        "1 cliente con cuenta pendiente."
+                        "1 persona te debe."
                     } else {
-                        "${deuda.deudores} clientes con cuenta pendiente."
+                        "${deuda.deudores} personas te deben."
                     },
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
@@ -416,7 +456,7 @@ private fun TeDeben(vm: ResumenViewModel, onIrAlFiado: () -> Unit) {
         // esconderla dejaría sin forma de llegar a la cuenta de alguien que ya
         // terminó de pagar.
         RbButton(
-            label = if (hayDeuda) "Ver quién me debe" else "Ver el fiado",
+            label = if (hayDeuda) "Ver quién me debe" else "Quién me debe",
             onClick = onIrAlFiado,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
