@@ -38,4 +38,57 @@ class CopyCobrarFeriaTest {
         assertFalse(escanerVisible(barcode = false, hayCamara = false))
         assertTrue(escanerVisible(barcode = true, hayCamara = true))
     }
+
+    @Test
+    fun `feria miss enseña venderle al agente con precio`() {
+        val pista = pistaBusquedaVacia(
+            feria = true,
+            consulta = " tomates ",
+            puedeCargar = true,
+        )
+        assertTrue(
+            "debe enseñar la frase con precio: era \"$pista\"",
+            pista.contains("a 2000"),
+        )
+        assertTrue(pista.contains("vendí tomates a 2000"))
+        assertTrue(pista.contains("Agregar una cosa"))
+        assertFalse(
+            "feria no habla de computador: era \"$pista\"",
+            pista.contains("computador", ignoreCase = true),
+        )
+    }
+
+    @Test
+    fun `feria miss sin cargar solo enseña al agente`() {
+        val pista = pistaBusquedaVacia(
+            feria = true,
+            consulta = "cilantro",
+            puedeCargar = false,
+        )
+        assertTrue(pista.contains("a 2000"))
+        assertTrue(pista.contains("vendí cilantro a 2000"))
+        assertFalse(pista.contains("Agregar una cosa"))
+        assertFalse(pista.contains("computador", ignoreCase = true))
+    }
+
+    @Test
+    fun `pharmacy miss conserva el copy retail exacto`() {
+        assertEquals(
+            "Revisa cómo se escribe, prueba con una palabra más corta, " +
+                "o agrégalo si todavía no está cargado.",
+            pistaBusquedaVacia(
+                feria = false,
+                consulta = "ibuprofeno",
+                puedeCargar = true,
+            ),
+        )
+        assertEquals(
+            "Revisa cómo se escribe, o prueba con una palabra más corta.",
+            pistaBusquedaVacia(
+                feria = false,
+                consulta = "ibuprofeno",
+                puedeCargar = false,
+            ),
+        )
+    }
 }
