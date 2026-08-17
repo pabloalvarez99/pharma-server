@@ -81,6 +81,7 @@ fun TarjetaRescate(
     val shape = RbTheme.shapes.card
     val clipboard = LocalClipboardManager.current
     val compartir = LocalCompartirTarjeta.current
+    val copy = remember { copyTarjeta() }
     var copiado by remember { mutableStateOf(false) }
     val qrPayload = remember(clave, tenantSlug) {
         payloadQrRescate(tenantSlug, clave.bloques)
@@ -98,8 +99,8 @@ fun TarjetaRescate(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Tu tarjeta de rescate",
-            subtitle = "Escribila en el cuaderno",
+            title = copy.tituloBarra,
+            subtitle = copy.subtituloBarra,
         )
 
         Column(
@@ -121,23 +122,20 @@ fun TarjetaRescate(
                 verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {
                 Text(
-                    // Esta pantalla es day-1 feria (ADR-0022): "puesto", no "negocio".
-                    text = "Esta es la llave de tu puesto",
+                    // Day-1 feria (ADR-0022): "puesto", no "negocio".
+                    text = copy.tituloHero,
                     style = RbTheme.typography.title,
                     color = colors.textPrimary,
                     modifier = Modifier.rbHeading(),
                 )
                 Text(
-                    text = "Si te roban o se te rompe el teléfono, con esta llave " +
-                        "y tu cuenta de Google volvés a entrar a tus ventas y deudas. " +
-                        "Sin ella, el respaldo es basura: nosotros no podemos " +
-                        "recuperarla por vos.",
+                    text = copy.cuerpoHero,
                     style = RbTheme.typography.body,
                     color = colors.textPrimary,
                 )
             }
 
-            SeccionTarjeta(titulo = "Palabras (12)") {
+            SeccionTarjeta(titulo = copy.tituloPalabras) {
                 Text(
                     text = clave.fraseCompleta(),
                     style = RbTheme.typography.bodyStrong,
@@ -146,7 +144,7 @@ fun TarjetaRescate(
                 )
             }
 
-            SeccionTarjeta(titulo = "Bloques (más fáciles con lápiz)") {
+            SeccionTarjeta(titulo = copy.tituloBloques) {
                 Text(
                     text = clave.bloquesCompletos(),
                     style = RbTheme.typography.bodyStrong,
@@ -158,11 +156,9 @@ fun TarjetaRescate(
             }
 
             if (qrPayload != null) {
-                SeccionTarjeta(titulo = "Código QR de rescate") {
+                SeccionTarjeta(titulo = copy.tituloQr) {
                     Text(
-                        text = "Solo los bloques del código (no las 12 palabras). " +
-                            "Podés escanearlo o copiar el texto al cuaderno. " +
-                            "No lo mandes por WhatsApp.",
+                        text = copy.ayudaQr,
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                     )
@@ -200,13 +196,7 @@ fun TarjetaRescate(
                         }
                     }
                     Text(
-                        text = if (matrizQr != null) {
-                            "QR escaneable (bloques). Las 12 palabras siguen " +
-                                "siendo solo del cuaderno."
-                        } else {
-                            "Huella visual (el QR no se pudo dibujar). " +
-                                "Copiá el texto de abajo."
-                        },
+                        text = if (matrizQr != null) copy.pieQrOk else copy.pieQrFallo,
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                         modifier = Modifier.padding(top = dimens.space2),
@@ -232,15 +222,13 @@ fun TarjetaRescate(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
                     Text(
-                        text = "Anotá esto YA en tu cuaderno",
+                        text = copy.tituloAnotar,
                         style = RbTheme.typography.bodyStrong,
                         color = colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "Pegá esta hoja o copiá las palabras. " +
-                            "Si las perdés, perdés el historial del respaldo. " +
-                            "No las mandes por WhatsApp.",
+                        text = copy.cuerpoAnotar,
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                     )
@@ -264,8 +252,8 @@ fun TarjetaRescate(
                 }
             }
 
-            // Una página: copiar, compartir texto, o imprimir / Guardar como PDF.
-            SeccionTarjeta(titulo = "Una página para el cuaderno") {
+            // Una página: copiar, guardar en Notas, o imprimir / PDF.
+            SeccionTarjeta(titulo = copy.tituloPagina) {
                 Text(
                     text = textoPagina,
                     style = RbTheme.typography.label,
@@ -273,11 +261,7 @@ fun TarjetaRescate(
                     fontFamily = FontFamily.Monospace,
                 )
                 RbButton(
-                    label = if (copiado) {
-                        "Copiado. Pegalo en una nota y anotalo"
-                    } else {
-                        "Copiar texto al portapapeles"
-                    },
+                    label = if (copiado) copy.ctaCopiado else copy.ctaCopiar,
                     onClick = {
                         clipboard.setText(AnnotatedString(textoPagina))
                         copiado = true
@@ -289,7 +273,7 @@ fun TarjetaRescate(
                 // Sin plataforma detrás (preview, test, iOS todavía) el botón no
                 // se dibuja: vale más que falte a que exista y no haga nada.
                 if (compartir != null) RbButton(
-                    label = "Compartir a una nota (no WhatsApp)",
+                    label = copy.ctaGuardarNota,
                     onClick = {
                         compartir.compartirTexto(
                             asunto = "RutAgent - tarjeta de rescate",
@@ -301,7 +285,7 @@ fun TarjetaRescate(
                     modifier = Modifier.padding(top = dimens.space1),
                 )
                 if (compartir != null) RbButton(
-                    label = "Imprimir o guardar PDF",
+                    label = copy.ctaImprimir,
                     onClick = {
                         compartir.imprimirHtml(htmlPagina)
                     },
@@ -312,8 +296,7 @@ fun TarjetaRescate(
             }
 
             Text(
-                text = "Imprimí o guardá el PDF y pegalo en el cuaderno. " +
-                    "Las 12 palabras no van en el QR (solo los bloques).",
+                text = copy.piePagina,
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -339,12 +322,12 @@ fun TarjetaRescate(
             verticalArrangement = Arrangement.spacedBy(dimens.space2),
         ) {
             RbButton(
-                label = "Ya la anoté en el cuaderno",
+                label = copy.ctaListo,
                 onClick = onListo,
                 fillWidth = true,
             )
             RbButton(
-                label = "Seguir sin anotar (no recomendado)",
+                label = copy.ctaSeguirSinAnotar,
                 onClick = onListo,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
