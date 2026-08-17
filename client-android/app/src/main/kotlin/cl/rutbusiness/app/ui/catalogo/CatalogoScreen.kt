@@ -115,7 +115,7 @@ private fun ListaDeCosas(
         // segundo control a una barra que al 200% ya se parte en dos líneas.
         RbTopBar(
             title = copy.titulo,
-            subtitle = "Lo que puedes cobrar",
+            subtitle = copy.subtitulo,
             onBack = onCerrar,
         )
 
@@ -132,8 +132,8 @@ private fun ListaDeCosas(
                 RbTextField(
                     value = vm.consulta,
                     onValueChange = vm::cambiarConsulta,
-                    label = "Buscar",
-                    placeholder = "Nombre",
+                    label = copy.etiquetaBuscar,
+                    placeholder = copy.placeholderBuscar,
                     imeAction = ImeAction.Search,
                     onImeAction = vm::cargar,
                 )
@@ -151,7 +151,10 @@ private fun ListaDeCosas(
                     .padding(horizontal = dimens.space3, vertical = dimens.space2),
             ) {
                 RbChip(
-                    label = "Guardado: $guardado",
+                    label = copyConfirmacionGuardado(
+                        nombre = guardado,
+                        feria = copy.esFeria,
+                    ),
                     tone = RbChipTone.Brand,
                     onClick = vm::olvidarConfirmacion,
                 )
@@ -187,7 +190,7 @@ private fun ListaDeCosas(
                         .fillMaxWidth(),
                 ) {
                     RbLoadingState(
-                        label = "Cargando ${copy.titulo.replaceFirstChar { it.lowercase() }}",
+                        label = copyCargandoLista(copy.titulo),
                     )
                     RbSkeletonLines(
                         lines = 5,
@@ -212,8 +215,8 @@ private fun ListaDeCosas(
                         )
                     } else {
                         VacioDelCatalogo(
-                            titulo = "Nada con \"${vm.consulta.trim()}\"",
-                            pista = "Fíjate cómo se escribe, o agrégalo si todavía no está.",
+                            titulo = copyVacioBusqueda(vm.consulta),
+                            pista = copy.vacioBusquedaPista,
                             accion = copy.agregar,
                             onAccion = vm::nuevaCosa,
                         )
@@ -365,7 +368,7 @@ internal fun FilaDeCosa(
                 )
                 if (unidad.isNotBlank()) {
                     Text(
-                        text = "Por $unidad",
+                        text = copyComoSeVende(unidad),
                         style = RbTheme.typography.support,
                         color = colors.textSecondary,
                     )
@@ -386,7 +389,7 @@ private fun FormularioDeCosa(vm: CatalogoViewModel, copy: CopyCatalogo) {
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(
             title = if (vm.editando == null) copy.tituloAlta else copy.tituloEdicion,
-            subtitle = if (vm.editando == null) "Con esto ya lo puedes cobrar" else null,
+            subtitle = if (vm.editando == null) copy.subtituloAlta else null,
             onBack = vm::volverALaLista,
         )
 
@@ -490,8 +493,8 @@ internal fun FormularioContenido(
                     value = unidad,
                     onValueChange = onUnidad,
                     label = copy.etiquetaUnidad,
-                    placeholder = "kilo, atado, bolsa…",
-                    supportingText = "Opcional",
+                    placeholder = PLACEHOLDER_UNIDAD,
+                    supportingText = AYUDA_UNIDAD_OPCIONAL,
                     enabled = !guardando,
                     imeAction = ImeAction.Done,
                 )
@@ -523,7 +526,7 @@ internal fun FormularioContenido(
         }
 
         RbButton(
-            label = if (guardando) "Guardando…" else "Guardar",
+            label = if (guardando) ETIQUETA_GUARDANDO else ETIQUETA_GUARDAR,
             onClick = onGuardar,
             enabled = !guardando,
             fillWidth = true,
@@ -531,9 +534,9 @@ internal fun FormularioContenido(
 
         // Lo que la pantalla no pide, dicho en voz baja. Sin esto el formulario
         // se lee como incompleto —"¿y el código de barras?"— y quien viene de
-        // otro sistema se queda esperando más campos.
+        // otro sistema se queda esperando más campos. Feria no nombra el código.
         Text(
-            text = "Con el nombre y el precio alcanza. No hace falta código de barras.",
+            text = copy.pieFormulario,
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
