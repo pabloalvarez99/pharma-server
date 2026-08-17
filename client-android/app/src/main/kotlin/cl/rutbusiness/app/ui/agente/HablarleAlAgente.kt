@@ -38,24 +38,6 @@ val LocalIrAlAgente = staticCompositionLocalOf<(() -> Unit)?> { null }
 @Composable
 fun irAlAgente(): (() -> Unit)? = LocalIrAlAgente.current
 
-/**
- * Cómo se le dice al agente que se vendió algo.
- *
- * Va en los vacíos como ejemplo y no como instrucción: la vara es el cuaderno, y
- * en el cuaderno nadie escribe "registrar una transacción" — escribe lo que
- * pasó. El ejemplo es una venta de feria (kilos, precio redondo) porque una
- * dueña copia el ejemplo que se parece a lo suyo.
- *
- * Está acá y no adentro de cada pantalla porque la frase la enseñan dos vacíos
- * distintos: si se separan, cada pantalla le enseña otra manera de hablar al
- * mismo agente.
- */
-const val ASI_SE_ANOTA_UNA_VENTA = "vendí 2 kg de tomates a 2000"
-
-/**
- * Ídem para fiar: una venta fiada completa (qué, a cuánto, a quién).
- *
- * "Don Juan me debe 5000" suena natural pero el parser lo deja Incomplete
- * (pide el producto). Esta frase sí cierra el loop como Venta fiado.
- */
-const val ASI_SE_FIA = "anota 2 kg de tomates a 2000 fiado a Don Juan"
+// Las frases de ejemplo ("vendí 2 kg...", "anota... fiado a...") viven en
+// CopyAgente.kt: este archivo es sólo la puerta (el cableado de navegación),
+// no el copy. Mismo criterio que separa FiadoScreen.kt de CopyFiado.kt.
