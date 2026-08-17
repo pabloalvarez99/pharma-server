@@ -7,8 +7,16 @@ package cl.rutbusiness.app.ui.gente
  * es de recado — lo que le dirías a alguien — no de exportar un informe.
  */
 
-/** Pista sobre la nota: sale por el chat que la dueña elija. */
-fun pistaDelRecado(): String = "Se manda por el chat que uses"
+/**
+ * Pista sobre la nota: sale por el chat que la dueña elija.
+ *
+ * "De siempre" y no "WhatsApp" a propósito: el puerto es un `ACTION_SEND`
+ * genérico (ver [CompartirConGente]), el selector puede abrir cualquier chat
+ * instalado, y nombrar una marca que después no aparece confunde más de lo
+ * que tranquiliza. La frase igual habla directo a la dueña que ya manda
+ * mensajes todos los días: es el chat de siempre, no uno nuevo que aprender.
+ */
+fun pistaDelRecado(): String = "Se manda por tu chat de siempre"
 
 /**
  * CTA para contar cómo va el día.
@@ -37,3 +45,19 @@ fun etiquetaCompartirDeuda(
     val limpio = nombre.trim()
     return if (limpio.isEmpty()) "Mandar por chat" else "Recordarle a $limpio"
 }
+
+/**
+ * Todas las cadenas de usuario de este archivo, para el gate de tono.
+ *
+ * Mismo criterio que `todoCopyFeriaUsuario` en `CopyFiado`: si se agrega copy
+ * nuevo acá, sumarlo a esta lista para que el gate lo revise.
+ */
+internal fun todoCopyGenteUsuario(): List<String> = listOf(
+    pistaDelRecado(),
+    etiquetaCompartirDia(feria = true),
+    etiquetaCompartirDia(feria = false),
+    etiquetaCompartirDeuda(feria = true),
+    etiquetaCompartirDeuda(feria = false),
+    etiquetaCompartirDeuda(feria = true, nombre = "Don Juan"),
+    etiquetaCompartirDeuda(feria = false, nombre = "Rosa"),
+)
