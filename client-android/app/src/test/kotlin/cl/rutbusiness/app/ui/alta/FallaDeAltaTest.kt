@@ -307,6 +307,14 @@ class FallaDeAltaTest {
         }
     }
 
+    /**
+     * CORREO_TOMADO no se arregla reintentando en esta pantalla -a diferencia
+     * de SLUG_TOMADO- así que no alcanza con repetir el mensaje pelado del
+     * server (que no dice cómo volver a entrar): tiene que caer en la falla
+     * que sí sabe decir el camino, con el nombre exacto del botón de
+     * [cl.rutbusiness.app.ui.entrada.Puerta] («Entrar a mi puesto»), no un
+     * «Entrá» genérico que la dueña no va a encontrar escrito en ningún botón.
+     */
     @Test
     fun `correo tomado manda a entrar y no a inventar otro correo`() {
         val falla = fallaDeAlta(
@@ -319,8 +327,9 @@ class FallaDeAltaTest {
             email = email,
             nube = true,
         )
-        assertTrue(falla is FallaDeAlta.DatosRechazados)
-        assertTrue(falla.queHacer.contains("Entrá", ignoreCase = true))
+        assertTrue(falla is FallaDeAlta.CorreoYaTieneNegocio)
+        assertTrue("no dice el botón exacto: ${falla.queHacer}", falla.queHacer.contains("Entrar a mi puesto"))
+        assertTrue(falla.queHacer.contains(email))
         assertFalse(falla.queHacer.contains("computador", ignoreCase = true))
     }
 
@@ -398,5 +407,34 @@ class FallaDeAltaTest {
         val falla = FallaDeAlta.ServicioNoResponde("http://192.168.1.10:8080")
         assertTrue(falla.queHacer.contains("192.168.1.10:8080"))
         assertTrue("muestra maquinaria: ${falla.queHacer}", !falla.queHacer.contains("http://"))
+    }
+
+    // --- feria local (sin nube compilada) también habla de puesto -----------
+
+    /**
+     * Antes de este fix, [FallaDeAlta.ServicioNoResponde] sólo miraba `nube`
+     * para elegir la palabra: una feria en un servidor propio (offline, sin
+     * nube compilada) leía "negocio" en la mitad del mensaje. Mismo criterio
+     * que `CreadoPeroNoEntro.esPuesto`: nube o feria, cualquiera alcanza.
+     */
+    @Test
+    fun `servicio caido en feria local dice puesto y no negocio`() {
+        val falla = deLaConexion(
+            problema = FallaDeConexion.ContestaPeroNoEsElSistema(donde, "200 hotel wifi"),
+            donde = donde,
+            esFeria = true,
+        )
+        assertTrue(falla is FallaDeAlta.ServicioNoResponde)
+        assertTrue("no dice puesto: ${falla.queHacer}", falla.queHacer.contains("puesto"))
+        assertFalse("sigue diciendo negocio: ${falla.queHacer}", falla.queHacer.contains("negocio"))
+    }
+
+    /** Mismo gap, misma corrección, para [FallaDeAlta.CorreoYaTieneNegocio]. */
+    @Test
+    fun `correo tomado en feria local dice puesto y el boton exacto`() {
+        val falla = FallaDeAlta.CorreoYaTieneNegocio(email, donde, esFeria = true)
+        assertEquals("Ese correo no puede crear un puesto acá", falla.titulo)
+        assertTrue(falla.queHacer.contains("Entrar a mi puesto"))
+        assertFalse(falla.queHacer.contains("negocio"))
     }
 }
