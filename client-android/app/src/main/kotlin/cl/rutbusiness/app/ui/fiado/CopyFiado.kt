@@ -122,9 +122,15 @@ internal fun chipQuedoAnotado(): String = "Quedó anotado"
 
 // --- anotar un pago --------------------------------------------------------
 
+/** Top bar del paso: alguien te está pagando en el puesto. */
 internal fun tituloPasoAbono(): String = "Me está pagando"
 
-internal fun tituloCuantoPaga(): String = "¿Cuánto te está pagando?"
+/**
+ * Pregunta del monto: feria suena a mesa («¿cuánto me das?»); retail al
+ * mostrador formal.
+ */
+internal fun tituloCuantoPaga(feria: Boolean = false): String =
+    if (feria) "¿Cuánto me das?" else "¿Cuánto te está pagando?"
 
 /**
  * Referencia a cuánto debe, al lado del campo de monto.
@@ -133,12 +139,14 @@ internal fun tituloCuantoPaga(): String = "¿Cuánto te está pagando?"
  */
 internal fun referenciaDeuda(feria: Boolean, montoFormateado: String): String =
     if (feria) {
-        "Te debe $montoFormateado. Puede pagarte todo o una parte."
+        "Te debe $montoFormateado. Puede ser todo o una parte."
     } else {
         "Debe $montoFormateado. Puede pagarte todo o una parte."
     }
 
-internal fun labelMontoPago(): String = "Plata que te da"
+/** Etiqueta del campo de plata: lo que la persona te está dando ahora. */
+internal fun labelMontoPago(feria: Boolean = false): String =
+    if (feria) "Lo que te da" else "Plata que te da"
 
 internal fun tituloComoPaga(): String = "¿Cómo te paga?"
 
@@ -149,11 +157,12 @@ internal fun chipTransferencia(): String = "Transferencia"
 /**
  * Ayuda bajo el toggle efectivo / transferencia.
  *
- * @param entraALaCaja `true` = billete que cuenta en el cierre / día.
+ * @param entraALaCaja `true` = billete que cuenta en el cierre (retail) o en
+ *   la plata del día del puesto (feria).
  */
 internal fun ayudaComoPaga(feria: Boolean, entraALaCaja: Boolean): String =
     when {
-        feria && entraALaCaja -> "Esta plata cuenta en el día."
+        feria && entraALaCaja -> "Esta plata cuenta en el día del puesto."
         feria && !entraALaCaja ->
             "No cuenta en la plata del día: es transferencia u otro medio " +
                 "que no está en el puesto."
@@ -165,14 +174,25 @@ internal fun ayudaComoPaga(feria: Boolean, entraALaCaja: Boolean): String =
 
 internal fun tituloNotaPago(): String = "¿Algo que anotar?"
 
-internal fun labelNotaPago(): String = "Nota del pago (opcional)"
+internal fun labelNotaPago(feria: Boolean = false): String =
+    if (feria) "Algo que anotar (opcional)" else "Nota del pago (opcional)"
 
-internal fun placeholderNotaPago(): String = "Quedó de traer el resto el viernes"
+internal fun placeholderNotaPago(feria: Boolean = false): String =
+    if (feria) {
+        "Trae el resto el viernes"
+    } else {
+        "Quedó de traer el resto el viernes"
+    }
 
-internal fun previaAnotarPago(): String = "Vas a anotar que te pagó:"
+internal fun previaAnotarPago(feria: Boolean = false): String =
+    if (feria) "Vas a anotar lo que te dio:" else "Vas a anotar que te pagó:"
 
-internal fun ctaAnotarPago(guardando: Boolean): String =
-    if (guardando) "Anotando..." else "Anotar el pago"
+internal fun ctaAnotarPago(guardando: Boolean, feria: Boolean = false): String =
+    when {
+        guardando -> "Anotando..."
+        feria -> "Anotar lo que me dio"
+        else -> "Anotar el pago"
+    }
 
 /** Cerrar el paso de pago sin «cuenta» en feria. */
 internal fun ctaVolverDelAbono(feria: Boolean): String =
@@ -229,20 +249,20 @@ internal fun todoCopyFeriaUsuario(): List<String> = listOf(
     ctaMeEstaPagando(),
     chipQuedoAnotado(),
     tituloPasoAbono(),
-    tituloCuantoPaga(),
+    tituloCuantoPaga(feria = true),
     referenciaDeuda(feria = true, montoFormateado = "$2.000"),
-    labelMontoPago(),
+    labelMontoPago(feria = true),
     tituloComoPaga(),
     chipEfectivo(),
     chipTransferencia(),
     ayudaComoPaga(feria = true, entraALaCaja = true),
     ayudaComoPaga(feria = true, entraALaCaja = false),
     tituloNotaPago(),
-    labelNotaPago(),
-    placeholderNotaPago(),
-    previaAnotarPago(),
-    ctaAnotarPago(guardando = false),
-    ctaAnotarPago(guardando = true),
+    labelNotaPago(feria = true),
+    placeholderNotaPago(feria = true),
+    previaAnotarPago(feria = true),
+    ctaAnotarPago(guardando = false, feria = true),
+    ctaAnotarPago(guardando = true, feria = true),
     ctaVolverDelAbono(feria = true),
     remateAbonoEfectivo(feria = true),
     EJEMPLO_FIADO_FERIA,
