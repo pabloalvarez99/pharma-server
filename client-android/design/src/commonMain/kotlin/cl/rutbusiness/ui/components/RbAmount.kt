@@ -10,6 +10,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.RbTypography
 
 /** How loud an [RbAmount] is. */
 enum class RbAmountEmphasis {
@@ -19,7 +20,7 @@ enum class RbAmountEmphasis {
      */
     Headline,
 
-    /** A figure inside a card or a row. Monospace and bold, but not louder. */
+    /** A figure inside a card or a row. Tabular figures and bold, but not louder. */
     Body,
 }
 
@@ -37,12 +38,17 @@ enum class RbAmountEmphasis {
  *   and the reader cannot tell a million from a thousand. Here the figure is
  *   forced onto **one line** (`softWrap = false`, `maxLines = 1`) so it never
  *   splits mid-digit.
- * - The [RbAmountEmphasis.Headline] multiplier is released once the system font
- *   scale goes large - by then the device is enlarging everything anyway, and a
- *   smaller whole figure beats a bigger halved one. That rule lived inside one
- *   screen and had to be re-derived by the next one; here it is written once.
- * - Bold monospace is the scannable column of a cuaderno: digits line up, weight
- *   carries the eye to the plata before the surrounding copy.
+ * - [RbAmountEmphasis.Headline] renders at [RbTypography.display] - the
+ *   product's biggest, boldest register, reserved for the one figure a screen
+ *   exists to show - until the system font scale goes large, where it drops to
+ *   [RbTypography.title] instead: by then the device is enlarging everything
+ *   anyway, and a smaller whole figure beats a bigger halved one. That rule
+ *   lived inside one screen and had to be re-derived by the next one; here it
+ *   is written once.
+ * - Bold with `tnum` tabular figures ([RbTypography.amount]) is the scannable
+ *   column of a cuaderno: digits claim the same width and line up, weight
+ *   carries the eye to the plata before the surrounding copy - without the
+ *   terminal-script look a monospace face gave every amount before this.
  *
  * No motion. A figure is static type, never a count-up or scale-in: both would
  * fight reduced motion and cost frames on the reference panel.
@@ -69,17 +75,29 @@ fun RbAmount(
     )
 }
 
-/** The text style [RbAmount] uses, exposed for callers that must build on it. */
+/**
+ * The text style [RbAmount] uses, exposed for callers that must build on it.
+ *
+ * [RbAmountEmphasis.Headline] borrows its size, line height and tracking from
+ * [RbTypography.display] (or [RbTypography.title] once the font scale is
+ * large enough that the device is already doing the enlarging) rather than
+ * from [RbTypography.amount] directly - a headline figure is still the
+ * biggest thing on the screen, and [RbTypography.display] is where that
+ * register lives. Only the family and the `tnum` tabular-figure feature come
+ * from [RbTypography.amount], so both emphases keep the same digit treatment.
+ */
 @Composable
 fun rbAmountStyle(emphasis: RbAmountEmphasis): TextStyle {
     val typography = RbTheme.typography
     return when (emphasis) {
-        RbAmountEmphasis.Body -> typography.numeric.copy(fontWeight = FontWeight.Bold)
+        RbAmountEmphasis.Body -> typography.amount.copy(fontWeight = FontWeight.Bold)
 
         RbAmountEmphasis.Headline -> {
             val enlarged = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
-            typography.numeric.copy(
-                fontSize = typography.title.fontSize * (if (enlarged) 1.0f else 1.5f),
+            val scale = if (enlarged) typography.title else typography.display
+            scale.copy(
+                fontFamily = typography.amount.fontFamily,
+                fontFeatureSettings = typography.amount.fontFeatureSettings,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -87,7 +105,8 @@ fun rbAmountStyle(emphasis: RbAmountEmphasis): TextStyle {
 }
 
 /**
- * Where the headline multiplier is dropped.
+ * Where the headline register drops from [RbTypography.display] back down to
+ * [RbTypography.title].
  *
  * 1.5x is the point at which Android's own font-scale curve stops being a
  * courtesy and starts being an accessibility setting the user needs.
