@@ -26,12 +26,11 @@ import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.theme.RbTheme
 
 /**
- * Anotar lo que el cliente está pagando ahora.
+ * Anotar que alguien te está pagando, en el puesto.
  *
- * El campo del monto va arriba de todo, con la deuda actual a la vista para no
- * tener que volver a mirarla: la pregunta del mostrador es "¿cuánto me das?" y
- * la referencia es cuánto debe. En feria se habla de plata y del día, no de
- * cajón ni de computador.
+ * El monto va arriba de todo, con la deuda a la vista: la pregunta de mesa es
+ * «¿cuánto me das?» y la referencia es cuánto debe. En feria se habla de plata
+ * del día/puesto; en retail de caja y cajón. No se inventa aritmética.
  */
 @Composable
 fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
@@ -61,13 +60,13 @@ fun PasoAbono(vm: FiadoViewModel, modifier: Modifier = Modifier) {
  * Misma disciplina de layout que [cl.rutbusiness.app.ui.caja.FormularioDeArqueo],
  * y por el mismo motivo: es un campo de plata con teclado numérico. Campo
  * primero, columna que scrollea con `imePadding`, botones a todo el ancho uno
- * debajo del otro.
+ * debajo del otro (≥56 dp vía design system).
  *
  * @param deudaActual el monto que mandó el server, en su texto decimal. Se
  *   muestra como referencia; no se resta nada contra él.
  * @param esFeria pack feria: el pago en efectivo cuenta en la plata del día
- *   (puesto), no habla de cajón. El toggle se ofrece si hay sesión o se puede
- *   abrir el puesto.
+ *   del puesto, no habla de cajón. El toggle se ofrece si hay sesión o se
+ *   puede abrir el puesto.
  */
 @Composable
 internal fun FormularioDeAbono(
@@ -99,7 +98,7 @@ internal fun FormularioDeAbono(
             .padding(dimens.space3),
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
-        RbCard(title = tituloCuantoPaga()) {
+        RbCard(title = tituloCuantoPaga(feria = esFeria)) {
             if (deudaActual != null) {
                 Text(
                     text = referenciaDeuda(
@@ -114,7 +113,7 @@ internal fun FormularioDeAbono(
             RbTextField(
                 value = monto,
                 onValueChange = onMonto,
-                label = labelMontoPago(),
+                label = labelMontoPago(feria = esFeria),
                 placeholder = "0",
                 numeric = true,
                 keyboardType = tecladoDePlata(moneda),
@@ -153,8 +152,8 @@ internal fun FormularioDeAbono(
             RbTextField(
                 value = nota,
                 onValueChange = onNota,
-                label = labelNotaPago(),
-                placeholder = placeholderNotaPago(),
+                label = labelNotaPago(feria = esFeria),
+                placeholder = placeholderNotaPago(feria = esFeria),
                 enabled = !guardando,
             )
         }
@@ -176,7 +175,7 @@ internal fun FormularioDeAbono(
             )
         } else {
             Text(
-                text = previaAnotarPago(),
+                text = previaAnotarPago(feria = esFeria),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -188,7 +187,7 @@ internal fun FormularioDeAbono(
         }
 
         RbButton(
-            label = ctaAnotarPago(guardando),
+            label = ctaAnotarPago(guardando = guardando, feria = esFeria),
             onClick = onAnotar,
             enabled = !guardando && impedimento == null,
             fillWidth = true,
