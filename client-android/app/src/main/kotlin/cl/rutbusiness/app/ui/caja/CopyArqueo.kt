@@ -6,10 +6,8 @@ package cl.rutbusiness.app.ui.caja
  *
  * Archivo nuevo para no tocar `CopyCaja.kt` ni `Diferencia.kt` -son de otro
  * asiento de esta ola-, aunque las tres frases hablan del mismo momento.
- * `CopyCaja.kt` escribe la feria en voseo ("Contá", "escribí"); acá se usa
- * tuteo ("cuenta", "escribe"), igual que `CopyEscaner.kt` y `CopyCuenta.kt`.
- * Es un roce de tono entre archivos de distintos dueños que no se puede
- * resolver desde acá -ver el reporte de cierre de esta ola-.
+ * Todos usan tuteo chileno ("cuenta", "escribe"), igual que `CopyEscaner.kt`
+ * y `CopyCuenta.kt` (ver la ola de unificación de acento del 2026-08-16).
  */
 
 /**

@@ -77,10 +77,10 @@ internal fun copyCarritoVacioTitulo(feria: Boolean): String =
 
 internal fun copyCarritoVacioPista(feria: Boolean): String =
     if (feria) {
-        "Volvé y sumá lo que se lleva. Acá no se inventa un total: " +
+        "Vuelve y suma lo que se lleva. Acá no se inventa un total: " +
             "el monto lo confirma el puesto al cobrar."
     } else {
-        "Volvé y agregá al menos un producto. El total lo confirma el " +
+        "Vuelve y agrega al menos un producto. El total lo confirma el " +
             "cobro, no el teléfono."
     }
 
@@ -109,7 +109,7 @@ internal fun copyClientesVaciosTitulo(feria: Boolean): String =
 internal fun copyClientesVaciosPista(feria: Boolean): String =
     if (feria) {
         "El fiado va a nombre de alguien. Cobra esta venta de otra forma " +
-            "para no hacer esperar, y después decile al agente: " +
+            "para no hacer esperar, y después dile al agente: " +
             "«agrega el cliente Juan Pérez»."
     } else {
         "El fiado queda en la cuenta de una persona, así que primero hay que " +

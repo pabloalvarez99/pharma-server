@@ -26,7 +26,7 @@ class CopyPasosAltaTest {
         val c = copyPasoCuenta(esFeria = true)
         assertEquals("marta@correo.cl", c.placeholderCorreo)
         assertTrue(c.ayudaCorreo.lowercase().contains("puesto"))
-        assertTrue(c.ayudaClave.contains("por vos"))
+        assertTrue(c.ayudaClave.contains("por ti"))
         assertTrue(c.ayudaClave.contains(LARGO_MINIMO_DE_CLAVE.toString()))
         assertFalse(c.placeholderCorreo.contains("negocio", ignoreCase = true))
         assertFalse(c.placeholderCorreo.contains("minegocio", ignoreCase = true))

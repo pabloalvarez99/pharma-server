@@ -84,7 +84,7 @@ class CopyRescateTest {
         assertNull(c.labelDireccion)
         assertNull(c.placeholderDireccion)
         assertTrue(c.tituloPalabras.contains("12 palabras"))
-        assertTrue(c.errorDireccion.contains("Reintentá", ignoreCase = true))
+        assertTrue(c.errorDireccion.contains("Reintenta", ignoreCase = true))
         assertSinJergaNube("rescate nube", c)
     }
 

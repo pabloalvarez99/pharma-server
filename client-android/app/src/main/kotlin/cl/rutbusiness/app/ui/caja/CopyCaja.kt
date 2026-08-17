@@ -20,10 +20,10 @@ internal fun copyAbrirCaja(feria: Boolean): CopyAbrirCaja =
     if (feria) {
         CopyAbrirCaja(
             tituloCard = "Abrir el puesto",
-            ayuda = "El puesto arranca sin contar monedas. Escribí 0 si querés " +
+            ayuda = "El puesto arranca sin contar monedas. Escribe 0 si quieres " +
                 "anotar algo distinto.",
             etiquetaMonto = "Plata con la que parte el puesto",
-            ayudaMonto = "El puesto arranca sin contar monedas. Escribí 0.",
+            ayudaMonto = "El puesto arranca sin contar monedas. Escribe 0.",
             cta = "Empezar el día",
             ctaGuardando = "Abriendo el puesto...",
         )
@@ -58,7 +58,7 @@ internal fun copyCajaAbierta(feria: Boolean): CopyCajaAbierta =
             ctaCerrar = "Cerrar el día",
             tituloMovimientos = "Plata que sacaste o metiste a mano",
             vacioMovimientos = "Todavía no sacaste ni metiste plata a mano. " +
-                "Lo que cobrás en billete ya está contado arriba.",
+                "Lo que cobras en billete ya está contado arriba.",
             ctaSacar = "Sacar plata",
             ctaMeter = "Meter plata",
         )
@@ -118,15 +118,15 @@ internal fun copyArqueoCaja(feria: Boolean): CopyArqueoCaja =
     if (feria) {
         CopyArqueoCaja(
             tituloCard = "Contar la plata",
-            ayuda = "Contá la plata del puesto, como en el cuaderno, y escribí " +
+            ayuda = "Cuenta la plata del puesto, como en el cuaderno, y escribe " +
                 "el total. Después te mostramos cómo quedó el día.",
             etiquetaMonto = "Plata contada",
-            ayudaMonto = "Solo lo que tenés en la mano. Si no quedó plata, escribí 0.",
+            ayudaMonto = "Solo lo que tienes en la mano. Si no quedó plata, escribe 0.",
             tituloNota = "¿Algo que anotar?",
             etiquetaNota = "Nota del día (opcional)",
             placeholderNota = "El vuelto que se dio mal, compré cambio…",
-            ayudaNota = "Si ya sabés que algo no va a cuadrar — el vuelto que se " +
-                "dio mal, compré cambio, un gasto suelto — escribilo acá. Después " +
+            ayudaNota = "Si ya sabes que algo no va a cuadrar — el vuelto que se " +
+                "dio mal, compré cambio, un gasto suelto — escríbelo acá. Después " +
                 "de cerrar el día no se puede agregar.",
             cta = "Cerrar el día",
             ctaGuardando = "Cerrando el día…",
@@ -172,20 +172,20 @@ internal fun copyMovimientoCaja(feria: Boolean, esRetiro: Boolean): CopyMovimien
     if (feria) {
         if (esRetiro) {
             CopyMovimientoCaja(
-                tituloCard = "¿Cuánto sacás?",
-                ayuda = "La plata que sacás del puesto para pagar algo o para guardarla. " +
+                tituloCard = "¿Cuánto sacas?",
+                ayuda = "La plata que sacas del puesto para pagar algo o para guardarla. " +
                     "Se descuenta de lo que debería haber al cerrar el día.",
-                etiquetaMonto = "Plata que sacás",
+                etiquetaMonto = "Plata que sacas",
                 cta = "Anotar que sacaste",
                 ctaGuardando = "Anotando...",
                 ctaVolver = "Volver al puesto",
             )
         } else {
             CopyMovimientoCaja(
-                tituloCard = "¿Cuánto metés?",
-                ayuda = "La plata que le agregás al puesto: cambio que trajiste, un vuelto " +
+                tituloCard = "¿Cuánto metes?",
+                ayuda = "La plata que le agregas al puesto: cambio que trajiste, un vuelto " +
                     "que devolvieron. Se suma a lo que debería haber al cerrar el día.",
-                etiquetaMonto = "Plata que metés",
+                etiquetaMonto = "Plata que metes",
                 cta = "Anotar que metiste",
                 ctaGuardando = "Anotando...",
                 ctaVolver = "Volver al puesto",
@@ -261,7 +261,7 @@ internal fun copyErrorRed(feria: Boolean, accion: AccionErrorRed = AccionErrorRe
     when (accion) {
         AccionErrorRed.Apertura ->
             if (feria) {
-                "No llegamos. Revisá la señal del teléfono y reintentá; si el puesto " +
+                "No llegamos. Revisa la señal del teléfono y reintenta; si el puesto " +
                     "igual quedó abierto, lo vas a ver al actualizar."
             } else {
                 "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
@@ -271,7 +271,7 @@ internal fun copyErrorRed(feria: Boolean, accion: AccionErrorRed = AccionErrorRe
 
         AccionErrorRed.Cierre ->
             if (feria) {
-                "No llegamos. Revisá la señal del teléfono y reintentá: si el día ya " +
+                "No llegamos. Revisa la señal del teléfono y reintenta: si el día ya " +
                     "se había cerrado, te lo vamos a decir."
             } else {
                 "No llegamos al computador del negocio. Revisa que el teléfono tenga " +
@@ -280,7 +280,7 @@ internal fun copyErrorRed(feria: Boolean, accion: AccionErrorRed = AccionErrorRe
 
         AccionErrorRed.Cobro ->
             if (feria) {
-                "No alcanzó a anotarse la venta. Revisá la señal y tocá «Reintentar»: " +
+                "No alcanzó a anotarse la venta. Revisa la señal y toca «Reintentar»: " +
                     "aunque la mandes de nuevo, no se cobra dos veces."
             } else {
                 "No alcanzamos a mandarle la venta al computador del negocio. Revisa que " +

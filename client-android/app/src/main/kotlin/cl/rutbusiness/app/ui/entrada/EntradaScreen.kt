@@ -392,7 +392,7 @@ internal fun FormularioDeEntrada(
                     Text(
                         text = if (rubroEsFeria) {
                             "Todavía no está cableado en este teléfono. " +
-                                "Podés entrar igual con correo y clave."
+                                "Puedes entrar igual con correo y clave."
                         } else {
                             "Disponible en una próxima versión."
                         },
@@ -466,7 +466,7 @@ internal fun FormularioDeEntrada(
                                 "palabra, sin espacios."
                         }
                     } else {
-                        "Si lo tenés. Si no, alcanza con el correo y la clave."
+                        "Si lo tienes. Si no, alcanza con el correo y la clave."
                     },
                     enabled = !ocupado,
                     imeAction = ImeAction.Next,

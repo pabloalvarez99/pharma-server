@@ -102,7 +102,7 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
         },
         tituloEdicion = "Editar $enMinuscula",
         subtituloAlta = if (feria) {
-            "Con el precio ya lo cobrás"
+            "Con el precio ya lo cobras"
         } else {
             "Con esto ya lo puedes cobrar"
         },
@@ -124,8 +124,8 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
         // Feria: el vacío enseña el form y el day-1 por el agente.
         // Farmacia/otro: form + "no hace falta código de barras".
         vacioPista = if (feria) {
-            "Agregá tomates, cilantro, lo que sea, con el precio. " +
-                "O decile al agente: «vendí tomates a 2000»."
+            "Agrega tomates, cilantro, lo que sea, con el precio. " +
+                "O dile al agente: «vendí tomates a 2000»."
         } else {
             "Agrega lo que vendes con su precio y ya puedes cobrarlo. " +
                 "No hace falta código de barras ni nada más."

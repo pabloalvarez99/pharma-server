@@ -75,9 +75,9 @@ internal fun detalleFranja(
     rechazadas: Int,
     feria: Boolean,
 ): String = when {
-    rechazadas > 0 -> if (feria) "Tocá para ver cuáles." else "Tócalo para ver cuáles."
+    rechazadas > 0 -> if (feria) "Toca para ver cuáles." else "Tócalo para ver cuáles."
     !conectado && esperando > 0 ->
         if (esperando == 1) "Sale sola al volver la señal" else "Salen solas al volver la señal"
     !conectado -> detalleSinConexion()
-    else -> if (feria) "Tocá para verlas." else "Tócalo para verlas."
+    else -> if (feria) "Toca para verlas." else "Tócalo para verlas."
 }

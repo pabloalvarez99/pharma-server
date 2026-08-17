@@ -41,8 +41,8 @@ fun ElegirRubro(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "¿Cómo trabajás?",
-            subtitle = "Elegí lo que más se parece a tu día",
+            title = "¿Cómo trabajas?",
+            subtitle = "Elige lo que más se parece a tu día",
         )
 
         Column(

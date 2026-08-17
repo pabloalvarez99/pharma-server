@@ -273,8 +273,8 @@ class GoogleEntradaCopyTest {
 
         // Primera vez: crear pesa más y va arriba; entrar es el secundario.
         compose.onNodeWithText("Es la primera vez").assertIsDisplayed()
-        compose.onNodeWithText("Ya tenés un puesto").assertIsDisplayed()
-        compose.onNodeWithText("Creá uno, o entrá al que ya tenés").assertIsDisplayed()
+        compose.onNodeWithText("Ya tienes un puesto").assertIsDisplayed()
+        compose.onNodeWithText("Crea uno, o entra al que ya tienes").assertIsDisplayed()
 
         // Rescate usable sin pelear con los dos caminos.
         compose.onNodeWithText("Perdí mi teléfono").performScrollTo().assertIsDisplayed()
@@ -298,7 +298,7 @@ class GoogleEntradaCopyTest {
             }
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Entrá de nuevo, o creá otro").assertIsDisplayed()
+        compose.onNodeWithText("Entra de nuevo, o crea otro").assertIsDisplayed()
         compose.onNodeWithText("Entrar a mi puesto").assertIsDisplayed()
         compose.onNodeWithText("Crear mi puesto").assertIsDisplayed()
     }

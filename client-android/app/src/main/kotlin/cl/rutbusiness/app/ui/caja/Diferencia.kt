@@ -132,7 +132,7 @@ fun copyDeDiferencia(
     }
 
     val mananaOtraVez = if (feria) {
-        "Queda guardado así y mañana empezás de nuevo."
+        "Queda guardado así y mañana empiezas de nuevo."
     } else {
         "Queda guardado así y mañana empiezas de nuevo."
     }
@@ -182,7 +182,7 @@ fun copyDeDiferencia(
             // hace que la dueña deje de contar.
             calma = if (feria) {
                 "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
-                    "guardado: volvé a abrir el puesto más tarde para ver cómo quedó."
+                    "guardado: vuelve a abrir el puesto más tarde para ver cómo quedó."
             } else {
                 "No pudimos traer la comparación con lo anotado. El cierre igual quedó " +
                     "guardado: vuelve a abrir la caja más tarde para ver cómo quedó."

@@ -20,8 +20,8 @@ internal fun copyElegirCajaApertura(feria: Boolean): CopyElegirCajaApertura =
     if (feria) {
         CopyElegirCajaApertura(
             tituloCard = "¿Cuál mesa?",
-            ayuda = "Hay más de un puesto o mesa. Elegí en cuál estás: lo que " +
-                "vendés se anota ahí, como en el cuaderno.",
+            ayuda = "Hay más de un puesto o mesa. Elige en cuál estás: lo que " +
+                "vendes se anota ahí, como en el cuaderno.",
         )
     } else {
         CopyElegirCajaApertura(

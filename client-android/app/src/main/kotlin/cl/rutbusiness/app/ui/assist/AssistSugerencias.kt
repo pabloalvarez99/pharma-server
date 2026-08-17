@@ -43,7 +43,7 @@ object AssistSugerencias {
     fun intro(pack: RubroPack): String =
         if (pack.features.agentHome || pack.rubro == "feria") {
             // Hablado, de puesto: sin "asistente virtual" ni jerga de app.
-            "Hablame como en el puesto — vendí, fié, ¿cuánto saqué hoy? " +
+            "Háblame como en el puesto — vendí, fié, ¿cuánto saqué hoy? " +
                 "Antes de anotar nada, te lo digo de vuelta para que lo revises."
         } else {
             "Escríbeme como le hablarías a un empleado de confianza. " +

@@ -3,7 +3,7 @@ package cl.rutbusiness.app.ui.alta
 /**
  * Copy de los carteles del alta, extraído para tests JVM sin Compose.
  *
- * Feria habla de puesto y voseo; retail conserva «negocio» y el ejemplo
+ * Feria habla de puesto en tuteo chileno; retail conserva «negocio» y el ejemplo
  * minegocio. [PasoDonde] es solo on-prem (APK sin URL horneada) y sí puede
  * nombrar computador + IP de LAN — no se reutiliza en Cuenta/Negocio/Rubro.
  */
@@ -26,7 +26,7 @@ internal fun copyPasoCuenta(esFeria: Boolean): CopyPasoCuenta =
             ayudaCorreo = "Con esto entras al puesto.",
             labelClave = "Tu clave",
             ayudaClave = "Al menos $LARGO_MINIMO_DE_CLAVE letras o números. Anótala: nadie " +
-                "puede recuperártela por vos.",
+                "puede recuperártela por ti.",
         )
     } else {
         CopyPasoCuenta(

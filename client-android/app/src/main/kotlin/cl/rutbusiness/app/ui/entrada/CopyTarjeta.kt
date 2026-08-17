@@ -31,31 +31,31 @@ internal data class CopyTarjeta(
 /** Copy fijo day-1 feria: puesto + cuaderno. */
 internal fun copyTarjeta(): CopyTarjeta = CopyTarjeta(
     tituloBarra = "Tu tarjeta de rescate",
-    subtituloBarra = "Escribila en el cuaderno",
+    subtituloBarra = "Escríbela en el cuaderno",
     tituloHero = "Esta es la llave de tu puesto",
     cuerpoHero = "Si te roban o se te rompe el teléfono, con esta llave " +
-        "y tu cuenta de Google volvés a entrar a tus ventas y deudas. " +
+        "y tu cuenta de Google vuelves a entrar a tus ventas y deudas. " +
         "Sin ella, el respaldo es basura: nosotros no podemos " +
-        "recuperarla por vos.",
+        "recuperarla por ti.",
     tituloPalabras = "Las 12 palabras",
     tituloBloques = "Bloques (más fáciles con lápiz)",
     tituloQr = "Código para el cuaderno",
     ayudaQr = "Para escanear después. Solo los bloques del código " +
-        "(no las 12 palabras). Podés copiarlo al cuaderno. " +
+        "(no las 12 palabras). Puedes copiarlo al cuaderno. " +
         "No lo mandes por WhatsApp.",
     pieQrOk = "Para escanear después (bloques). Las 12 palabras siguen " +
         "siendo solo del cuaderno.",
-    pieQrFallo = "El dibujo no salió. Copiá el texto de abajo al cuaderno.",
-    tituloAnotar = "Anotá esto YA en tu cuaderno",
-    cuerpoAnotar = "Pegá esta hoja o copiá las palabras. " +
-        "Si las perdés, perdés el historial del respaldo. " +
+    pieQrFallo = "El dibujo no salió. Copia el texto de abajo al cuaderno.",
+    tituloAnotar = "Anota esto YA en tu cuaderno",
+    cuerpoAnotar = "Pega esta hoja o copia las palabras. " +
+        "Si las pierdes, pierdes el historial del respaldo. " +
         "No las mandes por WhatsApp.",
     tituloPagina = "Una página para el cuaderno",
     ctaCopiar = "Copiar las palabras",
-    ctaCopiado = "Copiado. Pegalo en Notas y anotalo",
+    ctaCopiado = "Copiado. Pégalo en Notas y anótalo",
     ctaGuardarNota = "Guardar en Notas",
     ctaImprimir = "Imprimir / PDF",
-    piePagina = "Imprimí o guardá el PDF y pegalo en el cuaderno. " +
+    piePagina = "Imprime o guarda el PDF y pégalo en el cuaderno. " +
         "Las 12 palabras no van en el código (solo los bloques).",
     ctaListo = "Ya la anoté",
     ctaSeguirSinAnotar = "Seguir sin anotar (no recomendado)",

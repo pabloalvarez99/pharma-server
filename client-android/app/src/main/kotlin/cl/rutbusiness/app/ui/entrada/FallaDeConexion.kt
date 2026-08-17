@@ -54,7 +54,7 @@ sealed class FallaDeConexion(
     class SinRed(nube: Boolean = false) : FallaDeConexion(
         titulo = if (nube) "No hay internet" else "Tu teléfono no está conectado",
         queHacer = if (nube) {
-            "El teléfono no tiene wifi ni datos. Prendelos y reintentá."
+            "El teléfono no tiene wifi ni datos. Préndelos y reintenta."
         } else {
             "No tiene wifi ni datos prendidos, así que no puede llegar a ninguna parte. " +
                 "Prende el wifi del local, o prende los datos del teléfono, y vuelve a intentar."
@@ -75,7 +75,7 @@ sealed class FallaDeConexion(
     ) : FallaDeConexion(
         titulo = if (nube) "RutAgent no responde" else "En esa dirección no contesta nadie",
         queHacer = if (nube) {
-            "No pudimos llegar. Revisá que el teléfono tenga internet y reintentá."
+            "No pudimos llegar. Revisa que el teléfono tenga internet y reintenta."
         } else {
             "Escribiste ${comoSeLee(direccion)} y no hubo respuesta. Revisa tres cosas, " +
                 "en este orden: que el computador del negocio esté prendido, que este teléfono esté " +
@@ -103,7 +103,7 @@ sealed class FallaDeConexion(
             "Ahí contesta algo, pero no se puede trabajar"
         },
         queHacer = if (nube) {
-            "Reintentá en un momento. Si sigue igual, no es algo que se arregle desde el teléfono."
+            "Reintenta en un momento. Si sigue igual, no es algo que se arregle desde el teléfono."
         } else {
             "En ${comoSeLee(direccion)} hay un computador prendido, pero lo que contesta " +
                 "no es el sistema de tu negocio andando. Casi siempre es el número del final, el que " +
@@ -123,7 +123,7 @@ sealed class FallaDeConexion(
     class DatosQueNoCoinciden(tecnico: String? = null) : FallaDeConexion(
         titulo = "Ese correo o esa clave no calzan",
         queHacer = "La conexión anda: lo que no calza es lo que escribiste. " +
-            "Revisá el nombre corto, el correo y la clave. " +
+            "Revisa el nombre corto, el correo y la clave. " +
             "La clave distingue mayúsculas de minúsculas.",
         tecnico = tecnico,
     )
@@ -131,7 +131,7 @@ sealed class FallaDeConexion(
     /** Correo en más de un puesto: hay que escribir el nombre corto. */
     class FaltaNombreCorto(tecnico: String? = null) : FallaDeConexion(
         titulo = "Falta el nombre corto",
-        queHacer = "Ese correo está en más de un puesto. Escribí el nombre corto del que querés.",
+        queHacer = "Ese correo está en más de un puesto. Escribe el nombre corto del que quieres.",
         tecnico = tecnico,
     )
 }

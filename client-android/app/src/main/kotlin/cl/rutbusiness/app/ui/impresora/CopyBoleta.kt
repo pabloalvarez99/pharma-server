@@ -141,7 +141,7 @@ internal fun copyTituloElegirAncho(nombre: String): String =
     "¿De qué ancho es el papel de «$nombre»?"
 
 internal fun copyAyudaElegirAncho(): String =
-    "Mirá el rollo que le pusiste: el angosto cabe en la palma; el ancho es el de supermercado."
+    "Mira el rollo que le pusiste: el angosto cabe en la palma; el ancho es el de supermercado."
 
 internal fun copyNotaCambiarAnchoDespues(): String =
     "Si te equivocas no pasa nada: se cambia después desde «Cambiar impresora»."

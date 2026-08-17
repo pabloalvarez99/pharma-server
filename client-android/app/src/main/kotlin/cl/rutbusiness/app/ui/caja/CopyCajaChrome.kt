@@ -39,7 +39,7 @@ internal fun copyCajaSinConexion(feria: Boolean): CopyCajaSinConexion =
         CopyCajaSinConexion(
             titulo = "Sin señal no se cierra el día",
             hint = "La plata del puesto la confirma el cobro, no el teléfono. " +
-                "Seguí vendiendo en efectivo; cuando vuelva la red cerrás el día.",
+                "Sigue vendiendo en efectivo; cuando vuelva la red cierras el día.",
             accion = "Volver",
         )
     } else {
@@ -71,6 +71,6 @@ internal fun subtituloPasoCaja(
         nombreCaja?.ifBlank { null }
     }
     PasoDeCaja.Movimiento -> if (feria) "Queda en la cuenta del día" else "Queda anotado hasta el cierre"
-    PasoDeCaja.Arqueo -> if (feria) "Contá primero, después cerrás" else "Cuenta primero, después cierra"
+    PasoDeCaja.Arqueo -> if (feria) "Cuenta primero, después cierras" else "Cuenta primero, después cierra"
     PasoDeCaja.Cerrada -> if (feria) "Listo por hoy" else null
 }

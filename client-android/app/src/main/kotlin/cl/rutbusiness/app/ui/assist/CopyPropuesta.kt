@@ -40,13 +40,13 @@ internal fun copyBotonVolverAPedir(feria: Boolean): String =
 /**
  * El verbo exacto de lo que va a pasar al tocar el botón principal.
  *
- * En feria es una sola frase hablada ("Sí, anotá eso"): en el puesto nadie
+ * En feria es una sola frase hablada ("Sí, anota eso"): en el puesto nadie
  * dice "registrar la venta". En retail el botón nombra la acción del server
  * (`Action::label` en `crates/assist`); una desconocida cae en genérico
  * honesto, nunca en un verbo inventado.
  */
 internal fun etiquetaDeConfirmar(nombreDeAccion: String, feria: Boolean = false): String {
-    if (feria) return "Sí, anotá eso"
+    if (feria) return "Sí, anota eso"
     return when (nombreDeAccion) {
         "registrar_gasto" -> "Sí, registrar el gasto"
         "registrar_abono" -> "Sí, registrar el abono"

@@ -46,7 +46,7 @@ class CopyPropuestaTest {
     fun `boton de confirmar en feria es una sola frase hablada sin importar la accion`() {
         val nombres = listOf("registrar_gasto", "ajustar_stock", "accion_que_no_existe_todavia")
         nombres.forEach { nombre ->
-            assertEquals("Sí, anotá eso", etiquetaDeConfirmar(nombre, feria = true))
+            assertEquals("Sí, anota eso", etiquetaDeConfirmar(nombre, feria = true))
         }
     }
 

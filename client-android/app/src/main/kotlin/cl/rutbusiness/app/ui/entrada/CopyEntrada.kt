@@ -11,7 +11,7 @@ internal fun copyAvisoGoogleSinDestino(pideDireccion: Boolean): String =
     if (pideDireccion) {
         "Primero poné la dirección del computador del negocio."
     } else {
-        "RutAgent no responde. Reintentá en un momento."
+        "RutAgent no responde. Reintenta en un momento."
     }
 
 /**
@@ -20,4 +20,4 @@ internal fun copyAvisoGoogleSinDestino(pideDireccion: Boolean): String =
  */
 internal fun copyAvisoGoogleFalloLogin(mensajeDelServer: String): String =
     mensajeDelServer.trimEnd() +
-        " Si Google aún no está listo, usá correo y clave."
+        " Si Google aún no está listo, usa correo y clave."

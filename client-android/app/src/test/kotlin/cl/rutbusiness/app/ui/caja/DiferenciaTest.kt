@@ -181,7 +181,7 @@ class DiferenciaTest {
 
         assertEquals("Faltan $2.500", copy.titular)
         assertEquals("Contaste $15.000 y lo anotado del día era $17.500.", copy.explicacion)
-        assertTrue(copy.calma.contains("empezás"))
+        assertTrue(copy.calma.contains("empiezas"))
         assertSinJergaFeria(copy)
     }
 

@@ -33,7 +33,7 @@ import kotlinx.coroutines.delay
  *
  * - **Encabezado honesto**, no "Confirmación". Todavía no pasó nada.
  * - **Se lee en voz alta**: en feria suena a alguien repitiendo lo que oyó en
- *   el puesto ("Sí, anotá eso" / "Mejor no"), no a un admin de ERP.
+ *   el puesto ("Sí, anota eso" / "Mejor no"), no a un admin de ERP.
  * - **El resumen del server, grande.** Es la frase armada con datos reales.
  * - **El detalle campo por campo** ([TarjetaDetalleAccion]), con la plata
  *   formateada. El resumen se lee rápido; el detalle pilla un cero de más.

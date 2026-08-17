@@ -183,9 +183,9 @@ fun PantallaDeCola(
                 item {
                     RbCard(title = "Abrir un respaldo") {
                         Text(
-                            text = "Si tenés el paquete cifrado y la llave del " +
+                            text = "Si tienes el paquete cifrado y la llave del " +
                                 "cuaderno, se abre acá en el teléfono. " +
-                                "Nadie en la nube puede hacerlo por vos.",
+                                "Nadie en la nube puede hacerlo por ti.",
                             style = RbTheme.typography.body,
                             color = RbTheme.colors.textSecondary,
                         )
