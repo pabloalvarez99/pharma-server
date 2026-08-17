@@ -14,16 +14,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import cl.rutbusiness.ui.theme.RbTheme
+import cl.rutbusiness.ui.theme.rbElevated
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
  * A card shell — a piece of the mesa del puesto, not a floating SaaS panel.
  *
  * Ported from `.ui-card` / `.rb-card`. The CSS carried a drop shadow
- * (`--rb-shadow`, a 40px blur); this draws a real edge instead. Two reasons,
- * and both come from the hardware floor: a large-radius shadow is a real GPU
- * cost per frame on the reference device, and a shadow is invisible against a
- * light surface in daylight while a border is not.
+ * (`--rb-shadow`, a 40px blur); the border was added instead because that
+ * blur cost a per-frame GPU pass and vanished against a light surface in
+ * daylight. The card now carries **both**: [cl.rutbusiness.ui.theme.rbElevated]
+ * draws a shallow native shadow (cheap - see [cl.rutbusiness.ui.theme.RbDimens.elevationCard]
+ * for why it is not the same cost as the CSS blur), and the border stays as
+ * the cue that still works when the shadow washes out outdoors. Depth is
+ * never the *only* signal.
  *
  * The edge uses [cl.rutbusiness.ui.theme.RbColors.outlineStrong] (>= 3.0), not
  * the decorative hairline: under feria sun a 1.27 outline disappears and the
@@ -47,6 +51,7 @@ fun RbCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .rbElevated(dimens.elevationCard, shape)
             .clip(shape)
             .background(colors.surface)
             .border(dimens.border, colors.outlineStrong, shape)

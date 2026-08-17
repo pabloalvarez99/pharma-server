@@ -17,8 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.RectangleShape
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbElevated
 import cl.rutbusiness.ui.theme.rbHeading
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
@@ -41,6 +43,11 @@ import cl.rutbusiness.ui.theme.rbTouchTarget
  * subtitle read as a thick mesa header at 100% and still reflow cleanly at 200%.
  * No translateY, no motion on the bar itself.
  *
+ * A shallow [cl.rutbusiness.ui.theme.rbElevated] shadow sits under the whole
+ * bar, so the header reads as a plane the content scrolls under rather than a
+ * flat strip painted at the same depth as everything below it. The border
+ * stays because it is the cue that survives when the shadow does not.
+ *
  * @param subtitle second line - the business name, the branch. Optional.
  * @param onBack renders the back affordance when set.
  * @param actions trailing slot, typically an [RbButton] or an [RbChip].
@@ -59,6 +66,10 @@ fun RbTopBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // Rectangular shadow: the bar has no rounded corners, so the same
+            // clip=false shadow used by rounded surfaces just draws a flat
+            // strip under the edge, which is exactly what a header wants.
+            .rbElevated(dimens.elevationCard, RectangleShape)
             .background(colors.surface)
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(
