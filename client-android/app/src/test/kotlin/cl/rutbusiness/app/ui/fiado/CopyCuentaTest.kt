@@ -59,7 +59,7 @@ class CopyCuentaTest {
 
         val feria = mensajeAlDia(feria = true)
         assertTrue(feria.contains("pagó"))
-        assertTrue(feria.contains("Te"))
+        assertTrue(feria.contains("te "))
         assertFalse(feria.lowercase().contains("saldo"))
 
         val formal = mensajeAlDia(feria = false)
