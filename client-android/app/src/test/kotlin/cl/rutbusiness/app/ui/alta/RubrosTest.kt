@@ -1,8 +1,12 @@
 package cl.rutbusiness.app.ui.alta
 
+import cl.rutbusiness.ui.theme.RbDarkColors
+import cl.rutbusiness.ui.theme.RbDefaultDimens
+import cl.rutbusiness.ui.theme.RbLightColors
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -155,5 +159,54 @@ class RubrosTest {
         assertTrue(AYUDA_DE_RUBROS.contains("cartel", ignoreCase = true))
         assertFalse(AYUDA_DE_RUBROS.contains("combo", ignoreCase = true))
         assertFalse(AYUDA_DE_RUBROS.contains("wizard", ignoreCase = true))
+    }
+
+    /**
+     * El cartel de feria (el natural, no elegido) no puede pintarse con el
+     * borde de "elegido".
+     *
+     * Es la prueba del bug real: un `uiautomator dump` en el emulador mostró
+     * el cartel de feria con borde verde grueso y `checked="false"` a la vez —
+     * Siguiente seguía apagado hasta tocarlo nuevamente. La causa no era un
+     * estado desincronizado (`semantics { selected = elegido }` ya decía la
+     * verdad) sino que [bordeColorDeCartel] y [bordeAnchoDeCartel] antes
+     * miraban también si el rubro era el natural, no sólo si estaba elegido.
+     * Sin Compose de por medio: son funciones puras sobre [RbLightColors] /
+     * [RbDarkColors] y [RbDefaultDimens], los mismos valores que usa la
+     * pantalla real.
+     */
+    @Test
+    fun `el cartel natural sin elegir no toma el borde de elegido`() {
+        listOf(RbLightColors, RbDarkColors).forEach { colores ->
+            val bordeLibre = bordeColorDeCartel(elegido = false, colors = colores)
+            val bordeElegido = bordeColorDeCartel(elegido = true, colors = colores)
+
+            assertEquals(
+                "un cartel no elegido tiene que llevar el borde neutro",
+                colores.outlineStrong,
+                bordeLibre,
+            )
+            assertNotEquals(
+                "el borde de un cartel libre no puede ser el de uno elegido",
+                bordeElegido,
+                bordeLibre,
+            )
+        }
+
+        val anchoLibre = bordeAnchoDeCartel(elegido = false, dimens = RbDefaultDimens)
+        val anchoElegido = bordeAnchoDeCartel(elegido = true, dimens = RbDefaultDimens)
+        assertEquals(RbDefaultDimens.border, anchoLibre)
+        assertNotEquals(
+            "el ancho de un cartel libre no puede ser el ancho de foco de uno elegido",
+            anchoElegido,
+            anchoLibre,
+        )
+    }
+
+    /** Elegir sí trae el borde y el ancho de foco: la señal existe, sólo que ahora la manda la única fuente correcta. */
+    @Test
+    fun `el cartel elegido si toma el borde de foco`() {
+        assertEquals(RbLightColors.brandText, bordeColorDeCartel(elegido = true, colors = RbLightColors))
+        assertEquals(RbDefaultDimens.focusRing, bordeAnchoDeCartel(elegido = true, dimens = RbDefaultDimens))
     }
 }
