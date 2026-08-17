@@ -179,6 +179,101 @@ class VentaSueltaTest {
     }
 
     /**
+     * **El caso real más incómodo.** Negocio nuevo, primera vez que alguien
+     * cobra un monto suelto, y quien está en el puesto no es admin -la hija,
+     * la sobrina, quien esté esa mañana-. `POST /products` (admin+) le
+     * contesta 403, y sin fallback el cobro rápido moriría ahí para cualquiera
+     * que no fuera la dueña. Este test prueba que en vez de eso cae a
+     * `POST /products/ensure` (cashier+) y el centinela nace igual.
+     */
+    @Test
+    fun `sin permiso de admin cae al ensure cashier mas`() {
+        val pedidos = mutableListOf<HttpRequestData>()
+        val api = ApiFactory(
+            "http://localhost:8080",
+            ReporteDeRed.Nulo,
+            MockEngine { pedido ->
+                pedidos += pedido
+                val ruta = pedido.url.encodedPath
+                when {
+                    ruta.endsWith("/products") && pedido.method.value == "POST" -> respond(
+                        content = """{"error":{"code":"FORBIDDEN","message":"no autorizado"}}""",
+                        status = HttpStatusCode.Forbidden,
+                        headers = headersOf("Content-Type", "application/json"),
+                    )
+
+                    ruta.endsWith("/products/ensure") -> respond(
+                        // El ensure no manda la marca: el server la deja en
+                        // rb_simple, no en rb_venta_suelta. Se reconoce por
+                        // nombre igual (ver esVentaSuelta).
+                        content = ApiFactory.JSON.encodeToString(producto("p1", NOMBRE_VENTA_SUELTA)),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf("Content-Type", "application/json"),
+                    )
+
+                    else -> respond(
+                        content = """[]""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf("Content-Type", "application/json"),
+                    )
+                }
+            },
+        ) { "token-de-prueba" }
+
+        val r = runBlocking { asegurarVentaSuelta(api) }
+
+        assertTrue("el fallback cashier+ no devolvió el centinela: $r", r is Resultado.Ok)
+        assertEquals(NOMBRE_VENTA_SUELTA, (r as Resultado.Ok).valor.name)
+        assertTrue(
+            "no se intentó primero el camino con marca (admin+)",
+            pedidos.any { it.url.encodedPath.endsWith("/products") && it.method.value == "POST" },
+        )
+        assertTrue(
+            "no se cayó al ensure cashier+ después del 403",
+            pedidos.any { it.url.encodedPath.endsWith("/products/ensure") },
+        )
+    }
+
+    /**
+     * Una falla que no es de permiso -red, servidor caído- no reintenta por
+     * otro camino: reintentar por rol un error que no es de rol escondería el
+     * problema real.
+     */
+    @Test
+    fun `una falla que no es 403 no cae al ensure`() {
+        val pedidos = mutableListOf<HttpRequestData>()
+        val api = ApiFactory(
+            "http://localhost:8080",
+            ReporteDeRed.Nulo,
+            MockEngine { pedido ->
+                pedidos += pedido
+                val ruta = pedido.url.encodedPath
+                when {
+                    ruta.endsWith("/products") && pedido.method.value == "POST" -> respond(
+                        content = """{"error":{"code":"INTERNAL","message":"boom"}}""",
+                        status = HttpStatusCode.InternalServerError,
+                        headers = headersOf("Content-Type", "application/json"),
+                    )
+
+                    else -> respond(
+                        content = """[]""",
+                        status = HttpStatusCode.OK,
+                        headers = headersOf("Content-Type", "application/json"),
+                    )
+                }
+            },
+        ) { "token-de-prueba" }
+
+        val r = runBlocking { asegurarVentaSuelta(api) }
+
+        assertTrue("una falla de servidor tendría que propagarse tal cual", r is Resultado.Falla)
+        assertTrue(
+            "se intentó el ensure sin que la falla fuera de permiso",
+            pedidos.none { it.url.encodedPath.endsWith("/products/ensure") },
+        )
+    }
+
+    /**
      * Y si está en el teléfono, no se pregunta nada: la venta suelta funciona
      * sin señal, que es el punto entero del centinela.
      */

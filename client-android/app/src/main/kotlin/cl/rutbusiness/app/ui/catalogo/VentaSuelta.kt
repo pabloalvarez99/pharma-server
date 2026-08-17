@@ -2,6 +2,7 @@ package cl.rutbusiness.app.ui.catalogo
 
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.catalog.ProductRepository
+import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.net.ApiFactory
 import cl.rutbusiness.core.net.Resultado
 import kotlinx.serialization.json.JsonObject
@@ -35,6 +36,20 @@ import kotlinx.serialization.json.booleanOrNull
  * stock" en las alertas y en el tablero — un producto que la dueña no cargó,
  * gritando un problema que no existe. El colchón lo tapaba por accidente, no por
  * diseño.
+ *
+ * **Quién puede nacerlo la primera vez.** `POST /products` -lo que usa
+ * [crearProducto], y lo único que deja mandar la marca `rb_venta_suelta`- es
+ * admin+ (`crates/api/src/v1/catalog.rs`). En feria quien está en el puesto
+ * casi nunca es admin: es la hija, la sobrina, quien esté esa mañana. Si el
+ * negocio es nuevo y a esa persona le toca cobrar el primer monto suelto de su
+ * vida, sin fallback acá el centinela nunca nacería -403, "Tu usuario no tiene
+ * permiso para esto"- y el cobro rápido, el corazón de la feria, quedaría
+ * muerto para cualquiera que no sea la dueña. [asegurarVentaSuelta] lo resuelve
+ * cayendo a `POST /products/ensure` -cashier+, idempotente por nombre- cuando
+ * el intento admin+ vuelve con [AppError.SinPermiso]. Ese camino no puede
+ * mandar la marca -el server la fija sola en `attrs.rb_simple`, no en
+ * `rb_venta_suelta`-, pero no hace falta: [esVentaSuelta] ya reconoce por
+ * nombre como plan B, que es exactamente para esto.
  */
 
 /** Cómo se llama el centinela. Se ve en el comprobante, así que se lee. */
@@ -80,6 +95,9 @@ fun ventaSueltaEn(productos: List<ProductDto>): ProductDto? =
  * señal y sin nada en el teléfono tiene que decirlo con sus palabras antes:
  * desde acá saldría un error de red genérico, y el problema no es la red sino
  * que todavía no se usó nunca.
+ *
+ * Crear tampoco pide ser admin, aunque el primer intento sí lo sea: ver
+ * [crearCentinela].
  */
 suspend fun asegurarVentaSuelta(
     api: ApiFactory,
@@ -91,17 +109,43 @@ suspend fun asegurarVentaSuelta(
         is Resultado.Falla -> encontrado
 
         is Resultado.Ok -> encontrado.valor.firstOrNull(::esVentaSuelta)?.let { Resultado.Ok(it) }
-            ?: crearProducto(
-                api = api,
-                nombre = NOMBRE_VENTA_SUELTA,
-                // El precio del catálogo no se usa nunca: cada línea lleva el
-                // monto que se dijo. Cero es lo honesto para "no tiene precio".
-                precio = "0",
-                stock = 0,
-                sinInventario = true,
-                extras = JsonObject(mapOf(CLAVE_VENTA_SUELTA to JsonPrimitive(true))),
-            )
+            ?: crearCentinela(api)
     }
+}
+
+/**
+ * Crea el centinela, con marca si se puede y sin ella si no se puede.
+ *
+ * Primer intento: `POST /products` (admin+, [crearProducto]) con la marca
+ * `rb_venta_suelta` en `attrs`. Es el camino bueno -queda a prueba de que
+ * alguien le cambie el nombre después- y funciona siempre que quien esté
+ * cobrando sea la dueña o alguien con su mismo rol.
+ *
+ * Si ese intento vuelve con [AppError.SinPermiso] (403: no es admin), no se
+ * corta ahí. Se reintenta con `POST /products/ensure` (cashier+, sin marca:
+ * el server la deja fija en `attrs.rb_simple`, no en `rb_venta_suelta`) para
+ * que el cobro rápido -que en el puesto lo usa cualquiera, no sólo quien
+ * administra el negocio- no dependa de un rol que la cajera del día puede no
+ * tener. [esVentaSuelta] reconoce este centinela igual, por nombre.
+ *
+ * Cualquier otra falla -red, servidor- se devuelve tal cual del primer
+ * intento: no tiene sentido reintentar por rol un error que no es de rol.
+ */
+private suspend fun crearCentinela(api: ApiFactory): Resultado<ProductDto> {
+    val conMarca = crearProducto(
+        api = api,
+        nombre = NOMBRE_VENTA_SUELTA,
+        // El precio del catálogo no se usa nunca: cada línea lleva el
+        // monto que se dijo. Cero es lo honesto para "no tiene precio".
+        precio = "0",
+        stock = 0,
+        sinInventario = true,
+        extras = JsonObject(mapOf(CLAVE_VENTA_SUELTA to JsonPrimitive(true))),
+    )
+    if (conMarca is Resultado.Falla && conMarca.error is AppError.SinPermiso) {
+        return asegurarProducto(api, nombre = NOMBRE_VENTA_SUELTA, precio = "0")
+    }
+    return conMarca
 }
 
 /**
