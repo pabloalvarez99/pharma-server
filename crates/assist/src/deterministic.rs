@@ -19,6 +19,8 @@ use domain::expenses::service as reports;
 use domain::inventory::service as inventory;
 use domain::prescriptions::model::PrescriptionFilters;
 use domain::prescriptions::service as prescriptions;
+use domain::sales::model::OrderFilters;
+use domain::sales::service as sales;
 use domain::settings;
 use domain::DomainResult;
 
@@ -40,13 +42,31 @@ impl AssistProvider for Deterministic {
             Intent::VentasHoy => ventas(q.db, q.tenant, &m, &q.intent, today_range()).await,
             Intent::VentasAyer => ventas(q.db, q.tenant, &m, &q.intent, yesterday_range()).await,
             Intent::VentasMes => ventas(q.db, q.tenant, &m, &q.intent, month_range()).await,
-            Intent::VentasMesPasado => ventas(q.db, q.tenant, &m, &q.intent, last_month_range()).await,
+            Intent::VentasMesPasado => {
+                ventas(q.db, q.tenant, &m, &q.intent, last_month_range()).await
+            }
             Intent::VentasSemana => ventas(q.db, q.tenant, &m, &q.intent, week_range()).await,
             Intent::ComparativaDia => {
-                comparativa(q.db, q.tenant, &m, &q.intent, today_range(), yesterday_range()).await
+                comparativa(
+                    q.db,
+                    q.tenant,
+                    &m,
+                    &q.intent,
+                    today_range(),
+                    yesterday_range(),
+                )
+                .await
             }
             Intent::ComparativaMes => {
-                comparativa(q.db, q.tenant, &m, &q.intent, month_range(), last_month_range()).await
+                comparativa(
+                    q.db,
+                    q.tenant,
+                    &m,
+                    &q.intent,
+                    month_range(),
+                    last_month_range(),
+                )
+                .await
             }
             Intent::VentasPorMetodo => ventas_por_metodo(q.db, q.tenant, &m, &q.intent).await,
             Intent::IngresosPorMetodo(bucket) => {
@@ -55,14 +75,22 @@ impl AssistProvider for Deterministic {
             Intent::PorVencer => por_vencer(q.db, q.tenant, &q.intent, 30).await,
             Intent::PorVencerSemana => por_vencer(q.db, q.tenant, &q.intent, 7).await,
             Intent::StockProducto(term) => stock_producto(q.db, q.tenant, &q.intent, term).await,
+            Intent::UltimasVentas => ultimas_ventas(q.db, q.tenant, &m, &q.intent).await,
             Intent::CajaActual => caja_actual(q.db, q.tenant, &m, &q.intent).await,
             Intent::TopProductos => top_productos(q.db, q.tenant, &m, &q.intent).await,
             Intent::ClientesTop => clientes_top(q.db, q.tenant, &q.intent).await,
             Intent::BuscarCliente(term) => buscar_cliente(q.db, q.tenant, &q.intent, term).await,
             Intent::ResumenClientes => resumen_clientes(q.db, q.tenant, &q.intent).await,
-            Intent::PrecioProducto(term) => precio_producto(q.db, q.tenant, &m, &q.intent, term).await,
+            Intent::PrecioProducto(term) => {
+                precio_producto(q.db, q.tenant, &m, &q.intent, term).await
+            }
             Intent::MargenMes => margen_mes(q.db, q.tenant, &m, &q.intent).await,
-            Intent::MargenProducto(term) => margen_producto(q.db, q.tenant, &m, &q.intent, term).await,
+            Intent::MargenProducto(term) => {
+                margen_producto(q.db, q.tenant, &m, &q.intent, term).await
+            }
+            Intent::CostoProducto(term) => {
+                costo_producto(q.db, q.tenant, &m, &q.intent, term).await
+            }
             Intent::GastosMes => gastos_mes(q.db, q.tenant, &m, &q.intent).await,
             Intent::PorCobrar => por_cobrar(q.db, q.tenant, &m, &q.intent).await,
             Intent::IvaMes => iva_mes(q.db, q.tenant, &m, &q.intent).await,
@@ -327,6 +355,123 @@ async fn stock_producto(
     })))
 }
 
+/// "Qué vendí recién" — las últimas ventas (lista), no una cifra. REGLA DE
+/// PLATA: no sumamos los montos acá. Si la dueña quiere el total del día, eso
+/// ya lo contesta `ventas()` con el número que calculó el servidor; un total
+/// armado sumando estas filas sería un número distinto del que cobró el
+/// negocio.
+async fn ultimas_ventas(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+) -> DomainResult<Answer> {
+    let rows = sales::list_orders(
+        db,
+        tenant,
+        OrderFilters {
+            limit: Some(5),
+            ..Default::default()
+        },
+    )
+    .await?;
+    if rows.is_empty() {
+        return Ok(Answer::new(intent, "Todavía no registras ninguna venta.")
+            .with_data(serde_json::json!({ "count": 0 })));
+    }
+    let items: Vec<String> = rows
+        .iter()
+        .map(|o| {
+            let hora = o.created_at.format("%H:%M");
+            let metodo = metodo_pago_label(&o.payment_method);
+            let devuelta = if o.status == "refunded" {
+                ", devuelta"
+            } else {
+                ""
+            };
+            format!("{hora} {} ({metodo}{devuelta})", m.fmt(o.total))
+        })
+        .collect();
+    let intro = if rows.len() == 1 {
+        "Lo último que vendiste:".to_string()
+    } else {
+        format!(
+            "Lo último que vendiste ({} ventas, la más nueva primero):",
+            rows.len()
+        )
+    };
+    let text = format!("{intro} {}.", items.join("; "));
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "count": rows.len(),
+        "sales": rows.iter().map(|o| serde_json::json!({
+            "created_at": o.created_at.to_rfc3339(),
+            "total": o.total.to_string(),
+            "payment_method": o.payment_method,
+            "status": o.status,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+/// Etiqueta hablada del método de pago de UNA venta puntual. Distinto del
+/// desglose agregado de `sales_by_method` (que reparte una `pos_mixed` en dos
+/// buckets): acá es una sola fila, así que "mixto" es la respuesta honesta.
+fn metodo_pago_label(pm: &str) -> &'static str {
+    match pm {
+        "pos_cash" => "efectivo",
+        "pos_debit" | "pos_credit" => "tarjeta",
+        "pos_transferencia" => "transferencia",
+        "pos_fiado" => "fiado",
+        "pos_mixed" => "mixto",
+        _ => "otro medio",
+    }
+}
+
+/// La frase textual que la dueña puede decir ahora mismo para registrar el
+/// costo de un producto. Implementada por otro asiento en `actions.rs` en
+/// esta misma ola — acá sólo se ofrece, textual, para que la salida exista
+/// aunque todavía no esté soportada en el merge.
+fn frase_arregla_costo(nombre: &str) -> String {
+    format!("«{nombre} me cuesta 800»")
+}
+
+async fn costo_producto(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+    term: &str,
+) -> DomainResult<Answer> {
+    let products = catalog::list_products(
+        db,
+        tenant,
+        ProductFilters {
+            search: Some(term.to_string()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let Some(p) = products.into_iter().next() else {
+        return Ok(Answer::new(
+            intent,
+            format!("No encontré ningún producto que coincida con «{term}»."),
+        ));
+    };
+    let text = match p.cost_price {
+        Some(cost) => format!("{} te cuesta {}.", p.name, m.fmt(cost)),
+        None => format!(
+            "No tengo registrado cuánto te cuesta {}. Sin ese dato no puedo calcular tu \
+             margen de verdad. Decí {} (cambia el precio real) para guardarlo.",
+            p.name,
+            frase_arregla_costo(&p.name),
+        ),
+    };
+    Ok(Answer::new(intent, text).with_data(serde_json::json!({
+        "name": p.name,
+        "cost_price": p.cost_price.map(|c| c.to_string()),
+    })))
+}
+
 async fn caja_actual(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let sessions = caja::list_sessions(
         db,
@@ -381,7 +526,12 @@ async fn caja_actual(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> Dom
     })))
 }
 
-async fn top_productos(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
+async fn top_productos(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+) -> DomainResult<Answer> {
     let rows = reports::top_products(
         db,
         tenant,
@@ -423,10 +573,11 @@ async fn top_productos(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> D
 
 async fn margen_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
     let rows = reports::margins_daily(db, tenant, month_range()).await?;
-    let (mut rev, mut cost) = (Decimal::ZERO, Decimal::ZERO);
+    let (mut rev, mut cost, mut sin_costo) = (Decimal::ZERO, Decimal::ZERO, 0i64);
     for r in &rows {
         rev += r.revenue;
         cost += r.cost;
+        sin_costo += r.items_without_cost;
     }
     let margin = rev - cost;
     let pct = if rev.is_zero() {
@@ -437,19 +588,34 @@ async fn margen_mes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> Doma
     let text = if rev.is_zero() {
         "No hay ventas este mes para calcular margen.".to_string()
     } else {
-        format!(
+        let cifra = format!(
             "Margen del mes: {} sobre ventas de {} (costo {}), un {}%.",
             m.fmt(margin),
             m.fmt(rev),
             m.fmt(cost),
             pct,
-        )
+        );
+        // El aviso va ANTES de la cifra, no al final: un dueño que lee la
+        // cifra primero puede tomar una decisión de precios con un margen que
+        // en verdad está inflado porque falta costo en el catálogo.
+        if sin_costo > 0 {
+            format!(
+                "Ojo: {sin_costo} {} vendidos este mes no tienen costo registrado, así que \
+                 este margen puede estar inflado (parece que ganas más de lo real). Decí {} \
+                 (cambia nombre y precio) por cada producto para arreglarlo. {cifra}",
+                plural(sin_costo, "ítem", "ítems"),
+                frase_arregla_costo("tomate"),
+            )
+        } else {
+            cifra
+        }
     };
     Ok(Answer::new(intent, text).with_data(serde_json::json!({
         "revenue": rev.to_string(),
         "cost": cost.to_string(),
         "margin": margin.to_string(),
         "margin_pct": pct.to_string(),
+        "items_without_cost": sin_costo,
     })))
 }
 
@@ -479,7 +645,12 @@ async fn stock_bajo(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<An
     })))
 }
 
-async fn resumen_inventario(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
+async fn resumen_inventario(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+) -> DomainResult<Answer> {
     let s = catalog::stats(db, tenant).await?;
     let text = format!(
         "Tienes {} productos ({} activos), {} con stock bajo y {} agotados. Valor de inventario: {}.",
@@ -723,7 +894,12 @@ async fn recetas_mes(db: &Db, tenant: &Thing, intent: &Intent) -> DomainResult<A
 
 /// Purchasing — draft purchase orders pending receipt (count + total). Pairs
 /// with the "recibe la orden de compra" action: shows what is receivable.
-async fn compras_pendientes(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
+async fn compras_pendientes(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+) -> DomainResult<Answer> {
     use domain::purchasing::model::PurchaseOrderFilters;
     use domain::purchasing::service as purchasing;
     let rows = purchasing::list_purchase_orders(
@@ -855,7 +1031,12 @@ async fn comparativa(
     })))
 }
 
-async fn ventas_por_metodo(db: &Db, tenant: &Thing, m: &Money, intent: &Intent) -> DomainResult<Answer> {
+async fn ventas_por_metodo(
+    db: &Db,
+    tenant: &Thing,
+    m: &Money,
+    intent: &Intent,
+) -> DomainResult<Answer> {
     // Antes esto sumaba sólo `cash_amount`/`card_amount` y presentaba los dos
     // como el 100% del mes: con fiado (0039) y transferencia (0043) esa foto
     // MIENTE (la plata que no es efectivo ni tarjeta desaparecía del desglose).
@@ -1075,9 +1256,11 @@ async fn margen_producto(
             intent,
             format!(
                 "{} se vende a {}, pero no tiene costo registrado, así que no puedo \
-                 calcular el margen. Agrega el costo en el producto.",
+                 calcular el margen — sin costo no sé cuánto ganas de verdad. Decí {} \
+                 (con el precio real) para guardarlo.",
                 p.name,
-                m.fmt(p.price)
+                m.fmt(p.price),
+                frase_arregla_costo(&p.name),
             ),
         )
         .with_data(serde_json::json!({ "name": p.name, "price": p.price.to_string() })));
@@ -1229,9 +1412,10 @@ fn ayuda(intent: &Intent, feria: bool) -> Answer {
         return Answer::new(
             intent,
             "Hablame como en el cuaderno. Por ejemplo: «vendí tomates a 2000», \
-             «le fío a don Juan 2000», «¿cuánto vendí hoy?», «¿quién me debe?» \
-             o «¿cuánto me deben?». También: «doña Rosa me pagó 5000» para anotar \
-             un abono, o «ventas de ayer» si querés el día anterior.",
+             «le fío a don Juan 2000», «¿cuánto vendí hoy?», «¿qué vendí recién?», \
+             «¿quién me debe?» o «¿cuánto me deben?». También: «doña Rosa me pagó 5000» \
+             para anotar un abono, «ventas de ayer» si querés el día anterior, o \
+             «¿cuánto me cuesta el tomate?» para saber tu costo.",
         );
     }
     Answer::new(
@@ -1241,7 +1425,8 @@ fn ayuda(intent: &Intent, feria: bool) -> Answer {
          También puedes preguntarme, por ejemplo: «¿cuánto vendí hoy?», «ventas de ayer», \
          «ventas de hoy vs ayer», «ventas del mes pasado», «ventas por método de pago», \
          «gastos del mes», «mejores clientes», «¿cuántos clientes tengo?», «busca el \
-         cliente Juan», «precio de ibuprofeno», «margen de paracetamol», «¿qué se vence \
+         cliente Juan», «¿qué vendí recién?», «precio de ibuprofeno», «¿cuánto me cuesta \
+         el ibuprofeno?», «margen de paracetamol», «¿qué se vence \
          esta semana?», «stock de ibuprofeno», «¿cuánto hay en caja?», «top productos», \
          «margen del mes», «¿qué tengo que reponer?» o «resumen de inventario». Si llevas \
          recetas: «recetas del mes» o «libro de controlados». De compras: «órdenes de \
@@ -1388,5 +1573,31 @@ mod tests {
     fn capitalize_first() {
         assert_eq!(capitalize("hoy llevas"), "Hoy llevas");
         assert_eq!(capitalize(""), "");
+    }
+
+    #[test]
+    fn frase_arregla_costo_is_the_exact_fix_phrase() {
+        assert_eq!(frase_arregla_costo("tomate"), "«tomate me cuesta 800»");
+    }
+
+    #[test]
+    fn metodo_pago_label_covers_known_buckets() {
+        assert_eq!(metodo_pago_label("pos_cash"), "efectivo");
+        assert_eq!(metodo_pago_label("pos_debit"), "tarjeta");
+        assert_eq!(metodo_pago_label("pos_credit"), "tarjeta");
+        assert_eq!(metodo_pago_label("pos_transferencia"), "transferencia");
+        assert_eq!(metodo_pago_label("pos_fiado"), "fiado");
+        assert_eq!(metodo_pago_label("pos_mixed"), "mixto");
+        assert_eq!(metodo_pago_label("weird"), "otro medio");
+    }
+
+    /// Ninguna respuesta de este asiento usa vocabulario de oficina: la lee
+    /// una feriante.
+    #[test]
+    fn no_office_vocabulary_in_new_copy() {
+        let fix = frase_arregla_costo("tomate");
+        for palabra in ["orden", "pedido", "transacción", "boleta"] {
+            assert!(!fix.to_lowercase().contains(palabra), "fix={fix}");
+        }
     }
 }
