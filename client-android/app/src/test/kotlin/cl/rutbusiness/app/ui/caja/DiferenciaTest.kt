@@ -127,6 +127,25 @@ class DiferenciaTest {
         }
     }
 
+    /**
+     * "Queda guardado así y mañana empiezas de nuevo." no nombra ningún objeto
+     * del negocio (a diferencia de "lo anotado" vs "sistema", o "caja" vs
+     * "día"), así que no hay jerga de rubro que cambiar y la frase es la misma
+     * en feria y en retail. Antes esto vivía como un `if (feria) ... else ...`
+     * con las dos ramas idénticas -- código muerto que un refactor futuro
+     * podía "completar" con una diferencia que nunca existió. Esta prueba fija
+     * que la frase es una sola para que quien la toque lo haga a propósito.
+     */
+    @Test
+    fun `la frase de manana es la misma en feria y retail porque no nombra nada del negocio`() {
+        val feria = copyDeDiferencia(pesos, "15000", "17500", "-2500", feria = true)
+        val retail = copyDeDiferencia(pesos, "15000", "17500", "-2500", feria = false)
+        val frase = "Queda guardado así y mañana empiezas de nuevo."
+
+        assertTrue(feria.calma.endsWith(frase))
+        assertTrue(retail.calma.endsWith(frase))
+    }
+
     @Test
     fun `cuando sobra plata tambien se explica solo`() {
         val copy = copyDeDiferencia(
