@@ -250,4 +250,49 @@ class DetalleAccionTest {
         // realidad crea algo sería peor que no decir nada.
         assertEquals("Sí, hazlo", etiquetaDeConfirmar("accion_que_no_existe_todavia"))
     }
+
+    // ---- feria: el detalle de ajustar_stock/crear_producto_rapido no puede decir "Stock" ----
+
+    /**
+     * El bug real: `crear_producto_rapido` y `ajustar_stock` son acciones
+     * compartidas entre rubros, y esta tarjeta las mostraba con la etiqueta
+     * "Stock" también en feria — justo en la pantalla donde se confirma que
+     * se mueve plata. `feria` llega como parámetro (no se puede llamar
+     * `esFeria()` acá, es `@Composable`) y cambia solo esas etiquetas.
+     */
+    @Test
+    fun `en feria el ajuste de stock no dice Stock`() {
+        val ajuste = params("""{ "old_stock": "12", "new_stock": "20" }""")
+        val etiquetas = DetalleAccion.lineas(ajuste, feria = true).map { it.etiqueta }
+        assertTrue(
+            "no debe decir Stock en feria: $etiquetas",
+            etiquetas.none { it.contains("stock", ignoreCase = true) },
+        )
+        assertEquals(listOf("Lo que tenías anotado", "Lo que vas a anotar"), etiquetas)
+    }
+
+    @Test
+    fun `fuera de feria el ajuste de stock sigue diciendo Stock`() {
+        // Retail conserva la palabra: el gate es "no llega a feria", no
+        // "la palabra no existe en la app".
+        val ajuste = params("""{ "old_stock": "12", "new_stock": "20" }""")
+        val etiquetas = DetalleAccion.lineas(ajuste, feria = false).map { it.etiqueta }
+        assertEquals(listOf("Stock que hay hoy", "Stock nuevo"), etiquetas)
+    }
+
+    @Test
+    fun `en feria un stock inicial al crear producto tampoco dice Stock`() {
+        val creacion = params("""{ "product_name": "Tomate", "stock": "10" }""")
+        val etiquetas = DetalleAccion.lineas(creacion, feria = true).map { it.etiqueta }
+        assertTrue(etiquetas.none { it.contains("stock", ignoreCase = true) })
+        assertTrue(etiquetas.contains("Lo que traes"))
+    }
+
+    @Test
+    fun `sin decir feria el comportamiento de siempre no cambia`() {
+        // El default (feria = false) es el mismo resultado que antes de este
+        // parámetro, para no romper ningún llamador que no lo pasa.
+        val ajuste = params("""{ "old_stock": "12", "new_stock": "20" }""")
+        assertEquals(DetalleAccion.lineas(ajuste), DetalleAccion.lineas(ajuste, feria = false))
+    }
 }

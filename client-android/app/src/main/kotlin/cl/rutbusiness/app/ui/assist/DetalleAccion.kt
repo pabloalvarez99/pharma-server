@@ -154,6 +154,22 @@ object DetalleAccion {
         "abre_puesto" to "Abre el puesto",
     )
 
+    /**
+     * En feria nadie dice "stock": es lo que trajiste hoy al puesto. Solo
+     * pisa las claves de [ETIQUETAS] que dicen "Stock" — el resto (Monto,
+     * Cantidad, Cambio…) ya es lenguaje de puesto en los dos rubros. Esta es
+     * la mitad que faltaba: `esFeria()` llega hasta acá desde
+     * `TarjetaPropuesta.kt`, así que estas acciones compartidas
+     * (`crear_producto_rapido`, `ajustar_stock`) ya no le muestran "Stock" a
+     * una feriante.
+     */
+    private val ETIQUETAS_FERIA = mapOf(
+        "stock" to "Lo que traes",
+        "old_stock" to "Lo que tenías anotado",
+        "new_stock" to "Lo que vas a anotar",
+        "set" to "Lo que vas a anotar",
+    )
+
     /** Valores que el server manda en clave y se dicen en castellano. */
     private val VALORES = mapOf(
         "cash" to "efectivo",
@@ -164,7 +180,13 @@ object DetalleAccion {
         "pos_fiado" to "fiado",
     )
 
-    fun lineas(params: JsonObject): List<LineaDetalle> {
+    /**
+     * @param feria viene de `esFeria()` (`ServiciosDeRubro.kt`), pasado como
+     *   parámetro porque es `@Composable` y esta función no lo es. Solo
+     *   cambia qué etiqueta se usa para `stock`/`old_stock`/`new_stock`/`set`
+     *   — ver [ETIQUETAS_FERIA].
+     */
+    fun lineas(params: JsonObject, feria: Boolean = false): List<LineaDetalle> {
         // El carrito es la información más valiosa de la tarjeta y no es un
         // campo escalar: se arma aparte, una fila por producto, y va primero.
         val carrito = params["lines"]?.let(::filasCarrito).orEmpty()
@@ -179,7 +201,8 @@ object DetalleAccion {
 
         val resto = porOrden.mapNotNull { (clave, valor) ->
             val texto = valorLegible(clave, valor) ?: return@mapNotNull null
-            LineaDetalle(etiqueta = ETIQUETAS[clave] ?: humanizar(clave), valor = texto)
+            val etiquetaFeria = if (feria) ETIQUETAS_FERIA[clave] else null
+            LineaDetalle(etiqueta = etiquetaFeria ?: ETIQUETAS[clave] ?: humanizar(clave), valor = texto)
         }
 
         return carrito + resto

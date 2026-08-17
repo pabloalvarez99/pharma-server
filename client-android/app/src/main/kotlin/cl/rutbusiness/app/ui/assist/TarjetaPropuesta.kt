@@ -84,7 +84,7 @@ fun TarjetaPropuesta(
             color = colors.textPrimary,
         )
 
-        Detalle(mensaje.propuesta)
+        Detalle(mensaje.propuesta, feria)
 
         when (val estado = mensaje.estado) {
             EstadoPropuesta.Esperando -> Esperando(
@@ -184,8 +184,10 @@ private fun Esperando(
 
 /** El detalle campo por campo — tarjeta legible del puesto. */
 @Composable
-private fun Detalle(propuesta: PropuestaAccion) {
-    val lineas = remember(propuesta.confirmToken) { DetalleAccion.lineas(propuesta.params) }
+private fun Detalle(propuesta: PropuestaAccion, feria: Boolean) {
+    val lineas = remember(propuesta.confirmToken, feria) {
+        DetalleAccion.lineas(propuesta.params, feria)
+    }
     TarjetaDetalleAccion(lineas = lineas)
 }
 
