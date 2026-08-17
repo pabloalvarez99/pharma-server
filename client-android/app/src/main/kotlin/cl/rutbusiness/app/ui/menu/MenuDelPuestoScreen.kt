@@ -17,7 +17,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import cl.rutbusiness.app.ui.caja.CajaRoute
 import cl.rutbusiness.app.ui.entrada.LocalEntrada
 import cl.rutbusiness.app.ui.impresora.EstadoDeImpresion
 import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
@@ -27,7 +26,6 @@ import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.rubro.packActual
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.rubro.SettingsRubroApi
-import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbConfirmDialog
@@ -56,51 +54,81 @@ import kotlinx.coroutines.launch
  * "Hoy") y el escáner (adentro de Cobrar). Meterlos también sería llenar el
  * menú de puertas repetidas.
  *
- * No es una pestaña ni una pantalla de ajustes de sistema: es la cuarta
- * rutina de "Tu día", exactamente al lado de la caja y el fiado
- * (`TuDiaRoute.kt`), así que no hace falta un cuarto destino en la barra de
- * abajo — que además está tope en tres (`BarraDeNavegacion.kt`).
+ * No es una pestaña ni una pantalla de ajustes de sistema: es una rama más
+ * de la pila de "Tu día" (`Pantalla.kt`), exactamente al lado de la caja y
+ * el fiado, así que no hace falta un cuarto destino en la barra de abajo —
+ * que además está tope en tres (`BarraDeNavegacion.kt`).
+ *
+ * Ya no maneja su propia sub-navegación. Hasta la ola 27 tenía adentro un
+ * segundo `enum SeccionDelMenu` con su propio `when` — un segundo dueño de
+ * la navegación, aparte de `RutinaDelDia` en `TuDiaRoute.kt`, y la
+ * consecuencia era que `CajaRoute` se alcanzaba desde los dos con
+ * semánticas de "volver" distintas. Impresora y cambiar de rubro ahora son
+ * ramas más de la misma pila que maneja `TuDiaRoute` (`Pantalla.Impresora`,
+ * `Pantalla.Rubro`); acá sólo queda la portada.
  *
  * @param onVolver vuelve a "Hoy". Lo pasa `TuDiaRoute`, igual que en caja y
  *   fiado.
+ * @param onAbrirCaja empuja `Pantalla.Caja` en la pila de `TuDiaRoute`.
+ * @param onAbrirImpresora empuja `Pantalla.Impresora`.
+ * @param onAbrirRubro empuja `Pantalla.Rubro`.
  */
 @Composable
 fun MenuDelPuestoRoute(
-    sesion: SessionRepository,
-    estado: EstadoSesion.Activa,
     onVolver: () -> Unit,
+    onAbrirCaja: () -> Unit,
+    onAbrirImpresora: () -> Unit,
+    onAbrirRubro: () -> Unit,
 ) {
-    var seccion by rememberSaveable { mutableStateOf(SeccionDelMenu.Lista) }
-    val volverALista: () -> Unit = { seccion = SeccionDelMenu.Lista }
-
-    when (seccion) {
-        SeccionDelMenu.Lista -> ListaDelMenu(
-            onVolver = onVolver,
-            onAbrirCaja = { seccion = SeccionDelMenu.Caja },
-            onAbrirImpresora = { seccion = SeccionDelMenu.Impresora },
-            onAbrirRubro = { seccion = SeccionDelMenu.Rubro },
-        )
-
-        SeccionDelMenu.Caja -> CajaRoute(sesion = sesion, estado = estado, onVolver = volverALista)
-
-        SeccionDelMenu.Impresora -> PantallaDeImpresoraDelMenu(onVolver = volverALista)
-
-        SeccionDelMenu.Rubro -> PantallaDeCambiarRubro(sesion = sesion, onVolver = volverALista)
-    }
+    ListaDelMenu(
+        onVolver = onVolver,
+        onAbrirCaja = onAbrirCaja,
+        onAbrirImpresora = onAbrirImpresora,
+        onAbrirRubro = onAbrirRubro,
+    )
 }
 
-/** Las cuatro secciones del menú. `Lista` es la portada. */
-private enum class SeccionDelMenu { Lista, Caja, Impresora, Rubro }
+/**
+ * Los dos ritmos en que la dueña usa este menú, para que doce entradas no se
+ * lean como una guía telefónica.
+ *
+ * [Diario]: lo que se toca en medio de un día de puesto — contar la plata,
+ * la impresora, ventas que faltan subir, anotar un gasto. [Mensual]: lo que
+ * se toca una vez y se olvida por semanas — cambiar de rubro, ver márgenes,
+ * preparar un respaldo. El orden de declaración es el orden en que se
+ * dibujan los grupos: [Diario] siempre arriba.
+ *
+ * Dónde cae cada pantalla nueva de las olas 29 a 33 — detalle completo del
+ * empuje a la pila en el KDoc de `Pantalla` — por ritmo de uso:
+ * - Historial de ventas (ola 29): [Diario].
+ * - Devoluciones (ola 29): [Diario] — pasa en el puesto, no una vez al mes.
+ * - Márgenes (ola 31): [Mensual] — se revisa, no se anota en el momento.
+ * - Gastos (ola 32): [Diario] — se anota cada vez que sale plata.
+ * - Respaldo (ola 33): [Mensual].
+ * - Fiado por persona (ola 30) no entra acá: cuelga de [Pantalla.Fiado], no
+ *   de este menú (ver KDoc de `Pantalla`).
+ */
+private enum class GrupoDeMenu { Diario, Mensual }
+
+/** La etiqueta visible de cada [GrupoDeMenu], fijada por `CopyMenuTest`. */
+private fun tituloDeGrupo(grupo: GrupoDeMenu): String = when (grupo) {
+    GrupoDeMenu.Diario -> tituloGrupoDiario()
+    GrupoDeMenu.Mensual -> tituloGrupoMensual()
+}
 
 /** Una fila tocable del menú. */
 private data class EntradaDeMenu(
     val titulo: String,
     val subtitulo: String,
+    val grupo: GrupoDeMenu,
     val onClick: () -> Unit,
 )
 
 /**
- * La portada: la lista de puertas.
+ * La portada: la lista de puertas, agrupada por [GrupoDeMenu] en vez de una
+ * sola lista plana — con cuatro entradas no se nota, con las diez o doce que
+ * llegan en las olas 29 a 33 es la diferencia entre un menú y una guía
+ * telefónica.
  *
  * Gatea por pack (ADR-0022): la impresora sólo se ofrece cuando el rubro la
  * trae (`features.printer`, `false` en feria), y "ventas que faltan subir"
@@ -122,16 +150,38 @@ private fun ListaDelMenu(
 
     val entradas = remember(feria, pack.features.printer, abrirPendientes) {
         buildList {
-            add(EntradaDeMenu(tituloCaja(feria), subtituloCaja(feria), onAbrirCaja))
+            add(
+                EntradaDeMenu(
+                    tituloCaja(feria),
+                    subtituloCaja(feria),
+                    GrupoDeMenu.Diario,
+                    onAbrirCaja,
+                ),
+            )
             if (pack.features.printer) {
-                add(EntradaDeMenu(tituloImpresora(), subtituloImpresora(), onAbrirImpresora))
+                add(
+                    EntradaDeMenu(
+                        tituloImpresora(),
+                        subtituloImpresora(),
+                        GrupoDeMenu.Diario,
+                        onAbrirImpresora,
+                    ),
+                )
             }
             if (abrirPendientes != null) {
-                add(EntradaDeMenu(tituloVentasPendientes(), subtituloVentasPendientes(), abrirPendientes))
+                add(
+                    EntradaDeMenu(
+                        tituloVentasPendientes(),
+                        subtituloVentasPendientes(),
+                        GrupoDeMenu.Diario,
+                        abrirPendientes,
+                    ),
+                )
             }
-            add(EntradaDeMenu(tituloRubro(feria), subtituloRubro(), onAbrirRubro))
+            add(EntradaDeMenu(tituloRubro(feria), subtituloRubro(), GrupoDeMenu.Mensual, onAbrirRubro))
         }
     }
+    val porGrupo = remember(entradas) { entradas.groupBy { it.grupo } }
 
     Column(modifier = Modifier.fillMaxSize()) {
         RbTopBar(title = tituloMenu(feria), subtitle = subtituloMenu(), onBack = onVolver)
@@ -141,15 +191,21 @@ private fun ListaDelMenu(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(dimens.space3),
+            verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
-            RbCard {
-                entradas.forEachIndexed { indice, entrada ->
-                    RbListRow(
-                        title = entrada.titulo,
-                        subtitle = entrada.subtitulo,
-                        onClick = entrada.onClick,
-                    )
-                    if (indice != entradas.lastIndex) RbDivider()
+            GrupoDeMenu.entries.forEach { grupo ->
+                val deEsteGrupo = porGrupo[grupo].orEmpty()
+                if (deEsteGrupo.isNotEmpty()) {
+                    RbCard(title = tituloDeGrupo(grupo)) {
+                        deEsteGrupo.forEachIndexed { indice, entrada ->
+                            RbListRow(
+                                title = entrada.titulo,
+                                subtitle = entrada.subtitulo,
+                                onClick = entrada.onClick,
+                            )
+                            if (indice != deEsteGrupo.lastIndex) RbDivider()
+                        }
+                    }
                 }
             }
         }
@@ -166,9 +222,13 @@ private fun ListaDelMenu(
  * una vez: eso abre la lista de emparejadas de una, en vez de mostrar primero
  * la tarjeta de "reimprimir la última" — la dueña vino a configurar la
  * impresora, no a reimprimir una boleta vieja.
+ *
+ * `internal` y no `private`: es una rama de la pila que maneja `TuDiaRoute`
+ * (`Pantalla.Impresora`), que la llama directo — no pasa por
+ * `MenuDelPuestoRoute`.
  */
 @Composable
-private fun PantallaDeImpresoraDelMenu(onVolver: () -> Unit) {
+internal fun PantallaDeImpresoraDelMenu(onVolver: () -> Unit) {
     val dimens = RbTheme.dimens
     val vm = impresoraViewModel()
 
@@ -217,9 +277,12 @@ private fun PantallaDeImpresoraDelMenu(onVolver: () -> Unit) {
  * Nunca escribe sin confirmar: cambiar de rubro cambia qué ve la dueña en
  * toda la app (agente vs. impresora, fiado vs. recetas), así que
  * [RbConfirmDialog] media el golpe antes de tocar el server.
+ *
+ * `internal` y no `private`: es una rama de la pila que maneja `TuDiaRoute`
+ * (`Pantalla.Rubro`), que la llama directo — no pasa por `MenuDelPuestoRoute`.
  */
 @Composable
-private fun PantallaDeCambiarRubro(sesion: SessionRepository, onVolver: () -> Unit) {
+internal fun PantallaDeCambiarRubro(sesion: SessionRepository, onVolver: () -> Unit) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val scope = rememberCoroutineScope()
