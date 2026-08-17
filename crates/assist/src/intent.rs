@@ -38,6 +38,10 @@ pub enum Intent {
     PorVencerSemana,
     /// Stock of a specific product (the captured search term).
     StockProducto(String),
+    /// Last few sales (list, newest first) — "qué vendí recién". Distinct from
+    /// [`Intent::VentasHoy`]: that answers a single figure for today, this
+    /// answers a short list regardless of date.
+    UltimasVentas,
     /// Cash currently expected in the open drawer.
     CajaActual,
     /// Best-selling products (month-to-date ranking).
@@ -54,6 +58,10 @@ pub enum Intent {
     MargenMes,
     /// Unit margin of a specific product (the captured search term).
     MargenProducto(String),
+    /// What a specific product costs the business to buy/produce (the
+    /// captured search term). Distinct from [`Intent::PrecioProducto`]: cost
+    /// is what she pays, price is what she charges.
+    CostoProducto(String),
     /// Month-to-date expenses (total + breakdown by category).
     GastosMes,
     /// Fiado — cuánto le deben al negocio y quién (cuentas por cobrar).
@@ -98,6 +106,7 @@ impl Intent {
             Intent::PorVencer => "por_vencer",
             Intent::PorVencerSemana => "por_vencer_semana",
             Intent::StockProducto(_) => "stock_producto",
+            Intent::UltimasVentas => "ultimas_ventas",
             Intent::CajaActual => "caja_actual",
             Intent::TopProductos => "top_productos",
             Intent::ClientesTop => "clientes_top",
@@ -106,6 +115,7 @@ impl Intent {
             Intent::PrecioProducto(_) => "precio_producto",
             Intent::MargenMes => "margen_mes",
             Intent::MargenProducto(_) => "margen_producto",
+            Intent::CostoProducto(_) => "costo_producto",
             Intent::GastosMes => "gastos_mes",
             Intent::PorCobrar => "por_cobrar",
             Intent::IvaMes => "iva_mes",
@@ -493,11 +503,29 @@ pub fn parse(question: &str) -> Intent {
         return Intent::ResumenInventario;
     }
 
+    // Cost of a specific product — captured term after a cost cue. MUST
+    // precede the price capture: "cuánto me cuesta X" asks what SHE pays
+    // (cost), "a cuánto vendo X" asks what she charges (price) — same
+    // vocabulary neighbourhood, opposite question.
+    if let Some(term) = capture_cost_product(&q) {
+        return Intent::CostoProducto(term);
+    }
+
     // Price of a specific product — captured term after a price cue. After the
     // inventory summary ("valor inventario") so that doesn't get read as a
     // product-price lookup.
     if let Some(term) = capture_price_product(&q) {
         return Intent::PrecioProducto(term);
+    }
+
+    // Last few sales (a list) — MUST precede the generic sales block below,
+    // whose default is VentasHoy (a single figure). "recién" / "última venta"
+    // / "hace un rato" ask for a list of what she sold, not a number.
+    if contains_any(
+        &q,
+        &["ultima venta", "ultimas ventas", "recien", "hace un rato"],
+    ) {
+        return Intent::UltimasVentas;
     }
 
     // Sales — disambiguate by relative-date window.
@@ -661,12 +689,42 @@ fn capture_price_product(q: &str) -> Option<String> {
         "cuanto sale ",
         "a cuanto esta ",
         "a como esta ",
+        "a cuanto vendo ",
         "que precio tiene ",
     ];
     for cue in CUES {
         if let Some(pos) = q.find(cue) {
             let mut tail = q[pos + cue.len()..].trim();
             // Drop a leading article so "precio del ibuprofeno" → "ibuprofeno".
+            for art in ["el ", "la ", "los ", "las ", "un ", "una ", "producto "] {
+                if let Some(s) = tail.strip_prefix(art) {
+                    tail = s.trim();
+                }
+            }
+            let term = strip_trailing_punct(tail);
+            if !term.is_empty() {
+                return Some(term.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Cues that introduce a product name in a cost question ("cuánto me cuesta
+/// X", "a cómo me sale X"). Cost is what SHE pays a supplier — distinct from
+/// [`capture_price_product`], which is what she charges a customer.
+fn capture_cost_product(q: &str) -> Option<String> {
+    const CUES: &[&str] = &[
+        "cuanto me cuesta ",
+        "a como me sale ",
+        "a cuanto me sale ",
+        "costo de ",
+        "costo del ",
+        "en cuanto compro ",
+    ];
+    for cue in CUES {
+        if let Some(pos) = q.find(cue) {
+            let mut tail = q[pos + cue.len()..].trim();
             for art in ["el ", "la ", "los ", "las ", "un ", "una ", "producto "] {
                 if let Some(s) = tail.strip_prefix(art) {
                     tail = s.trim();
@@ -1076,6 +1134,104 @@ mod tests {
     }
 
     #[test]
+    fn ultimas_ventas_synonyms() {
+        for q in [
+            "¿qué vendí recién?",
+            "¿cuáles fueron las últimas ventas?",
+            "muéstrame la última venta",
+            "¿qué vendí hace un rato?",
+            "las últimas ventas",
+        ] {
+            assert_eq!(parse(q), Intent::UltimasVentas, "q={q}");
+        }
+        // Contraste: "cuánto" + "hoy" pide una cifra (VentasHoy), no una lista.
+        assert_eq!(parse("¿cuánto vendí hoy?"), Intent::VentasHoy);
+        assert_eq!(parse("cuánto vendí hoy"), Intent::VentasHoy);
+    }
+
+    #[test]
+    fn costo_producto_captures_term() {
+        for q in [
+            "¿cuánto me cuesta el tomate?",
+            "¿a cómo me sale el tomate?",
+            "¿cuál es el costo del tomate?",
+            "¿en cuánto compro el tomate?",
+        ] {
+            assert_eq!(parse(q), Intent::CostoProducto("tomate".into()), "q={q}");
+        }
+        // Contraste: precio es lo que ella cobra, costo es lo que a ella le
+        // cuesta. Misma vecindad léxica, pregunta opuesta.
+        assert_eq!(
+            parse("¿a cuánto vendo el tomate?"),
+            Intent::PrecioProducto("tomate".into())
+        );
+        assert_eq!(
+            parse("¿cuánto me cuesta el tomate?"),
+            Intent::CostoProducto("tomate".into())
+        );
+    }
+
+    /// Barrido de frases que ya funcionaban: un patrón nuevo no puede robarse
+    /// preguntas viejas.
+    #[test]
+    fn regression_sweep_existing_intents_unchanged() {
+        assert_eq!(parse("ventas hoy"), Intent::VentasHoy);
+        assert_eq!(parse("cuánto vendí hoy?"), Intent::VentasHoy);
+        assert_eq!(parse("ventas de ayer"), Intent::VentasAyer);
+        assert_eq!(parse("ventas del mes"), Intent::VentasMes);
+        assert_eq!(parse("ventas del mes pasado"), Intent::VentasMesPasado);
+        assert_eq!(parse("ventas de la semana"), Intent::VentasSemana);
+        assert_eq!(parse("ventas de hoy vs ayer"), Intent::ComparativaDia);
+        assert_eq!(
+            parse("ventas de este mes vs el mes pasado"),
+            Intent::ComparativaMes
+        );
+        assert_eq!(parse("ventas por método de pago"), Intent::VentasPorMetodo);
+        assert_eq!(
+            parse("ventas por transferencia"),
+            Intent::IngresosPorMetodo(Some("transferencia".into()))
+        );
+        assert_eq!(parse("qué se vence"), Intent::PorVencer);
+        assert_eq!(parse("qué se vence esta semana"), Intent::PorVencerSemana);
+        assert_eq!(
+            parse("stock de paracetamol"),
+            Intent::StockProducto("paracetamol".into())
+        );
+        assert_eq!(parse("cuánto hay en caja"), Intent::CajaActual);
+        assert_eq!(parse("top productos"), Intent::TopProductos);
+        assert_eq!(parse("mejores clientes"), Intent::ClientesTop);
+        assert_eq!(
+            parse("busca el cliente Juan Pérez"),
+            Intent::BuscarCliente("juan perez".into())
+        );
+        assert_eq!(parse("cuántos clientes tengo"), Intent::ResumenClientes);
+        assert_eq!(
+            parse("precio de paracetamol"),
+            Intent::PrecioProducto("paracetamol".into())
+        );
+        assert_eq!(parse("margen del mes"), Intent::MargenMes);
+        assert_eq!(
+            parse("margen de paracetamol"),
+            Intent::MargenProducto("paracetamol".into())
+        );
+        assert_eq!(parse("gastos del mes"), Intent::GastosMes);
+        assert_eq!(parse("cuánto me deben"), Intent::PorCobrar);
+        assert_eq!(parse("iva del mes"), Intent::IvaMes);
+        assert_eq!(parse("qué tengo que reponer"), Intent::StockBajo);
+        assert_eq!(parse("resumen del inventario"), Intent::ResumenInventario);
+        assert_eq!(parse("prepárame el día"), Intent::ResumenDia);
+        assert_eq!(parse("libro de controlados"), Intent::Controlados);
+        assert_eq!(parse("recetas del mes"), Intent::RecetasMes);
+        assert_eq!(
+            parse("órdenes de compra pendientes"),
+            Intent::ComprasPendientes
+        );
+        assert_eq!(parse("proveedores"), Intent::Proveedores);
+        assert_eq!(parse("ayuda"), Intent::Ayuda);
+        assert_eq!(parse("cuéntame un chiste"), Intent::Unknown);
+    }
+
+    #[test]
     fn labels_are_stable() {
         assert_eq!(Intent::VentasHoy.label(), "ventas_hoy");
         assert_eq!(Intent::VentasAyer.label(), "ventas_ayer");
@@ -1098,6 +1254,8 @@ mod tests {
             "margen_producto"
         );
         assert_eq!(Intent::StockProducto("x".into()).label(), "stock_producto");
+        assert_eq!(Intent::UltimasVentas.label(), "ultimas_ventas");
+        assert_eq!(Intent::CostoProducto("x".into()).label(), "costo_producto");
         assert_eq!(Intent::ResumenDia.label(), "resumen_dia");
         assert_eq!(Intent::Controlados.label(), "controlados");
         assert_eq!(Intent::RecetasMes.label(), "recetas_mes");
