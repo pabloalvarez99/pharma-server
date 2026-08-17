@@ -68,19 +68,22 @@ class TarjetaRescateTest {
             .assertCountEquals(2)
         assertTrue(payload.startsWith("rutbusiness-rescue:v1:puesto-rosa:"))
         // PDF / impresión: botón en el scroll (no se toca en Robolectric).
-        compose.onNodeWithText("Imprimir o guardar PDF")
+        // Ola 20 acortó el label a "Imprimir / PDF" (ADR-0022, sin jerga).
+        compose.onNodeWithText("Imprimir / PDF")
             .performScrollTo()
             .assertIsDisplayed()
         // Botón anclado abajo (fuera del scroll): siempre a la vista.
-        compose.onNodeWithText("Ya la anoté en el cuaderno")
+        // Ola 20 acortó el label a "Ya la anoté" (ADR-0022, sin jerga).
+        compose.onNodeWithText("Ya la anoté")
             .assertIsDisplayed()
             .performClick()
         compose.waitForIdle()
         assertTrue(listo)
 
         // Compartir manda el texto de la tarjeta, con las palabras adentro:
-        // es lo que la dueña pega en su nota.
-        compose.onNodeWithText("Compartir a una nota", substring = true)
+        // es lo que la dueña pega en su nota. Ola 20 acortó el label a
+        // "Guardar en Notas" (ADR-0022); la acción sigue siendo la misma.
+        compose.onNodeWithText("Guardar en Notas", substring = true)
             .performScrollTo()
             .performClick()
         compose.waitForIdle()
