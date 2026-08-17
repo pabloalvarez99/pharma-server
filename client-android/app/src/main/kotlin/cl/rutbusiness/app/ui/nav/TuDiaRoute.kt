@@ -7,12 +7,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import cl.rutbusiness.app.ui.caja.CajaRoute
 import cl.rutbusiness.app.ui.fiado.FiadoRoute
+import cl.rutbusiness.app.ui.menu.MenuDelPuestoRoute
 import cl.rutbusiness.app.ui.resumen.ResumenRoute
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 
-/** Las tres cosas que se hacen desde "Tu día". */
-private enum class RutinaDelDia { Resumen, Caja, Fiado }
+/**
+ * Las cosas que se hacen desde "Tu día".
+ *
+ * [Menu] se agregó en la ola de visibilidad: es la puerta a lo que existe y
+ * funciona pero no tenía ningún camino desde la interfaz (impresora, ventas
+ * que faltan subir, contar la plata en feria, cambiar de rubro). Mismo motivo
+ * que [Caja] y [Fiado] para no ser una pestaña propia — ver el KDoc de
+ * [TuDiaRoute] — así que entra acá como una rutina más.
+ */
+private enum class RutinaDelDia { Resumen, Caja, Fiado, Menu }
 
 /**
  * "Tu día": el resumen y las dos rutinas que salen de él.
@@ -59,11 +68,14 @@ internal fun TuDiaRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) 
             estado = estado,
             onIrALaCaja = { rutina = RutinaDelDia.Caja },
             onIrAlFiado = { rutina = RutinaDelDia.Fiado },
+            onAbrirMenu = { rutina = RutinaDelDia.Menu },
             recargasPedidas = vueltas,
         )
 
         RutinaDelDia.Caja -> CajaRoute(sesion = sesion, estado = estado, onVolver = volver)
 
         RutinaDelDia.Fiado -> FiadoRoute(sesion = sesion, estado = estado, onVolver = volver)
+
+        RutinaDelDia.Menu -> MenuDelPuestoRoute(sesion = sesion, estado = estado, onVolver = volver)
     }
 }

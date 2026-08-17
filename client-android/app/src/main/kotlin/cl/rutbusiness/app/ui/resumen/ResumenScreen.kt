@@ -3,6 +3,7 @@ package cl.rutbusiness.app.ui.resumen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -46,7 +47,12 @@ import cl.rutbusiness.ui.theme.rbHeading
  * @param onIrALaCaja abre el ritual de la caja. Sale del bloque "En la caja",
  *   que es donde la dueña ya está mirando cuando se lo pregunta.
  * @param onIrAlFiado abre "quién me debe", desde el bloque que muestra el total.
- * @param recargasPedidas cambia cada vez que se vuelve de una de esas dos
+ * @param onAbrirMenu abre el menú del puesto (caja en feria, impresora, ventas
+ *   pendientes, cambiar de rubro). Vive en la barra de arriba, al lado de
+ *   "Actualizar" — es el único lugar de toda la app donde alcanza sin pasar
+ *   por Cobrar ni por el agente, y por eso lo carga "Tu día" y no una pestaña
+ *   propia (la barra de abajo está tope en tres, ver `BarraDeNavegacion.kt`).
+ * @param recargasPedidas cambia cada vez que se vuelve de una de esas
  *   pantallas. El `ViewModel` sobrevive al cambio y su carga inicial ya corrió,
  *   así que sin esto el resumen mostraría la caja y la deuda de hace un rato.
  */
@@ -56,6 +62,7 @@ fun ResumenRoute(
     estado: EstadoSesion.Activa,
     onIrALaCaja: () -> Unit = {},
     onIrAlFiado: () -> Unit = {},
+    onAbrirMenu: () -> Unit = {},
     recargasPedidas: Int = 0,
 ) {
     val offline = LocalOffline.current
@@ -73,7 +80,7 @@ fun ResumenRoute(
         if (recargasPedidas > 0) vm.cargar()
     }
 
-    ResumenScreen(vm = vm, onIrALaCaja = onIrALaCaja, onIrAlFiado = onIrAlFiado)
+    ResumenScreen(vm = vm, onIrALaCaja = onIrALaCaja, onIrAlFiado = onIrAlFiado, onAbrirMenu = onAbrirMenu)
 }
 
 /**
@@ -99,6 +106,7 @@ private fun ResumenScreen(
     vm: ResumenViewModel,
     onIrALaCaja: () -> Unit,
     onIrAlFiado: () -> Unit,
+    onAbrirMenu: () -> Unit,
 ) {
     val dimens = RbTheme.dimens
 
@@ -117,12 +125,27 @@ private fun ResumenScreen(
             } ?: vm.nombreDelPuesto?.takeIf { feria && it.isNotBlank() }
                 ?: subtituloHoy(feria),
             actions = {
-                RbButton(
-                    label = labelActualizarHoy(feria),
-                    onClick = vm::cargar,
-                    variant = RbButtonVariant.Secondary,
-                    enabled = !vm.cargando,
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(dimens.space2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RbButton(
+                        label = labelActualizarHoy(feria),
+                        onClick = vm::cargar,
+                        variant = RbButtonVariant.Secondary,
+                        enabled = !vm.cargando,
+                    )
+                    // Puerta al menú del puesto: sin esto la impresora, las
+                    // ventas que faltan subir y cambiar de rubro no tenían
+                    // ningún camino desde la interfaz. Botón chico y al lado
+                    // de "Actualizar" — nunca en Cobrar, que es la pantalla
+                    // que no se puede ensuciar.
+                    RbButton(
+                        label = labelAbrirMenuHoy(),
+                        onClick = onAbrirMenu,
+                        variant = RbButtonVariant.Secondary,
+                    )
+                }
             },
         )
 
