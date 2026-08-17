@@ -26,13 +26,13 @@ internal fun copyBuscarCobrar(barcode: Boolean): CopyBuscarCobrar =
         CopyBuscarCobrar(
             etiqueta = "¿Qué vendiste?",
             placeholder = "Tomate, cilantro…",
-            ayudaOnline = "Escribí el nombre (tomate, atado, bolsa…).",
+            ayudaOnline = "Escribe el nombre (tomate, atado, bolsa…).",
         )
     }
 
 /** Subtítulo del paso buscar: mesa del puesto, no panel de POS. */
 internal fun copySubtituloBuscar(feria: Boolean): String =
-    if (feria) "Anotá lo que se lleva" else "Busca el producto y agrégalo"
+    if (feria) "Anota lo que se lleva" else "Busca el producto y agrégalo"
 
 /**
  * Resumen de la barra inferior del carrito.
@@ -155,9 +155,9 @@ internal fun pistaBusquedaVacia(
     if (feria && q.isNotEmpty()) {
         val fraseAgente = "«vendí $q a 2000»"
         return if (puedeCargar) {
-            "No está en lo que vendes. Tocá «Agregar una cosa» o decile al agente: $fraseAgente."
+            "No está en lo que vendes. Toca «Agregar una cosa» o dile al agente: $fraseAgente."
         } else {
-            "Decile al agente: $fraseAgente."
+            "Dile al agente: $fraseAgente."
         }
     }
     return if (puedeCargar) {

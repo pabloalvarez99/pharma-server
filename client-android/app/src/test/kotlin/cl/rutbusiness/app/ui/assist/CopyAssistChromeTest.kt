@@ -31,16 +31,16 @@ class CopyAssistChromeTest {
     }
 
     @Test
-    fun `feria habla de puesto con Decime Decirle y anotando`() {
+    fun `feria habla de puesto con Dime Decirle y anotando`() {
         val c = copyAssistChrome(feria = true)
-        assertEquals("Decime qué pasó", c.tituloBienvenida)
+        assertEquals("Dime qué pasó", c.tituloBienvenida)
         assertEquals("Decirle", c.enviar)
         assertEquals("Estoy anotando…", c.pensando)
         assertEquals("Vendí, fié, ¿cuánto saqué?", c.etiquetaCampo)
         assertEquals("Decirle de nuevo", c.reintentar)
         assertTrue(
             "chips feria invitan a tocar: ${c.etiquetaChips}",
-            c.etiquetaChips.contains("Tocá", ignoreCase = true),
+            c.etiquetaChips.contains("Toca", ignoreCase = true),
         )
         val todo = listOf(
             c.tituloBienvenida,

@@ -517,7 +517,7 @@ private fun ElegirAncho(vm: ImpresoraViewModel, impresora: ImpresoraConocida) {
             color = colors.textPrimary,
         )
         Text(
-            text = "Mirá el rollo que le pusiste: el angosto cabe en la palma; el ancho es " +
+            text = "Mira el rollo que le pusiste: el angosto cabe en la palma; el ancho es " +
                 "el de supermercado.",
             style = RbTheme.typography.support,
             color = colors.textSecondary,

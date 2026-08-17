@@ -309,7 +309,7 @@ class TarjetaPropuestaEscalaTest {
         compose.onNodeWithText("Antes de hacerlo, revisa")
             .performScrollTo()
             .assertIsDisplayed()
-        compose.onNodeWithText("Sí, anotá eso")
+        compose.onNodeWithText("Sí, anota eso")
             .performScrollTo()
             .assertIsDisplayed()
         compose.onNodeWithText("Mejor no")

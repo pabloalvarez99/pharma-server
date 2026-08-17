@@ -71,7 +71,7 @@ internal fun cargandoDetalle(feria: Boolean): String =
 internal fun errorSinCuenta(feria: Boolean): String =
     if (feria) {
         "No pudimos ver cuánto te debe esta persona. Toca atrás y vuelve a " +
-            "abrirla; si sigue igual, revisá la señal e intentá de nuevo."
+            "abrirla; si sigue igual, revisa la señal e intenta de nuevo."
     } else {
         "No pudimos traer la cuenta de esta persona. Toca atrás y vuelve a " +
             "abrirla; si sigue igual, revisa que el computador del negocio esté " +

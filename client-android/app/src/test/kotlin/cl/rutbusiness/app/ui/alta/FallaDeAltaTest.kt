@@ -99,7 +99,7 @@ class FallaDeAltaTest {
     fun `datos rechazados sin mensaje manda a revisar lo escrito`() {
         val falla = FallaDeAlta.DatosRechazados("")
         assertEquals("Esos datos no sirvieron", falla.titulo)
-        assertTrue(falla.queHacer.contains("Revisá", ignoreCase = true))
+        assertTrue(falla.queHacer.contains("Revisa", ignoreCase = true))
         assertFalse(falla.titulo.contains("sistema", ignoreCase = true))
         assertFalse(falla.queHacer.contains("sistema", ignoreCase = true))
         assertFalse(falla.queHacer.contains("computador", ignoreCase = true))

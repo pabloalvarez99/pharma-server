@@ -19,7 +19,7 @@ package cl.rutbusiness.app.ui.caja
 internal fun copyErrorEsperadoAbierta(feria: Boolean): String =
     if (feria) {
         "No pudimos traer cuánta plata debería haber en el puesto. El día " +
-            "sigue abierto y podés seguir vendiendo; tocá «Actualizar» arriba " +
+            "sigue abierto y puedes seguir vendiendo; toca «Actualizar» arriba " +
             "para volver a pedirla."
     } else {
         "No pudimos traer la cuenta de la caja. La caja sigue abierta y puedes " +
@@ -43,7 +43,7 @@ internal fun copyDesgloseAbierta(feria: Boolean): CopyDesgloseAbierta =
         CopyDesgloseAbierta(
             titulo = "De dónde sale",
             apertura = "Con lo que abriste",
-            // Mismo vocabulario que el vacío de movimientos («cobrás en billete»).
+            // Mismo vocabulario que el vacío de movimientos («cobras en billete»).
             ventasEfectivo = "Cobrado en billete",
             entradas = "Metiste a mano",
             salidas = "Sacaste a mano",

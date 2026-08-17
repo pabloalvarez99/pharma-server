@@ -64,8 +64,8 @@ class AssistSugerenciasFeriaTest {
 
     @Test
     fun `botones de la propuesta en feria suenan hablados`() {
-        assertEquals("Sí, anotá eso", etiquetaDeConfirmar("registrar_venta", feria = true))
-        assertEquals("Sí, anotá eso", etiquetaDeConfirmar("registrar_fiado", feria = true))
+        assertEquals("Sí, anota eso", etiquetaDeConfirmar("registrar_venta", feria = true))
+        assertEquals("Sí, anota eso", etiquetaDeConfirmar("registrar_fiado", feria = true))
         assertEquals("Mejor no", etiquetaDeCancelar(feria = true))
         assertEquals("No, déjalo así", etiquetaDeCancelar(feria = false))
         assertEquals(

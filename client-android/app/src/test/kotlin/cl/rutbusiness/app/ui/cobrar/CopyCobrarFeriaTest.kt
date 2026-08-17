@@ -174,7 +174,7 @@ class CopyCobrarFeriaTest {
 
     @Test
     fun `subtitulo feria es de mesa`() {
-        assertEquals("Anotá lo que se lleva", copySubtituloBuscar(feria = true))
+        assertEquals("Anota lo que se lleva", copySubtituloBuscar(feria = true))
         assertEquals("Busca el producto y agrégalo", copySubtituloBuscar(feria = false))
     }
 

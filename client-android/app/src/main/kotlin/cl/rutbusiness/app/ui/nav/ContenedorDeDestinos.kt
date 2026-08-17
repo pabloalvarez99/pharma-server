@@ -403,7 +403,7 @@ internal fun ContenedorDeDestinos(
                                                 val msg =
                                                     "Hay ${listado.valor.size} meta(s) " +
                                                         "sin backup_id (server viejo). " +
-                                                        "Actualizá el nodo o usá el sobre local."
+                                                        "Actualiza el nodo o usa el sobre local."
                                                 estadoRespaldo = EstadoRespaldoUi(
                                                     mensaje = msg,
                                                     bytes = 0,
@@ -418,8 +418,8 @@ internal fun ContenedorDeDestinos(
                                                         estadoRespaldo = EstadoRespaldoUi(
                                                             mensaje =
                                                                 "Bajé el sobre ${d.valor.backupId}. " +
-                                                                    "Escribí la llave del cuaderno " +
-                                                                    "y tocá Abrir respaldo.",
+                                                                    "Escribe la llave del cuaderno " +
+                                                                    "y toca Abrir respaldo.",
                                                             bytes = d.valor.meta.sizeBytes.toInt(),
                                                             ventas = 0,
                                                         )

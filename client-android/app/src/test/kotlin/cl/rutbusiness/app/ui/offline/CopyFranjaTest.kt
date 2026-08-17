@@ -84,13 +84,13 @@ class CopyFranjaTest {
     }
 
     @Test
-    fun `feria invita con voseo al tocar`() {
+    fun `feria invita a tocar en tuteo chileno`() {
         assertEquals(
-            "Tocá para ver cuáles.",
+            "Toca para ver cuáles.",
             detalleFranja(conectado = true, esperando = 0, rechazadas = 1, feria = true),
         )
         assertEquals(
-            "Tocá para verlas.",
+            "Toca para verlas.",
             detalleFranja(conectado = true, esperando = 1, rechazadas = 0, feria = true),
         )
     }

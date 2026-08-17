@@ -53,7 +53,7 @@ internal fun pasosDelPrimerUso(
             titulo = "Esto es RutAgent",
             encabezado = "El cuaderno del puesto, en tu teléfono",
             parrafos = listOf(
-                "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
+                "Anotas una venta con la voz o el teclado, sabes quién te debe y " +
                     "cuánto hiciste hoy — más rápido que el cuaderno de mil pesos.",
                 "Hablale como en la mesa. Antes de guardar nada, te lo muestra " +
                     "para que lo revises.",
@@ -64,7 +64,7 @@ internal fun pasosDelPrimerUso(
             titulo = "Esto es RutAgent",
             encabezado = "El cuaderno del negocio, en tu teléfono",
             parrafos = listOf(
-                "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
+                "Anotas una venta con la voz o el teclado, sabes quién te debe y " +
                     "cuánto hiciste hoy — más rápido que el cuaderno de mil pesos.",
                 "Hablale como a un empleado de confianza. Antes de guardar nada, " +
                     "te lo muestra para que lo revises.",
@@ -76,18 +76,18 @@ internal fun pasosDelPrimerUso(
         titulo = "Dónde se guarda todo",
         encabezado = "En el teléfono y en un respaldo cifrado",
         parrafos = listOf(
-            "Vendés aunque no haya señal: lo del día queda en el aparato.",
-            "Si activás el respaldo, se sube cifrado con una llave tuya. " +
-                "Nosotros no podemos leerla ni recuperarla: la escribís en el " +
+            "Vendes aunque no haya señal: lo del día queda en el aparato.",
+            "Si activas el respaldo, se sube cifrado con una llave tuya. " +
+                "Nosotros no podemos leerla ni recuperarla: la escribes en el " +
                 "cuaderno el primer día (tarjeta de rescate).",
         ),
         remate = "Sin esa llave, el respaldo no sirve. Con ella y tu cuenta, " +
-            "volvés a entrar si se te rompe el teléfono.",
+            "vuelves a entrar si se te rompe el teléfono.",
     )
 
     val pasoTres = if (nube) {
         PasoDelPrimerUso(
-            titulo = "Lo que necesitás a mano",
+            titulo = "Lo que necesitas a mano",
             encabezado = "Para empezar",
             parrafos = emptyList(),
             lista = listOf(
@@ -98,7 +98,7 @@ internal fun pasosDelPrimerUso(
         )
     } else {
         PasoDelPrimerUso(
-            titulo = "Lo que necesitás a mano",
+            titulo = "Lo que necesitas a mano",
             encabezado = "Para entrar la primera vez",
             parrafos = emptyList(),
             lista = listOf(
@@ -107,7 +107,7 @@ internal fun pasosDelPrimerUso(
                 "El nombre corto de tu negocio.",
                 cuenta,
             ),
-            remate = "¿No los tenés? Pedíselos a quien instaló el sistema. " +
+            remate = "¿No los tienes? Pídeselos a quien instaló el sistema. " +
                 "Quedaron anotados el día que lo instaló.",
         )
     }

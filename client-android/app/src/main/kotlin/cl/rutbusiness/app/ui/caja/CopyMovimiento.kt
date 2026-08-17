@@ -20,11 +20,11 @@ internal fun copyMotivoMovimiento(feria: Boolean, esRetiro: Boolean): CopyMotivo
     if (feria) {
         if (esRetiro) {
             CopyMotivoMovimiento(
-                tituloCard = "¿Pa qué lo sacás?",
+                tituloCard = "¿Pa qué lo sacas?",
                 etiqueta = "En una línea",
                 placeholder = "Le pagué al del pan",
                 ayuda = "Como en el cuaderno: una raya con el porqué. " +
-                    "Al final del día sabés pa dónde se fue esa plata.",
+                    "Al final del día sabes pa dónde se fue esa plata.",
             )
         } else {
             CopyMotivoMovimiento(
@@ -32,7 +32,7 @@ internal fun copyMotivoMovimiento(feria: Boolean, esRetiro: Boolean): CopyMotivo
                 etiqueta = "En una línea",
                 placeholder = "Traje cambio de mi casa",
                 ayuda = "Como en el cuaderno: una raya con el porqué. " +
-                    "Al final del día sabés de dónde entró esa plata.",
+                    "Al final del día sabes de dónde entró esa plata.",
             )
         }
     } else {

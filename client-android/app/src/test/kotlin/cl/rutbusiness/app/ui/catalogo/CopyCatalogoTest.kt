@@ -49,7 +49,7 @@ class CopyCatalogoTest {
         assertEquals("Lo que se vende hoy", copy.subtitulo)
         assertEquals("Buscar cosa", copy.etiquetaBuscar)
         assertEquals("Tomate, cilantro, palta…", copy.placeholderBuscar)
-        assertEquals("Con el precio ya lo cobrás", copy.subtituloAlta)
+        assertEquals("Con el precio ya lo cobras", copy.subtituloAlta)
         assertEquals("Con el nombre y el precio alcanza.", copy.pieFormulario)
         assertFalse(
             "feria no nombra código de barras en el form: era \"${copy.pieFormulario}\"",

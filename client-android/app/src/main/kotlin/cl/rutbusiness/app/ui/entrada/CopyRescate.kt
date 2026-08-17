@@ -46,10 +46,10 @@ internal fun copyRescate(
         subtituloBarra = "Con la tarjeta de papel",
         tituloCartel = "Si perdiste el teléfono o lo cambiaste",
         cuerpoCartel = if (esFeria) {
-            "Con la tarjeta de papel del cuaderno volvés a tu puesto. " +
+            "Con la tarjeta de papel del cuaderno vuelves a tu puesto. " +
                 "No hace falta tu clave: las 12 palabras son la llave."
         } else {
-            "Con la tarjeta que la app te pidió anotar volvés a tu $cosa. " +
+            "Con la tarjeta que la app te pidió anotar vuelves a tu $cosa. " +
                 "No hace falta tu clave: la tarjeta es la llave."
         },
         tituloCampos = if (pideDireccion) {
@@ -68,7 +68,7 @@ internal fun copyRescate(
         },
         tituloPalabras = "Las 12 palabras de la tarjeta",
         labelPalabras = "Las 12 palabras (o los 5 bloques)",
-        ayudaPalabras = "Copialas separadas por espacios, en el mismo orden. " +
+        ayudaPalabras = "Cópialas separadas por espacios, en el mismo orden. " +
             "No importan mayúsculas ni tildes.",
         avisoPrivacidad = "La tarjeta no sale de este teléfono. Lo que viaja es una prueba " +
             "derivada de ella, que sólo sirve para pedir tu paquete y no para abrirlo.",
@@ -78,9 +78,9 @@ internal fun copyRescate(
         tituloFalla = "No se pudo traer el respaldo",
         tituloListo = "Listo",
         errorDireccion = if (pideDireccion) {
-            "Revisá la dirección: algo como 192.168.1.10:8080 o app.rutbusiness.cl."
+            "Revisa la dirección: algo como 192.168.1.10:8080 o app.rutbusiness.cl."
         } else {
-            "RutAgent no responde. Reintentá en un momento."
+            "RutAgent no responde. Reintenta en un momento."
         },
     )
 }

@@ -51,8 +51,8 @@ internal fun etiquetaDescartar(): String = "Descartar"
  */
 internal fun ayudaVentaRechazada(feria: Boolean): String =
     if (feria) {
-        "Quedó en el teléfono y no se va a reintentar sola. Revisá qué pasó y " +
-            "volvé a cobrarla si corresponde; recién ahí descártala de acá."
+        "Quedó en el teléfono y no se va a reintentar sola. Revisa qué pasó y " +
+            "vuelve a cobrarla si corresponde; recién ahí descártala de acá."
     } else {
         "No se va a reintentar sola. Revisa qué pasó y vuelve a cobrarla si " +
             "corresponde; recién ahí descártala de acá."

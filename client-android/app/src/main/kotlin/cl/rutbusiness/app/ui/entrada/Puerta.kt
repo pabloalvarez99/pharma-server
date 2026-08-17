@@ -67,23 +67,23 @@ internal fun Puerta(
 
     val tituloBarra = if (esFeria) "Tu puesto" else "Tu negocio"
     val subtituloBarra = if (yaEntroAlgunaVez) {
-        "Entrá de nuevo, o creá otro"
+        "Entra de nuevo, o crea otro"
     } else {
-        "Creá uno, o entrá al que ya tenés"
+        "Crea uno, o entra al que ya tienes"
     }
 
     val cuerpoCrear = if (esFeria) {
-        "Creas tu puesto acá mismo: le ponés nombre, correo y clave, y quedás adentro."
+        "Creas tu puesto acá mismo: le pones nombre, correo y clave, y quedas adentro."
     } else {
-        "Creas tu negocio acá mismo: le ponés nombre, decís a qué se dedica, " +
-            "elegís correo y clave, y quedás adentro."
+        "Creas tu negocio acá mismo: le pones nombre, dices a qué se dedica, " +
+            "eliges correo y clave, y quedas adentro."
     }
     val cuerpoEntrar = if (nube) {
         "Lo creaste antes en este teléfono o en otro. " +
-            "Entrá con el nombre corto, tu correo y tu clave."
+            "Entra con el nombre corto, tu correo y tu clave."
     } else {
         "Lo creaste antes, o alguien te lo instaló y te pasó los datos. " +
-            "Necesitás tu correo y tu clave."
+            "Necesitas tu correo y tu clave."
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -110,7 +110,7 @@ internal fun Puerta(
                     primario = true,
                 )
                 CaminoDePuerta(
-                    titulo = "Ya tenés un $cosa",
+                    titulo = "Ya tienes un $cosa",
                     cuerpo = cuerpoEntrar,
                     etiqueta = "Entrar a mi $cosa",
                     onClick = onEntrar,
@@ -118,7 +118,7 @@ internal fun Puerta(
                 )
             } else {
                 CaminoDePuerta(
-                    titulo = "Ya tenés un $cosa",
+                    titulo = "Ya tienes un $cosa",
                     cuerpo = cuerpoEntrar,
                     etiqueta = "Entrar a mi $cosa",
                     onClick = onEntrar,

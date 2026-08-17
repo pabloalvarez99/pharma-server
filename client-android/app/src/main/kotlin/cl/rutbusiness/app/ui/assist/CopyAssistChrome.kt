@@ -21,11 +21,11 @@ internal data class CopyAssistChrome(
 internal fun copyAssistChrome(feria: Boolean): CopyAssistChrome =
     if (feria) {
         CopyAssistChrome(
-            tituloBienvenida = "Decime qué pasó",
-            etiquetaChips = "Tocá una y arrancamos",
+            tituloBienvenida = "Dime qué pasó",
+            etiquetaChips = "Toca una y arrancamos",
             etiquetaCampo = "Vendí, fié, ¿cuánto saqué?",
-            placeholderSinVoz = "Escribí o tocá una de arriba",
-            placeholderConVoz = "Hablá o escribí",
+            placeholderSinVoz = "Escribe o toca una de arriba",
+            placeholderConVoz = "Habla o escribe",
             pensando = "Estoy anotando…",
             enviar = "Decirle",
             reintentar = "Decirle de nuevo",

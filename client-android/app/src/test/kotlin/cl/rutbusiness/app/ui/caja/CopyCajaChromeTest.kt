@@ -46,7 +46,7 @@ class CopyCajaChromeTest {
         assertTrue(
             "hint cierra el día cuando vuelva la red: ${c.hint}",
             c.hint.contains("red", ignoreCase = true) &&
-                c.hint.contains("cerrás el día", ignoreCase = true),
+                c.hint.contains("cierras el día", ignoreCase = true),
         )
         assertEquals("Volver", c.accion)
         assertSinJergaFeria("sin conexión feria", "${c.titulo} | ${c.hint}")
@@ -84,7 +84,7 @@ class CopyCajaChromeTest {
             subtituloPasoCaja(PasoDeCaja.Movimiento, feria = true),
         )
         assertEquals(
-            "Contá primero, después cerrás",
+            "Cuenta primero, después cierras",
             subtituloPasoCaja(PasoDeCaja.Arqueo, feria = true),
         )
         assertEquals("Listo por hoy", subtituloPasoCaja(PasoDeCaja.Cerrada, feria = true))
