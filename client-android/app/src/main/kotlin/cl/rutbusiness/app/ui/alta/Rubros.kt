@@ -12,11 +12,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
+import cl.rutbusiness.ui.theme.RbColors
+import cl.rutbusiness.ui.theme.RbDimens
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbTouchTarget
@@ -102,6 +106,24 @@ fun Rubro.chipCuandoLibre(): String? =
 fun Rubro.chipCuandoElegido(): String = CHIP_RUBRO_ELEGIDO
 
 /**
+ * El color de borde de un cartel de rubro, aparte de [CartelDeRubro] para que
+ * `RubrosTest` lo pruebe sin montar Compose.
+ *
+ * Sólo depende de [elegido]. Antes también entraba `natural` (el cartel de
+ * feria) y por eso el cartel de feria se pintaba con el mismo borde brand que
+ * el elegido de verdad sin estarlo -el bug del auditor: borde verde con
+ * `checked=false` confirmado por `uiautomator`-. El color es la señal más
+ * fuerte de "esto está elegido" que tiene el cartel, así que sólo la manda la
+ * única fuente de verdad de esa pregunta: [elegido].
+ */
+internal fun bordeColorDeCartel(elegido: Boolean, colors: RbColors): Color =
+    if (elegido) colors.brandText else colors.outlineStrong
+
+/** El ancho de borde de un cartel de rubro. Misma razón que [bordeColorDeCartel]. */
+internal fun bordeAnchoDeCartel(elegido: Boolean, dimens: RbDimens): Dp =
+    if (elegido) dimens.focusRing else dimens.border
+
+/**
  * Los rubros como carteles apilados, no como filas de lista ni como combo.
  *
  * Cada opción es un cartel con borde grueso y piso táctil de 56dp: se lee de
@@ -135,9 +157,17 @@ fun CartelesDeRubro(
 /**
  * Un solo cartel de rubro.
  *
- * Feria (el natural) y el elegido se pintan con más peso visual — borde brand y
- * superficie de marca — para que el ojo caiga ahí sin que nadie elija por
- * descarte.
+ * Sólo el elegido de verdad se pinta con el borde y el peso de "seleccionado"
+ * -borde brand, ancho de foco-: eso es lo único que un lector de pantalla o un
+ * `uiautomator dump` puede confirmar (`selected = elegido`, línea de abajo), y
+ * lo único que tiene que confirmar el ojo. Feria (el natural) se distingue con
+ * una superficie apenas más alta y texto en negrita -y, cuando nadie eligió
+ * todavía, con su propio chip de invitación- pero **nunca** con el mismo borde
+ * que el elegido: antes los compartía, y el cartel de feria se veía elegido
+ * -borde verde grueso- estando `checked=false` de verdad, con Siguiente
+ * apagado y sin explicación visible de por qué. "Se ve elegido" y "está
+ * elegido" tienen que ser la misma pregunta o alguien se queda trabado acá
+ * antes de llegar a usar la app.
  */
 @Composable
 internal fun CartelDeRubro(
@@ -157,14 +187,8 @@ internal fun CartelDeRubro(
         natural -> colors.surfaceRaised
         else -> colors.surface
     }
-    val bordeColor = when {
-        elegido || natural -> colors.brandText
-        else -> colors.outlineStrong
-    }
-    val bordeAncho = when {
-        elegido || natural -> dimens.focusRing
-        else -> dimens.border
-    }
+    val bordeColor = bordeColorDeCartel(elegido, colors)
+    val bordeAncho = bordeAnchoDeCartel(elegido, dimens)
     val chip = if (elegido) rubro.chipCuandoElegido() else rubro.chipCuandoLibre()
 
     Column(

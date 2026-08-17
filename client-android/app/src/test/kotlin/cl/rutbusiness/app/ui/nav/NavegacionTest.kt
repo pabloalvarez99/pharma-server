@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -16,8 +17,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import cl.rutbusiness.app.ui.catalogo.abrirCatalogo
 import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.pos.Carrito
+import cl.rutbusiness.core.session.AlmacenamientoPlataforma
+import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertEquals
@@ -25,6 +29,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -75,10 +80,15 @@ class NavegacionTest {
         }
     }
 
-    private fun montar() {
+    /**
+     * @param sesion sólo la necesitan las pruebas del catálogo: sin sesión
+     *   `LocalAbrirCatalogo` queda en `null` (ver `AbrirCatalogo.kt`) y el
+     *   botón de [CobrarDeMentira] no tiene qué invocar.
+     */
+    private fun montar(sesion: SessionRepository? = null) {
         compose.setContent {
             RbTheme(darkTheme = true, reducedMotion = true) {
-                ContenedorDeDestinos { destino ->
+                ContenedorDeDestinos(sesion = sesion) { destino ->
                     when (destino) {
                         Destino.Agente -> PantallaDeMentira("Estoy en el agente")
                         Destino.Cobrar -> CobrarDeMentira()
@@ -88,6 +98,12 @@ class NavegacionTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    /** Sesión sin login: alcanza para que `abrirCatalogo()` deje de ser `null`. */
+    private fun sesionDeMentira(): SessionRepository {
+        val app = RuntimeEnvironment.getApplication()
+        return SessionRepository(AlmacenamientoPlataforma(app))
     }
 
     @Composable
@@ -107,6 +123,12 @@ class NavegacionTest {
             factory = viewModelFactory { initializer { CarritoFalsoViewModel() } },
         )
         var notaDelMostrador by rememberSaveable { mutableStateOf("") }
+        // Lo mismo que hace Cobrar de verdad para abrir "Lo que vendo": leer
+        // el callback del `CompositionLocal` y listo. Con `sesion == null` en
+        // `montar()` esto es `null` y el botón no hace nada -el mismo gateo
+        // que la pantalla real-, así que las pruebas que no piden catálogo no
+        // se ven afectadas.
+        val abrirCatalogo = abrirCatalogo()
 
         Column {
             Text("En el carrito: ${vm.carrito.items.size}")
@@ -122,6 +144,10 @@ class NavegacionTest {
             RbButton(
                 label = "Anotar",
                 onClick = { notaDelMostrador = "paga con 20 lucas" },
+            )
+            RbButton(
+                label = "Abrir catálogo",
+                onClick = { abrirCatalogo?.invoke() },
             )
         }
     }
@@ -226,6 +252,67 @@ class NavegacionTest {
         compose.onNodeWithText("Estoy en el agente").assertIsDisplayed()
 
         irA(Destino.Cobrar)
+        compose.onNodeWithText("En el carrito: 1").assertIsDisplayed()
+    }
+
+    /**
+     * El bug real: con el catálogo abierto encima de Cobrar, tocar otra
+     * pestaña resaltaba la pestaña nueva pero dejaba el catálogo en pantalla
+     * -recién Atrás mostraba lo que la barra ya decía-. La causa no era que
+     * `viendoCatalogo` sobreviviera al cambio de pestaña -eso es
+     * correcto, es lo mismo que hace `viendoCola`- sino que
+     * `BarraDeNavegacion.onElegir` sólo cambiaba `destino` y nunca apagaba la
+     * bandera, así que el `if` en cascada de `ContenedorDeDestinos` seguía
+     * entrando a la rama del catálogo. Ver el `onElegir` de
+     * `ContenedorDeDestinos`.
+     */
+    @Test
+    fun `tocar una pestana cierra el catalogo y muestra el destino nuevo de una`() {
+        montar(sesionDeMentira())
+
+        irA(Destino.Cobrar)
+        compose.onNodeWithText("Agregar pan").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Abrir catálogo").performClick()
+        compose.waitForIdle()
+
+        // El catálogo tapa a Cobrar: su topbar ("Inventario", pack por
+        // defecto de la prueba) es lo único que se ve.
+        compose.onNodeWithText("Inventario").assertIsDisplayed()
+        compose.onNodeWithText("En el carrito: 1").assertDoesNotExist()
+
+        irA(Destino.Resumen)
+
+        compose.onNodeWithText("Inventario").assertDoesNotExist()
+        compose.onNodeWithText("Estoy en el resumen").assertIsDisplayed()
+    }
+
+    /**
+     * Decisión de producto para el caso completo del encargo: el catálogo se
+     * cierra, no se pausa. Se abre **desde** Vender para cargar algo que
+     * falta -"esto no lo tengo cargado", ver `LocalAbrirCatalogo`- y se
+     * vuelve a cobrar; no es un lugar donde uno se queda. Tocar otra pestaña
+     * es la dueña yéndose a hacer otra cosa a propósito, así que si vuelve a
+     * Cobrar más tarde por la barra encuentra Cobrar, no el catálogo de
+     * vuelta -que sería la misma mentira de estado que este arreglo saca,
+     * sólo que retrasada-. El carrito, en cambio, sí sobrevive: es el estado
+     * de la pestaña, no el del catálogo.
+     */
+    @Test
+    fun `el catalogo no reaparece solo al volver a la pestana`() {
+        montar(sesionDeMentira())
+
+        irA(Destino.Cobrar)
+        compose.onNodeWithText("Agregar pan").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Abrir catálogo").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Inventario").assertIsDisplayed()
+
+        irA(Destino.Resumen)
+        irA(Destino.Cobrar)
+
+        compose.onNodeWithText("Inventario").assertDoesNotExist()
         compose.onNodeWithText("En el carrito: 1").assertIsDisplayed()
     }
 }

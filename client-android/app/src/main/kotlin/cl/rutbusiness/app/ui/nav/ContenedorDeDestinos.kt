@@ -524,7 +524,26 @@ internal fun ContenedorDeDestinos(
 
         BarraDeNavegacion(
             actual = destino,
-            onElegir = { elegido -> destino = elegido },
+            // Tocar una pestaña tiene que cerrar lo que estuviera tapando el
+            // destino. Antes sólo cambiaba `destino`: la barra pasaba a
+            // resaltar la pestaña nueva pero el bloque de más arriba seguía
+            // mirando `viendoCola`/`viendoCatalogo` primero (es un `if` en
+            // cascada) y por eso seguía dibujando la cola o el catálogo -la
+            // pantalla afirmaba algo que la barra ya desmentía, y sólo Atrás
+            // (que sí apaga esas banderas) destapaba el destino real.
+            //
+            // Y no reabren solas al volver a la pestaña. El catálogo se abre
+            // **desde** Vender -"esto no lo tengo cargado", ver
+            // `LocalAbrirCatalogo`- para volver a cobrar, no para quedarse
+            // ahí; tocar otra pestaña es la dueña yéndose a hacer otra cosa a
+            // propósito, y un catálogo que reaparece de la nada al rato en
+            // una pestaña distinta sería el mismo tipo de mentira de estado
+            // que este arreglo vino a sacar, sólo que retrasada.
+            onElegir = { elegido ->
+                viendoCola = false
+                viendoCatalogo = false
+                destino = elegido
+            },
             agentHome = packActual().features.agentHome,
         )
     }
