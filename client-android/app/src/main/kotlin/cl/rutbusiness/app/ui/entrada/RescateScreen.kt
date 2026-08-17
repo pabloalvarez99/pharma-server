@@ -60,10 +60,10 @@ import kotlinx.coroutines.withContext
  * es un respaldo. Por eso el rescate está **antes** del login, que es donde
  * está parada la persona que lo necesita.
  *
- * Lo que pide es exactamente lo que dice la tarjeta impresa: el nombre corto
- * del negocio y las 12 palabras (o los 5 bloques, que son los mismos 84 bits).
- * La dirección se pregunta porque un teléfono recién instalado tampoco la sabe;
- * si el APK trae una por defecto, ya viene escrita.
+ * Lo que pide es exactamente lo que dice la tarjeta de papel: el nombre corto
+ * del puesto/negocio y las 12 palabras (o los 5 bloques, que son los mismos
+ * 84 bits). La dirección del computador solo se pregunta en on-prem LAN; en
+ * nube el APK ya trae el destino y la pantalla no nombra IP ni computador.
  *
  * Los dos PBKDF2 —el de la prueba de retiro y el de la llave del sobre— corren
  * en [Dispatchers.Default]. Son ~210.000 iteraciones cada uno: en el aparato
@@ -116,12 +116,11 @@ internal fun RescateRoute(
         onRescatar = {
             val destino = ServerUrl.normalizar(url)
             if (destino == null) {
-                mensaje = if (!pideDireccion) {
-                    "RutAgent no responde. Reintentá en un momento."
-                } else {
-                    "Revisá la dirección: algo como 192.168.1.10:8080 o " +
-                        "app.rutbusiness.cl."
-                }
+                // Nube: sin IP ni computador. On-prem: se puede decir la dirección.
+                mensaje = copyRescate(
+                    pideDireccion = pideDireccion,
+                    esFeria = esFeria,
+                ).errorDireccion
             } else {
                 trabajando = true
                 mensaje = null
@@ -197,7 +196,7 @@ internal fun RescatePantalla(
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
     val shape = RbTheme.shapes.card
-    val cosa = if (esFeria) "puesto" else "negocio"
+    val copy = copyRescate(pideDireccion = pideDireccion, esFeria = esFeria)
     // En nube la URL ya viene del APK: no bloquear el botón por el campo oculto.
     val puede = !trabajando &&
         (url.isNotBlank() || !pideDireccion) &&
@@ -206,8 +205,8 @@ internal fun RescatePantalla(
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
-            title = "Recuperar mi $cosa",
-            subtitle = "Con la tarjeta del cuaderno",
+            title = copy.tituloBarra,
+            subtitle = copy.subtituloBarra,
             onBack = onVolver,
         )
 
@@ -231,31 +230,28 @@ internal fun RescatePantalla(
                 verticalArrangement = Arrangement.spacedBy(dimens.space2),
             ) {
                 Text(
-                    text = "Si perdiste el teléfono o lo cambiaste",
+                    text = copy.tituloCartel,
                     style = RbTheme.typography.heading,
                     color = colors.textPrimary,
                     modifier = Modifier.rbHeading(),
                 )
                 Text(
-                    text = "Con la tarjeta que la app te pidió anotar volvés a " +
-                        "tu $cosa. No hace falta tu clave: la tarjeta es la llave.",
+                    text = copy.cuerpoCartel,
                     style = RbTheme.typography.body,
                     color = colors.textPrimary,
                 )
             }
 
-            CartelDeCampos(titulo = if (pideDireccion) {
-                "¿Dónde está tu $cosa?"
-            } else {
-                "Tu $cosa"
-            }) {
-                if (pideDireccion) {
+            // Una pregunta a la vez: ¿dónde/cómo se llama? y después las 12 palabras.
+            CartelDeCampos(titulo = copy.tituloCampos) {
+                // Solo on-prem: dirección del computador. Nube nunca muestra IP.
+                if (pideDireccion && copy.labelDireccion != null) {
                     RbTextField(
                         value = url,
                         onValueChange = onUrl,
-                        label = "Dirección del computador",
-                        placeholder = "192.168.1.10:8080",
-                        supportingText = "La misma que usabas para entrar.",
+                        label = copy.labelDireccion,
+                        placeholder = copy.placeholderDireccion.orEmpty(),
+                        supportingText = copy.ayudaDireccion,
                         keyboardType = KeyboardType.Uri,
                         enabled = !trabajando,
                         imeAction = ImeAction.Next,
@@ -264,28 +260,25 @@ internal fun RescatePantalla(
                 RbTextField(
                     value = negocio,
                     onValueChange = onNegocio,
-                    label = "Nombre corto del $cosa",
-                    supportingText = "El que está impreso arriba en la tarjeta.",
+                    label = copy.labelNombre,
+                    supportingText = copy.ayudaNombre,
                     enabled = !trabajando,
                     imeAction = ImeAction.Next,
                 )
             }
 
-            CartelDeCampos(titulo = "Las palabras de la tarjeta") {
+            CartelDeCampos(titulo = copy.tituloPalabras) {
                 RbTextField(
                     value = tarjeta,
                     onValueChange = onTarjeta,
-                    label = "Las 12 palabras (o los 5 bloques)",
-                    supportingText = "Copialas separadas por espacios, en el mismo orden. " +
-                        "No importan mayúsculas ni tildes.",
+                    label = copy.labelPalabras,
+                    supportingText = copy.ayudaPalabras,
                     enabled = !trabajando,
                     imeAction = ImeAction.Go,
                     onImeAction = onRescatar,
                 )
                 Text(
-                    text = "La tarjeta no sale de este teléfono. Lo que viaja es una prueba " +
-                        "derivada de ella, que sólo sirve para pedir tu paquete y no para " +
-                        "abrirlo.",
+                    text = copy.avisoPrivacidad,
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
@@ -293,7 +286,7 @@ internal fun RescatePantalla(
 
             mensaje?.let { texto ->
                 TarjetaDeFallaEntrada(
-                    titulo = if (listo) "Listo" else "No se pudo traer el respaldo",
+                    titulo = if (listo) copy.tituloListo else copy.tituloFalla,
                     queHacer = texto,
                 )
             }
@@ -319,7 +312,7 @@ internal fun RescatePantalla(
             verticalArrangement = Arrangement.spacedBy(dimens.space2),
         ) {
             RbButton(
-                label = if (trabajando) "Buscando tu respaldo..." else "Traer mi respaldo",
+                label = if (trabajando) copy.ctaBuscando else copy.ctaRescatar,
                 onClick = onRescatar,
                 enabled = puede,
                 fillWidth = true,
@@ -327,7 +320,7 @@ internal fun RescatePantalla(
 
             if (listo) {
                 RbButton(
-                    label = "Entrar a mi $cosa",
+                    label = copy.ctaEntrar,
                     onClick = onEntrar,
                     variant = RbButtonVariant.Secondary,
                     enabled = !trabajando,
