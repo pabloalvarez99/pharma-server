@@ -48,6 +48,10 @@ import cl.rutbusiness.ui.theme.rbHeading
  * a la vista, del mismo tamaño táctil, pero secundario. Los botones no
  * scrollean. Se muestra una sola vez: la bandera se prende con el primer login
  * que funciona. Ver [PreferenciasDeEntrada].
+ *
+ * El copy vive en [pasosDelPrimerUso] / [ctaPrimarioPrimerUso] (paquete
+ * `CopyPrimerUso`): feria/nube habla de puesto; on-prem puede nombrar el
+ * computador del negocio.
  */
 @Composable
 fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
@@ -56,17 +60,21 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
 
     // La misma fuente de verdad que gobierna el botón de la pantalla de
     // entrada. Sin servicios provistos —una prueba de otra pantalla— no hay
-    // Google y el texto no lo finge.
+    // Google y el texto no lo finge. `nube` del APK feria/nube es la voz del
+    // puesto (sin CompositionLocal extra).
     val servicios = LocalEntrada.current
+    val nube = !servicios?.nube.isNullOrBlank()
     val pasos = pasosDelPrimerUso(
         googleDisponible = servicios?.identidadGoogle?.disponible() == true,
-        nube = !servicios?.nube.isNullOrBlank(),
+        nube = nube,
     )
 
     val paso = pasos[indice]
     val ultimo = indice == pasos.lastIndex
     val colors = RbTheme.colors
     val shape = RbTheme.shapes.card
+    val ctaPrimario = ctaPrimarioPrimerUso(ultimo = ultimo, nube = nube)
+    val ctaSaltar = ctaSaltarPrimerUso(nube = nube)
 
     Column(modifier = modifier.fillMaxSize()) {
         RbTopBar(
@@ -155,12 +163,12 @@ fun PrimerUso(onListo: () -> Unit, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(dimens.space2),
         ) {
             RbButton(
-                label = if (ultimo) "Empezar" else "Siguiente",
+                label = ctaPrimario,
                 onClick = { if (ultimo) onListo() else indice += 1 },
                 fillWidth = true,
             )
             RbButton(
-                label = "Saltar la explicación",
+                label = ctaSaltar,
                 onClick = onListo,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -196,94 +204,4 @@ private fun LineaNumerada(numero: Int, texto: String) {
             color = RbTheme.colors.textPrimary,
         )
     }
-}
-
-/**
- * Lo que dice cada pantalla.
- *
- * Los textos viven en una lista de datos y no repartidos en tres composables
- * para que se puedan leer de corrido —que es como hay que revisarlos— y para
- * que una prueba pueda recorrerlos sin montar la pantalla tres veces.
- */
-internal data class PasoDelPrimerUso(
-    val titulo: String,
-    val encabezado: String,
-    val parrafos: List<String>,
-    val lista: List<String> = emptyList(),
-    val remate: String? = null,
-)
-
-/**
- * Los tres pasos, con el paso 3 escrito según lo que este build puede hacer.
- *
- * [googleDisponible] es el **mismo** `disponible()` que decide si aparece el
- * botón de Google en la pantalla de entrada, y eso es todo el punto: si el
- * texto tuviera su propia constante, un APK compilado con client id mostraría
- * el botón andando y, dos pantallas antes, "pronto". Dos verdades sobre lo
- * mismo, y la que la persona lee primero es la falsa.
- *
- * Cuando no hay client id el texto es **exactamente** el de siempre: prometer
- * "pronto" es honesto, porque el botón todavía no está.
- */
-internal fun pasosDelPrimerUso(
-    googleDisponible: Boolean,
-    nube: Boolean = false,
-): List<PasoDelPrimerUso> {
-    val cuenta = if (googleDisponible) {
-        "Tu cuenta de Google, o tu correo y tu clave."
-    } else {
-        "Tu correo y tu clave. Pronto también con tu cuenta de Google " +
-            "(sin otra contraseña que acordarte)."
-    }
-    val pasoTres = if (nube) {
-        PasoDelPrimerUso(
-            titulo = "Lo que necesitás a mano",
-            encabezado = "Para empezar",
-            parrafos = emptyList(),
-            lista = listOf(
-                "Un nombre para tu puesto (como lo dicen en la feria).",
-                cuenta,
-            ),
-            remate = "Nada más. No hace falta un computador ni una dirección.",
-        )
-    } else {
-        PasoDelPrimerUso(
-            titulo = "Lo que necesitás a mano",
-            encabezado = "Para entrar la primera vez",
-            parrafos = emptyList(),
-            lista = listOf(
-                "La dirección del computador del negocio (si te la dieron). " +
-                    "Se ve así: 192.168.1.10:8080",
-                "El nombre corto de tu negocio.",
-                cuenta,
-            ),
-            remate = "¿No los tenés? Pedíselos a quien instaló el sistema. " +
-                "Quedaron anotados el día que lo instaló.",
-        )
-    }
-    return listOf(
-        PasoDelPrimerUso(
-            titulo = "Esto es RutAgent",
-            encabezado = "El cuaderno del negocio, en tu teléfono",
-            parrafos = listOf(
-                "Anotás una venta con la voz o el teclado, sabés quién te debe y " +
-                    "cuánto hiciste hoy — más rápido que el cuaderno de mil pesos.",
-                "Hablale como a un empleado de confianza. Antes de guardar nada, " +
-                    "te lo muestra para que lo revises.",
-            ),
-        ),
-        PasoDelPrimerUso(
-            titulo = "Dónde se guarda todo",
-            encabezado = "En el teléfono y en un respaldo cifrado",
-            parrafos = listOf(
-                "Vendés aunque no haya señal: lo del día queda en el aparato.",
-                "Si activás el respaldo, se sube cifrado con una llave tuya. " +
-                    "Nosotros no podemos leerla ni recuperarla: la escribís en el " +
-                    "cuaderno el primer día (tarjeta de rescate).",
-            ),
-            remate = "Sin esa llave, el respaldo no sirve. Con ella y tu cuenta, " +
-                "volvés a entrar si se te rompe el teléfono.",
-        ),
-        pasoTres,
-    )
 }
