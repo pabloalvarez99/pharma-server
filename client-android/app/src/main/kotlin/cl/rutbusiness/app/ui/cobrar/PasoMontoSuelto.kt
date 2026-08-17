@@ -80,9 +80,9 @@ internal fun MontoSueltoContenido(
         RbTextField(
             value = monto,
             onValueChange = onMonto,
-            label = "¿Cuánto le cobras?",
+            label = copyLabelMontoSuelto(feria),
             placeholder = "0",
-            supportingText = "En $simbolo. No hace falta que tengas nada cargado.",
+            supportingText = copyAyudaMontoSuelto(feria, simbolo),
             errorMessage = error,
             enabled = !preparando,
             numeric = true,
@@ -95,14 +95,14 @@ internal fun MontoSueltoContenido(
 
         // Brand fill Primary + fillWidth + ≥56dp (rbTouchTarget).
         RbButton(
-            label = if (preparando) "Preparando…" else "Cobrar este monto",
+            label = copyCtaMontoSuelto(feria, preparando),
             onClick = onConfirmar,
             enabled = !preparando,
             fillWidth = true,
         )
 
         RbButton(
-            label = "Volver",
+            label = copyVolverMontoSuelto(),
             onClick = onCancelar,
             variant = RbButtonVariant.Secondary,
             enabled = !preparando,
