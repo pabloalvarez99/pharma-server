@@ -96,6 +96,26 @@ class CopyPasoPagoTest {
     }
 
     @Test
+    fun `cta en vuelo sin conexion no promete un cobro que no viaja`() {
+        // El botón, tocado sin señal, no manda nada a la red: guarda la venta
+        // en el teléfono. Decir "Cobrando" ahí prometería un viaje que no
+        // ocurre, la misma mentira chica que el resto de esta pantalla evita.
+        assertEquals(
+            "Anotando venta…",
+            copyCtaPago(feria = true, cobrando = true, hayConexion = false, medio = MedioDePago.Efectivo),
+        )
+        assertEquals(
+            "Guardando venta…",
+            copyCtaPago(feria = false, cobrando = true, hayConexion = false, medio = MedioDePago.Efectivo),
+        )
+        // Con señal, en cambio, sí hay un cobro en vuelo: sigue diciendo eso.
+        assertEquals(
+            "Cobrando…",
+            copyCtaPago(feria = true, cobrando = true, hayConexion = true, medio = MedioDePago.Efectivo),
+        )
+    }
+
+    @Test
     fun `cta retail offline sigue siendo Guardar venta`() {
         assertEquals(
             "Guardar venta",
