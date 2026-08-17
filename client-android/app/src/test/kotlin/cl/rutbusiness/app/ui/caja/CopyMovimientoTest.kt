@@ -69,4 +69,47 @@ class CopyMovimientoTest {
         assertEquals("Traje cambio de mi casa", meter.placeholder)
         assertEquals("Motivo", meter.etiqueta)
     }
+
+    // --- motivosDeUnToque: chips de un toque ---------------------------------
+
+    @Test
+    fun `feria retiro ofrece las razones reales de sacar plata en un toque`() {
+        val chips = motivosDeUnToque(feria = true, esRetiro = true)
+        assertEquals(
+            listOf("Almuerzo", "Le pagué la mercadería", "Movilización", "Plata para la casa"),
+            chips,
+        )
+        chips.forEach { assertSinJergaCajaFormal("chip feria retiro", it) }
+    }
+
+    @Test
+    fun `feria ingreso ofrece las razones reales de meter plata en un toque`() {
+        val chips = motivosDeUnToque(feria = true, esRetiro = false)
+        assertEquals(listOf("Vuelto de la casa", "Plata para dar cambio"), chips)
+        chips.forEach { assertSinJergaCajaFormal("chip feria ingreso", it) }
+    }
+
+    @Test
+    fun `retail no ofrece chips, el motivo se escribe entero`() {
+        assertTrue(motivosDeUnToque(feria = false, esRetiro = true).isEmpty())
+        assertTrue(motivosDeUnToque(feria = false, esRetiro = false).isEmpty())
+    }
+
+    @Test
+    fun `los chips de feria caben sin scroll y no usan jerga contable`() {
+        val todos = motivosDeUnToque(feria = true, esRetiro = true) +
+            motivosDeUnToque(feria = true, esRetiro = false)
+
+        assertTrue(todos.isNotEmpty())
+        todos.forEach { chip ->
+            // Letra grande, sin scroll: nada de frases largas disfrazadas de chip.
+            assertTrue("«$chip» es muy largo para un chip", chip.length <= 24)
+            assertFalse(
+                "«$chip» no debe decir «egreso» / «ingreso de caja» / «concepto»",
+                chip.lowercase().let {
+                    it.contains("egreso") || it.contains("ingreso de caja") || it.contains("concepto")
+                },
+            )
+        }
+    }
 }
