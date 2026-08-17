@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.sp
  * the older person cannot change from Ajustes, which is the exact failure the
  * hardware floor forbids.
  *
- * Three rules this file enforces beyond "use sp":
+ * Four rules this file enforces beyond "use sp":
  *
  * 1. **Line height in `em`, not `sp`.** A line height fixed in `sp` does not
  *    grow with the glyphs, so at 200% the text collides with itself. Declaring
@@ -28,16 +28,36 @@ import androidx.compose.ui.unit.sp
  *    smear. Supporting text here is Normal or Medium, never Light.
  * 3. **No size below [MIN_BODY_SP].** The CSS scale bottomed out at 10px
  *    (`.rb-tag`) and 11px (`.rb-pill`, `.rb-table th`). Those are gone.
+ * 4. **Tracking in `em`, like line height, not `sp`.** [TextStyle.letterSpacing]
+ *    takes a [TextUnit] same as font size, and the same argument applies: a
+ *    fixed-sp tracking value stops being proportional to the letterforms the
+ *    instant the system font scale multiplies the glyphs but not the gap
+ *    between them. Only the styles that need it declare it - a big semibold
+ *    number reads tighter with a touch of negative tracking, a small label
+ *    reads calmer with a touch of positive tracking - everything else is left
+ *    at the font's own default rather than tracked "just because".
  *
- * Font families are the system's. `brand.css` asks for Fraunces + IBM Plex
- * Sans + IBM Plex Mono; bundling three families costs megabytes of APK on a
- * phone the floor describes as "almost out of space", and a webfont download
- * costs mobile data the floor calls expensive. The system sans is already
- * hinted for the device's panel. Monospace is kept for RUT / CLP / folio
- * digits, where column alignment is the point.
+ * Type is Public Sans (SIL OFL 1.1), bundled - see [RbBrandFont] for the
+ * measured byte cost and why it ships as four static weight files instead
+ * of one variable font. [FontFamily.Monospace] is kept only where it is
+ * earning its keep: RUT and folios, where a letter (the RUT check digit) has
+ * to sit the same width as every digit around it. CLP amounts used to share
+ * that monospace style too - the plata is the most important thing this app
+ * shows, and a terminal typeface made it look like a script's stdout. [amount]
+ * is Public Sans instead, with `tnum` tabular figures so the digits still
+ * line up without the typewriter texture.
  */
 @Immutable
 data class RbTypography(
+    /**
+     * The one figure that has to dominate the screen: the day's takings, the
+     * arqueo difference. Larger than [title] on purpose - before this style
+     * existed the biggest thing in the scale was a 22sp screen title, and a
+     * headline number was just that same title stretched at the call site by
+     * a hand-rolled multiplier (see the old `RbAmount.kt` history). One place
+     * to be big, instead of every caller improvising its own.
+     */
+    val display: TextStyle,
     /** Screen title in the top bar. */
     val title: TextStyle,
     /** Section and card heading. */
@@ -52,8 +72,19 @@ data class RbTypography(
     val label: TextStyle,
     /** Label inside a button. */
     val button: TextStyle,
-    /** RUT, CLP amounts, folios - monospace so digits line up. */
+    /**
+     * RUT and folios - monospace so every character lines up, digit or the
+     * RUT's check letter alike. Not for money: see [amount].
+     */
     val numeric: TextStyle,
+    /**
+     * CLP amounts - Public Sans with `tnum` tabular figures, so the digits
+     * still line up column to column without borrowing a terminal typeface's
+     * look for the plata. [cl.rutbusiness.ui.components.RbAmount] is the
+     * component that consumes this; reach for it there rather than styling a
+     * bare `Text` with this directly.
+     */
+    val amount: TextStyle,
     /** Chip / pill label. */
     val chip: TextStyle,
 ) {
@@ -81,51 +112,75 @@ private val TrimmedLines = LineHeightStyle(
     trim = LineHeightStyle.Trim.None,
 )
 
+/**
+ * `"tnum" 1` in CSS `font-feature-settings` syntax - the format
+ * [TextStyle.fontFeatureSettings] itself documents. Tabular figures: every
+ * digit glyph claims the same advance width, so a column of [amount] values
+ * lines up the way monospace used to, without switching the whole word to a
+ * monospace face just because it contains digits.
+ */
+private const val TabularFigures = "\"tnum\" 1"
+
 val RbDefaultTypography = RbTypography(
+    display = TextStyle(
+        fontFamily = RbBrandFont,
+        fontWeight = FontWeight.Bold,
+        fontSize = 34.sp,
+        lineHeight = TightLines,
+        lineHeightStyle = TrimmedLines,
+        // Tight tracking on a big bold headline keeps large digits and
+        // letterforms from feeling loose at a size this size range never had
+        // before this style existed.
+        letterSpacing = (-0.02).em,
+    ),
     title = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = TightLines,
         lineHeightStyle = TrimmedLines,
+        letterSpacing = (-0.01).em,
     ),
     heading = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 18.sp,
         lineHeight = TightLines,
         lineHeightStyle = TrimmedLines,
+        letterSpacing = (-0.005).em,
     ),
     body = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.Normal,
         fontSize = 17.sp,
         lineHeight = NormalLines,
         lineHeightStyle = TrimmedLines,
     ),
     bodyStrong = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 17.sp,
         lineHeight = NormalLines,
         lineHeightStyle = TrimmedLines,
     ),
     support = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.Normal,
         fontSize = 15.sp,
         lineHeight = NormalLines,
         lineHeightStyle = TrimmedLines,
     ),
     label = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.Medium,
         fontSize = 15.sp,
         lineHeight = TightLines,
         lineHeightStyle = TrimmedLines,
+        // Small text reads calmer with a touch of room between letters.
+        letterSpacing = 0.01.em,
     ),
     button = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.SemiBold,
         fontSize = 17.sp,
         lineHeight = TightLines,
@@ -138,12 +193,21 @@ val RbDefaultTypography = RbTypography(
         lineHeight = TightLines,
         lineHeightStyle = TrimmedLines,
     ),
+    amount = TextStyle(
+        fontFamily = RbBrandFont,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 17.sp,
+        lineHeight = TightLines,
+        lineHeightStyle = TrimmedLines,
+        fontFeatureSettings = TabularFigures,
+    ),
     chip = TextStyle(
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = RbBrandFont,
         fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = TightLines,
         lineHeightStyle = TrimmedLines,
+        letterSpacing = 0.02.em,
     ),
 )
 
