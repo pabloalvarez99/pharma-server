@@ -99,6 +99,53 @@ internal fun copyResumenDelDia(feria: Boolean, monto: String, conteo: Long): Str
         if (conteo == 1L) "$monto en 1 boleta" else "$monto en $conteo boletas"
     }
 
+// --- semana (bajo la tarjeta del día) ----------------------------------------
+
+/** Título de la tarjeta con el gráfico de la semana. */
+internal fun tituloSemana(): String = "Cómo te fue la semana"
+
+internal fun errorSemanaHoy(feria: Boolean): String =
+    "No pudimos traer cómo te fue en la semana. El resto sí está al día: toca " +
+        "«${labelActualizarHoy(feria)}» arriba para volver a pedirla."
+
+private val LETRAS_DIA_SEMANA = listOf("lu", "ma", "mi", "ju", "vi", "sá", "do")
+private val NOMBRES_DIA_SEMANA = listOf(
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+)
+
+/** Letra corta bajo cada barra (`0` lunes .. `6` domingo). La de hoy no la usa: dice «Hoy». */
+internal fun letraDiaSemana(diaDeLaSemana: Int): String = LETRAS_DIA_SEMANA[diaDeLaSemana]
+
+/** Nombre completo del día, para la frase que resume el gráfico a quien no lo ve. */
+internal fun nombreDiaSemana(diaDeLaSemana: Int): String = NOMBRES_DIA_SEMANA[diaDeLaSemana]
+
+/** Etiqueta bajo la barra de hoy: nunca la letra del día, para que se note distinta. */
+internal fun etiquetaHoySemana(): String = "Hoy"
+
+/**
+ * La frase que reemplaza el gráfico entero para un lector de pantalla.
+ *
+ * Nunca dice "vendiste $X esta semana": eso sería sumar siete montos del
+ * server en el teléfono, y la regla de plata no permite armar un total que
+ * el server no mandó. Lo único que se puede decir sin inventar un peso es una
+ * comparación — cuál día fue el mejor — así que eso es lo único que dice.
+ *
+ * @param mejorDiaFrase cómo se dice el día ya con su artículo resuelto: "el
+ *   sábado", pero "hoy" sin "el" — nunca "el hoy". `null` si ningún día tuvo
+ *   ventas todavía.
+ * @param mejorDiaMontoFormateado ya con [cl.rutbusiness.core.money.Moneda.formatear] aplicado.
+ */
+internal fun descripcionSemana(mejorDiaFrase: String?, mejorDiaMontoFormateado: String?): String =
+    if (mejorDiaFrase == null || mejorDiaMontoFormateado == null) {
+        "Gráfico de la semana. Todavía no hay ventas para comparar los días."
+    } else {
+        "Gráfico de la semana. El mejor día fue $mejorDiaFrase, con $mejorDiaMontoFormateado."
+    }
+
+/** "el sábado", pero "hoy" sin artículo — nunca "el hoy". */
+internal fun mejorDiaFrase(nombreDia: String, esHoy: Boolean): String =
+    if (esHoy) "hoy" else "el $nombreDia"
+
 // --- vacío del día (feria, antes de la primera venta) -----------------------
 
 internal fun tituloHoySinVentas(): String = "Todavía no vendiste nada hoy"
@@ -172,13 +219,19 @@ internal fun ctaCajaHoy(sinCajaAbierta: Boolean): String =
  * Qué tarjeta va primero en «Hoy», de mayor a menor importancia para la dueña.
  *
  * Extraído a función pura para que el orden quede fijado por un test y no
- * dependa de leer bien el `LazyColumn`: cuánto entró, cuánto le deben, y —solo
- * en retail formal— qué falta cerrar (caja, stock, vencimientos). En feria no
- * hay tercer bloque: no hay caja que cuadrar ni FEFO que mirar (ADR-0022), así
- * que la lista termina en el fiado.
+ * dependa de leer bien el `LazyColumn`: cuánto entró, cómo va la semana,
+ * cuánto le deben, y —solo en retail formal— qué falta cerrar (caja, stock,
+ * vencimientos). "semana" va pegado a "ventas" porque es el mismo dato visto
+ * con más contexto — sin eso la cifra grande queda sin con qué compararse
+ * más allá de un adjetivo. En feria no hay tercer bloque: no hay caja que
+ * cuadrar ni FEFO que mirar (ADR-0022), así que la lista termina en el fiado.
  */
 internal fun ordenDeBloquesHoy(feria: Boolean): List<String> =
-    if (feria) listOf("ventas", "fiado") else listOf("ventas", "fiado", "caja", "faltantes", "vencimientos")
+    if (feria) {
+        listOf("ventas", "semana", "fiado")
+    } else {
+        listOf("ventas", "semana", "fiado", "caja", "faltantes", "vencimientos")
+    }
 
 // --- se está por acabar (retail formal; oculta en feria) --------------------
 

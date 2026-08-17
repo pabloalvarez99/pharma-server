@@ -45,6 +45,12 @@ data class ResumenGuardado(
     val ventasHoy: VentasDto?,
     val ventasDeAyer: String?,
     val comparacion: String,
+    /**
+     * Los 7 días de la semana, para que el gráfico siga ahí sin señal. Sin
+     * este campo el bloque semanal desaparecería justo el día que más se
+     * necesita mirar el teléfono guardado — ver [ResumenViewModel.guardar].
+     */
+    val ventasSemana: List<DiaDeLaSemana> = emptyList(),
     val enCaja: String?,
     val nombreDeCaja: String?,
     val sinCajaAbierta: Boolean,
@@ -120,6 +126,14 @@ class ResumenViewModel(
     var ventasDeAyer by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Los 7 días de la semana, del más viejo al de hoy. `null` mientras no se
+     * pudo traer — distinto de una lista vacía, que nunca ocurre una vez que
+     * carga bien: siempre son 7 días, completados en cero si no hubo ventas.
+     */
+    var ventasSemana by mutableStateOf<List<DiaDeLaSemana>?>(null)
+        private set
+
     // --- 3. cuánta plata hay en caja ----------------------------------------
 
     /** Lo que el arqueo dice que debería haber en el cajón. */
@@ -177,13 +191,18 @@ class ResumenViewModel(
             moneda = MonedaRepository(api).resolver()
 
             val resumen = ResumenApi(api)
-            val (desdeAyer, hastaAyer) = DiaUtc.rangoDeAyer(ahora())
+            val (desdeSemana, hastaSemana) = DiaUtc.rangoDeSemana(ahora())
 
             // Todo en paralelo. `async` sale a la red apenas se crea, así que
             // esperarlos en orden más abajo no los serializa: la pantalla tarda
             // lo que el más lento y no la suma de seis viajes por datos móviles.
+            //
+            // Una sola llamada a `sales-daily`, con el rango ampliado a los 6
+            // días completos antes de hoy: la comparación con ayer y el
+            // gráfico de la semana entera salen de la misma respuesta, sin
+            // pedir la red dos veces por el mismo dato.
             val agregado = async { resumen.dashboard() }
-            val ayer = async { resumen.ventasDiarias(desdeAyer, hastaAyer) }
+            val semana = async { resumen.ventasDiarias(desdeSemana, hastaSemana) }
             val deuda = async { resumen.porCobrar() }
             val caja = async { cargarCaja(resumen) }
             val vencimientos = async { resumen.porVencer() }
@@ -212,7 +231,7 @@ class ResumenViewModel(
             }
             guardadoEn = null
 
-            aplicarAyer(ayer.await())
+            aplicarSemana(semana.await())
             porCobrar = (deuda.await() as? Resultado.Ok)?.valor
             stockBajo = (faltantes.await() as? Resultado.Ok)?.valor.orEmpty()
             porVencer = (vencimientos.await() as? Resultado.Ok)?.valor.orEmpty()
@@ -244,6 +263,7 @@ class ResumenViewModel(
                 ventasHoy = ventasHoy,
                 ventasDeAyer = ventasDeAyer,
                 comparacion = comparacion.name,
+                ventasSemana = ventasSemana.orEmpty(),
                 enCaja = enCaja,
                 nombreDeCaja = nombreDeCaja,
                 sinCajaAbierta = sinCajaAbierta,
@@ -269,6 +289,7 @@ class ResumenViewModel(
         ventasDeAyer = datos.ventasDeAyer
         comparacion = Comparacion.entries.firstOrNull { it.name == datos.comparacion }
             ?: Comparacion.SinDatoDeAyer
+        ventasSemana = datos.ventasSemana.ifEmpty { null }
         enCaja = datos.enCaja
         nombreDeCaja = datos.nombreDeCaja
         sinCajaAbierta = datos.sinCajaAbierta
@@ -303,24 +324,34 @@ class ResumenViewModel(
     }
 
     /**
-     * Traduce el total de ayer en una palabra.
+     * Traduce el total de ayer en una palabra, y arma los 7 días del gráfico
+     * semanal a partir de la misma respuesta.
      *
-     * `sales-daily` no devuelve fila para un día sin ventas, así que una lista
-     * vacía significa "ayer no se vendió nada", que sí es comparable: si hoy
+     * Ayer se busca **por fecha** en `filas`, nunca por posición: con el
+     * rango ampliado a 7 días, `filas.firstOrNull()` pasaría a ser el día más
+     * viejo de la serie, y la pantalla diría "mejor que ayer" comparando
+     * contra hace una semana sin que ningún test se entere. `sales-daily` no
+     * devuelve fila para un día sin ventas, así que no encontrar la fecha de
+     * ayer significa "ayer no se vendió nada", que sí es comparable: si hoy
      * hay algo vendido, hoy fue mejor.
      */
-    private fun aplicarAyer(resultado: Resultado<List<VentaDiariaDto>>) {
+    private fun aplicarSemana(resultado: Resultado<List<VentaDiariaDto>>) {
         val filas = (resultado as? Resultado.Ok)?.valor ?: return
-        val hoy = ventasHoy?.revenue?.let { Dinero.deTextoDeServidor(it) } ?: return
+        val ventasDeHoy = ventasHoy ?: return
+        val hoy = Dinero.deTextoDeServidor(ventasDeHoy.revenue) ?: return
 
-        val ayer = filas.firstOrNull()?.revenue?.let { Dinero.deTextoDeServidor(it) }
-            ?: Dinero.CERO
-        ventasDeAyer = filas.firstOrNull()?.revenue ?: "0"
+        val diasEsqueleto = DiaUtc.diasDeLaSemana(ahora())
+        val fechaDeAyer = diasEsqueleto.lastOrNull { !it.esHoy }?.fecha
+        val filaDeAyer = filas.firstOrNull { it.date == fechaDeAyer }
+        val ayer = filaDeAyer?.revenue?.let { Dinero.deTextoDeServidor(it) } ?: Dinero.CERO
+        ventasDeAyer = filaDeAyer?.revenue ?: "0"
 
         comparacion = when {
             hoy > ayer -> Comparacion.Mejor
             hoy < ayer -> Comparacion.Peor
             else -> Comparacion.Igual
         }
+
+        ventasSemana = armarSemana(diasEsqueleto, filas, ventasDeHoy.revenue)
     }
 }

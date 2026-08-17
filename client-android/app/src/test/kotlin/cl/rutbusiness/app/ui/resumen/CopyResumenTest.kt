@@ -156,11 +156,40 @@ class CopyResumenTest {
 
     @Test
     fun `el orden de las tarjetas pone plata entrada y deuda antes que el cierre`() {
-        assertEquals(listOf("ventas", "fiado"), ordenDeBloquesHoy(feria = true))
+        assertEquals(listOf("ventas", "semana", "fiado"), ordenDeBloquesHoy(feria = true))
         assertEquals(
-            listOf("ventas", "fiado", "caja", "faltantes", "vencimientos"),
+            listOf("ventas", "semana", "fiado", "caja", "faltantes", "vencimientos"),
             ordenDeBloquesHoy(feria = false),
         )
+    }
+
+    @Test
+    fun `la semana nunca dice un total sumado, solo compara`() {
+        assertEquals(
+            "Gráfico de la semana. El mejor día fue el sábado, con $12.000.",
+            descripcionSemana(mejorDiaFrase = "el sábado", mejorDiaMontoFormateado = "$12.000"),
+        )
+        val sinDatos = descripcionSemana(mejorDiaFrase = null, mejorDiaMontoFormateado = null)
+        assertTrue(sinDatos.contains("Todavía no hay ventas"))
+        assertFalse(
+            "la descripcion de la semana no puede sumar los 7 dias",
+            descripcionSemana("el sábado", "$12.000").lowercase().contains("total"),
+        )
+    }
+
+    @Test
+    fun `hoy nunca lleva el articulo el`() {
+        assertEquals("hoy", mejorDiaFrase("jueves", esHoy = true))
+        assertEquals("el jueves", mejorDiaFrase("jueves", esHoy = false))
+    }
+
+    @Test
+    fun `los dias de la semana estan en orden lunes a domingo`() {
+        assertEquals("lu", letraDiaSemana(0))
+        assertEquals("do", letraDiaSemana(6))
+        assertEquals("lunes", nombreDiaSemana(0))
+        assertEquals("domingo", nombreDiaSemana(6))
+        assertEquals("Hoy", etiquetaHoySemana())
     }
 
     @Test
@@ -237,5 +266,12 @@ class CopyResumenTest {
         ctaFiadoHoy(true),
         copyEnCajaExplicacion(true, null),
         copyEnCajaExplicacion(true, "Puesto"),
-    )
+        tituloSemana(),
+        errorSemanaHoy(true),
+        etiquetaHoySemana(),
+        descripcionSemana(null, null),
+        descripcionSemana("el sábado", "$12.000"),
+        mejorDiaFrase("sábado", esHoy = false),
+        mejorDiaFrase("jueves", esHoy = true),
+    ) + (0..6).map { letraDiaSemana(it) } + (0..6).map { nombreDiaSemana(it) }
 }

@@ -33,6 +33,8 @@ import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
 import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
+import cl.rutbusiness.ui.components.RbChart
+import cl.rutbusiness.ui.components.RbChartDato
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbEmptyState
@@ -180,6 +182,7 @@ private fun ResumenScreen(
                 ordenDeBloquesHoy(feria).forEach { bloque ->
                     when (bloque) {
                         "ventas" -> item("ventas") { VendidoHoy(vm) }
+                        "semana" -> item("semana") { ComoVaLaSemana(vm) }
                         "fiado" -> item("fiado") { TeDeben(vm, onIrAlFiado) }
                         "caja" -> item("caja") { EnCaja(vm, onIrALaCaja) }
                         "faltantes" -> item("faltantes") { SePorAcabar(vm) }
@@ -339,6 +342,56 @@ private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
         actionLabel = onHablarleAlAgente?.let { ctaHablarleAlAgenteHoy() },
         onAction = onHablarleAlAgente,
     )
+}
+
+// --- 1b: cómo le fue en la semana --------------------------------------------
+
+/**
+ * El gráfico de la semana, bajo la cifra del día.
+ *
+ * La cifra grande contesta "¿cuánto vendí hoy?"; esta tarjeta contesta la
+ * pregunta que viene después y que un número solo no responde: "¿$47.300 es
+ * un buen día?". Sin algo con qué comparar, la dueña no tiene cómo saberlo.
+ *
+ * `vm.ventasSemana` puede ser `null` aunque la pantalla ya terminó de
+ * cargar: el bloque de la semana viaja en la misma respuesta de
+ * `sales-daily` que la comparación con ayer, y si esa llamada falla, la
+ * tarjeta lo dice sin arrastrar la cifra del día — ver la KDoc de
+ * [ResumenViewModel].
+ */
+@Composable
+private fun ComoVaLaSemana(vm: ResumenViewModel) {
+    val colors = RbTheme.colors
+    val feria = esFeria()
+    val semana = vm.ventasSemana
+
+    RbCard(title = tituloSemana()) {
+        if (semana == null) {
+            Text(
+                text = errorSemanaHoy(feria),
+                style = RbTheme.typography.body,
+                color = colors.textSecondary,
+            )
+            return@RbCard
+        }
+
+        val datos = semana.map { dia ->
+            RbChartDato(
+                etiqueta = if (dia.esHoy) etiquetaHoySemana() else letraDiaSemana(dia.diaDeLaSemana),
+                valor = alturaDeBarra(dia.revenue),
+                destacado = dia.esHoy,
+            )
+        }
+        val mejorDia = mejorDiaDeLaSemana(semana)
+        val descripcion = descripcionSemana(
+            mejorDiaFrase = mejorDia?.let {
+                mejorDiaFrase(nombreDiaSemana(it.diaDeLaSemana), esHoy = it.esHoy)
+            },
+            mejorDiaMontoFormateado = mejorDia?.let { vm.moneda.formatear(it.revenue) },
+        )
+
+        RbChart(datos = datos, descripcion = descripcion)
+    }
 }
 
 // --- 3: cuánta plata hay en caja -------------------------------------------
