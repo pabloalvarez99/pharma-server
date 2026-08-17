@@ -154,6 +154,46 @@ class CopyResumenTest {
     }
 
     @Test
+    fun `el orden de las tarjetas pone plata entrada y deuda antes que el cierre`() {
+        assertEquals(listOf("ventas", "fiado"), ordenDeBloquesHoy(feria = true))
+        assertEquals(
+            listOf("ventas", "fiado", "caja", "faltantes", "vencimientos"),
+            ordenDeBloquesHoy(feria = false),
+        )
+    }
+
+    @Test
+    fun `se esta por acabar cuenta en singular y plural sin fecha de maquina`() {
+        assertEquals("1 producto se está acabando.", tituloSePorAcabar(1))
+        assertEquals("5 productos se están acabando.", tituloSePorAcabar(5))
+        assertEquals(
+            "· Tomate — quedan 3",
+            filaSePorAcabar(nombre = "Tomate", stock = 3L),
+        )
+        assertEquals(
+            "· Tomate — sin stock",
+            filaSePorAcabar(nombre = "Tomate", stock = 0L),
+        )
+        assertTrue(vacioSePorAcabar(umbral = 5).contains("5"))
+        assertEquals("Y 2 más. Pídeselos al agente: «¿qué se está por acabar?».", masSePorAcabar(2))
+    }
+
+    @Test
+    fun `se esta por vencer dice el plazo como lo diria una persona`() {
+        assertEquals("1 lote se vence pronto.", tituloPorVencer(1))
+        assertEquals("4 lotes se vencen pronto.", tituloPorVencer(4))
+        assertEquals(
+            "· Yogurt — vence mañana",
+            filaPorVencer(producto = "Yogurt", plazo = plazoDeVencimiento(diasParaVencer = 1L, expired = false)),
+        )
+        assertEquals("vence hoy", plazoDeVencimiento(diasParaVencer = 0L, expired = false))
+        assertEquals("ya vencido", plazoDeVencimiento(diasParaVencer = -1L, expired = true))
+        assertEquals("le quedan 10 días", plazoDeVencimiento(diasParaVencer = 10L, expired = false))
+        assertTrue(vacioPorVencer(dias = 30).contains("30"))
+        assertEquals("Y 3 más.", masPorVencer(3))
+    }
+
+    @Test
     fun `feria nunca usa jerga de tablero ni de cajon`() {
         for (copy in todoCopyFeriaUsuario()) {
             val bajo = copy.lowercase()
