@@ -10,6 +10,8 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test

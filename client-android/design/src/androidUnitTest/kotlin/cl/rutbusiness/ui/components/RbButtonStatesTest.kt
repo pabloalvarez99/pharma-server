@@ -9,6 +9,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.width
 import cl.rutbusiness.ui.theme.RbTheme
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
