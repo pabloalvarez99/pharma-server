@@ -52,16 +52,27 @@ import cl.rutbusiness.ui.theme.rbTouchTarget
  * El catálogo **no** es un destino: buscar un producto vive dentro de Cobrar,
  * que es donde la cajera lo necesita. Una pestaña de catálogo suelta sería una
  * segunda lista de productos que hace lo mismo con un toque más.
+ *
+ * **El orden ya es el del día de feria** y no hace falta reordenar por pack:
+ * Cobrar ("Vender") queda antes que Resumen ("Hoy") en la declaración de
+ * abajo, así que la fila de [BarraDeNavegacion] —que recorre [entries] tal
+ * cual— siempre pone "vender" antes que "el día". "Quién me debe" no tiene
+ * pestaña propia: vive dentro de Resumen/Hoy, y ahí también es el primer
+ * bloque después de las ventas ([ordenDeBloquesHoy][cl.rutbusiness.app.ui.resumen]).
+ * Agente/Hablar queda primero porque así lo pide el founder: es la puerta de
+ * entrada, no el último recurso. Los tres destinos existen en los dos packs
+ * -feria no esconde ninguno- así que tampoco hay una lista más corta que
+ * armar para ese pack.
  */
-enum class Destino(val etiqueta: String) {
+enum class Destino {
     /**
      * El default. Directiva del founder: la dueña no navega menús, le habla al
      * negocio. Todo lo demás existe para cuando hablar no alcanza.
      */
-    Agente("Agente"),
+    Agente,
 
     /** La pantalla que la cajera usa doscientas veces al día. */
-    Cobrar("Cobrar"),
+    Cobrar,
 
     /**
      * "¿Cuánto vendí hoy?", la pregunta de todos los días.
@@ -72,21 +83,21 @@ enum class Destino(val etiqueta: String) {
      * mejor: es una palabra más corta en el peor caso de la barra, que es
      * tres etiquetas completas al 200% en 360dp.
      */
-    Resumen("Tu día"),
+    Resumen,
     ;
 
+    /** Etiqueta de retail formal (pack sin `agent_home`), la de siempre. */
+    val etiqueta: String get() = etiquetaPara(agentHome = false)
+
     /**
-     * Etiqueta según pack (ADR-0022). Feria: palabras cortas del puesto, no de
-     * ERP. Agente → "Hablar", Cobrar → "Vender" (buscar por nombre, sin
-     * escáner), Resumen → "Hoy". Nunca "Caja": la caja del día vive dentro de
-     * Hoy, no en la barra.
+     * Etiqueta según pack (ADR-0022), delegada a `CopyNavegacion` para que el
+     * texto se pueda fijar con un test JVM puro y no quede hardcodeado acá.
+     * Nunca "Caja": la caja del día vive dentro de Hoy, no en la barra.
      */
-    fun etiquetaPara(agentHome: Boolean): String = when {
-        !agentHome -> etiqueta
-        this == Agente -> "Hablar"
-        this == Cobrar -> "Vender"
-        this == Resumen -> "Hoy"
-        else -> etiqueta
+    fun etiquetaPara(agentHome: Boolean): String = when (this) {
+        Agente -> etiquetaAgente(agentHome)
+        Cobrar -> etiquetaCobrar(agentHome)
+        Resumen -> etiquetaResumen(agentHome)
     }
 }
 
