@@ -120,7 +120,7 @@ private fun FiadoScreen(vm: FiadoViewModel, onVolver: () -> Unit) {
             actions = {
                 if (vm.paso == PasoDeFiado.Lista) {
                     RbButton(
-                        label = "Actualizar",
+                        label = labelActualizarFiado(feria),
                         onClick = vm::cargar,
                         variant = RbButtonVariant.Secondary,
                         enabled = !vm.cargando,

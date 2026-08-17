@@ -187,6 +187,13 @@ internal fun remateAbonoEfectivo(feria: Boolean): String =
     }
 
 /**
+ * Botón de la barra en la lista: feria «mira» quién debe, no «actualiza un sistema».
+ * Misma voz que Hoy / Caja.
+ */
+internal fun labelActualizarFiado(feria: Boolean): String =
+    if (feria) "Mirar de nuevo" else "Actualizar"
+
+/**
  * Todas las cadenas de usuario del camino feria, para el gate de vocabulario.
  *
  * Si se agrega copy nuevo de feria, sumarlo acá: el test recorre esta lista.
@@ -197,6 +204,7 @@ internal fun todoCopyFeriaUsuario(): List<String> = listOf(
     labelBuscarDeudor(),
     placeholderBuscarDeudor(),
     cargandoListaDeuda(),
+    labelActualizarFiado(feria = true),
     tituloTotalPorCobrar(),
     cuantosTeDeben(1),
     cuantosTeDeben(3),

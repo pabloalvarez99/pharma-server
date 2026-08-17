@@ -50,6 +50,12 @@ class CopyFiadoTest {
     }
 
     @Test
+    fun `actualizar en feria es mirar de nuevo como Hoy y Caja`() {
+        assertEquals("Mirar de nuevo", labelActualizarFiado(feria = true))
+        assertEquals("Actualizar", labelActualizarFiado(feria = false))
+    }
+
+    @Test
     fun `detalle feria dice te debe no saldo de cuenta`() {
         assertEquals("Te debe", tituloDebeAhora(feria = true))
         assertEquals("Debe ahora", tituloDebeAhora(feria = false))
