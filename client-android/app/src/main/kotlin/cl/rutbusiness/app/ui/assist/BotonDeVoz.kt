@@ -26,14 +26,11 @@ import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
-/** Lo que dice el botón cuando está quieto. */
-internal const val ETIQUETA_QUIETO = "Hablar"
-
-/** Y mientras escucha, para que se vea que el micrófono está abierto. */
-internal const val ETIQUETA_ESCUCHANDO = "Te escucho"
-
 /**
  * El control de voz del agente.
+ *
+ * Las palabras del botón ("Hablar" / "Te escucho") están en `CopyVoz.kt`, no
+ * acá: mismo patrón que el resto del copy de feria, puro JVM y con test propio.
  *
  * **No es un micrófono chico en la esquina.** En el puesto se toca con sol,
  * a veces con una mano ocupada y sin mirar el ícono: el control tiene que
