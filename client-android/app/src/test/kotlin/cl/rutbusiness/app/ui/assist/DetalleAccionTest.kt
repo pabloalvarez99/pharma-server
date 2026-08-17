@@ -89,6 +89,136 @@ class DetalleAccionTest {
         assertEquals(listOf("Nombre", "Teléfono"), etiquetas)
     }
 
+    // ---- el caso real que motivó esta reescritura: la venta de la captura ----
+
+    /**
+     * Los `params` reales de `vender`, copiados tal cual de la captura del
+     * bug: la tarjeta de confirmación de venta mostraba JSON crudo. Este es
+     * el caso que no puede volver a pasar.
+     */
+    private val venta = params(
+        """
+        {
+          "lines": [
+            {
+              "product_id": "product:zoyrw299djv9372hhb2r",
+              "product_name": "Tomate",
+              "quantity": 1,
+              "unit_price": "2000",
+              "line_total": "2000"
+            }
+          ],
+          "subtotal": "2000",
+          "total": "2000",
+          "payment_method": "pos_cash",
+          "customer_id": null,
+          "customer_name": null,
+          "warnings": [],
+          "abre_puesto": false
+        }
+        """,
+    )
+
+    /**
+     * La prueba general: sea cual sea la clave, en ninguna línea de la
+     * tarjeta puede aparecer un carácter de JSON crudo, un booleano en texto,
+     * un id interno o la palabra en inglés `Lines`/`pos_cash`. Barrer
+     * caracteres en vez de fijar frase por frase: así una clave nueva del
+     * server queda cubierta igual, no solo las de esta captura.
+     */
+    @Test
+    fun `la venta de la captura no muestra nada crudo`() {
+        val lineas = DetalleAccion.lineas(venta)
+        val todoElTexto = lineas.joinToString("\n") { "${it.etiqueta}: ${it.valor}" }
+
+        assertTrue("no debe aparecer un id de producto: $todoElTexto", "product:" !in todoElTexto)
+        assertTrue("no debe aparecer un arreglo crudo: $todoElTexto", "[" !in todoElTexto)
+        assertTrue("no debe aparecer un objeto crudo: $todoElTexto", "{" !in todoElTexto)
+        assertTrue("no debe aparecer un booleano crudo: $todoElTexto", "false" !in todoElTexto)
+        assertTrue("no debe aparecer el método de pago crudo: $todoElTexto", "pos_cash" !in todoElTexto)
+        assertTrue("no debe aparecer la etiqueta en inglés: $todoElTexto", "Lines" !in todoElTexto)
+    }
+
+    @Test
+    fun `el carrito se dibuja como una fila por producto, no como un bloque`() {
+        val lineas = DetalleAccion.lineas(venta)
+        val filaTomate = lineas.first { it.etiqueta == "Tomate" }
+        assertEquals("1 × $2.000 c/u = $2.000", filaTomate.valor)
+    }
+
+    @Test
+    fun `subtotal y total usan el mismo formato de plata`() {
+        val lineas = DetalleAccion.lineas(venta)
+        assertEquals("$2.000", lineas.first { it.etiqueta == "Subtotal" }.valor)
+        assertEquals("$2.000", lineas.first { it.etiqueta == "Total" }.valor)
+    }
+
+    @Test
+    fun `pos_cash se dice efectivo`() {
+        val lineas = DetalleAccion.lineas(venta)
+        assertEquals("efectivo", lineas.first { it.etiqueta == "Cómo se paga" }.valor)
+    }
+
+    @Test
+    fun `un booleano en false no ocupa una linea`() {
+        val lineas = DetalleAccion.lineas(venta)
+        assertTrue(
+            "abre_puesto en false no es información para la dueña",
+            lineas.none { it.etiqueta == "Abre el puesto" },
+        )
+    }
+
+    @Test
+    fun `un arreglo vacio no ocupa una linea`() {
+        val lineas = DetalleAccion.lineas(venta)
+        assertTrue("warnings vacío no debe dibujarse", lineas.none { it.etiqueta == "Advertencias" })
+    }
+
+    @Test
+    fun `un booleano en true se dice Si, nunca la palabra true`() {
+        val conApertura = params(
+            """
+            { "lines": [], "subtotal": "0", "total": "0", "abre_puesto": true }
+            """,
+        )
+        val fila = DetalleAccion.lineas(conApertura).first { it.etiqueta == "Abre el puesto" }
+        assertEquals("Sí", fila.valor)
+    }
+
+    @Test
+    fun `un arreglo de strings no vacio se lee como lista, no como JSON`() {
+        val conAdvertencias = params(
+            """
+            { "warnings": ["interactúa con otro medicamento"] }
+            """,
+        )
+        val fila = DetalleAccion.lineas(conAdvertencias).first { it.etiqueta == "Advertencias" }
+        assertTrue(fila.valor.contains("interactúa con otro medicamento"))
+        assertTrue("[" !in fila.valor && "]" !in fila.valor)
+    }
+
+    @Test
+    fun `un id nuevo que la lista vieja no conocia tambien se oculta`() {
+        // po_id no estaba en la lista fija de ids ocultos: con la regla
+        // genérica (sufijo _id) queda cubierto igual.
+        val conPoId = params(
+            """{ "po_id": "purchase_order:xyz789", "items": 3, "total": "15000" }""",
+        )
+        val etiquetas = DetalleAccion.lineas(conPoId).map { it.etiqueta }
+        val valores = DetalleAccion.lineas(conPoId).map { it.valor }
+        assertTrue(etiquetas.none { it.contains("id", ignoreCase = true) })
+        assertTrue(valores.none { it.contains("purchase_order:") })
+    }
+
+    @Test
+    fun `una linea de carrito sin nombre de producto se descarta en silencio`() {
+        // Mejor una fila de menos que una fila con JSON crudo adentro.
+        val lineaIncompleta = params(
+            """{ "lines": [ { "quantity": 1, "unit_price": "2000" } ] }""",
+        )
+        assertTrue(DetalleAccion.lineas(lineaIncompleta).isEmpty())
+    }
+
     @Test
     fun `los miles llevan punto, no coma`() {
         // Un teléfono configurado en inglés escribiría "$1,250,000", que en
