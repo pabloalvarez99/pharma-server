@@ -1,6 +1,21 @@
 package cl.rutbusiness.app.ui.resumen
 
 /**
+ * Un día del bloque semanal, sin ninguna plata todavía adentro.
+ *
+ * @param fecha `YYYY-MM-DD`, para hacer *match* contra `VentaDiariaDto.date`
+ *   por texto y no por posición.
+ * @param diaDeLaSemana `0` lunes .. `6` domingo.
+ * @param esHoy si es el día de hoy, cuyo total no sale de `sales-daily` sino
+ *   del agregado — ver [DiaUtc.rangoDeSemana].
+ */
+internal data class DiaEnLaSemana(
+    val fecha: String,
+    val diaDeLaSemana: Int,
+    val esHoy: Boolean,
+)
+
+/**
  * Los bordes del día, en UTC, como los entiende el server.
  *
  * Dos decisiones que hay que dejar escritas porque no son obvias:
@@ -43,6 +58,42 @@ internal object DiaUtc {
         return rfc3339(comienzoDeHoy - MILIS_POR_DIA) to rfc3339(comienzoDeHoy - 1L)
     }
 
+    /**
+     * `[desde, hasta]` cubriendo los **6 días completos** antes de hoy, mismo
+     * cierre que [rangoDeAyer] (fin de ayer, no medianoche de hoy) así que la
+     * semana se pide sin abrir una segunda convención de bordes.
+     *
+     * Hoy no entra en este rango a propósito: está a medias, y el agregado
+     * (`dashboard`) ya trae su total exacto en `ventas_hoy`. Pedirlo también acá
+     * sería mostrar dos números de "hoy" que un desfase de un segundo entre las
+     * dos llamadas podría no dejar coincidir al peso — ver [armarSemana].
+     */
+    fun rangoDeSemana(ahora: Long): Pair<String, String> {
+        val comienzoDeHoy = comienzoDelDia(ahora)
+        return rfc3339(comienzoDeHoy - 6L * MILIS_POR_DIA) to rfc3339(comienzoDeHoy - 1L)
+    }
+
+    /**
+     * Los 7 días del bloque semanal, del más viejo al de hoy, con su día de la
+     * semana (`0` lunes .. `6` domingo) ya resuelto.
+     *
+     * Se calcula acá y no a partir del `date` que manda el server para que
+     * nada en la pantalla tenga que volver a parsear una fecha: la pantalla
+     * hace *match* de estos 7 días contra las filas del server por texto de
+     * fecha (`YYYY-MM-DD` es comparable como string), nunca por posición.
+     */
+    fun diasDeLaSemana(ahora: Long): List<DiaEnLaSemana> {
+        val comienzoDeHoy = comienzoDelDia(ahora)
+        return (6 downTo 0).map { diasAtras ->
+            val comienzoDelDiaX = comienzoDeHoy - diasAtras * MILIS_POR_DIA
+            DiaEnLaSemana(
+                fecha = rfc3339(comienzoDelDiaX).substring(0, 10),
+                diaDeLaSemana = diaDeLaSemana(comienzoDelDiaX),
+                esHoy = diasAtras == 0,
+            )
+        }
+    }
+
     /** `2026-08-05T00:00:00Z`, que es lo que `DateTime<Utc>` sabe leer. */
     fun rfc3339(milisDeEpoca: Long): String {
         val dias = pisoDivision(milisDeEpoca, MILIS_POR_DIA)
@@ -79,6 +130,18 @@ internal object DiaUtc {
         val dia = diaDelAnio - (153L * mesCorrido + 2L) / 5L + 1L
         val mes = if (mesCorrido < 10L) mesCorrido + 3L else mesCorrido - 9L
         return Triple(if (mes <= 2L) anio + 1L else anio, mes, dia)
+    }
+
+    /**
+     * `0` lunes .. `6` domingo, para cualquier instante dentro de ese día.
+     *
+     * La época (`1970-01-01`) fue jueves. Correr el origen tres días lo deja en
+     * lunes = 0, y de ahí el resto de la semana sale del mismo módulo entero
+     * que ya usa el resto del archivo — sin tablas, sin `java.time`.
+     */
+    private fun diaDeLaSemana(milisDeEpoca: Long): Int {
+        val dias = pisoDivision(milisDeEpoca, MILIS_POR_DIA)
+        return pisoModulo(dias + 3L, 7L).toInt()
     }
 
     private fun dosDigitos(valor: Long, ancho: Int): String =

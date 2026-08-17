@@ -1,6 +1,7 @@
 package cl.rutbusiness.app.ui.resumen
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -69,6 +70,33 @@ class DiaUtcTest {
         val (desde, hasta) = DiaUtc.rangoDeAyer(anioNuevo)
         assertEquals("2026-12-31T00:00:00Z", desde)
         assertEquals("2026-12-31T23:59:59Z", hasta)
+    }
+
+    @Test
+    fun `el rango de semana cubre 6 dias completos y no toca hoy`() {
+        val (desde, hasta) = DiaUtc.rangoDeSemana(jueves)
+        // 6 días atrás desde el jueves 2026-08-06: el jueves anterior, 2026-07-31.
+        assertEquals("2026-07-31T00:00:00Z", desde)
+        // Mismo cierre que rangoDeAyer: el último milisegundo de ayer.
+        assertEquals("2026-08-05T23:59:59Z", hasta)
+    }
+
+    @Test
+    fun `los 7 dias de la semana van de mas viejo a hoy, lunes es 0`() {
+        val dias = DiaUtc.diasDeLaSemana(jueves)
+
+        assertEquals(7, dias.size)
+        assertEquals("2026-07-31", dias.first().fecha)
+        assertEquals("2026-08-06", dias.last().fecha)
+        assertTrue(dias.last().esHoy)
+        assertTrue(dias.dropLast(1).none { it.esHoy })
+
+        // 2026-08-06 es jueves (ver el nombre del fixture): índice 3, lunes=0.
+        assertEquals(3, dias.last().diaDeLaSemana)
+        // 2026-07-31, seis días antes, es viernes = 4.
+        assertEquals(4, dias.first().diaDeLaSemana)
+        // Y el resto encadena: sábado, domingo, lunes, martes, miércoles, jueves.
+        assertEquals(listOf(4, 5, 6, 0, 1, 2, 3), dias.map { it.diaDeLaSemana })
     }
 
     /** La época misma, como control de que el origen del cálculo está bien. */
