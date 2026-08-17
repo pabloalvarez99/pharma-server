@@ -72,7 +72,7 @@ fun TarjetaPropuesta(
         // Honestidad primero: todavía no se anotó nada. Misma frase en feria
         // y retail; el tono del puesto vive en los botones y el cierre.
         Text(
-            text = "Antes de hacerlo, revisa",
+            text = copyEncabezado(),
             style = RbTheme.typography.heading,
             color = colors.brandText,
             modifier = Modifier.rbHeading(),
@@ -97,7 +97,7 @@ fun TarjetaPropuesta(
             )
 
             EstadoPropuesta.Confirmando -> RbLoadingState(
-                label = if (feria) "Anotándolo…" else "Guardándolo…",
+                label = copyCargando(feria),
             )
 
             is EstadoPropuesta.Hecha -> Cierre(
@@ -106,11 +106,7 @@ fun TarjetaPropuesta(
             )
 
             EstadoPropuesta.Cancelada -> Cierre(
-                texto = if (feria) {
-                    "Listo, no lo anoté. En tu puesto no cambió nada."
-                } else {
-                    "No lo hice. No cambió nada en tu negocio."
-                },
+                texto = copyCierreCancelada(feria),
                 tono = Tono.Neutro,
             )
 
@@ -119,7 +115,7 @@ fun TarjetaPropuesta(
             ) {
                 Cierre(texto = estado.texto, tono = Tono.Atencion)
                 RbButton(
-                    label = if (feria) "Decírmelo de nuevo" else "Pedirlo de nuevo",
+                    label = copyBotonVolverAPedir(feria),
                     onClick = { onVolverAPedir(mensaje.pregunta) },
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
@@ -183,51 +179,6 @@ private fun Esperando(
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
         )
-    }
-}
-
-/**
- * El verbo exacto de lo que va a pasar.
- *
- * En feria es una sola frase hablada ("Sí, anotá eso"): en el puesto nadie
- * dice "registrar la venta". En retail el botón nombra la acción del server
- * (`Action::label` en `crates/assist`); una desconocida cae en genérico
- * honesto, nunca en un verbo inventado.
- */
-internal fun etiquetaDeConfirmar(nombreDeAccion: String, feria: Boolean = false): String {
-    if (feria) return "Sí, anotá eso"
-    return when (nombreDeAccion) {
-        "registrar_gasto" -> "Sí, registrar el gasto"
-        "registrar_abono" -> "Sí, registrar el abono"
-        "crear_cliente" -> "Sí, crear el cliente"
-        "crear_proveedor" -> "Sí, crear el proveedor"
-        "crear_producto_rapido" -> "Sí, crear el producto"
-        "ajustar_precio" -> "Sí, cambiar el precio"
-        "ajustar_stock" -> "Sí, ajustar el stock"
-        "abrir_caja" -> "Sí, abrir la caja"
-        "cerrar_caja" -> "Sí, cerrar la caja"
-        "crear_orden_compra_draft" -> "Sí, crear la orden de compra"
-        "dispensar_receta" -> "Sí, dispensar la receta"
-        "registrar_venta" -> "Sí, registrar la venta"
-        "registrar_fiado" -> "Sí, registrar el fiado"
-        else -> "Sí, hazlo"
-    }
-}
-
-/** Salida sin escribir nada. Feria suena a conversación; retail, a deshacer. */
-internal fun etiquetaDeCancelar(feria: Boolean): String =
-    if (feria) "Mejor no" else "No, déjalo así"
-
-/**
- * Tiempo que queda, en castellano hablado. Nunca un timestamp crudo.
- * Feria: "anotar" / "decirme que sí". Retail: el tramo de [Vencimiento].
- */
-internal fun vencimientoEnPalabras(segundosRestantes: Long, feria: Boolean): String {
-    if (!feria) return Vencimiento.enPalabras(segundosRestantes)
-    return when {
-        segundosRestantes <= 0 -> "Ya se me pasó el tiempo para anotarlo."
-        segundosRestantes <= 45 -> "Queda poquito para anotarlo."
-        else -> "Tienes unos minutos para decirme que sí."
     }
 }
 
