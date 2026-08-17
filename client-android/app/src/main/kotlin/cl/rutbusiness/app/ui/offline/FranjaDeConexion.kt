@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.core.offline.VentaEnCola
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
@@ -45,6 +46,7 @@ fun FranjaDeConexion(
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
     val hayCola = esperando > 0 || rechazadas > 0
+    val feria = esFeria()
 
     // Rojo sólo cuando el sistema rechazó una venta: eso pide decisión.
     // Sin señal y ventas en camino son un recado (papel callado), no una alarma.
@@ -52,25 +54,24 @@ fun FranjaDeConexion(
     val fondo = if (hayProblema) colors.dangerContainer else colors.surfaceVariant
     val filo = if (hayProblema) colors.dangerText else colors.outline
 
-    val titulo = when {
-        !conectado && esperando > 0 -> "${recadoSinConexion()} · ${ventas(esperando)} esperando"
-        !conectado -> recadoSinConexion()
-        rechazadas > 0 && esperando == 0 -> "${ventas(rechazadas)} no ${if (rechazadas == 1) "se pudo" else "se pudieron"} enviar"
-        esperando > 0 -> "Enviando ${ventas(esperando)}..."
-        else -> "${ventas(rechazadas)} no ${if (rechazadas == 1) "se pudo" else "se pudieron"} enviar"
-    }
-
+    // Copy en [CopyFranja]: recado feria / retail, sin gerundio inglés.
+    val titulo = tituloFranja(
+        conectado = conectado,
+        esperando = esperando,
+        rechazadas = rechazadas,
+        feria = feria,
+    )
     // Corto a propósito. Cada renglón que se lleva la franja se lo saca a la
     // lista de productos que hay abajo, y en un panel de 640dp con la barra de
     // arriba, el buscador y la barra de total, la lista se queda sin lugar
     // antes que nadie. Se midió en un emulador API 23: con el texto largo, la
     // lista quedaba en cero.
-    val detalle = when {
-        rechazadas > 0 -> "Tócalo para ver cuáles."
-        !conectado && esperando > 0 -> "Salen solas al volver la señal. Tócalo para verlas."
-        !conectado -> detalleSinConexion()
-        else -> "Tócalo para verlas."
-    }
+    val detalle = detalleFranja(
+        conectado = conectado,
+        esperando = esperando,
+        rechazadas = rechazadas,
+        feria = feria,
+    )
 
     Column(modifier = modifier.fillMaxWidth()) {
         Column(
@@ -122,7 +123,3 @@ fun FranjaDeConexion(
         )
     }
 }
-
-/** "1 venta" / "3 ventas". El singular importa: lo lee una persona. */
-private fun ventas(cuantas: Int): String =
-    if (cuantas == 1) "1 venta" else "$cuantas ventas"
