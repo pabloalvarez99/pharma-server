@@ -35,6 +35,7 @@ class CopyResumenTest {
         assertEquals("Cómo va el negocio hoy", subtituloHoy(feria = false))
         assertEquals("Mirar de nuevo", labelActualizarHoy(feria = true))
         assertEquals("Actualizar", labelActualizarHoy(feria = false))
+        assertEquals("Más", labelAbrirMenuHoy())
     }
 
     @Test

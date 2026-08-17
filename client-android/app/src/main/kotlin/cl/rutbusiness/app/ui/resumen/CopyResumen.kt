@@ -31,6 +31,14 @@ internal fun subtituloHoy(feria: Boolean): String =
 internal fun labelActualizarHoy(feria: Boolean): String =
     if (feria) "Mirar de nuevo" else "Actualizar"
 
+/**
+ * Botón de la barra que abre el menú del puesto (caja, impresora, ventas
+ * pendientes, cambiar de rubro — ver `MenuDelPuestoScreen.kt`). Una sola
+ * palabra a propósito: comparte la barra con [labelActualizarHoy] y las dos
+ * tienen que caber juntas sin cortarse al 200% de letra.
+ */
+internal fun labelAbrirMenuHoy(): String = "Más"
+
 /** Primera carga sin cifras todavía. */
 internal fun cargandoHoy(feria: Boolean): String =
     if (feria) {
