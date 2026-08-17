@@ -46,6 +46,12 @@ class CopyMenuTest {
     }
 
     @Test
+    fun `los encabezados de grupo no cambian por rubro`() {
+        assertEquals("Lo que usas seguido", tituloGrupoDiario())
+        assertEquals("Una vez al mes", tituloGrupoMensual())
+    }
+
+    @Test
     fun `contar la plata no dice cajon ni arqueo en feria`() {
         val titulo = tituloCaja(feria = true)
         assertEquals("Contar la plata del puesto", titulo)
@@ -120,6 +126,8 @@ class CopyMenuTest {
     private fun todoCopyFeriaUsuario(): List<String> = listOf(
         tituloMenu(true),
         subtituloMenu(),
+        tituloGrupoDiario(),
+        tituloGrupoMensual(),
         tituloCaja(true),
         subtituloCaja(true),
         tituloImpresora(),

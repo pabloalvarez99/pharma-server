@@ -1,5 +1,6 @@
 package cl.rutbusiness.app.ui.nav
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -8,74 +9,89 @@ import androidx.compose.runtime.setValue
 import cl.rutbusiness.app.ui.caja.CajaRoute
 import cl.rutbusiness.app.ui.fiado.FiadoRoute
 import cl.rutbusiness.app.ui.menu.MenuDelPuestoRoute
+import cl.rutbusiness.app.ui.menu.PantallaDeCambiarRubro
+import cl.rutbusiness.app.ui.menu.PantallaDeImpresoraDelMenu
 import cl.rutbusiness.app.ui.resumen.ResumenRoute
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 
 /**
- * Las cosas que se hacen desde "Tu día".
+ * "Tu día": el resumen y todo lo que cuelga de él — caja, fiado, y el menú
+ * del puesto con sus propias pantallas (impresora, cambiar de rubro).
  *
- * [Menu] se agregó en la ola de visibilidad: es la puerta a lo que existe y
- * funciona pero no tenía ningún camino desde la interfaz (impresora, ventas
- * que faltan subir, contar la plata en feria, cambiar de rubro). Mismo motivo
- * que [Caja] y [Fiado] para no ser una pestaña propia — ver el KDoc de
- * [TuDiaRoute] — así que entra acá como una rutina más.
- */
-private enum class RutinaDelDia { Resumen, Caja, Fiado, Menu }
-
-/**
- * "Tu día": el resumen y las dos rutinas que salen de él.
- *
- * **Por qué la caja y el fiado no son pestañas propias.** La barra de abajo está
- * medida: tres etiquetas completas repartidas en 360dp con la letra al 200% ya
- * es el límite de lo que entra sin cortar una palabra — está escrito en
- * [BarraDeNavegacion] y lo prueba `BarraDeNavegacionEscalaTest`. Con cinco
+ * **Por qué la caja y el fiado no son pestañas propias.** La barra de abajo
+ * está medida: tres etiquetas completas repartidas en 360dp con la letra al
+ * 200% ya es el límite de lo que entra sin cortar una palabra — está escrito
+ * en [BarraDeNavegacion] y lo prueba `BarraDeNavegacionEscalaTest`. Con cinco
  * pestañas cada una queda en 72dp y una etiqueta de dos palabras no cabe ni
- * partiéndola, o sea que
- * la pestaña se queda sin nombre justo para la persona que subió la letra porque
- * ve poco. Cambiar eso para meter dos destinos sería pagar la accesibilidad de
- * toda la app con un toque de ahorro.
+ * partiéndola, o sea que la pestaña se queda sin nombre justo para la
+ * persona que subió la letra porque ve poco.
  *
- * Y el lugar no es un premio de consuelo: el resumen ya contesta "cuánta plata
- * hay en la caja" y "cuánto te deben", así que abrir la caja y cobrar el fiado
- * salen del mismo bloque que hace la pregunta. Son dos toques desde que se prende
- * el teléfono.
+ * **Una sola pila, no dos `enum` anidados.** Hasta la ola 27 esto era un
+ * `enum RutinaDelDia` con su `when`, y `MenuDelPuestoScreen.kt` tenía adentro
+ * un segundo `enum SeccionDelMenu` con el suyo — dos dueños de la
+ * navegación, sin back stack, cada uno manejando su propio botón físico de
+ * atrás. La consecuencia: `CajaRoute` era alcanzable desde los dos (el
+ * resumen y el menú) con semánticas de "volver" distintas según por dónde se
+ * entraba. Con [rememberPilaDeNavegacion] hay una sola pila para todo el
+ * árbol — ver [Pantalla] para el detalle y para dónde entran las pantallas
+ * de las olas 29 a 33 — así que da lo mismo qué empujó [Pantalla.Caja]:
+ * volver siempre saca la última pantalla empujada, y ninguna pantalla
+ * necesita saber quién la abrió.
  *
- * Sub-navegación con un `enum` en `rememberSaveable`, igual que
- * [ContenedorDeDestinos] y por lo mismo: son tres pantallas, un `NavHost` traería
- * un back stack y un `ViewModelStore` por entrada para no ganar nada. El botón
- * físico de atrás lo maneja cada pantalla de adentro, y el suyo gana por ser el
- * más profundo.
+ * Sigue sin `navigation-compose` (prohibido: sin dependencias de Gradle
+ * nuevas) y sin `ViewModelStore` por entrada: los `ViewModel` de Caja, Fiado
+ * e Impresora cuelgan del `Activity`, igual que en [ContenedorDeDestinos].
  */
 @Composable
 internal fun TuDiaRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) {
-    var rutina by rememberSaveable { mutableStateOf(RutinaDelDia.Resumen) }
+    val pila = rememberPilaDeNavegacion(Pantalla.Resumen)
 
-    // Volver de la caja o del fiado cambia justo los dos números que el resumen
-    // muestra. Sin esto, la dueña abre la caja, vuelve, y "Tu día" le sigue
-    // diciendo que no hay ninguna caja abierta — el `ViewModel` sobrevive al
-    // cambio de pantalla y su carga inicial ya corrió.
+    // Volver de la caja o del fiado cambia justo los dos números que el
+    // resumen muestra. Sin esto, la dueña abre la caja, vuelve, y "Tu día"
+    // le sigue diciendo que no hay ninguna caja abierta — el `ViewModel`
+    // sobrevive al cambio de pantalla y su carga inicial ya corrió.
+    //
+    // Se mira `pila.actual` **antes** de sacarla (la pantalla que se está
+    // por abandonar), no la que queda arriba: da lo mismo si `Caja` se
+    // empujó desde el resumen o desde el menú, lo que importa es de dónde se
+    // vuelve, no adónde.
     var vueltas by rememberSaveable { mutableStateOf(0) }
-
     val volver: () -> Unit = {
-        vueltas += 1
-        rutina = RutinaDelDia.Resumen
+        if (pila.actual == Pantalla.Caja || pila.actual == Pantalla.Fiado) vueltas += 1
+        pila.volver()
     }
 
-    when (rutina) {
-        RutinaDelDia.Resumen -> ResumenRoute(
+    // Mismo patrón que `ContenedorDeDestinos`: un solo `BackHandler` acá
+    // arriba, habilitado mientras no se esté en la raíz. Las pantallas de
+    // adentro (Caja, Fiado) pueden registrar el suyo propio para sus propios
+    // pasos internos -ese es más profundo y gana-, pero "salir de esta
+    // pantalla y volver a la anterior" es una sola regla y vive acá.
+    BackHandler(enabled = !pila.enRaiz) { volver() }
+
+    when (pila.actual) {
+        Pantalla.Resumen -> ResumenRoute(
             sesion = sesion,
             estado = estado,
-            onIrALaCaja = { rutina = RutinaDelDia.Caja },
-            onIrAlFiado = { rutina = RutinaDelDia.Fiado },
-            onAbrirMenu = { rutina = RutinaDelDia.Menu },
+            onIrALaCaja = { pila.ir(Pantalla.Caja) },
+            onIrAlFiado = { pila.ir(Pantalla.Fiado) },
+            onAbrirMenu = { pila.ir(Pantalla.Menu) },
             recargasPedidas = vueltas,
         )
 
-        RutinaDelDia.Caja -> CajaRoute(sesion = sesion, estado = estado, onVolver = volver)
+        Pantalla.Caja -> CajaRoute(sesion = sesion, estado = estado, onVolver = volver)
 
-        RutinaDelDia.Fiado -> FiadoRoute(sesion = sesion, estado = estado, onVolver = volver)
+        Pantalla.Fiado -> FiadoRoute(sesion = sesion, estado = estado, onVolver = volver)
 
-        RutinaDelDia.Menu -> MenuDelPuestoRoute(sesion = sesion, estado = estado, onVolver = volver)
+        Pantalla.Menu -> MenuDelPuestoRoute(
+            onVolver = volver,
+            onAbrirCaja = { pila.ir(Pantalla.Caja) },
+            onAbrirImpresora = { pila.ir(Pantalla.Impresora) },
+            onAbrirRubro = { pila.ir(Pantalla.Rubro) },
+        )
+
+        Pantalla.Impresora -> PantallaDeImpresoraDelMenu(onVolver = volver)
+
+        Pantalla.Rubro -> PantallaDeCambiarRubro(sesion = sesion, onVolver = volver)
     }
 }

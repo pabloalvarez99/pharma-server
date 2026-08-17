@@ -23,6 +23,16 @@ internal fun tituloMenu(feria: Boolean): String =
 /** Subtítulo del top bar del menú. Igual en los dos rubros: no es jerga. */
 internal fun subtituloMenu(): String = "Todo lo que puedes hacer aquí"
 
+// --- encabezados de grupo (GrupoDeMenu) --------------------------------------
+// Mismo texto en los dos rubros: agrupa por ritmo de uso, no por vocabulario
+// de negocio, así que no hace falta rama feria.
+
+/** Encabezado del grupo de arriba: lo que se toca en medio de un día de puesto. */
+internal fun tituloGrupoDiario(): String = "Lo que usas seguido"
+
+/** Encabezado del grupo de abajo: lo que se toca una vez y se olvida por semanas. */
+internal fun tituloGrupoMensual(): String = "Una vez al mes"
+
 // --- entrada: contar la plata (caja) ----------------------------------------
 
 /**
