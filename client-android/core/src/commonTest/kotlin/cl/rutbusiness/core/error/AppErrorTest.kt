@@ -18,7 +18,7 @@ class AppErrorTest {
     fun `ServidorNoResponde no nombra PC ni host en el mensaje visible`() {
         val err = AppError.ServidorNoResponde("http://10.0.2.2:8080", technical = "timeout")
         assertEquals(
-            "No pudimos conectar. Revisá que el teléfono tenga internet e intentá de nuevo.",
+            "No pudimos conectar. Revisa que el teléfono tenga internet e intenta de nuevo.",
             err.userMessage,
         )
         assertFalse(err.userMessage.contains("PC", ignoreCase = true))

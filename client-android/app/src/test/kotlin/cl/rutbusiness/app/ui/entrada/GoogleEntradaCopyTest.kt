@@ -129,7 +129,7 @@ class GoogleEntradaCopyTest {
         override fun disponible(): Boolean = true
 
         override fun copyPromocion(rubroEsFeria: Boolean): String =
-            "Entrá con tu cuenta de Google."
+            "Entra con tu cuenta de Google."
 
         override suspend fun pedirCuenta(): ResultadoGoogle =
             error("el copy del primer uso no puede pedir una cuenta")

@@ -54,10 +54,10 @@ class IdentidadGoogleAndroid(
 
     override fun copyPromocion(rubroEsFeria: Boolean): String =
         if (rubroEsFeria) {
-            "Entrá con tu cuenta de Google y no te acordás de ninguna clave " +
+            "Entra con tu cuenta de Google y no te acuerdas de ninguna clave " +
                 "más. Es la misma cuenta del teléfono."
         } else {
-            "Entrá con tu cuenta de Google, sin teclear la clave cada vez."
+            "Entra con tu cuenta de Google, sin teclear la clave cada vez."
         }
 
     override suspend fun pedirCuenta(): ResultadoGoogle {
@@ -91,14 +91,14 @@ class IdentidadGoogleAndroid(
             ) {
                 return ResultadoGoogle.Error(
                     "El teléfono devolvió algo que no es una cuenta de Google. " +
-                        "Usá correo y clave.",
+                        "Usa correo y clave.",
                 )
             }
 
             val google = GoogleIdTokenCredential.createFrom(credencial.data)
             if (google.idToken.isBlank()) {
                 return ResultadoGoogle.Error(
-                    "Google no devolvió la credencial. Probá de nuevo o usá " +
+                    "Google no devolvió la credencial. Prueba de nuevo o usa " +
                         "correo y clave.",
                 )
             }
@@ -118,7 +118,7 @@ class IdentidadGoogleAndroid(
             // de un aparato de feria recién comprado, no una falla.
             ResultadoGoogle.NoDisponible(
                 mensajeUsuario = "Este teléfono no tiene ninguna cuenta de " +
-                    "Google agregada. Usá el correo y la clave del negocio.",
+                    "Google agregada. Usa el correo y la clave del negocio.",
                 razonInterna = "no_credential: ${e.type}",
             )
         } catch (e: GetCredentialException) {
@@ -127,7 +127,7 @@ class IdentidadGoogleAndroid(
             // puesto pueda hacer.
             ResultadoGoogle.Error(
                 "No se pudo abrir la lista de cuentas de Google. " +
-                    "Usá el correo y la clave de abajo.",
+                    "Usa el correo y la clave de abajo.",
             ).also { registrarFalla(e) }
         }
     }

@@ -114,12 +114,12 @@ class UserBackupApi(private val api: ApiFactory) {
  * encontrado" que no le dice a nadie qué hacer.
  */
 fun mensajeRescateFallido(tenantSlug: String): String =
-    "No encontramos un respaldo con esos datos. Revisá tres cosas: " +
+    "No encontramos un respaldo con esos datos. Revisa tres cosas: " +
         "que el nombre del negocio sea exactamente el de la tarjeta " +
         "(\"${PruebaDeRetiro.normalizarSlug(tenantSlug)}\"), " +
         "que no falte ninguna palabra ni letra, y que este negocio haya " +
         "alcanzado a subir un respaldo alguna vez. " +
-        "Nadie más que vos puede abrirlo, así que tampoco podemos buscarlo por vos."
+        "Nadie más que tú puede abrirlo, así que tampoco podemos buscarlo por ti."
 
 @Serializable
 data class DescargaBackupWire(

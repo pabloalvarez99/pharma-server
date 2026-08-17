@@ -23,7 +23,7 @@ class CompartirTarjetaAndroid(private val context: Context) : CompartirTarjeta {
         // `createChooser` y no el share directo: sin él Android puede elegir
         // sola la última app usada, que en un teléfono chileno es WhatsApp. La
         // tarjeta abre el respaldo del negocio; mandarla por chat es regalarla.
-        val chooser = Intent.createChooser(send, "Guardá en Notas. No mandes por chat.")
+        val chooser = Intent.createChooser(send, "Guarda en Notas. No mandes por chat.")
         // La pantalla puede lanzarse desde un Context que no es Activity.
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(chooser)

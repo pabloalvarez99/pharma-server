@@ -123,7 +123,7 @@ fun textoTarjetaImprimible(
     sb.appendLine(titulo)
     sb.appendLine("Negocio: ${tenantSlug.trim().lowercase()}")
     sb.appendLine()
-    sb.appendLine("Palabras (12) - escribí en el cuaderno:")
+    sb.appendLine("Palabras (12) - escribe en el cuaderno:")
     clave.palabras.forEachIndexed { i, p ->
         sb.appendLine("  ${i + 1}. $p")
     }
@@ -221,7 +221,7 @@ fun htmlTarjetaImprimible(
   <h1>${escaparHtml(titulo)}</h1>
   <p>Negocio: <strong class="mono">${escaparHtml(slug)}</strong></p>
   <div class="warn">
-    <strong>Pegá esta hoja en tu cuaderno.</strong>
+    <strong>Pega esta hoja en tu cuaderno.</strong>
     Sin esta llave el respaldo cifrado no se puede abrir.
     RutAgent no puede recuperarla. No la mandes por WhatsApp.
   </div>

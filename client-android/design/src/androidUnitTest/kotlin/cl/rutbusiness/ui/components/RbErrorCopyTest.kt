@@ -19,8 +19,8 @@ class RbErrorCopyTest {
         val copy = rbErrorCopy(RbErrorKind.Offline, "tus productos")
         assertEquals("No llegamos", copy.title)
         assertEquals(
-            "No pudimos traer tus productos. Revisá que el teléfono tenga wifi o datos " +
-                "prendidos e intentá de nuevo.",
+            "No pudimos traer tus productos. Revisa que el teléfono tenga wifi o datos " +
+                "prendidos e intenta de nuevo.",
             copy.message,
         )
         assertEquals("Reintentar", copy.retryLabel)
@@ -40,7 +40,7 @@ class RbErrorCopyTest {
         val copy = rbErrorCopy(RbErrorKind.Timeout, "tus ventas")
         assertEquals("Se demoró", copy.title)
         assertEquals(
-            "No alcanzamos a traer tus ventas. Esperá un ratito e intentá de nuevo.",
+            "No alcanzamos a traer tus ventas. Espera un ratito e intenta de nuevo.",
             copy.message,
         )
         assertEquals("Reintentar", copy.retryLabel)
@@ -63,7 +63,7 @@ class RbErrorCopyTest {
         val copy = rbErrorCopy(RbErrorKind.Unknown, "tus clientes")
         assertEquals("No salió", copy.title)
         assertTrue(copy.message.contains("tus clientes"))
-        assertTrue(copy.message.contains("cerrá la app"))
+        assertTrue(copy.message.contains("cierra la app"))
         assertEquals("Reintentar", copy.retryLabel)
         assertSinStacktrace(copy)
     }

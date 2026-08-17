@@ -62,7 +62,7 @@ fun restaurarDesdeSobre(
                 return Result.failure(
                     IllegalArgumentException(
                         "KDF del sobre (${header.kdf}) no está en esta app. " +
-                            "Actualizá o usá el aparato que creó el respaldo.",
+                            "Actualiza o usa el aparato que creó el respaldo.",
                     ),
                 )
         }
@@ -73,7 +73,7 @@ fun restaurarDesdeSobre(
     val plain = descifrarSobreV1(key, envelopeBytes).getOrElse {
         return Result.failure(
             IllegalArgumentException(
-                "No se pudo abrir el respaldo. Revisá las palabras del cuaderno.",
+                "No se pudo abrir el respaldo. Revisa las palabras del cuaderno.",
             ),
         )
     }

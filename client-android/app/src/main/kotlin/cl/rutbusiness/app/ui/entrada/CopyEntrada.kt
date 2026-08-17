@@ -9,7 +9,7 @@ package cl.rutbusiness.app.ui.entrada
  */
 internal fun copyAvisoGoogleSinDestino(pideDireccion: Boolean): String =
     if (pideDireccion) {
-        "Primero poné la dirección del computador del negocio."
+        "Primero pon la dirección del computador del negocio."
     } else {
         "RutAgent no responde. Reintenta en un momento."
     }
