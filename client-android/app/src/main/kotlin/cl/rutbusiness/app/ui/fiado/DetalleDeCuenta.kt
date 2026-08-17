@@ -149,14 +149,20 @@ fun DetalleDeCuenta(vm: FiadoViewModel, modifier: Modifier = Modifier) {
             }
 
             cuenta.entries.isEmpty() -> item("sin-movimientos") {
-                Text(
-                    // En feria no se manda a «Cobrar»: esa pestaña se llama
-                    // "Vender" y fiar se hace hablando. Mandar a alguien a una
-                    // pestaña que no existe es peor que no decirle nada.
-                    text = vacioMovimientos(feria),
-                    style = RbTheme.typography.body,
-                    color = colors.textSecondary,
-                )
+                // Hoja recién abierta, no una pantalla rota: el chip le da
+                // presencia en vez de dejar el texto flotando gris sobre el
+                // fondo, como si esta persona no tuviera hoja todavía.
+                RbCard {
+                    RbChip(label = chipHojaNueva(), tone = RbChipTone.Neutral)
+                    Text(
+                        // En feria no se manda a «Cobrar»: esa pestaña se llama
+                        // "Vender" y fiar se hace hablando. Mandar a alguien a una
+                        // pestaña que no existe es peor que no decirle nada.
+                        text = vacioMovimientos(feria),
+                        style = RbTheme.typography.body,
+                        color = colors.textSecondary,
+                    )
+                }
             }
 
             else -> items(items = cuenta.entries, key = { it.id }) { movimiento ->
@@ -194,6 +200,31 @@ private fun DebeAhora(vm: FiadoViewModel, feria: Boolean) {
             amount = vm.moneda.formatear(cuenta.balance),
             emphasis = RbAmountEmphasis.Headline,
         )
+
+        // Bajo el monto: si hay deuda, desde cuándo la tiene; si no, que
+        // quedó al día no es un cero vacío ni un error, sino la mejor
+        // noticia posible de esta hoja.
+        val pesosQueDebeAhora = Dinero.deTextoDeServidor(cuenta.balance)?.unidades
+        val hayHistorial = cuenta.entries.isNotEmpty()
+        if (pesosQueDebeAhora != null && pesosQueDebeAhora <= 0L && hayHistorial) {
+            RbChip(label = chipAlDia(), tone = RbChipTone.Brand)
+            Text(
+                text = mensajeAlDia(feria),
+                style = RbTheme.typography.support,
+                color = colors.textSecondary,
+            )
+        } else {
+            // El más viejo de la lista (ordenada del más nuevo al más
+            // viejo) es cuándo empezó a llevar esta hoja.
+            val fechaInicio = cuenta.entries.lastOrNull()?.creadoEn?.let { fechaCorta(it) }
+            if (fechaInicio != null) {
+                Text(
+                    text = debeDesde(feria, fechaInicio),
+                    style = RbTheme.typography.support,
+                    color = colors.textSecondary,
+                )
+            }
+        }
 
         RbDivider()
 
