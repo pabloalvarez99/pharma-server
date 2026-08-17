@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import cl.rutbusiness.app.diag.Latencia
+import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.scanner.AccionesDePermiso
 import cl.rutbusiness.app.ui.scanner.Cartel
 import cl.rutbusiness.app.ui.scanner.EstadoDelPermiso
@@ -57,6 +58,7 @@ import kotlinx.coroutines.delay
 fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
     val camara = LocalCamaraDeCodigos.current
     val haptica = LocalHapticFeedback.current
+    val feria = esFeria()
 
     // El tic corto es la mitad de la señal: la cajera está mirando el producto
     // y el mostrador, no la pantalla. Se dispara con `ultimaLectura`, que trae
@@ -83,12 +85,12 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier = modifier) {
         RbTopBar(
-            title = if (vm.creandoProducto) "Producto nuevo" else "Leer código",
-            subtitle = when {
-                vm.creandoProducto -> "No estaba en tu catálogo"
-                camara != null -> "Acerca el código a la luz"
-                else -> null
-            },
+            title = copyTituloEscaner(vm.creandoProducto),
+            subtitle = copySubtituloEscaner(
+                feria = feria,
+                creandoProducto = vm.creandoProducto,
+                hayCamara = camara != null,
+            ),
             onBack = if (vm.creandoProducto) vm::cancelarCreacion else vm::cerrarEscaner,
         )
 
@@ -98,7 +100,11 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize(),
             )
 
-            vm.creandoProducto -> FormularioDeProductoNuevo(vm, modifier = Modifier.fillMaxSize())
+            vm.creandoProducto -> FormularioDeProductoNuevo(
+                vm,
+                feria = feria,
+                modifier = Modifier.fillMaxSize(),
+            )
 
             else -> {
                 val permiso = camara.recordarPermiso()
@@ -117,7 +123,7 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                         )
                         MarcoDeLinterna(Modifier.fillMaxSize())
                     }
-                    PanelDeLectura(vm)
+                    PanelDeLectura(vm, feria = feria)
                 } else {
                     ExplicacionDelPermiso(
                         estado = permiso.estado,
@@ -147,7 +153,7 @@ fun PasoEscaner(vm: CobrarViewModel, modifier: Modifier = Modifier) {
  * un toque equivocado por venta. Botones ≥ 56 dp vía design system.
  */
 @Composable
-private fun PanelDeLectura(vm: CobrarViewModel) {
+private fun PanelDeLectura(vm: CobrarViewModel, feria: Boolean) {
     val colors = RbTheme.colors
     val lectura = vm.ultimaLectura
     val sinProducto = vm.codigoSinProducto
@@ -157,8 +163,8 @@ private fun PanelDeLectura(vm: CobrarViewModel) {
         when {
             sinProducto != null -> Cartel(
                 fondo = colors.dangerContainer,
-                titulo = "Ese código no está en tu catálogo",
-                detalle = "Leímos $sinProducto. Puedes crearlo ahora o escribirlo a mano.",
+                titulo = copyTituloSinProducto(feria),
+                detalle = copyDetalleSinProducto(sinProducto),
             )
 
             error != null -> Cartel(
@@ -169,23 +175,19 @@ private fun PanelDeLectura(vm: CobrarViewModel) {
 
             lectura != null -> Cartel(
                 fondo = colors.brandContainer,
-                titulo = "Listo: ${lectura.nombre}",
-                detalle = if (lectura.enCarrito > 1) {
-                    "${lectura.enCarrito} unidades en el carrito"
-                } else {
-                    "1 unidad en el carrito"
-                },
+                titulo = copyTituloListo(lectura.nombre),
+                detalle = copyDetalleListo(feria, lectura.enCarrito),
             )
 
             else -> Cartel(
                 fondo = colors.surfaceVariant,
-                titulo = "Acerca el código de barras",
-                detalle = "Uno tras otro, sin salir entre medio. Como una linterna: apuntas y listo.",
+                titulo = copyTituloEsperando(),
+                detalle = copyDetalleEsperando(),
             )
         }
 
         Text(
-            text = resumenDelCarrito(vm),
+            text = resumenDelCarrito(vm, feria),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
             modifier = Modifier.fillMaxWidth(),
@@ -195,14 +197,14 @@ private fun PanelDeLectura(vm: CobrarViewModel) {
             spacing = RbTheme.dimens.space2,
             content = {
                 if (sinProducto != null) {
-                    RbButton(label = "Crear producto", onClick = vm::crearProductoDelCodigo)
+                    RbButton(label = copyBotonCrearProducto(), onClick = vm::crearProductoDelCodigo)
                 } else {
-                    RbButton(label = "Listo", onClick = vm::cerrarEscaner)
+                    RbButton(label = copyBotonListo(), onClick = vm::cerrarEscaner)
                 }
             },
             trailing = {
                 RbButton(
-                    label = "Escribir a mano",
+                    label = copyBotonEscribirAMano(),
                     onClick = vm::escribirAMano,
                     variant = RbButtonVariant.Secondary,
                 )
@@ -211,12 +213,13 @@ private fun PanelDeLectura(vm: CobrarViewModel) {
     }
 }
 
-private fun resumenDelCarrito(vm: CobrarViewModel): String {
-    val unidades = vm.carrito.unidades
-    if (unidades == 0) return "El carrito está vacío"
+/**
+ * Reusa [copyBarraCarrito]: la misma frase de "lo que llevas" que ya fija
+ * [PasoBuscar], para no decirlo dos veces distinto en la misma venta.
+ */
+private fun resumenDelCarrito(vm: CobrarViewModel, feria: Boolean): String {
     val total = vm.carrito.total?.let { vm.moneda.formatear(it) }
-    val palabra = if (unidades == 1) "producto" else "productos"
-    return "$unidades $palabra${total?.let { " · $it" } ?: ""}"
+    return copyBarraCarrito(unidades = vm.carrito.unidades, total = total, feria = feria)
 }
 
 /**
@@ -231,7 +234,11 @@ private fun resumenDelCarrito(vm: CobrarViewModel): String {
  * escribe.
  */
 @Composable
-private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = Modifier) {
+private fun FormularioDeProductoNuevo(
+    vm: CobrarViewModel,
+    feria: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
     val shape = RbTheme.shapes.card
@@ -256,7 +263,7 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 verticalArrangement = Arrangement.spacedBy(dimens.space3),
             ) {
                 Text(
-                    text = "Código leído",
+                    text = copyEtiquetaCodigoLeido(),
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
@@ -269,8 +276,8 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 RbTextField(
                     value = vm.nombreNuevo,
                     onValueChange = vm::cambiarNombreNuevo,
-                    label = "Nombre",
-                    placeholder = "Como quieres verlo en la boleta",
+                    label = copyEtiquetaNombreNuevo(),
+                    placeholder = copyPlaceholderNombreNuevo(feria),
                     enabled = !vm.guardandoProducto,
                     imeAction = ImeAction.Next,
                 )
@@ -278,12 +285,14 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 RbTextField(
                     value = vm.precioNuevo,
                     onValueChange = vm::cambiarPrecioNuevo,
-                    label = "Precio",
-                    placeholder = "Sólo números",
-                    supportingText = vm.precioNuevo
-                        .takeIf { it.isNotBlank() }
-                        ?.let { "Se cobra ${vm.moneda.formatear(it)}" }
-                        ?: "El precio de venta al público.",
+                    label = copyEtiquetaPrecioNuevo(),
+                    placeholder = copyPlaceholderPrecioNuevo(),
+                    supportingText = copyAyudaPrecioNuevo(
+                        feria = feria,
+                        cobrado = vm.precioNuevo
+                            .takeIf { it.isNotBlank() }
+                            ?.let { vm.moneda.formatear(it) },
+                    ),
                     numeric = true,
                     keyboardType = KeyboardType.Number,
                     enabled = !vm.guardandoProducto,
@@ -297,9 +306,7 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 }
 
                 Text(
-                    text = "Nace con una unidad en stock: la que tienes en la mano. El resto de la " +
-                        "ficha —categoría, costo, proveedor— se completa después con calma, " +
-                        "pidiéndoselo al agente.",
+                    text = copyNotaProductoNuevo(feria),
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
@@ -311,14 +318,14 @@ private fun FormularioDeProductoNuevo(vm: CobrarViewModel, modifier: Modifier = 
                 spacing = dimens.space2,
                 content = {
                     RbButton(
-                        label = if (vm.guardandoProducto) "Creando…" else "Crear y agregar",
+                        label = copyBotonCrearYAgregar(vm.guardandoProducto),
                         onClick = vm::guardarProductoNuevo,
                         enabled = !vm.guardandoProducto,
                     )
                 },
                 trailing = {
                     RbButton(
-                        label = "Escribir a mano",
+                        label = copyBotonEscribirAMano(),
                         onClick = vm::escribirAMano,
                         variant = RbButtonVariant.Secondary,
                         enabled = !vm.guardandoProducto,
