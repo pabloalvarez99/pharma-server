@@ -150,13 +150,19 @@ pub async fn sales_by_method(
     ))
 }
 
-/// Reporte de márgenes diarios. **Requiere Pro+** o microtx
-/// `reports.margins_daily` — Free retorna 402 `FEATURE_REQUIRES_UPGRADE`.
+/// Reporte de márgenes diarios. **Incluido en Free**, como todos los reportes
+/// sobre los datos del propio negocio.
+///
+/// Estuvo detrás de un gate de licencia (Fase 10d POC) hasta el 2026-08-17.
+/// Se abrió junto con `top-products`, `stock-rotation` y `near-expiry`: un
+/// reporte es una consulta sobre las filas del propio negocio, no hay costo
+/// marginal que cobrar, y un ERP que no puede decirte si ganaste plata es una
+/// caja registradora. Lo que sigue teniendo tier es lo que cuesta operar o
+/// carga responsabilidad — SII, federación, sync, respaldo remoto, soporte.
 #[utoipa::path(get, path = "/api/v1/reports/margins-daily", tag = "Expenses",
     responses(
         (status = 200, description = "Márgenes agrupados por día", body = serde_json::Value),
         (status = 401, body = crate::error::ErrorEnvelope),
-        (status = 402, description = "Tier license insuficiente (FEATURE_REQUIRES_UPGRADE)", body = crate::error::ErrorEnvelope),
         (status = 500, body = crate::error::ErrorEnvelope),
     ),
     security(("bearer_jwt" = [])))]
@@ -165,10 +171,6 @@ pub async fn margins_daily(
     AuthUser(claims): AuthUser,
     Query(filters): Query<SalesReportFilters>,
 ) -> Result<Json<Vec<DailyMarginRow>>, ApiError> {
-    // License gate (Fase 10d POC): requires Pro+ or microtx that grants
-    // `reports.margins_daily`. Free tier → 402 FEATURE_REQUIRES_UPGRADE.
-    let lic = state.license.load();
-    license::require(&lic, "reports.margins_daily")?;
     let db = db_of(&state)?;
     let tenant = tenant_of(&claims)?;
     Ok(Json(

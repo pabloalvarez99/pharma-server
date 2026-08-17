@@ -7,10 +7,9 @@
 //! `expenses::service::{sales_daily,top_products,near_expiry,margins_daily}`),
 //! so the SurrealQL lives in exactly one place.
 //!
-//! `margen_hoy` honours the same license gate as `/reports/margins-daily`
-//! (`reports.margins_daily`), but degrades the *single field* to `null` on the
-//! Free tier instead of 402-ing the whole overview — the rest of the dashboard
-//! is core/free and must always render.
+//! `margen_hoy` se calcula siempre. Estuvo detrás del gate de
+//! `reports.margins_daily` y se degradaba a `null` en Free; desde el
+//! 2026-08-17 los reportes sobre datos propios están incluidos en Free.
 
 use std::sync::Arc;
 
@@ -149,9 +148,13 @@ async fn dashboard(
     let top_productos = serde_json::to_value(&top).unwrap_or_else(|_| serde_json::json!([]));
     let por_vencer = expiring.len() as i64;
 
-    // --- margen_hoy (license-gated; degrade to null, never 402) -----------
-    let lic = state.license.load();
-    let margen_hoy: serde_json::Value = if license::entitled(&lic, "reports.margins_daily") {
+    // --- margen_hoy -------------------------------------------------------
+    //
+    // Estuvo detrás del gate de `reports.margins_daily` y se degradaba a null
+    // en Free. Desde el 2026-08-17 los reportes sobre datos propios están
+    // incluidos en Free, así que el campo se calcula siempre y ya no hay una
+    // rama que lo apague.
+    let margen_hoy: serde_json::Value = {
         let rows = reports::margins_daily(
             db.as_ref(),
             &tenant,
@@ -177,8 +180,6 @@ async fn dashboard(
             "cost": cost.to_string(),
             "margin_pct": margin_pct.to_string(),
         })
-    } else {
-        serde_json::Value::Null
     };
 
     let body = serde_json::json!({

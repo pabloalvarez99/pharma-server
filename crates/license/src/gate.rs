@@ -13,8 +13,15 @@ pub struct GateError {
 }
 
 /// Non-fallible check. Use in UI ("¿muestro este botón?").
+///
+/// A feature whose minimum tier is Free is included for **everyone**, whatever
+/// the license file happens to list. Free is the floor of the product, not an
+/// entitlement that a stale, hand-edited or older-issued file can revoke: a
+/// business that signed up before a feature moved down to Free would otherwise
+/// keep being denied something the product now advertises as included, and
+/// nobody would ever find out. Anything above Free is granted only by the file.
 pub fn entitled(license: &License, feature: &str) -> bool {
-    license.features.iter().any(|f| f == feature)
+    tier_required_for(feature) == Tier::Free || license.features.iter().any(|f| f == feature)
 }
 
 /// Fallible variant. Use in API handlers: map `GateError` → HTTP 402.
@@ -51,14 +58,25 @@ pub fn is_in_grace(license: &License, now: DateTime<Utc>, grace: Duration) -> bo
 /// for unknown keys (conservative — fail closed).
 fn tier_required_for(feature: &str) -> Tier {
     match feature {
-        // Free
-        "reports.sales_daily" | "federation.receive_cards" => Tier::Free,
-        // Pro
-        "reports.margins_daily"
+        // Free — los reportes sobre los datos del propio negocio.
+        //
+        // Se cobra lo que cuesta plata operar o carga responsabilidad
+        // (integraciones con el SII, federación entre tenants, sync en la nube,
+        // respaldo a S3, asientos extra, SLA). No se cobra por entender los
+        // datos propios: un reporte es una consulta sobre las filas del propio
+        // negocio en su propia instancia, su costo marginal es una query, y
+        // cobrarlo es lo que hacía que el producto se sintiera demo.
+        //
+        // `near_expiry` es el caso que menos se sostenía: en comida y en
+        // remedios, avisar que algo se vence es seguridad, no analítica.
+        "reports.sales_daily"
+        | "reports.margins_daily"
         | "reports.top_products"
         | "reports.stock_rotation"
         | "reports.near_expiry"
-        | "integrations.sii_dte_auto"
+        | "federation.receive_cards" => Tier::Free,
+        // Pro
+        "integrations.sii_dte_auto"
         | "integrations.isp_controlados_auto"
         | "integrations.telegram_bot"
         | "federation.quote_request"

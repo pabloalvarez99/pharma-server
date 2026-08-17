@@ -467,7 +467,11 @@ async fn full_pharmacy_day_invariants_hold() {
         "margins revenue must exclude refunded orders (got {revenue}, expected {expected_rev})"
     );
 
-    // --- margins-daily is 402 on Free (gate sanity) ------------------------
+    // --- margins-daily is served on Free -----------------------------------
+    //
+    // Hasta el 2026-08-17 esto era un 402. Un ERP que no puede decirle a la
+    // dueña si le quedó plata es una caja registradora, así que los reportes
+    // sobre los datos del propio negocio pasaron a estar incluidos en Free.
     let (st_free, body_free) = req_json(
         &app_free,
         "GET",
@@ -479,10 +483,13 @@ async fn full_pharmacy_day_invariants_hold() {
     .await;
     assert_eq!(
         st_free,
-        StatusCode::PAYMENT_REQUIRED,
-        "Free tier must get 402 for margins-daily: {body_free}"
+        StatusCode::OK,
+        "Free tier must be served margins-daily: {body_free}"
     );
-    assert_eq!(body_free["error"]["code"], "FEATURE_REQUIRES_UPGRADE");
+    assert!(
+        body_free.is_array(),
+        "margins-daily devuelve filas por día, no un error: {body_free}"
+    );
 
     // --- caja close arithmetic via arqueo (HTTP, READ — not gated) ---------
     let (st, arq) = req_json(

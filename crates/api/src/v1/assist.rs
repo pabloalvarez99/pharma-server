@@ -7,10 +7,10 @@
 //! (ADR-0005): no network, no model in this MVP — only the local deterministic
 //! provider is wired.
 //!
-//! License posture: the gross-margin intent honours the same gate as
-//! `/reports/margins-daily` (`reports.margins_daily`). On the Free tier it
-//! degrades to a friendly upgrade nudge instead of 402-ing — the agent must
-//! always answer something, never error in the owner's face.
+//! Postura de licencia: ninguna. El agente contesta todo lo que sabe de los
+//! datos del propio negocio, margen incluido. La pregunta de margen estuvo
+//! detrás de `reports.margins_daily` hasta el 2026-08-17 y devolvía una
+//! invitación a pagar.
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use crate::middleware::auth::AuthUser;
 use crate::role::{admin_plus, cashier_plus, RoleSet};
 use crate::AppState;
 
-use assist::{Answer, AssistConfig, AssistQuery, BuildOutcome, Intent};
+use assist::{Answer, AssistConfig, AssistQuery, BuildOutcome};
 
 #[derive(Debug, Deserialize)]
 struct AskRequest {
@@ -125,22 +125,11 @@ async fn ask(
 
     let intent = assist::parse(question);
 
-    // Gross margin (monthly or per-product) is a paid capability. Degrade (not
-    // 402) on the Free tier so the agent stays friendly: it still tells the
-    // owner *how* to unlock it.
-    if matches!(intent, Intent::MargenMes | Intent::MargenProducto(_)) {
-        let lic = state.license.load();
-        if !license::entitled(&lic, "reports.margins_daily") {
-            let answer = Answer::new(
-                &intent,
-                "El margen es parte del plan Pro. Actualiza tu plan para ver \
-                 ganancias y rentabilidad. Mientras tanto puedo darte tus ventas: \
-                 pregúntame «ventas del mes».",
-            );
-            return Ok(Json(answer));
-        }
-    }
-
+    // El margen se contesta siempre. Hasta el 2026-08-17 estuvo detrás del gate
+    // de `reports.margins_daily` y el agente respondía una invitación a pagar
+    // cuando le preguntaban cuánto había ganado. Preguntarle a tu propio
+    // negocio si te quedó plata es el uso central del producto, no un extra:
+    // cobrarlo era lo que convertía al agente en un vendedor.
     let query = AssistQuery {
         question,
         intent,

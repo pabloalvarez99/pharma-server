@@ -278,18 +278,22 @@ async fn seeded_products_inventory_counts_correct() {
     assert_eq!(j["inventario"]["value"], "6000");
 }
 
+/// Free ve exactamente el mismo margen que Pro.
+///
+/// Hasta el 2026-08-17 este campo llegaba en `null` para un negocio Free y este
+/// test fijaba ese `null`. Los reportes sobre los datos del propio negocio
+/// pasaron a estar incluidos en Free, así que las cifras que se afirman acá son
+/// las mismas de `pro_tier_margen_hoy_populated`: si algún día vuelven a
+/// diferir, es que se volvió a cobrar el margen.
 #[tokio::test]
-async fn free_tier_margen_hoy_is_null() {
+async fn free_tier_margen_hoy_is_populated() {
     let h = spawn(License::free_default(Uuid::nil())).await;
     seed_sale_today(&h).await;
     let (status, j) = get_dashboard(&h.app, Some(&h.token)).await;
-    // Whole endpoint still 200 (degrade the one field, never 402).
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        j["margen_hoy"].is_null(),
-        "expected null, got {}",
-        j["margen_hoy"]
-    );
+    assert_eq!(j["margen_hoy"]["revenue"], "2500");
+    assert_eq!(j["margen_hoy"]["cost"], "1200");
+    assert_eq!(j["margen_hoy"]["margin_pct"], "52.00");
     // The rest of the overview is unaffected.
     assert_eq!(j["ventas_hoy"]["orders"], 1);
 }

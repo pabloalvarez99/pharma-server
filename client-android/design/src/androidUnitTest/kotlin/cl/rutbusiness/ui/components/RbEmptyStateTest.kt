@@ -1,6 +1,8 @@
 package cl.rutbusiness.ui.components
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -9,10 +11,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.height
 import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbDefaultDimens
 import cl.rutbusiness.ui.theme.RbTheme
@@ -133,7 +135,11 @@ class RbEmptyStateTest {
         compose.setContent {
             val base = LocalDensity.current
             RbTheme(darkTheme = true, reducedMotion = true) {
-                Column {
+                // Con scroll a propósito: sin él la Column reparte el alto de la
+                // pantalla y el segundo bloque mide lo que sobró del primero, no
+                // lo que necesita. Los dos tienen que medirse con alto libre o la
+                // comparación no dice nada sobre la escala de letra.
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     listOf(1.0f to "1x", 2.0f to "2x").forEach { (scale, tag) ->
                         CompositionLocalProvider(
                             LocalDensity provides Density(base.density, fontScale = scale),

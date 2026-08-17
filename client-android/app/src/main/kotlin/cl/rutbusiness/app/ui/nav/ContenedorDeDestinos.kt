@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import cl.rutbusiness.app.ui.agente.LocalIrAlAgente
 import cl.rutbusiness.app.ui.catalogo.CatalogoRoute
 import cl.rutbusiness.app.ui.catalogo.LocalAbrirCatalogo
+import cl.rutbusiness.app.ui.menu.LocalAbrirVentasPendientes
 import cl.rutbusiness.app.ui.offline.EstadoRespaldoUi
 import cl.rutbusiness.app.ui.offline.FranjaDeConexion
 import cl.rutbusiness.app.ui.offline.LocalOffline
@@ -513,6 +514,7 @@ internal fun ContenedorDeDestinos(
                     CompositionLocalProvider(
                         LocalAbrirCatalogo provides abrirCatalogo,
                         LocalIrAlAgente provides irAlAgente,
+                        LocalAbrirVentasPendientes provides { viendoCola = true },
                     ) {
                         estados.SaveableStateProvider(destinoAnimado.name) {
                             contenido(destinoAnimado)

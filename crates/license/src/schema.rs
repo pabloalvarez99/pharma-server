@@ -80,9 +80,14 @@ pub struct License {
 
 impl License {
     /// Default Free-tier license used when no file is present on disk.
-    /// Entitles only features documented as included in Free
-    /// (license-architecture.md §9: `reports.sales_daily`,
-    /// `federation.receive_cards`).
+    /// Entitles the features documented as included in Free
+    /// (license-architecture.md §9): todos los reportes sobre los datos del
+    /// propio negocio, más `federation.receive_cards`.
+    ///
+    /// La lista se mantiene explícita aunque `gate::entitled` ya conceda
+    /// cualquier feature de tier Free sin mirarla: este struct es lo que
+    /// contesta `GET /api/v1/license`, y un resumen que no nombre lo que el
+    /// negocio tiene incluido no le sirve a nadie para saber qué puede usar.
     pub fn free_default(tenant_id: Uuid) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
@@ -91,6 +96,10 @@ impl License {
             tier: Tier::Free,
             features: vec![
                 "reports.sales_daily".to_string(),
+                "reports.margins_daily".to_string(),
+                "reports.top_products".to_string(),
+                "reports.stock_rotation".to_string(),
+                "reports.near_expiry".to_string(),
                 "federation.receive_cards".to_string(),
             ],
             bought_addons: Vec::new(),

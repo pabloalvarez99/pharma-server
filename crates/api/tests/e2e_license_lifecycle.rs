@@ -163,11 +163,23 @@ async fn revoked_license_degrades_to_free_end_to_end() {
     let loaded = api::load_license_from_with_keys(&path, &keys_as_refs(&keys));
     assert_eq!(loaded.tier, Tier::Free, "revocada debe degradar a Free");
 
-    // End-to-end: Free ⇒ el gate de margins-daily responde 402 (no kill-switch:
-    // el core sigue vivo; sólo la feature paga queda bloqueada).
-    let (status, json) = get_margins(api::build_router(state_with_license(loaded))).await;
-    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
-    assert_eq!(json["error"]["code"], "FEATURE_REQUIRES_UPGRADE");
+    // Lo que la revocación sí quita: las features pagas.
+    assert!(
+        !license::entitled(&loaded, "integrations.sii_dte_auto"),
+        "una licencia revocada no puede seguir habilitando lo que se cobra"
+    );
+
+    // Lo que no quita, y por eso no es un kill-switch: el piso Free. Los
+    // reportes sobre los datos del propio negocio están incluidos en Free desde
+    // el 2026-08-17, así que margins-daily sigue contestando. Antes de eso este
+    // caso probaba lo contrario (402), que era la forma más dura de decir que
+    // revocar una licencia le apagaba a la dueña la pregunta de si ganó plata.
+    let (status, _) = get_margins(api::build_router(state_with_license(loaded))).await;
+    assert_ne!(
+        status,
+        StatusCode::PAYMENT_REQUIRED,
+        "revocar no puede cobrar lo que es gratis"
+    );
 }
 
 #[tokio::test]
@@ -202,8 +214,15 @@ async fn tampered_license_on_disk_falls_back_to_free() {
     let loaded = api::load_license_from_with_keys(&path, &keys_as_refs(&keys));
     assert_eq!(loaded.tier, Tier::Free, "firma alterada ⇒ fallback a Free");
 
+    // Adulterar el archivo no compra nada de lo que se cobra...
+    assert!(
+        !license::entitled(&loaded, "integrations.sii_dte_auto"),
+        "una firma alterada no puede habilitar features pagas"
+    );
+    // ...y tampoco quita el piso Free, que desde el 2026-08-17 incluye los
+    // reportes sobre los datos del propio negocio.
     let (status, _) = get_margins(api::build_router(state_with_license(loaded))).await;
-    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    assert_ne!(status, StatusCode::PAYMENT_REQUIRED);
 }
 
 #[tokio::test]
