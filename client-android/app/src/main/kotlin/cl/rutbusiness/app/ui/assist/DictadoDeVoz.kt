@@ -22,6 +22,19 @@ interface SesionDeDictado {
     val escuchando: Boolean
 
     /**
+     * True desde que se corta el dictado hasta que el reconocedor entrega o
+     * descarta lo último dicho.
+     *
+     * En este tramo [escuchando] ya es `false` -el botón puede volver a decir
+     * "Hablar"- pero el reconocedor de verdad sigue vivo, terminando de
+     * convertir en texto lo que alcanzó a grabar. Es el hueco donde vivía la
+     * carrera que encontró el asiento de la ola 23: si [alternar] mirara sólo
+     * [escuchando], un tercer toque justo acá arrancaba una sesión nueva
+     * encima de la que todavía no contestó.
+     */
+    val procesando: Boolean
+
+    /**
      * Una línea corta para poner bajo el campo, o `null`.
      *
      * Es la única forma que tiene el dictado de decir que algo no salió, y por
@@ -35,9 +48,12 @@ interface SesionDeDictado {
     /**
      * Toca el micrófono.
      *
-     * Escuchando, corta y manda lo que alcanzó a entender. Quieto, pide el
-     * permiso si falta y arranca. Sin permiso o sin reconocedor no pasa nada
-     * visible salvo, quizás, un [aviso]: el campo y el teclado siguen enteros.
+     * Escuchando, corta y manda lo que alcanzó a entender. [procesando] -ya
+     * cortó pero el reconocedor todavía no contesta- el toque no hace nada:
+     * es la ventana de la carrera de la ola 23 y ahí no se puede arrancar
+     * nada nuevo. Quieto, pide el permiso si falta y arranca. Sin permiso o
+     * sin reconocedor no pasa nada visible salvo, quizás, un [aviso]: el
+     * campo y el teclado siguen enteros.
      */
     fun alternar()
 

@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
+import cl.rutbusiness.app.voz.AccionAlTocarVoz
+import cl.rutbusiness.app.voz.accionAlTocarVoz
 import cl.rutbusiness.core.rubro.PACK_OTRO
 import cl.rutbusiness.core.session.AlmacenamientoPlataforma
 import cl.rutbusiness.core.session.SessionRepository
@@ -325,6 +327,13 @@ private class DictadoFalso(
             object : SesionDeDictado {
                 override val escuchando: Boolean get() = escuchandoAhora
 
+                // Este fake resuelve todo en el mismo toque -no simula el
+                // tramo "cortó pero el reconocedor no contestó todavía"-, así
+                // que acá siempre es `false`. Esa carrera la cubre
+                // `AccionAlTocarVozTest` más abajo, sin Compose ni Robolectric
+                // de por medio.
+                override val procesando: Boolean get() = false
+
                 override val aviso: String? get() = avisoAhora
 
                 override fun alternar() {
@@ -353,5 +362,70 @@ private class DictadoFalso(
         /** Mismo tono que el de verdad: termina en cómo seguir. */
         const val AVISO_SIN_PERMISO =
             "Para dictar tienes que dejarme usar el micrófono. Puedes escribir igual."
+    }
+}
+
+/**
+ * La carrera de la ola 23, aislada de Compose y de Robolectric.
+ *
+ * [DictadoDeVozTest] necesita los dos para montar la pantalla, pero esta
+ * prueba no: `accionAlTocarVoz` es una función pura de tres booleanos a una
+ * decisión, así que corre en JVM lisa y se puede verificar leyéndola sin
+ * levantar Gradle.
+ *
+ * El bug que arregla: `DictadoDeVozAndroid` ponía `escuchando = false` apenas
+ * se tocaba cortar, **antes** de que el reconocedor entregara `onResults()`.
+ * El botón volvía a decir "Hablar" mientras el motor todavía procesaba lo
+ * último dicho, así que un tercer toque rápido -`escuchando == false`- caía
+ * en la rama de arrancar y abría una sesión nueva de `SpeechRecognizer` con
+ * la anterior todavía en vuelo. El estado `procesando` cierra ese hueco: un
+ * tercer toque ahí no hace nada, en vez de arrancar.
+ */
+class AccionAlTocarVozTest {
+
+    @Test
+    fun `escuchando corta, sin importar procesando ni el permiso`() {
+        assertEquals(
+            AccionAlTocarVoz.CORTAR,
+            accionAlTocarVoz(escuchando = true, procesando = true, tienePermiso = true),
+        )
+        assertEquals(
+            AccionAlTocarVoz.CORTAR,
+            accionAlTocarVoz(escuchando = true, procesando = false, tienePermiso = false),
+        )
+    }
+
+    /**
+     * La ventana exacta de la carrera: ya cortó -`escuchando == false`- pero
+     * el reconocedor no contestó. Antes del fix esto caía en `EMPEZAR`
+     * -o en `PEDIR_PERMISO`, si además no había permiso- y arrancaba una
+     * sesión nueva encima de la que seguía viva.
+     */
+    @Test
+    fun `procesando ignora el toque en vez de arrancar una sesion encima de la que sigue viva`() {
+        assertEquals(
+            AccionAlTocarVoz.IGNORAR,
+            accionAlTocarVoz(escuchando = false, procesando = true, tienePermiso = true),
+        )
+        assertEquals(
+            AccionAlTocarVoz.IGNORAR,
+            accionAlTocarVoz(escuchando = false, procesando = true, tienePermiso = false),
+        )
+    }
+
+    @Test
+    fun `quieto y con permiso empieza`() {
+        assertEquals(
+            AccionAlTocarVoz.EMPEZAR,
+            accionAlTocarVoz(escuchando = false, procesando = false, tienePermiso = true),
+        )
+    }
+
+    @Test
+    fun `quieto y sin permiso lo pide`() {
+        assertEquals(
+            AccionAlTocarVoz.PEDIR_PERMISO,
+            accionAlTocarVoz(escuchando = false, procesando = false, tienePermiso = false),
+        )
     }
 }
