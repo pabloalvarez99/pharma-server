@@ -17,8 +17,8 @@ class ErroresUiTest {
         val copy = AppError.ServidorNoResponde("http://10.0.2.2:8080").aCopy("el catálogo")
         assertEquals("No llegamos", copy.title)
         assertEquals(
-            "No pudimos traer el catálogo. Revisá que el teléfono tenga wifi o datos " +
-                "prendidos e intentá de nuevo.",
+            "No pudimos traer el catálogo. Revisa que el teléfono tenga wifi o datos " +
+                "prendidos e intenta de nuevo.",
             copy.message,
         )
         assertEquals("Reintentar", copy.retryLabel)

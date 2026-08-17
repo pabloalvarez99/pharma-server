@@ -40,7 +40,7 @@ suspend fun rescatarRespaldoDesdeCero(
     val slug = PruebaDeRetiro.normalizarSlug(tenantSlug)
     if (slug.isEmpty()) {
         return Result.failure(
-            IllegalArgumentException("Escribí el nombre del negocio, tal como está en la tarjeta."),
+            IllegalArgumentException("Escribe el nombre del negocio, tal como está en la tarjeta."),
         )
     }
 
@@ -71,7 +71,7 @@ suspend fun rescatarRespaldoDesdeCero(
     val envelope = try {
         base64ToEnvelope(descarga.ciphertextBase64)
     } catch (e: Exception) {
-        return Result.failure(IllegalStateException("El respaldo llegó dañado. Probá de nuevo."))
+        return Result.failure(IllegalStateException("El respaldo llegó dañado. Prueba de nuevo."))
     }
 
     // El segundo PBKDF2, con el salt que viene DENTRO del sobre. Por eso el de

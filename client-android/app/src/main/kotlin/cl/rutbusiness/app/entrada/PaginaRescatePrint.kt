@@ -36,7 +36,7 @@ object PaginaRescatePrint {
         if (printManager == null) {
             Toast.makeText(
                 appCtx,
-                "Este teléfono no tiene impresión. Usá copiar o compartir texto.",
+                "Este teléfono no tiene impresión. Usa copiar o compartir texto.",
                 Toast.LENGTH_LONG,
             ).show()
             return

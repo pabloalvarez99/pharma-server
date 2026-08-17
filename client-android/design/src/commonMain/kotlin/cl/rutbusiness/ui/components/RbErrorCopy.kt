@@ -61,21 +61,21 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
     // red del teléfono; pantallas con copy propio (entrada/caja) no pasan por acá.
     RbErrorKind.Offline -> RbErrorCopy(
         title = "No llegamos",
-        message = "No pudimos traer $what. Revisá que el teléfono tenga wifi o datos " +
-            "prendidos e intentá de nuevo.",
+        message = "No pudimos traer $what. Revisa que el teléfono tenga wifi o datos " +
+            "prendidos e intenta de nuevo.",
         retryLabel = "Reintentar",
     )
 
     RbErrorKind.Timeout -> RbErrorCopy(
         title = "Se demoró",
-        message = "No alcanzamos a traer $what. Esperá un ratito e intentá de nuevo.",
+        message = "No alcanzamos a traer $what. Espera un ratito e intenta de nuevo.",
         retryLabel = "Reintentar",
     )
 
     RbErrorKind.Forbidden -> RbErrorCopy(
         title = "Esto no está para tu cuenta",
-        message = "No podés ver $what con esta cuenta. Si lo necesitás para trabajar, " +
-            "pedile a quien te dio la cuenta que te lo habilite.",
+        message = "No puedes ver $what con esta cuenta. Si lo necesitas para trabajar, " +
+            "pídele a quien te dio la cuenta que te lo habilite.",
         // Retrying the same request with the same account cannot succeed.
         retryLabel = null,
     )
@@ -110,14 +110,14 @@ fun rbErrorCopy(kind: RbErrorKind, what: String = "esta parte"): RbErrorCopy = w
     RbErrorKind.ServerFault -> RbErrorCopy(
         title = "No se pudo ahora",
         message = "No es culpa tuya y no perdiste nada de lo que hiciste. " +
-            "Intentá de nuevo en un ratito.",
+            "Intenta de nuevo en un ratito.",
         retryLabel = "Reintentar",
     )
 
     RbErrorKind.Unknown -> RbErrorCopy(
         title = "No salió",
-        message = "No pudimos mostrar $what. Intentá de nuevo; si sigue igual, " +
-            "cerrá la app y abrila otra vez.",
+        message = "No pudimos mostrar $what. Intenta de nuevo; si sigue igual, " +
+            "cierra la app y ábrela otra vez.",
         retryLabel = "Reintentar",
     )
 }

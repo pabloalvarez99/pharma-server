@@ -125,7 +125,7 @@ fun prepararRespaldoDesdeCola(
                 "(PBKDF2 + AES-GCM). Aún falta el bucket para subirlo. " +
                 "La llave del cuaderno sigue siendo tuya."
         cifradoListo ->
-            "Escribí las 12 palabras o los 5 bloques de tu tarjeta y tocá " +
+            "Escribe las 12 palabras o los 5 bloques de tu tarjeta y toca " +
                 "Preparar de nuevo. ${cola.size} venta(s), ${bytes.size} bytes listos."
         else ->
             "Paquete armado: ${cola.size} venta(s) · ${bytes.size} bytes. " +

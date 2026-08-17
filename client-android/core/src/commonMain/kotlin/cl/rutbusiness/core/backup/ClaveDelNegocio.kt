@@ -302,7 +302,7 @@ fun semillaDesdeBloques(bloques: List<String>): Result<ByteArray> {
     val leido = leerBits(bits, BITS_SEMILLA, BITS_CHECKSUM)
     if (leido != checksum16(semilla)) {
         return Result.failure(
-            IllegalArgumentException("Los bloques no cuadran. Revisá que no falte ninguna letra."),
+            IllegalArgumentException("Los bloques no cuadran. Revisa que no falte ninguna letra."),
         )
     }
     return Result.success(semilla)

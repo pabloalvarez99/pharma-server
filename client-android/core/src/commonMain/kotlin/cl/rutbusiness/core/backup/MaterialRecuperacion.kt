@@ -72,7 +72,7 @@ fun parsearMaterialRecuperacion(raw: String): Result<MaterialRecuperacion> {
  */
 fun mensajeErrorMaterial(raw: String): String {
     val s = raw.trim()
-    if (s.isEmpty()) return "Escribí las palabras o los bloques de tu tarjeta."
+    if (s.isEmpty()) return "Escribe las palabras o los bloques de tu tarjeta."
 
     val tokens = s.split(Regex("\\s+")).filter { it.isNotEmpty() }
     val partes = s.split(Regex("[-\\s]+")).filter { it.isNotEmpty() }
@@ -80,7 +80,7 @@ fun mensajeErrorMaterial(raw: String): String {
     // Si la forma calza, el problema es el contenido: que lo diga quien sabe cuál.
     parsearMaterialRecuperacion(s).getOrNull()?.let { material ->
         semillaDeMaterial(material).exceptionOrNull()?.let { e ->
-            return e.message ?: "Revisá la tarjeta: algo no cuadra."
+            return e.message ?: "Revisa la tarjeta: algo no cuadra."
         }
     }
 
@@ -88,5 +88,5 @@ fun mensajeErrorMaterial(raw: String): String {
         return "Van $PALABRAS_FRASE palabras o $BLOQUES_TARJETA bloques. " +
             "Contaste ${tokens.size} palabra(s)."
     }
-    return "Revisá que no falte ninguna letra. Los bloques son de $LARGO_BLOQUE caracteres."
+    return "Revisa que no falte ninguna letra. Los bloques son de $LARGO_BLOQUE caracteres."
 }

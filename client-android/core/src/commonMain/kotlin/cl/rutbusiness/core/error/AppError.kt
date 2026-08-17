@@ -20,7 +20,7 @@ sealed class AppError(
      * en [technical], no en el texto visible.
      */
     class ServidorNoResponde(val baseUrl: String, technical: String? = null) : AppError(
-        userMessage = "No pudimos conectar. Revisá que el teléfono tenga internet e intentá de nuevo.",
+        userMessage = "No pudimos conectar. Revisa que el teléfono tenga internet e intenta de nuevo.",
         technical = technical ?: baseUrl,
     )
 

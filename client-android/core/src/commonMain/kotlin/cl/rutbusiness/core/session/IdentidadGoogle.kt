@@ -88,18 +88,18 @@ object IdentidadGoogleNoCableada : IdentidadGoogle {
     override fun copyPromocion(rubroEsFeria: Boolean): String =
         if (rubroEsFeria) {
             "Más adelante vas a poder entrar con tu cuenta de Google, sin " +
-                "acordarte de otra clave. Hoy usá el correo y la clave del " +
+                "acordarte de otra clave. Hoy usa el correo y la clave del " +
                 "negocio. Si se te rompe el teléfono, con Google y la llave " +
-                "del cuaderno recuperás ventas y deudas."
+                "del cuaderno recuperas ventas y deudas."
         } else {
-            "Entrar con Google llega pronto. Por ahora usá el correo y la " +
+            "Entrar con Google llega pronto. Por ahora usa el correo y la " +
                 "clave que te dieron al crear el negocio."
         }
 
     override suspend fun pedirCuenta(): ResultadoGoogle =
         ResultadoGoogle.NoDisponible(
             mensajeUsuario = "Entrar con Google todavía no está listo en " +
-                "este teléfono. Usá el correo y la clave de abajo.",
+                "este teléfono. Usa el correo y la clave de abajo.",
             razonInterna = "google_sign_in_not_wired",
         )
 }
