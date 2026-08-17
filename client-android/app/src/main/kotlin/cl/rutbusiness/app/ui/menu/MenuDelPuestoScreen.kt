@@ -24,6 +24,8 @@ import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.app.ui.rubro.LocalRubro
 import cl.rutbusiness.app.ui.rubro.esFeria
 import cl.rutbusiness.app.ui.rubro.packActual
+import cl.rutbusiness.app.ui.ventas.subtituloEntradaHistorial
+import cl.rutbusiness.app.ui.ventas.tituloEntradaHistorial
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.rubro.SettingsRubroApi
 import cl.rutbusiness.core.session.SessionRepository
@@ -72,6 +74,7 @@ import kotlinx.coroutines.launch
  * @param onAbrirCaja empuja `Pantalla.Caja` en la pila de `TuDiaRoute`.
  * @param onAbrirImpresora empuja `Pantalla.Impresora`.
  * @param onAbrirRubro empuja `Pantalla.Rubro`.
+ * @param onAbrirHistorialVentas empuja `Pantalla.HistorialVentas` (ola 29).
  */
 @Composable
 fun MenuDelPuestoRoute(
@@ -79,12 +82,14 @@ fun MenuDelPuestoRoute(
     onAbrirCaja: () -> Unit,
     onAbrirImpresora: () -> Unit,
     onAbrirRubro: () -> Unit,
+    onAbrirHistorialVentas: () -> Unit,
 ) {
     ListaDelMenu(
         onVolver = onVolver,
         onAbrirCaja = onAbrirCaja,
         onAbrirImpresora = onAbrirImpresora,
         onAbrirRubro = onAbrirRubro,
+        onAbrirHistorialVentas = onAbrirHistorialVentas,
     )
 }
 
@@ -142,6 +147,7 @@ private fun ListaDelMenu(
     onAbrirCaja: () -> Unit,
     onAbrirImpresora: () -> Unit,
     onAbrirRubro: () -> Unit,
+    onAbrirHistorialVentas: () -> Unit,
 ) {
     val dimens = RbTheme.dimens
     val feria = esFeria()
@@ -156,6 +162,14 @@ private fun ListaDelMenu(
                     subtituloCaja(feria),
                     GrupoDeMenu.Diario,
                     onAbrirCaja,
+                ),
+            )
+            add(
+                EntradaDeMenu(
+                    tituloEntradaHistorial(feria),
+                    subtituloEntradaHistorial(feria),
+                    GrupoDeMenu.Diario,
+                    onAbrirHistorialVentas,
                 ),
             )
             if (pack.features.printer) {

@@ -87,12 +87,21 @@ class PilaDeNavegacionTest {
                     Pantalla.Menu -> {
                         Text("Menu")
                         RbButton(label = "Ir a la caja desde el menu", onClick = { pila.ir(Pantalla.Caja) })
+                        RbButton(
+                            label = "Ir al historial desde el menu",
+                            onClick = { pila.ir(Pantalla.HistorialVentas) },
+                        )
                         RbButton(label = "Volver del menu", onClick = volver)
                     }
 
                     Pantalla.Impresora -> Text("Impresora")
 
                     Pantalla.Rubro -> Text("Rubro")
+
+                    Pantalla.HistorialVentas -> {
+                        Text("Historial")
+                        RbButton(label = "Volver del historial", onClick = volver)
+                    }
                 }
             }
         }
@@ -180,5 +189,28 @@ class PilaDeNavegacionTest {
             false,
             compose.activity.onBackPressedDispatcher.hasEnabledCallbacks(),
         )
+    }
+
+    /** Ola 29: empuja `Pantalla.HistorialVentas` y vuelve a la raíz. */
+    @Test
+    fun `historial de ventas se empuja desde el menu y vuelve a la raiz`() {
+        montar()
+
+        compose.onNodeWithText("Ir al menu desde resumen").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Ir al historial desde el menu").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Historial").assertIsDisplayed()
+
+        compose.onNodeWithText("Volver del historial").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Menu").assertIsDisplayed()
+    }
+
+    /** El `Saver` guarda `Pantalla.clave` (`String`) y la restaura con [Pantalla.porClave]. */
+    @Test
+    fun `pantalla se restaura desde su clave string`() {
+        val restaurada = Pantalla.porClave(Pantalla.HistorialVentas.clave)
+        assertEquals(Pantalla.HistorialVentas, restaurada)
     }
 }
