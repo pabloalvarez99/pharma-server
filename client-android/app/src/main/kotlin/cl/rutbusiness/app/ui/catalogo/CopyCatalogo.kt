@@ -52,10 +52,19 @@ internal data class CopyCatalogo(
     val hayUnidad: Boolean,
     /** Título del vacío. */
     val vacioTitulo: String,
+    /** Qué se gana al cargarlo, dicho en una frase — el «para qué». */
+    val vacioBeneficio: String,
     /** Qué hacer, dicho en una frase. */
     val vacioPista: String,
     /** Pista cuando el buscador no encuentra nada. */
     val vacioBusquedaPista: String,
+    /**
+     * Con la lista recién empezada (una o dos cosas), el hueco entre la
+     * última tarjeta y el botón de abajo se llena con esto en vez de quedar
+     * en blanco — ver ADR de la ola 27, "espacio vacío enorme incluso con
+     * contenido".
+     */
+    val sugerenciaPocasCosas: String,
     /** Pie del formulario: con nombre y precio alcanza. */
     val pieFormulario: String,
     /**
@@ -121,6 +130,13 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
         claveUnidad = unidad?.key ?: CLAVE_UNIDAD,
         hayUnidad = unidad != null,
         vacioTitulo = "Todavía no cargaste nada",
+        // El «para qué»: sin esto el vacío sólo explica un paso técnico
+        // (cómo cargar), nunca por qué vale la pena hacerlo primero.
+        vacioBeneficio = if (feria) {
+            "Así, cuando vendas, sólo tocas el precio en vez de escribirlo de nuevo."
+        } else {
+            "Así lo cobras directo desde la lista, sin escribir el precio cada vez."
+        },
         // Feria: el vacío enseña el form y el day-1 por el agente.
         // Farmacia/otro: form + "no hace falta código de barras".
         vacioPista = if (feria) {
@@ -132,6 +148,12 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
         },
         vacioBusquedaPista =
             "Fíjate cómo se escribe, o agrégalo si todavía no está.",
+        sugerenciaPocasCosas = if (feria) {
+            "Sigue agregando lo que vendes hoy: mientras más cosas tengas cargadas, " +
+                "menos tienes que escribir a mano cuando llega la clienta."
+        } else {
+            "Sigue agregando lo que vendes: con todo cargado, cobrar es tocar y listo."
+        },
         // Feria no nombra código de barras: en el puesto no hay.
         pieFormulario = if (feria) {
             "Con el nombre y el precio alcanza."

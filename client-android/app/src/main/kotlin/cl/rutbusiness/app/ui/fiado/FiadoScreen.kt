@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -46,9 +46,9 @@ import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
-import cl.rutbusiness.ui.theme.rbHeading
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
 @Composable
@@ -209,12 +209,20 @@ internal fun ListaDeDeudores(
 
             // El vacío del primer día: nadie debe. Se lee como gente (no como
             // ledger en cero). En feria enseña la frase completa del fiado.
-            sinDeuda -> Column(
+            //
+            // `Box` centrado y no un `Column` que sólo scrollea: la
+            // auditoría de capturas de la ola 27 mostró esta misma pantalla
+            // con la tarjeta pegada arriba y el resto de la pantalla en
+            // blanco liso. Centrar en toda la altura que le tocó lee como
+            // pantalla terminada, no como maqueta a medio llenar; sigue
+            // scrolleando para que el botón no quede atrapado al 200%.
+            sinDeuda -> Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(dimens.space3),
+                contentAlignment = Alignment.Center,
             ) {
                 VacioDeFiado(
                     feria = feria,
@@ -273,8 +281,16 @@ internal fun ListaDeDeudores(
 /**
  * Nadie te debe todavía.
  *
- * Misma vara que el vacío de "Hoy": aire, un ejemplo hablado (feria) y un solo
- * CTA. Sin asset de ilustración — el APK del teléfono viejo no paga eso.
+ * Las cuatro partes de un vacío producido: la marca de
+ * [RbIcons.fiadoContorno] (antes esta pantalla no tenía ninguna), el título
+ * de lo que falta, [beneficioVacioDeuda] — por qué fiar por el agente en vez
+ * de fiarlo de memoria — y el CTA que lleva a hacerlo, cuando hay adónde
+ * llevarlo. Sin asset de ilustración — el APK del teléfono viejo no paga eso.
+ *
+ * Delegado en [RbEmptyState]: antes esta función dibujaba su propio
+ * título/pista/botón adentro de un [RbCard] sin ninguna marca visual, que es
+ * exactamente la pantalla que la auditoría de capturas señaló como "tarjeta
+ * arriba, resto en blanco liso".
  */
 @Composable
 internal fun VacioDeFiado(
@@ -282,38 +298,15 @@ internal fun VacioDeFiado(
     onHablarleAlAgente: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val colors = RbTheme.colors
-    val dimens = RbTheme.dimens
-
-    RbCard(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = dimens.space4),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
-        ) {
-            Text(
-                text = tituloVacioDeuda(feria),
-                style = RbTheme.typography.heading,
-                color = colors.textPrimary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.rbHeading(),
-            )
-            Text(
-                text = pistaVacioDeuda(feria),
-                style = RbTheme.typography.body,
-                color = colors.textSecondary,
-                textAlign = TextAlign.Center,
-            )
-            if (onHablarleAlAgente != null) {
-                RbButton(
-                    label = ctaHablarleAlAgente(),
-                    onClick = onHablarleAlAgente,
-                )
-            }
-        }
-    }
+    RbEmptyState(
+        title = tituloVacioDeuda(feria),
+        modifier = modifier,
+        icon = RbIcons.fiadoContorno,
+        benefit = beneficioVacioDeuda(feria),
+        hint = pistaVacioDeuda(feria),
+        actionLabel = onHablarleAlAgente?.let { ctaHablarleAlAgente() },
+        onAction = onHablarleAlAgente,
+    )
 }
 
 /**

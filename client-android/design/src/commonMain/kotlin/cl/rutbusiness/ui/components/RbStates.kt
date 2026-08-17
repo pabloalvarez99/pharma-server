@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,9 +24,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextAlign
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbAssertive
 import cl.rutbusiness.ui.theme.rbElevated
@@ -126,19 +129,55 @@ fun RbLoadingState(
 }
 
 /**
- * Empty — teaches the next step on the mesa del puesto.
+ * Empty — teaches the next step on the mesa del puesto, and reads as a
+ * finished screen rather than a maqueta someone forgot to fill in.
  *
- * The rule from `ui.ts`: an empty state **teaches the next step**. `title` says
- * what is missing, `hint` says how to make the first one, and the optional
- * action takes the user there. "No hay datos" alone is a dead end and is not
- * allowed in this product. Mark + air match the chunky card tiles (56dp mark,
- * outline brand edge, space3 between lines) so the empty block reads as part of
- * the puesto, not a Material void.
+ * An audit against 44 emulator screenshots (wave 27) found that a bare title +
+ * hint, floated at the top of an otherwise blank panel, is read by a real
+ * owner as unfinished work: "tarjeta arriba, resto en blanco liso, sin
+ * ilustración ni acción que lo llene." Fixing that is not a bigger mark - it
+ * is naming all four parts a produced empty state needs and never shipping
+ * fewer than four:
+ *
+ * 1. [icon] — a real mark from [RbIcons], not a typographic glyph standing in
+ *    for one. The old build drew a bare "+" [Text]; every screen now gets the
+ *    vector that names its own concept ([RbIcons.fiadoContorno] for who-owes,
+ *    [RbIcons.catalogoContorno] for lo-que-vendo), or [RbIcons.mas] for the
+ *    generic case.
+ * 2. [title] — what is missing, said in one line.
+ * 3. [benefit] — what filling it buys the owner, e.g. "sabes quién te debe
+ *    sin tener que acordarte." This is new: before it existed, [hint] alone
+ *    had to carry both "why bother" and "how", and usually only managed the
+ *    second.
+ * 4. [actionLabel] / [onAction] — the button that fills it, right here. It
+ *    must call something that already works; a caller with no real action
+ *    passes `null` and gets no button, never a decorative dead one.
+ *
+ * [hint] survives as the optional fifth line for callers that still need a
+ * literal "say this to the agent" example separate from the benefit sentence.
+ *
+ * Ported from `emptyState` in `client/src/views/ui.ts`, which existed for
+ * exactly this reason - so a fresh install never shows a bare paragraph that
+ * reads "de dev". Mark + air match the chunky card tiles (56dp mark, outline
+ * brand edge, space3 between lines) so the empty block reads as part of the
+ * puesto, not a Material void.
+ *
+ * Callers that sit inside a `weight(1f)` sibling of a top bar - the exact
+ * shape that produced the "vacío enorme" screenshots - should wrap this in a
+ * `Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center)`
+ * that also carries `verticalScroll`, so the block centers in the space it
+ * owns instead of pinning to the top with dead air below, while still
+ * scrolling to reach the button at 200% font scale. This composable does not
+ * do that itself - `fillMaxWidth()` only - because several existing callers
+ * (search-empty inside a list, a disconnected-caja notice) sit in tighter
+ * spots where claiming the full screen height would be wrong.
  */
 @Composable
 fun RbEmptyState(
     title: String,
     modifier: Modifier = Modifier,
+    icon: ImageVector = RbIcons.mas,
+    benefit: String? = null,
     hint: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
@@ -170,10 +209,11 @@ fun RbEmptyState(
                 .clearAndSetSemantics { },
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = "+",
-                style = RbTheme.typography.title,
-                color = colors.brandText,
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colors.brandText,
+                modifier = Modifier.size(dimens.iconSize),
             )
         }
 
@@ -184,6 +224,17 @@ fun RbEmptyState(
             textAlign = TextAlign.Center,
             modifier = Modifier.rbHeading(),
         )
+
+        if (benefit != null) {
+            Text(
+                text = benefit,
+                // Body, not support: the gain sentence is the reason to act,
+                // so it reads with more weight than the how-to hint below it.
+                style = RbTheme.typography.body,
+                color = colors.textPrimary,
+                textAlign = TextAlign.Center,
+            )
+        }
 
         if (hint != null) {
             Text(

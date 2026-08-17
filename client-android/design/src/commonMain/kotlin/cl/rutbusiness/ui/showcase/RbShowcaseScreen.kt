@@ -36,6 +36,7 @@ import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
 import cl.rutbusiness.ui.components.rbErrorCopy
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 
@@ -211,6 +212,8 @@ fun RbShowcaseScreen(modifier: Modifier = Modifier) {
                 RbCard {
                     RbEmptyState(
                         title = "Todavía no has hecho ninguna venta",
+                        icon = RbIcons.cobrarContorno,
+                        benefit = "Así sabes cuánto llevas en el día sin sumar a mano.",
                         hint = "Toca Cobrar, elige los productos y listo: la venta " +
                             "queda guardada aunque se corte internet.",
                         actionLabel = "Hacer la primera venta",

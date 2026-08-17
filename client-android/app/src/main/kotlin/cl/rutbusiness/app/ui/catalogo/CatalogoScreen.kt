@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,11 +34,11 @@ import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
-import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipRow
 import cl.rutbusiness.ui.components.RbChipTone
 import cl.rutbusiness.ui.components.RbDivider
+import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorCopy
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
@@ -44,6 +46,7 @@ import cl.rutbusiness.ui.components.RbReflowRow
 import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTextField
 import cl.rutbusiness.ui.components.RbTopBar
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbTouchTarget
@@ -200,15 +203,23 @@ private fun ListaDeCosas(
             }
 
             vm.cosas.isEmpty() -> {
-                Column(
+                // `Box` con `contentAlignment = Center` y no un `Column` que
+                // sólo scrollea: así el vacío se centra en toda la altura que
+                // le tocó en vez de pegarse arriba con aire muerto abajo — la
+                // "tarjeta arriba, resto en blanco liso" que encontró la
+                // auditoría de capturas. Sigue siendo scrolleable para que al
+                // 200% el botón no quede atrapado bajo el teclado o el borde.
+                Box(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
+                        .fillMaxSize()
                         .verticalScroll(rememberScrollState()),
+                    contentAlignment = Alignment.Center,
                 ) {
                     if (vm.consulta.isBlank()) {
                         VacioDelCatalogo(
                             titulo = copy.vacioTitulo,
+                            beneficio = copy.vacioBeneficio,
                             pista = copy.vacioPista,
                             accion = copy.agregar,
                             onAccion = vm::nuevaCosa,
@@ -243,6 +254,19 @@ private fun ListaDeCosas(
                             onEditar = { vm.editar(cosa) },
                         )
                     }
+
+                    // Con una o dos cosas cargadas, la tarjeta ocupa una
+                    // fracción chica del alto que le tocó y el resto queda en
+                    // blanco hasta el botón anclado — el otro caso que marcó
+                    // la auditoría ("una pantalla con un solo ítem también
+                    // deja el 80% en blanco"). No es un segundo CTA — el botón
+                    // que llena esto ya está abajo — sino la razón para
+                    // seguir tocándolo.
+                    if (vm.cosas.size < UMBRAL_SUGERIR_MAS) {
+                        item("sugerencia-pocas-cosas") {
+                            SugerenciaPocasCosas(texto = copy.sugerenciaPocasCosas)
+                        }
+                    }
                 }
 
                 // Con la lista llena el botón sigue abajo y anclado: cargar el
@@ -265,8 +289,16 @@ private fun ListaDeCosas(
 }
 
 /**
- * Vacío de la mesa: aire, la pista que enseña (feria: «vendí tomates a 2000»),
- * y un solo CTA primario. Sin segunda acción ni ruido de sistema.
+ * Vacío de la mesa: la marca de [RbIcons.catalogoContorno], el título de lo
+ * que falta, [beneficio] opcional (el «para qué» de cargarlo) y la pista que
+ * enseña cómo (feria: «vendí tomates a 2000»), con un solo CTA primario. Sin
+ * segunda acción ni ruido de sistema.
+ *
+ * Delegado por completo en [RbEmptyState] — antes esta función redibujaba a
+ * mano el mismo mark/título/pista/botón que ya vive en `:design`, con un "+"
+ * de texto en vez de un ícono real. Mantiene su propia firma (y no la de
+ * [RbEmptyState] directamente) porque `CatalogoEscalaTest` la monta por
+ * nombre para medir el CTA sin levantar toda la pantalla.
  */
 @Composable
 internal fun VacioDelCatalogo(
@@ -275,54 +307,17 @@ internal fun VacioDelCatalogo(
     accion: String,
     onAccion: () -> Unit,
     modifier: Modifier = Modifier,
+    beneficio: String? = null,
 ) {
-    val colors = RbTheme.colors
-    val dimens = RbTheme.dimens
-    val shape = RbTheme.shapes.card
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = dimens.space4, vertical = dimens.space5),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(dimens.space3),
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(shape)
-                .background(colors.brandContainer)
-                .border(dimens.border, colors.brandText, shape)
-                .padding(dimens.space3),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "+",
-                style = RbTheme.typography.title,
-                color = colors.brandText,
-            )
-        }
-
-        Text(
-            text = titulo,
-            style = RbTheme.typography.heading,
-            color = colors.textPrimary,
-        )
-
-        // La pista va en tarjeta: es lo que enseña el día 1, no un pie de página.
-        RbCard {
-            Text(
-                text = pista,
-                style = RbTheme.typography.body,
-                color = colors.textSecondary,
-            )
-        }
-
-        RbButton(
-            label = accion,
-            onClick = onAccion,
-            fillWidth = true,
-        )
-    }
+    RbEmptyState(
+        title = titulo,
+        modifier = modifier,
+        icon = RbIcons.catalogoContorno,
+        benefit = beneficio,
+        hint = pista,
+        actionLabel = accion,
+        onAction = onAccion,
+    )
 }
 
 /**
@@ -379,6 +374,43 @@ internal fun FilaDeCosa(
             RbAmount(
                 amount = precio,
                 emphasis = RbAmountEmphasis.Body,
+            )
+        },
+    )
+}
+
+/**
+ * El hueco entre la última tarjeta y el botón anclado, con un motivo en vez
+ * de aire: no repite el CTA (el botón que llena esto ya está abajo, siempre
+ * visible), sólo dice por qué seguir. Ícono chico y texto de apoyo — no
+ * compite con las tarjetas de arriba, que son el contenido real.
+ */
+@Composable
+private fun SugerenciaPocasCosas(texto: String, modifier: Modifier = Modifier) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+    val shape = RbTheme.shapes.card
+
+    RbReflowRow(
+        spacing = dimens.space2,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.surfaceVariant)
+            .padding(horizontal = dimens.space3, vertical = dimens.space3),
+        leading = {
+            Icon(
+                imageVector = RbIcons.catalogoContorno,
+                contentDescription = null,
+                tint = colors.textSecondary,
+                modifier = Modifier.size(dimens.iconSize),
+            )
+        },
+        content = {
+            Text(
+                text = texto,
+                style = RbTheme.typography.support,
+                color = colors.textSecondary,
             )
         },
     )
@@ -545,3 +577,6 @@ internal fun FormularioContenido(
 
 /** Desde cuántas filas aparece el buscador. */
 private const val MINIMO_PARA_BUSCAR = 8
+
+/** Bajo cuántas filas se ofrece la sugerencia de seguir cargando. */
+private const val UMBRAL_SUGERIR_MAS = 3
