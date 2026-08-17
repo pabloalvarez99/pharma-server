@@ -86,24 +86,39 @@ object DictadoDeVozAndroid : DictadoDeVoz {
             object : SesionDeDictado {
                 override val escuchando: Boolean get() = motor.escuchando
 
+                override val procesando: Boolean get() = motor.procesando
+
                 override val aviso: String? get() = motor.aviso
 
                 override fun alternar() {
-                    when {
+                    when (
+                        accionAlTocarVoz(
+                            escuchando = motor.escuchando,
+                            procesando = motor.procesando,
+                            tienePermiso = contexto.tienePermisoDeMicrofono(),
+                        )
+                    ) {
                         // Segundo toque: "ya dije". Corta y manda lo que
                         // alcanzó a entender, en vez de tirarlo -que es lo que
                         // haría `cancel()`- porque quien lo aprieta acaba de
                         // terminar la frase, no se arrepintió.
-                        motor.escuchando -> motor.cortar()
+                        AccionAlTocarVoz.CORTAR -> motor.cortar()
 
-                        contexto.tienePermisoDeMicrofono() ->
+                        // Tercer toque, en pleno procesando: acá vivía la
+                        // carrera de la ola 23. No hacer nada es la salida
+                        // segura -el reconocedor ya va a contestar solo, por
+                        // `onResults()` o por `onError()`.
+                        AccionAlTocarVoz.IGNORAR -> Unit
+
+                        AccionAlTocarVoz.EMPEZAR ->
                             motor.empezar { texto -> alReconocer(texto) }
 
                         // El permiso se pide **acá**, cuando toca el
                         // micrófono, y nunca al abrir la app: en el manifiesto
                         // va sin `required`, así que un teléfono sin micrófono
                         // igual instala y escribe.
-                        else -> lanzador.launch(Manifest.permission.RECORD_AUDIO)
+                        AccionAlTocarVoz.PEDIR_PERMISO ->
+                            lanzador.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
 
@@ -127,6 +142,15 @@ object DictadoDeVozAndroid : DictadoDeVoz {
         var escuchando by mutableStateOf(false)
             private set
 
+        /**
+         * True entre que se corta el dictado y que el reconocedor contesta.
+         *
+         * Ver [SesionDeDictado.procesando]: es el estado que faltaba para que
+         * un tercer toque en ese hueco no arranque una sesión nueva.
+         */
+        var procesando by mutableStateOf(false)
+            private set
+
         var aviso by mutableStateOf<String?>(null)
             private set
 
@@ -135,7 +159,9 @@ object DictadoDeVozAndroid : DictadoDeVoz {
         private var alTexto: ((String) -> Unit)? = null
 
         fun empezar(alTexto: (String) -> Unit) {
-            if (escuchando) return
+            // El guardia cubre los dos tramos en que el reconocedor ya está
+            // ocupado: escuchando, o todavía procesando lo último dicho.
+            if (escuchando || procesando) return
             this.alTexto = alTexto
             aviso = null
             arrancar()
@@ -145,8 +171,18 @@ object DictadoDeVozAndroid : DictadoDeVoz {
         fun cortar() {
             if (!escuchando) return
             escuchando = false
+            procesando = true
             runCatching { reconocedor?.stopListening() }
-                .onFailure { Log.w(TAG, "no se pudo cortar el dictado", it) }
+                .onFailure { e ->
+                    Log.w(TAG, "no se pudo cortar el dictado", e)
+                    // Si `stopListening()` ni siquiera salió, nunca va a
+                    // llegar `onResults()` ni `onError()` que baje
+                    // `procesando`: quedarse ahí sería el mismo tipo de
+                    // cuelgue que se está arreglando acá, sólo que
+                    // permanente en vez de una ventana de milisegundos.
+                    procesando = false
+                    aviso = NO_DISPONIBLE
+                }
         }
 
         fun sinPermiso() {
@@ -161,6 +197,7 @@ object DictadoDeVozAndroid : DictadoDeVoz {
         fun soltar() {
             alTexto = null
             escuchando = false
+            procesando = false
             runCatching { reconocedor?.destroy() }
                 .onFailure { Log.w(TAG, "no se pudo soltar el reconocedor", it) }
             reconocedor = null
@@ -222,6 +259,7 @@ object DictadoDeVozAndroid : DictadoDeVoz {
 
             override fun onResults(results: Bundle?) {
                 escuchando = false
+                procesando = false
                 val texto = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
@@ -237,6 +275,7 @@ object DictadoDeVozAndroid : DictadoDeVoz {
 
             override fun onError(error: Int) {
                 escuchando = false
+                procesando = false
                 when (error) {
                     // Los dos códigos de idioma llegaron en Android 13. Son
                     // constantes: en un Android 6 el `when` simplemente nunca
@@ -324,3 +363,37 @@ fun Context.hayDictadoDeVoz(): Boolean =
 private fun Context.tienePermisoDeMicrofono(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
+
+/** Lo que hay que hacer al tocar el botón de voz. */
+internal enum class AccionAlTocarVoz {
+    CORTAR,
+    IGNORAR,
+    EMPEZAR,
+    PEDIR_PERMISO,
+}
+
+/**
+ * La decisión de [SesionDeDictado.alternar], separada del `SpeechRecognizer`
+ * y de Compose a propósito: ninguno de los dos corre en una prueba JVM pura,
+ * y acá es donde vivía la carrera que encontró el asiento de la ola 23 -que
+ * un tercer toque durante [procesando] arrancara una sesión nueva encima de
+ * la que el reconocedor todavía no había terminado de contestar.
+ */
+internal fun accionAlTocarVoz(
+    escuchando: Boolean,
+    procesando: Boolean,
+    tienePermiso: Boolean,
+): AccionAlTocarVoz = when {
+    // Segundo toque: corta, pase lo que pase con el resto -no puede haber
+    // procesando en vuelo si todavía está escuchando.
+    escuchando -> AccionAlTocarVoz.CORTAR
+
+    // Tercer toque, en pleno procesando: el reconocedor sigue vivo con la
+    // frase anterior. Arrancar acá es la carrera; no hacer nada es la
+    // salida segura, porque `onResults()`/`onError()` van a llegar solos.
+    procesando -> AccionAlTocarVoz.IGNORAR
+
+    tienePermiso -> AccionAlTocarVoz.EMPEZAR
+
+    else -> AccionAlTocarVoz.PEDIR_PERMISO
+}
