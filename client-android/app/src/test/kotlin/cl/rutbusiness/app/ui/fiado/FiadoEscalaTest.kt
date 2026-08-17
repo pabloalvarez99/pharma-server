@@ -370,14 +370,14 @@ class FiadoEscalaTest {
     @Test
     fun `feria abono en efectivo no habla de cajon y cuenta en el dia`() {
         mostrarAbono(escala = 1.0f, hayCaja = true, esFeria = true)
-        compose.onNodeWithText("Esta plata cuenta en el día.").assertIsDisplayed()
+        compose.onNodeWithText("Esta plata cuenta en el día del puesto.").assertIsDisplayed()
         assertEquals(
             0,
             compose.onAllNodes(hasText("cajón", substring = true, ignoreCase = true))
                 .fetchSemanticsNodes()
                 .size,
         )
-        compose.onNodeWithText("Anotar el pago").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Anotar lo que me dio").performScrollTo().assertIsDisplayed()
     }
 
     @Test
