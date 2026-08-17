@@ -41,6 +41,11 @@ import cl.rutbusiness.ui.theme.RbTheme
  * agregarla después. Por eso la ayuda del campo invita a escribir lo que ya se
  * sabe — el vuelto que se dio mal, compré cambio — sin esperar a ver la
  * diferencia.
+ *
+ * Justo antes del botón de cerrar va [copyTranquilidadArqueo] (`CopyArqueo.kt`):
+ * la única frase del paso que dice, antes de tocar el botón, que sobrar o
+ * faltar no traba el cierre. El resto del copy del paso vive en
+ * [copyArqueoCaja] y [copyConfirmarCierre] (`CopyCaja.kt`).
  */
 @Composable
 fun PasoArqueo(vm: CajaViewModel, modifier: Modifier = Modifier) {
@@ -139,6 +144,14 @@ internal fun FormularioDeArqueo(
                 enabled = !guardando,
             )
         }
+
+        // Tranquilidad antes del botón: sobre o falte, el cierre no se traba.
+        // Sin esto la dueña no sabe si un número que no calza la deja pegada.
+        Text(
+            text = copyTranquilidadArqueo(feria),
+            style = RbTheme.typography.support,
+            color = colors.textSecondary,
+        )
 
         error?.let { err ->
             RbErrorState(
