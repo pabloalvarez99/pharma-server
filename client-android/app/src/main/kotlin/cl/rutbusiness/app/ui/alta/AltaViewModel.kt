@@ -258,7 +258,7 @@ class AltaViewModel(
 
             when (val r = estadoDelServidor(sesion.apiPara(donde))) {
                 is Resultado.Falla -> {
-                    falla = fallaDeAlta(r.error, donde, email, nube != null)
+                    falla = fallaDeAlta(r.error, donde, email, nube != null, esFeria)
                     estado = EstadoDelAlta.Preguntando
                 }
 
@@ -322,6 +322,7 @@ class AltaViewModel(
                         donde,
                         email.trim().lowercase(),
                         nube != null,
+                        esFeria,
                     )
                     // Prefill del próximo POST: no auto-reintentar en este click.
                     slugSugeridoEn(mapeada.queHacer)?.let { slugParaReintento = it }
