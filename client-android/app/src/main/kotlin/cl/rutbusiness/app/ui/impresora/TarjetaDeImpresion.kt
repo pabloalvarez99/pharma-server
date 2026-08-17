@@ -109,7 +109,7 @@ fun TarjetaDeImpresion(
     ordenId: String?,
     modifier: Modifier = Modifier,
 ) {
-    RbCard(title = "La impresora", modifier = modifier) {
+    RbCard(title = copyTituloTarjetaImpresion(), modifier = modifier) {
         CuerpoDeImpresion(vm = vm) {
             EnReposoParaImprimir(vm = vm, ordenId = ordenId)
         }
@@ -132,33 +132,31 @@ fun TarjetaDeReimpresion(
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
+    val feria = esFeria()
 
-    RbCard(title = "Otra copia del papel", modifier = modifier) {
+    RbCard(title = copyTituloTarjetaReimpresion(), modifier = modifier) {
         CuerpoDeImpresion(vm = vm, onListo = onCerrar) {
             Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
                 if (vm.hayUltimaBoleta) {
                     Text(
-                        text = "Sale la misma boleta de la última venta. Reimprimir no vuelve " +
-                            "a cobrar.",
+                        text = copyReimpresionDisponible(feria),
                         style = RbTheme.typography.body,
                         color = colors.textSecondary,
                     )
                     RbButton(
-                        label = "Imprimir de nuevo",
+                        label = copyBotonReimprimir(),
                         onClick = vm::reimprimir,
                         fillWidth = true,
                     )
                 } else {
                     Text(
-                        text = "Todavía no imprimiste ninguna boleta desde este teléfono. " +
-                            "Cobra una venta y en la pantalla de «Listo» va a aparecer el botón " +
-                            "de imprimir; después vuelve a estar acá para repetirla.",
+                        text = copySinReimpresionDisponible(feria),
                         style = RbTheme.typography.body,
                         color = colors.textSecondary,
                     )
                 }
                 RbButton(
-                    label = "Cerrar",
+                    label = copyBotonCerrarReimpresion(),
                     onClick = onCerrar,
                     variant = RbButtonVariant.Secondary,
                     fillWidth = true,
@@ -209,7 +207,7 @@ private fun CuerpoDeImpresion(
 
         EstadoDeImpresion.Imprimiendo -> RbLoadingState(
             // Habla del aparato soltando papel, no de un socket abriéndose.
-            label = "La impresora «$nombre» está sacando el papel…",
+            label = copyImprimiendo(nombre),
         )
 
         EstadoDeImpresion.Impresa -> Impresa(vm, onListo)
@@ -224,12 +222,12 @@ private fun CuerpoDeImpresion(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             Text(
-                text = "Seguiste sin boleta. La venta quedó guardada igual.",
+                text = copyEstadoSinBoleta(esFeria()),
                 style = RbTheme.typography.body,
                 color = RbTheme.colors.textSecondary,
             )
             RbButton(
-                label = "Probar de imprimir",
+                label = copyBotonProbarDeImprimir(),
                 onClick = vm::reintentar,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -247,8 +245,7 @@ private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         if (ordenId == null) {
             Text(
-                text = "Todavía no tenemos el detalle de esta venta para imprimirlo. " +
-                    "La venta sí quedó registrada.",
+                text = copySinDetalleParaImprimir(),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -260,8 +257,7 @@ private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
             // una lista en vez de imprimir, y una sorpresa en el mostrador con
             // el cliente al frente es una sorpresa de más.
             Text(
-                text = "La primera vez te vamos a preguntar cuál es tu impresora. Después " +
-                    "sale sola.",
+                text = copyPrimeraVezEligeImpresora(),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -270,20 +266,20 @@ private fun EnReposoParaImprimir(vm: ImpresoraViewModel, ordenId: String?) {
             // jerga de driver. El CTA de imprimir va después.
             PlacaDelAparato(
                 nombre = elegida.nombre,
-                detalle = "Sale por «${elegida.nombre}», rollo de ${elegida.ancho.etiqueta}.",
+                detalle = copyDetallePlaca(elegida.nombre, elegida.ancho.etiqueta),
                 chip = elegida.ancho.etiqueta,
             )
         }
 
         RbButton(
-            label = "Imprimir boleta",
+            label = copyBotonImprimir(esFeria()),
             onClick = { vm.imprimir(ordenId) },
             fillWidth = true,
         )
 
         if (elegida != null) {
             RbButton(
-                label = "Cambiar impresora",
+                label = copyBotonCambiarImpresora(),
                 onClick = vm::cambiarImpresora,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -318,7 +314,7 @@ private fun PlacaDelAparato(
         verticalArrangement = Arrangement.spacedBy(dimens.space2),
     ) {
         Text(
-            text = "Tu impresora",
+            text = copyEtiquetaTuImpresora(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -328,7 +324,7 @@ private fun PlacaDelAparato(
             color = colors.textPrimary,
         )
         if (chip != null) {
-            RbChip(label = "Rollo $chip", tone = tono)
+            RbChip(label = copyChipRollo(chip), tone = tono)
         }
         Text(
             text = detalle,
@@ -354,26 +350,27 @@ private fun Impresa(vm: ImpresoraViewModel, onListo: (() -> Unit)?) {
             verticalArrangement = Arrangement.spacedBy(dimens.space1),
         ) {
             Text(
-                text = if (nombre != null) "«$nombre» soltó el papel" else "El papel salió",
+                text = copyTituloPapelSalio(nombre),
                 style = RbTheme.typography.bodyStrong,
                 color = colors.brandText,
             )
-            // Frase canónica que las pruebas y el resto de la app reconocen.
+            // Retail formal conserva la frase canónica de siempre, que
+            // ImpresoraFlujoTest sigue pinchando literal; feria dice "papel".
             Text(
-                text = "Boleta impresa.",
+                text = copyConfirmacionImpresion(esFeria()),
                 style = RbTheme.typography.body,
                 color = colors.textPrimary,
             )
         }
         RbButton(
-            label = "Imprimir otra copia",
+            label = copyBotonImprimirOtraCopia(),
             onClick = vm::reintentar,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
         )
         if (onListo != null) {
             RbButton(
-                label = "Listo",
+                label = copyBotonListoImpresion(),
                 onClick = onListo,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -413,14 +410,14 @@ private fun Fallida(
         )
 
         if (falla is FallaDeImpresion.FaltaPermiso && vm.permisosQuePedir.isNotEmpty()) {
-            RbButton(label = "Dar permiso", onClick = onDarPermiso, fillWidth = true)
+            RbButton(label = copyBotonDarPermiso(), onClick = onDarPermiso, fillWidth = true)
         } else if (falla.sePuedeReintentar) {
-            RbButton(label = "Reintentar", onClick = vm::reintentar, fillWidth = true)
+            RbButton(label = copyBotonReintentar(), onClick = vm::reintentar, fillWidth = true)
         }
 
         if (falla !is FallaDeImpresion.SinBluetooth) {
             RbButton(
-                label = "Elegir otra impresora",
+                label = copyBotonElegirOtraImpresora(),
                 onClick = vm::cambiarImpresora,
                 variant = RbButtonVariant.Secondary,
                 fillWidth = true,
@@ -428,14 +425,14 @@ private fun Fallida(
         }
 
         RbButton(
-            label = "Seguir sin boleta",
+            label = copyBotonSeguirSinBoleta(esFeria()),
             onClick = vm::seguirSinBoleta,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
         )
 
         Text(
-            text = "La venta ya está cobrada y guardada. Nada de esto la deshace.",
+            text = copyNotaVentaCobrada(),
             style = RbTheme.typography.support,
             color = RbTheme.colors.textSecondary,
         )
@@ -465,13 +462,12 @@ private fun ListaDeImpresoras(vm: ImpresoraViewModel, disponibles: List<Impresor
         verticalArrangement = Arrangement.spacedBy(dimens.space3),
     ) {
         Text(
-            text = "¿Cuál es tu impresora?",
+            text = copyTituloElegirImpresora(),
             style = RbTheme.typography.bodyStrong,
             color = colors.textPrimary,
         )
         Text(
-            text = "Estas son las que este teléfono ya tiene emparejadas. Si la tuya no está, " +
-                "enciéndela y emparéjala desde Ajustes › Bluetooth.",
+            text = copyAyudaElegirImpresora(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -482,14 +478,14 @@ private fun ListaDeImpresoras(vm: ImpresoraViewModel, disponibles: List<Impresor
                     title = impresora.nombre,
                     // Sin dirección: se elige el aparato por nombre, como se
                     // eligen los audífonos.
-                    subtitle = "Toca para usarla",
+                    subtitle = copySubtituloTocarParaUsar(),
                     onClick = { vm.elegirImpresora(impresora) },
                 )
             }
         }
 
         RbButton(
-            label = "Ahora no",
+            label = copyBotonAhoraNo(),
             onClick = vm::cerrar,
             variant = RbButtonVariant.Secondary,
             fillWidth = true,
@@ -512,13 +508,12 @@ private fun ElegirAncho(vm: ImpresoraViewModel, impresora: ImpresoraConocida) {
 
     Column(verticalArrangement = Arrangement.spacedBy(dimens.space3)) {
         Text(
-            text = "¿De qué ancho es el papel de «${impresora.nombre}»?",
+            text = copyTituloElegirAncho(impresora.nombre),
             style = RbTheme.typography.bodyStrong,
             color = colors.textPrimary,
         )
         Text(
-            text = "Mirá el rollo que le pusiste: el angosto cabe en la palma; el ancho es " +
-                "el de supermercado.",
+            text = copyAyudaElegirAncho(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -534,7 +529,7 @@ private fun ElegirAncho(vm: ImpresoraViewModel, impresora: ImpresoraConocida) {
         }
 
         Text(
-            text = "Si te equivocas no pasa nada: se cambia después desde «Cambiar impresora».",
+            text = copyNotaCambiarAnchoDespues(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
