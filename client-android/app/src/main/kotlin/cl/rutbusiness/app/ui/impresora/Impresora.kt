@@ -16,6 +16,38 @@ internal fun copyQueHacerSinBluetooth(feria: Boolean): String =
     }
 
 /**
+ * Título cuando no se pudo traer lo que hay que imprimir.
+ *
+ * Feria habla del papel del puesto; farmacia conserva «boleta». Nunca sistema,
+ * driver ni MAC.
+ */
+internal fun copyTituloSinDatosDeLaBoleta(feria: Boolean): String =
+    if (feria) "No pudimos traer el papel del puesto" else "No pudimos traer la boleta"
+
+/**
+ * Instrucción cuando faltan los datos del papel. La venta ya está cobrada.
+ */
+internal fun copyQueHacerSinDatosDeLaBoleta(feria: Boolean): String =
+    if (feria) {
+        "La venta está cobrada y anotada. Revisa la señal y toca «Reintentar»."
+    } else {
+        "La venta está cobrada y guardada. Revisa la señal y toca «Reintentar»."
+    }
+
+/**
+ * Instrucción cuando el rollo se cortó a medias: papel del puesto o boleta.
+ * Reimprimir no cobra de nuevo.
+ */
+internal fun copyQueHacerSeCortoAMitad(feria: Boolean): String =
+    if (feria) {
+        "Puede que el ticket del puesto haya salido a medias. Revisa el rollo y toca " +
+            "«Reintentar»: reimprimir no vuelve a cobrar."
+    } else {
+        "Puede que la boleta haya salido a medias. Revisa el papel y toca " +
+            "«Reintentar»: reimprimir no vuelve a cobrar."
+    }
+
+/**
  * Una impresora que el teléfono ya conoce.
  *
  * @param direccion la MAC. Es lo que identifica de verdad a la impresora: el
@@ -130,19 +162,37 @@ sealed class FallaDeImpresion(
         sePuedeReintentar = true,
     )
 
-    /** Se cayó el papel a medio salir: se habla del rollo, no del socket. */
-    class SeCortoAMitad(nombre: String, tecnico: String? = null) : FallaDeImpresion(
+    /**
+     * Se cayó el papel a medio salir: se habla del rollo, no del socket.
+     *
+     * @param feria pack feria (ADR-0022): ticket / papel del puesto, no boleta.
+     *   Default `false` para el enlace Bluetooth (sin CompositionLocal); la UI
+     *   puede reescribir con [copyQueHacerSeCortoAMitad] si el rubro es feria.
+     */
+    class SeCortoAMitad(
+        nombre: String,
+        tecnico: String? = null,
+        feria: Boolean = false,
+    ) : FallaDeImpresion(
         titulo = "Se cortó el papel a medias",
-        queHacer = "Puede que la boleta haya salido a medias. Revisa el papel y toca " +
-            "«Reintentar»: reimprimir no vuelve a cobrar.",
+        queHacer = copyQueHacerSeCortoAMitad(feria),
         sePuedeReintentar = true,
         tecnico = tecnico,
     )
 
-    /** No se pudo traer la boleta del server para imprimirla. */
-    class SinDatosDeLaBoleta(tecnico: String? = null) : FallaDeImpresion(
-        titulo = "No pudimos traer la boleta",
-        queHacer = "La venta está cobrada y guardada. Revisa la señal y toca «Reintentar».",
+    /**
+     * No se pudo traer lo imprimible del server.
+     *
+     * @param feria pack feria: papel del puesto; retail formal: boleta. Default
+     *   `false` en call sites de red; la UI puede reescribir título y qué-hacer
+     *   con [copyTituloSinDatosDeLaBoleta] / [copyQueHacerSinDatosDeLaBoleta].
+     */
+    class SinDatosDeLaBoleta(
+        tecnico: String? = null,
+        feria: Boolean = false,
+    ) : FallaDeImpresion(
+        titulo = copyTituloSinDatosDeLaBoleta(feria),
+        queHacer = copyQueHacerSinDatosDeLaBoleta(feria),
         sePuedeReintentar = true,
         tecnico = tecnico,
     )
