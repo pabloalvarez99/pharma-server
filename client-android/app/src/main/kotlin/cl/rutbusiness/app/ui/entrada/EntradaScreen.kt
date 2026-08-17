@@ -222,11 +222,8 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                     is ResultadoGoogle.Listo -> {
                         val destino = vm.direccion
                         if (destino == null) {
-                            avisoGoogle = if (vm.pideDireccion) {
-                                "Primero poné la dirección del sistema del negocio."
-                            } else {
-                                "RutAgent no responde. Reintentá en un momento."
-                            }
+                            // Nube: nunca "sistema" / IP / computador. On-prem: el PC.
+                            avisoGoogle = copyAvisoGoogleSinDestino(vm.pideDireccion)
                         } else {
                             when (
                                 val login = sesion.entrarConGoogle(
@@ -240,9 +237,9 @@ fun EntradaRoute(sesion: SessionRepository, estado: EstadoSesion.SinSesion) {
                                     avisoGoogle = null
                                 }
                                 is Resultado.Falla -> {
-                                    avisoGoogle = login.error.userMessage +
-                                        " Si Google aún no está listo en el " +
-                                        "servidor, usá correo y clave."
+                                    avisoGoogle = copyAvisoGoogleFalloLogin(
+                                        login.error.userMessage,
+                                    )
                                 }
                             }
                         }
