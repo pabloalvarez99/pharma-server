@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import cl.rutbusiness.app.ui.gente.compartirConGente
 import cl.rutbusiness.app.ui.impresora.TarjetaDeImpresion
 import cl.rutbusiness.app.ui.impresora.impresoraViewModel
 import cl.rutbusiness.app.ui.rubro.esFeria
@@ -18,6 +19,7 @@ import cl.rutbusiness.core.pos.MedioDePago
 import cl.rutbusiness.ui.components.RbAmount
 import cl.rutbusiness.ui.components.RbAmountEmphasis
 import cl.rutbusiness.ui.components.RbButton
+import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbDivider
 import cl.rutbusiness.ui.components.RbReflowRow
@@ -71,7 +73,7 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             DetalleDelComprobante(comprobante, vm.moneda, feria = feria)
         } else {
             // La venta se cobró pero el papel no llegó. Decirlo, no esconderlo.
-            RbCard(title = "La venta quedó registrada") {
+            RbCard(title = copyTituloSinDetalle()) {
                 Text(
                     text = copySinDetalleComprobante(feria),
                     style = RbTheme.typography.body,
@@ -92,9 +94,18 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
             )
         }
 
+        // Mandar el mismo papel por chat: en feria muchas veces no hay
+        // impresora en el puesto y esto es la salida de todos los días, no
+        // un premio de consuelo. Sin culpa si no se imprime ni se manda:
+        // la venta ya quedó cobrada arriba. Si no hay detalle o no hay
+        // puerto de plataforma (previews, iOS sin implementar), no se dibuja.
+        if (comprobante != null) {
+            BotonMandarPorChat(comprobante, vm.moneda, feria = feria)
+        }
+
         if (vm.puntosGanados > 0) {
             Text(
-                text = "Sumó ${vm.puntosGanados} ${if (vm.puntosGanados == 1L) "punto" else "puntos"} de fidelidad.",
+                text = copyPuntosGanados(vm.puntosGanados),
                 style = RbTheme.typography.support,
                 color = RbTheme.colors.textSecondary,
             )
@@ -102,11 +113,42 @@ fun PasoComprobante(vm: CobrarViewModel, modifier: Modifier = Modifier) {
 
         // Brand fill Primary + fillWidth + ≥56dp (rbTouchTarget).
         RbButton(
-            label = "Cobrar otra venta",
+            label = copyBotonCobrarOtraVenta(),
             onClick = vm::nuevaVenta,
             fillWidth = true,
         )
     }
+}
+
+/**
+ * Botón secundario para mandar el comprobante por el chat de siempre.
+ *
+ * Reusa el puerto [compartirConGente] (ADR-0021, `cl.rutbusiness.app.ui.gente`):
+ * mismo `ACTION_SEND` genérico que ya usa el recado del día, sin abrir una
+ * segunda vía para lo mismo. Si no hay puerto de plataforma detrás, no se
+ * dibuja nada —mismo contrato que el resto de esa serie—.
+ */
+@Composable
+private fun BotonMandarPorChat(comprobante: ComprobanteDto, moneda: Moneda, feria: Boolean) {
+    val compartir = compartirConGente() ?: return
+    val titulo = comprobante.tenantName.takeIf { it.isNotBlank() } ?: copyTituloCarrito(feria)
+    val lineas = comprobante.items.map { linea ->
+        "${linea.qty} × ${linea.name}  ${moneda.formatear(linea.lineTotal)}"
+    }
+    val mensaje = copyMensajeParaCompartir(
+        titulo = titulo,
+        referencia = copyRefPapel(comprobante.folio),
+        lineas = lineas,
+        total = moneda.formatear(comprobante.total),
+        vuelto = comprobante.change?.let { moneda.formatear(it) },
+    )
+
+    RbButton(
+        label = copyBotonMandarPorChat(),
+        onClick = { compartir(mensaje) },
+        variant = RbButtonVariant.Secondary,
+        fillWidth = true,
+    )
 }
 
 /**
@@ -135,13 +177,12 @@ private fun VentaGuardada(vm: CobrarViewModel, unidades: Int, feria: Boolean) {
     ) {
         RbCard(modifier = Modifier.rbAssertive()) {
             Text(
-                text = "Venta guardada",
+                text = copyTituloVentaGuardada(),
                 style = RbTheme.typography.heading,
                 color = colors.brandText,
             )
             Text(
-                text = "Se va a enviar sola apenas vuelva la señal. No la vuelvas a cobrar: " +
-                    "aunque se mande de nuevo, no se cobra dos veces.",
+                text = copyDetalleVentaGuardada(),
                 style = RbTheme.typography.body,
                 color = colors.textPrimary,
             )
@@ -163,7 +204,7 @@ private fun VentaGuardada(vm: CobrarViewModel, unidades: Int, feria: Boolean) {
         }
 
         RbButton(
-            label = "Cobrar otra venta",
+            label = copyBotonCobrarOtraVenta(),
             onClick = vm::nuevaVenta,
             fillWidth = true,
         )
@@ -189,7 +230,7 @@ private fun Vuelto(
 
     RbCard(modifier = Modifier.rbAssertive()) {
         Text(
-            text = if (vuelto != null) "Vuelto" else "Cobrado",
+            text = if (vuelto != null) copyEtiquetaVuelto() else copyEtiquetaCobrado(),
             style = RbTheme.typography.support,
             color = colors.textSecondary,
         )
@@ -211,7 +252,7 @@ private fun Vuelto(
 
         if (vuelto != null && total != null) {
             Text(
-                text = "Total de la venta: ${moneda.formatear(total)}",
+                text = copyTotalDeLaVenta(moneda.formatear(total)),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -277,13 +318,13 @@ private fun DetalleDelComprobante(
 
         RbDivider()
 
-        FilaDeMonto("Subtotal", moneda.formatear(comprobante.subtotal))
+        FilaDeMonto(copyEtiquetaSubtotal(), moneda.formatear(comprobante.subtotal))
         if (comprobante.discount != "0") {
-            FilaDeMonto("Descuento", moneda.formatear(comprobante.discount))
+            FilaDeMonto(copyEtiquetaDescuento(), moneda.formatear(comprobante.discount))
         }
-        FilaDeMonto("Total", moneda.formatear(comprobante.total), destacado = true)
-        comprobante.cashAmount?.let { FilaDeMonto("Pagó con", moneda.formatear(it)) }
-        comprobante.change?.let { FilaDeMonto("Vuelto", moneda.formatear(it)) }
+        FilaDeMonto(copyEtiquetaTotalLinea(), moneda.formatear(comprobante.total), destacado = true)
+        comprobante.cashAmount?.let { FilaDeMonto(copyEtiquetaPagoCon(), moneda.formatear(it)) }
+        comprobante.change?.let { FilaDeMonto(copyEtiquetaVueltoLinea(), moneda.formatear(it)) }
 
         if (comprobante.footerNote.isNotBlank()) {
             Text(
