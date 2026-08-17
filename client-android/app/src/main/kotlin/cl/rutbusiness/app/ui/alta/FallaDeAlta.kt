@@ -62,55 +62,78 @@ sealed class FallaDeAlta(
         donde: String,
         tecnico: String? = null,
         nube: Boolean = false,
+        /**
+         * Feria local (sin nube compilada): mismo criterio que
+         * `CreadoPeroNoEntro.esPuesto` -nube o feria hablan de «puesto», nunca de
+         * «negocio». Antes esta clase sólo miraba `nube`, así que una feria sin
+         * nube veía «negocio» en la mitad del mensaje.
+         */
+        esFeria: Boolean = false,
     ) : FallaDeAlta(
         titulo = "El servicio no está contestando",
-        queHacer = if (nube) {
-            "Intentamos crear tu puesto y no hubo respuesta. Revisa que el teléfono tenga " +
-                "internet, espera un momento y vuelve a intentar. Si al reintentar te dice que " +
-                "ese nombre o correo ya están, es que sí alcanzó a crearse: entra con tu correo " +
-                "y tu clave."
-        } else {
-            "Intentamos crear tu negocio en ${comoSeLee(donde)} y no hubo respuesta. " +
-                "Revisa que tu teléfono tenga wifi o datos, espera un momento y vuelve a intentar. " +
-                "Si al reintentar te dice que ahí ya hay un negocio, es que sí alcanzó a crearse: " +
-                "entra con tu correo y tu clave."
+        queHacer = run {
+            val cosa = if (hablaDePuesto(nube, esFeria)) "puesto" else "negocio"
+            if (nube) {
+                "Intentamos crear tu $cosa y no hubo respuesta. Revisa que el teléfono tenga " +
+                    "internet, espera un momento y vuelve a intentar. Si al reintentar te dice que " +
+                    "ese nombre o correo ya están, es que sí alcanzó a crearse: entra con tu correo " +
+                    "y tu clave."
+            } else {
+                "Intentamos crear tu $cosa en ${comoSeLee(donde)} y no hubo respuesta. " +
+                    "Revisa que tu teléfono tenga wifi o datos, espera un momento y vuelve a intentar. " +
+                    "Si al reintentar te dice que ahí ya hay un $cosa, es que sí alcanzó a crearse: " +
+                    "entra con tu correo y tu clave."
+            }
         },
         tecnico = tecnico,
     )
 
     /**
-     * Ese correo no puede crear un negocio en ese lugar, porque el lugar ya
-     * tiene uno.
+     * Ese correo ya tiene un negocio, así que no puede crear otro.
      *
      * El título nombra el correo porque es lo que la dueña acaba de escribir y
      * lo primero que va a revisar; el cuerpo dice exactamente lo que pasó y no
-     * más. El server contesta `SETUP_ALREADY_DONE`, que significa "esta
-     * instalación ya tiene una cuenta". **No** significa "ese correo está
-     * tomado por otra persona", y decírselo así la mandaría a inventarse un
-     * correo nuevo, que no arregla nada. Lo que arregla es entrar en vez de
-     * crear, o crear en otro computador.
+     * más. Dos códigos del server caen acá y significan cosas parecidas pero no
+     * iguales: `SETUP_ALREADY_DONE` (`/setup`, un nodo de un solo negocio) dice
+     * "esta instalación ya tiene una cuenta"; `CORREO_TOMADO` (`/alta`, la nube
+     * compartida) dice "este correo puntual ya tiene un puesto en algún lado".
+     * Ninguno de los dos significa "ese correo está tomado por otra persona", y
+     * decírselo así la mandaría a inventarse un correo nuevo, que no arregla
+     * nada. Lo que arregla es entrar en vez de crear, o crear en otro
+     * computador.
+     *
+     * El botón que se nombra entre «» es el de [cl.rutbusiness.app.ui.entrada.Puerta]
+     * tal cual está escrito ahí (`"Entrar a mi $cosa"`): nombrarlo distinto acá
+     * -por ejemplo un «Entrar» pelado- es una mentira chica, porque es un texto
+     * que la dueña tiene que encontrar leyendo, no adivinar por parecido.
      */
     class CorreoYaTieneNegocio(
         email: String,
         donde: String,
         tecnico: String? = null,
         nube: Boolean = false,
+        /** Mismo criterio que [ServicioNoResponde]: nube o feria hablan de «puesto». */
+        esFeria: Boolean = false,
     ) : FallaDeAlta(
-        titulo = if (nube) {
+        titulo = if (hablaDePuesto(nube, esFeria)) {
             "Ese correo no puede crear un puesto acá"
         } else {
             "Ese correo no puede crear un negocio acá"
         },
-        queHacer = if (nube) {
-            // El host de la nube es compilado (emulador, dominio…): no se lo
-            // mostramos al feriante ni lo llamamos "computador".
-            "Ahí ya hay un puesto creado, así que $email no puede crear otro encima. " +
-                "Si ese puesto es tuyo, vuelve atrás y toca «Entrar»: entras con ese " +
-                "mismo correo y tu clave."
-        } else {
-            "En ${comoSeLee(donde)} ya hay un negocio creado, así que $email no puede " +
-                "crear otro encima. Si ese negocio es tuyo, vuelve atrás y toca «Entrar a mi " +
-                "negocio»: entras con ese mismo correo y tu clave."
+        queHacer = run {
+            val cosa = if (hablaDePuesto(nube, esFeria)) "puesto" else "negocio"
+            val boton = "Entrar a mi $cosa"
+            if (nube) {
+                // El host de la nube es compilado (emulador, dominio…): no se lo
+                // mostramos al feriante ni lo llamamos "computador".
+                "Ahí ya hay un $cosa creado, así que $email no puede crear otro encima. " +
+                    "Si ese $cosa es tuyo, vuelve atrás y toca «$boton»: entras con ese " +
+                    "mismo correo y tu clave."
+            } else {
+                "En ${comoSeLee(donde)} ya hay un $cosa creado, así que $email no puede " +
+                    "crear otro encima. Si ese $cosa es tuyo, vuelve atrás y toca «$boton»: " +
+                    "entras con ese mismo correo y tu clave."
+            }
         },
         tecnico = tecnico,
     )
@@ -190,6 +213,17 @@ internal fun comoSeLee(direccion: String): String =
     direccion.substringAfter("://", direccion)
 
 /**
+ * Si el copy de esta falla tiene que decir «puesto» en vez de «negocio».
+ *
+ * Mismo criterio en todo el archivo: nube (la feria compartida) o la
+ * preferencia de feria elegida en el teléfono, cualquiera de las dos alcanza.
+ * Antes cada clase repetía su propio `if (nube)` y se olvidaba de mirar
+ * [esFeria], así que una feria sin nube compilada (offline, servidor propio)
+ * leía «negocio» en la mitad del mensaje y «puesto» en la otra mitad.
+ */
+private fun hablaDePuesto(nube: Boolean, esFeria: Boolean): Boolean = nube || esFeria
+
+/**
  * Lo que se revisa en el teléfono antes de gastar un viaje a la red.
  *
  * Devuelve `null` cuando lo escrito da para intentar. Sólo mira la clave: el
@@ -213,18 +247,26 @@ internal fun fallaDeAlta(
     donde: String,
     email: String,
     nube: Boolean = false,
+    esFeria: Boolean = false,
 ): FallaDeAlta = when {
-    // 409 de la nube compartida: el nombre corto o el correo ya son de otro
-    // puesto. Traducir eso a "este computador está ocupado" es el recuadro
-    // rojo que vio el feriante.
-    error is AppError.ErrorDelServidor &&
-        error.status == 409 &&
-        (error.code == "SLUG_TOMADO" || error.code == "CORREO_TOMADO") ->
+    // 409 SLUG_TOMADO (nube compartida): el nombre corto ya es de otro puesto.
+    // Se arregla en esta misma pantalla -el server ya sugiere uno en el
+    // mensaje («Probá con…»)- así que el mensaje pelado del server alcanza.
+    error is AppError.ErrorDelServidor && error.status == 409 && error.code == "SLUG_TOMADO" ->
         FallaDeAlta.DatosRechazados(error.userMessage, error.technical)
 
-    // 409: la instalación ya tiene cuenta (`SETUP_ALREADY_DONE`).
+    // 409 CORREO_TOMADO (nube compartida): ese correo puntual ya tiene un
+    // puesto en algún lado. A diferencia del slug, esto **no** se arregla
+    // escribiendo de nuevo acá -la salida es entrar, no reintentar- así que
+    // usa la falla que sabe decir cómo volver a la puerta de entrar, en vez
+    // de repetir el mensaje del server (que no dice cómo llegar ahí).
+    error is AppError.ErrorDelServidor && error.status == 409 && error.code == "CORREO_TOMADO" ->
+        FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical, nube, esFeria)
+
+    // 409 sin código de los de arriba: la instalación ya tiene cuenta
+    // (`SETUP_ALREADY_DONE`, el único que le queda a `/setup`).
     error is AppError.ErrorDelServidor && error.status == 409 ->
-        FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical, nube)
+        FallaDeAlta.CorreoYaTieneNegocio(email, donde, error.technical, nube, esFeria)
 
     // 400 hablando de la clave: el mínimo del server se movió respecto del
     // nuestro. Se cree el del server y se dice como falla de clave, no como un
@@ -237,7 +279,7 @@ internal fun fallaDeAlta(
 
     // Todo lo demás -sin respuesta, 5xx, 503, lo inesperado- es la misma cosa
     // para la dueña: el servicio no está en condiciones ahora.
-    else -> FallaDeAlta.ServicioNoResponde(donde, error.technical, nube)
+    else -> FallaDeAlta.ServicioNoResponde(donde, error.technical, nube, esFeria)
 }
 
 /**
@@ -257,7 +299,7 @@ internal fun deLaConexion(
 ): FallaDeAlta =
     when (problema) {
         is FallaDeConexion.SinRed -> FallaDeAlta.SinRed(esFeria)
-        else -> FallaDeAlta.ServicioNoResponde(donde, problema.tecnico, nube)
+        else -> FallaDeAlta.ServicioNoResponde(donde, problema.tecnico, nube, esFeria)
     }
 
 /**
