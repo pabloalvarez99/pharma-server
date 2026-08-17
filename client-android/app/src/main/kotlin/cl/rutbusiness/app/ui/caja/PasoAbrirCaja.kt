@@ -37,6 +37,8 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
     val colors = RbTheme.colors
     val feria = vm.esFeria || esFeria()
     val copy = copyAbrirCaja(feria)
+    val copyElegir = copyElegirCajaApertura(feria)
+    val copyNota = copyNotaApertura()
 
     Column(
         modifier = modifier
@@ -66,13 +68,12 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
             )
         }
 
-        // Elegir caja física sólo tiene sentido con más de una. Con una (o
-        // ninguna) no se pregunta: feria casi nunca tiene cajones nombrados.
+        // Elegir register físico sólo tiene sentido con más de uno. Con uno (o
+        // ninguno) no se pregunta: feria casi nunca tiene mesas nombradas.
         if (vm.cajas.size > 1) {
-            RbCard(title = "¿Cuál caja?") {
+            RbCard(title = copyElegir.tituloCard) {
                 Text(
-                    text = "El negocio tiene más de una. Elige en cuál estás parada: lo que " +
-                        "vendas descuenta del local donde está esa caja.",
+                    text = copyElegir.ayuda,
                     style = RbTheme.typography.support,
                     color = colors.textSecondary,
                 )
@@ -94,13 +95,13 @@ fun PasoAbrirCaja(vm: CajaViewModel, modifier: Modifier = Modifier) {
         }
 
         if (!feria) {
-            RbCard(title = "¿Algo que anotar?") {
+            RbCard(title = copyNota.tituloCard) {
                 RbTextField(
                     value = vm.notaDeApertura,
                     onValueChange = vm::cambiarNotaDeApertura,
-                    label = "Nota de la apertura (opcional)",
-                    placeholder = "Por ejemplo: quedaron $5.000 de anoche",
-                    supportingText = "Se guarda con la caja. Sirve para acordarse en el cierre.",
+                    label = copyNota.etiqueta,
+                    placeholder = copyNota.placeholder,
+                    supportingText = copyNota.ayuda,
                     enabled = !vm.guardando,
                 )
             }
