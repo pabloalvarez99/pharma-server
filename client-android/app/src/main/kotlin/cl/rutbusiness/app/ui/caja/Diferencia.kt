@@ -131,11 +131,12 @@ fun copyDeDiferencia(
             "El cierre quedó guardado con lo que contaste."
     }
 
-    val mananaOtraVez = if (feria) {
-        "Queda guardado así y mañana empiezas de nuevo."
-    } else {
-        "Queda guardado así y mañana empiezas de nuevo."
-    }
+    // Sin rama por rubro a propósito: a diferencia de "sistema"/"lo anotado" o
+    // "caja"/"día", esta frase no nombra ningún objeto del negocio, así que no
+    // hay jerga que cambiar. Antes vivía como un if/else con las dos ramas
+    // iguales -- código muerto que sugería una diferencia por rubro que nunca
+    // se escribió y que un refactor futuro podía "completar" de más.
+    val mananaOtraVez = "Queda guardado así y mañana empiezas de nuevo."
 
     return when (lectura.cuadre) {
         Cuadre.Justo -> CopyDeDiferencia(
