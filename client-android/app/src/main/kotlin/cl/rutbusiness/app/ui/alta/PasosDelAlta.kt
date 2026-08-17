@@ -47,25 +47,25 @@ internal fun PasoDonde(
     error: String?,
     habilitado: Boolean,
 ) {
-    CartelDelPaso(titulo = "El computador del negocio") {
+    val copy = copyPasoDonde()
+    CartelDelPaso(titulo = copy.titulo) {
         Text(
-            text = "Tus ventas no se guardan en el teléfono: se guardan en un computador tuyo. " +
-                "Puede estar en el local o arrendado en internet.",
+            text = copy.cuerpo,
             style = RbTheme.typography.body,
             color = RbTheme.colors.textPrimary,
         )
         RbTextField(
             value = url,
             onValueChange = onUrl,
-            label = "Dirección del computador",
-            placeholder = "192.168.1.10:8080",
+            label = copy.labelDireccion,
+            placeholder = copy.placeholder,
             supportingText = ayuda,
             errorMessage = error,
             keyboardType = KeyboardType.Uri,
             enabled = habilitado,
         )
         Text(
-            text = "¿No la tienes? Pídesela a quien instaló el sistema en ese computador.",
+            text = copy.ayudaSinDireccion,
             style = RbTheme.typography.support,
             color = RbTheme.colors.textSecondary,
         )
@@ -81,17 +81,14 @@ internal fun PasoNegocio(
     onListo: () -> Unit,
     esFeria: Boolean = false,
 ) {
-    CartelDelPaso(titulo = if (esFeria) "El nombre de tu puesto" else "El nombre de tu negocio") {
+    val copy = copyPasoNegocio(esFeria)
+    CartelDelPaso(titulo = copy.titulo) {
         RbTextField(
             value = nombre,
             onValueChange = onNombre,
-            label = if (esFeria) "Nombre del puesto" else "Nombre del negocio",
-            placeholder = if (esFeria) "Huevos de Marta" else "Almacén Doña Rosa",
-            supportingText = if (esFeria) {
-                "Como te gritan en la feria. Después se puede cambiar."
-            } else {
-                "El que le dice la gente del barrio. Después se puede cambiar."
-            },
+            label = copy.label,
+            placeholder = copy.placeholder,
+            supportingText = copy.ayuda,
             enabled = habilitado,
             imeAction = ImeAction.Next,
             onImeAction = onListo,
@@ -146,14 +143,16 @@ internal fun PasoCuenta(
     errorDeClave: String?,
     habilitado: Boolean,
     onListo: () -> Unit,
+    esFeria: Boolean = false,
 ) {
-    CartelDelPaso(titulo = "Con esto vas a entrar") {
+    val copy = copyPasoCuenta(esFeria)
+    CartelDelPaso(titulo = copy.titulo) {
         RbTextField(
             value = email,
             onValueChange = onEmail,
-            label = "Tu correo",
-            placeholder = "dueno@minegocio.cl",
-            supportingText = "Es tu nombre de usuario para entrar.",
+            label = copy.labelCorreo,
+            placeholder = copy.placeholderCorreo,
+            supportingText = copy.ayudaCorreo,
             errorMessage = errorDeCorreo,
             keyboardType = KeyboardType.Email,
             enabled = habilitado,
@@ -162,9 +161,8 @@ internal fun PasoCuenta(
         RbTextField(
             value = clave,
             onValueChange = onClave,
-            label = "Tu clave",
-            supportingText = "Al menos $LARGO_MINIMO_DE_CLAVE letras o números. Anótala: nadie " +
-                "puede recuperártela por ti.",
+            label = copy.labelClave,
+            supportingText = copy.ayudaClave,
             errorMessage = errorDeClave,
             keyboardType = KeyboardType.Password,
             visualTransformation = PasswordVisualTransformation(),
