@@ -51,12 +51,36 @@ data class RbDimens(
     val radiusCard: Dp,
     /** Field and button corner. `--rb-radius-sm`. */
     val radiusField: Dp,
+    /** Dialog / sheet corner - the "hoja" tier. Bigger than [radiusCard] so a
+     *  modal reads as one step further off the mesa than a card, the way a
+     *  physical piece of paper laid on top of another looks larger at the
+     *  corner. See [RbShapes.dialog]. */
+    val radiusDialog: Dp,
     /** Chip corner - a pill. */
     val radiusPill: Dp,
     /** Icon inside a button or list row. */
     val iconSize: Dp,
     /** The soft mark at the top of an empty state. */
     val markSize: Dp,
+
+    /**
+     * Resting shadow for a surface one step off the mesa: cards, the top bar,
+     * a filled button, a selected chip.
+     *
+     * This is **not** the `--rb-shadow` the CSS carried (a 40px blur, dropped
+     * for the reasons in [RbColors]'s KDoc). A Compose `Modifier.shadow` on
+     * Android is a native `RenderNode` outline shadow composited by the GPU,
+     * not a per-pixel blur shader - it costs roughly what an extra opaque
+     * layer costs, which the reference device can afford. It is still kept
+     * shallow on purpose: every component that applies it also carries a real
+     * surface-colour or border change, because a shadow alone is invisible on
+     * a washed-out panel in daylight and must never be the only cue.
+     */
+    val elevationCard: Dp,
+    /** Shadow for a surface two steps off the mesa: dialogs, menus - anything
+     *  drawn over a scrim. Deeper than [elevationCard] so a dialog reads as
+     *  unambiguously above the card it was opened from. */
+    val elevationRaised: Dp,
 )
 
 val RbDefaultDimens = RbDimens(
@@ -72,23 +96,36 @@ val RbDefaultDimens = RbDimens(
     focusRing = 3.dp,
     radiusCard = 14.dp,
     radiusField = 10.dp,
+    radiusDialog = 20.dp,
     radiusPill = 999.dp,
     iconSize = 24.dp,
     markSize = 56.dp,
+
+    elevationCard = 3.dp,
+    elevationRaised = 10.dp,
 )
 
 /** Corner shapes derived from [RbDimens], so a component asks for a shape and
- *  not for a number. */
+ *  not for a number.
+ *
+ *  The radii ascend with how far a surface sits off the mesa - [field] (a
+ *  control you type or tap into) < [card] (a tile of content) < [dialog] (a
+ *  sheet laid over everything else) < [pill] (fully round, its own family for
+ *  chips) - so the shape alone tells the eye which tier it is looking at,
+ *  before colour or elevation say anything.
+ */
 @Immutable
 data class RbShapes(
     val card: RoundedCornerShape,
     val field: RoundedCornerShape,
+    val dialog: RoundedCornerShape,
     val pill: RoundedCornerShape,
 )
 
 val RbDefaultShapes = RbShapes(
     card = RoundedCornerShape(RbDefaultDimens.radiusCard),
     field = RoundedCornerShape(RbDefaultDimens.radiusField),
+    dialog = RoundedCornerShape(RbDefaultDimens.radiusDialog),
     pill = RoundedCornerShape(percent = 50),
 )
 

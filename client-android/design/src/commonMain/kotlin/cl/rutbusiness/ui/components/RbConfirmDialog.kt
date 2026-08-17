@@ -19,6 +19,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbAssertive
+import cl.rutbusiness.ui.theme.rbElevated
 import cl.rutbusiness.ui.theme.rbHeading
 
 /**
@@ -35,6 +36,12 @@ import cl.rutbusiness.ui.theme.rbHeading
  *   on the path so "Quitar animaciones" cannot leave a stuck 0-alpha sheet.
  * - **No `width: min(420px, 100%)` equivalent as a fixed size.** The dialog
  *   fills the available width minus a gutter, so at 200% scale it has room.
+ * - **The deepest shadow in the system**, via
+ *   [cl.rutbusiness.ui.theme.RbDimens.elevationRaised] on
+ *   [cl.rutbusiness.ui.theme.RbShapes.dialog] - a bigger radius than
+ *   [cl.rutbusiness.ui.theme.RbShapes.card] too, so the sheet reads as one
+ *   more step off the mesa than the card that opened it, by shape and by
+ *   depth together, not by the scrim alone.
  * - **The body scrolls.** This is the one place a font scale can genuinely run
  *   out of screen: a two-line question plus two 56dp buttons at 200% is taller
  *   than a 720p phone. Scrolling the body keeps the buttons reachable instead
@@ -71,7 +78,7 @@ fun RbConfirmDialog(
 ) {
     val colors = RbTheme.colors
     val dimens = RbTheme.dimens
-    val shape = RbTheme.shapes.card
+    val shape = RbTheme.shapes.dialog
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -89,6 +96,7 @@ fun RbConfirmDialog(
             Column(
                 modifier = modifier
                     .fillMaxWidth()
+                    .rbElevated(dimens.elevationRaised, shape)
                     .clip(shape)
                     .background(colors.surfaceRaised)
                     // outlineStrong so the card edge survives feria sun the same

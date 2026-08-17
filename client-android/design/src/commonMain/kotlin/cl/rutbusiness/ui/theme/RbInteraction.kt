@@ -9,8 +9,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 
 /**
  * The one way anything in this design system becomes tappable.
@@ -61,3 +63,29 @@ fun Modifier.rbClickable(
             onClick = onClick,
         )
 }
+
+/**
+ * The one way anything in this design system lifts off the mesa.
+ *
+ * Centralised for the same reason [rbClickable] is: every caller should reach
+ * one decision, not re-derive it. That decision is a **static** value per
+ * [RbDimens.elevationCard] / [RbDimens.elevationRaised] tier - never animated.
+ * [RbMotion]'s own KDoc is explicit that its specs "only ever drive color and
+ * alpha"; a shadow that grows and shrinks every frame a finger is down is
+ * exactly the per-frame relayout cost that budget rules out. A component
+ * swaps tiers instantly on a boolean (`enabled`, `selected`) the same way
+ * [cl.rutbusiness.ui.components.RbButton]'s disabled fill swaps instantly
+ * instead of animating.
+ *
+ * This is a native `RenderNode` outline shadow, not the CSS's 40px
+ * `backdrop-filter` blur dropped elsewhere in this package - see
+ * [RbDimens.elevationCard] for why that distinction makes it affordable here.
+ * It is still never the only cue: every call site pairs it with a real
+ * surface-colour or border change, because on a washed-out panel in daylight
+ * a shadow by itself can vanish entirely.
+ *
+ * @param shape the same shape the caller clipped with, so the shadow follows
+ *   the control's corners instead of boxing it.
+ */
+fun Modifier.rbElevated(elevation: Dp, shape: Shape): Modifier =
+    this.shadow(elevation = elevation, shape = shape, clip = false)

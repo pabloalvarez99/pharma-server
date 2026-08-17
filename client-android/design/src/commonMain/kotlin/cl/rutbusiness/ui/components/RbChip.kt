@@ -22,8 +22,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
+import cl.rutbusiness.ui.theme.rbElevated
 import cl.rutbusiness.ui.theme.rbTouchTarget
 
 /** What a chip is saying. Ported from `.rb-pill` (`ok` / `rx` / `ctrl`). */
@@ -76,7 +78,10 @@ fun RbChipRow(
  * so they read under feria sun; selected filters thicken the brand edge rather
  * than relying on hue alone. Press feedback is color only — never translateY —
  * and runs through [cl.rutbusiness.ui.theme.RbMotion.quick] so reduced motion
- * snaps.
+ * snaps. A selected, interactive chip also picks up a shallow
+ * [cl.rutbusiness.ui.theme.rbElevated] shadow — a third, independent cue past
+ * the thicker edge and the filled body, so "which filter is active" survives
+ * for a colour-blind reader even if the brand tint reads flat to them.
  *
  * @param selected only meaningful when [onClick] is set; announced to TalkBack.
  */
@@ -142,7 +147,12 @@ fun RbChip(
         label = "RbChip background",
     )
 
+    // Only a selected, tappable chip lifts - a status pill never moves and an
+    // unselected filter has nothing to say is "up" yet.
+    val elevation = if (selected && onClick != null) dimens.elevationCard else 0.dp
+
     val base = modifier
+        .rbElevated(elevation, shape)
         .clip(shape)
         .background(animatedBackground)
         .border(borderWidth, borderColor, shape)

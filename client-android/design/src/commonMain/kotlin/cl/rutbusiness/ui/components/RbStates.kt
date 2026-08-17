@@ -28,6 +28,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextAlign
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbAssertive
+import cl.rutbusiness.ui.theme.rbElevated
 import cl.rutbusiness.ui.theme.rbHeading
 import cl.rutbusiness.ui.theme.rbPolite
 
@@ -210,6 +211,11 @@ fun RbEmptyState(
  *
  * Copy must read like a **recado** (what happened + what to do), never like a
  * stacktrace — see [RbErrorCopy]. No process names, status codes, or "error".
+ *
+ * Shares [RbCard]'s depth treatment - a shallow
+ * [cl.rutbusiness.ui.theme.rbElevated] shadow plus its own border - so it
+ * reads as the same kind of tile, not a flatter, lesser one, even though it
+ * is not built from [RbCard] itself.
  */
 @Composable
 fun RbErrorState(
@@ -226,6 +232,7 @@ fun RbErrorState(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .rbElevated(dimens.elevationCard, shape)
             .clip(shape)
             .background(colors.dangerContainer)
             .border(dimens.border, colors.dangerText, shape)
