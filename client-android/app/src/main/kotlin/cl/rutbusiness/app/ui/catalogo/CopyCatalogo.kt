@@ -19,6 +19,11 @@ import cl.rutbusiness.core.rubro.RubroPack
 internal data class CopyCatalogo(
     /** Título de la pantalla: "Lo que vendo", "Inventario", "Carta". */
     val titulo: String,
+    /**
+     * Subtítulo de la lista: mesa del puesto, no panel de ERP.
+     * Feria: "Lo que se vende hoy"; formal: "Lo que puedes cobrar".
+     */
+    val subtitulo: String,
     /** Una cosa vendible: "Cosa", "Producto", "Plato". */
     val item: String,
     /** Botón grande de alta: "Agregar una cosa". */
@@ -27,6 +32,12 @@ internal data class CopyCatalogo(
     val tituloAlta: String,
     /** Título del formulario en edición. */
     val tituloEdicion: String,
+    /** Subtítulo del alta: confirma que con esto ya se cobra. */
+    val subtituloAlta: String,
+    /** Rótulo del buscador: "Buscar cosa" / "Buscar producto". */
+    val etiquetaBuscar: String,
+    /** Placeholder del buscador. */
+    val placeholderBuscar: String,
     /** Rótulo del campo nombre. */
     val etiquetaNombre: String,
     /** Ejemplo adentro del campo nombre. */
@@ -43,6 +54,16 @@ internal data class CopyCatalogo(
     val vacioTitulo: String,
     /** Qué hacer, dicho en una frase. */
     val vacioPista: String,
+    /** Pista cuando el buscador no encuentra nada. */
+    val vacioBusquedaPista: String,
+    /** Pie del formulario: con nombre y precio alcanza. */
+    val pieFormulario: String,
+    /**
+     * Mesa / agent-home: cambia subtítulos, buscador y confirmaciones.
+     * No reescribe el vocab del pack (`titulo` / `item` siguen saliendo de
+     * `vocab.catalog` / `vocab.item`).
+     */
+    val esFeria: Boolean,
 )
 
 /**
@@ -72,12 +93,24 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
 
     return CopyCatalogo(
         titulo = catalogo,
+        // Mesa del puesto vs inventario formal: misma lista, otra voz.
+        subtitulo = if (feria) "Lo que se vende hoy" else "Lo que puedes cobrar",
         item = item,
         agregar = "Agregar $articulo $enMinuscula",
         tituloAlta = "$item nuevo".let {
             if (articulo == "una") "$item nueva" else it
         },
         tituloEdicion = "Editar $enMinuscula",
+        subtituloAlta = if (feria) {
+            "Con el precio ya lo cobrás"
+        } else {
+            "Con esto ya lo puedes cobrar"
+        },
+        // Feria: "Buscar cosa". Farmacia: "Buscar producto". Sale del vocab.
+        etiquetaBuscar = "Buscar $enMinuscula",
+        // El placeholder del buscador reusa el ejemplo del nombre: en feria
+        // "Tomate, cilantro…"; en formal sin unidad, "Nombre".
+        placeholderBuscar = if (unidad != null) "Tomate, cilantro, palta…" else "Nombre",
         etiquetaNombre = "¿Cómo se llama?",
         // El ejemplo habla del rubro sin nombrarlo: en feria "Tomate" es lo
         // primero que se carga, y en un rubro que no conocemos un ejemplo
@@ -97,8 +130,39 @@ internal fun copyCatalogo(pack: RubroPack): CopyCatalogo {
             "Agrega lo que vendes con su precio y ya puedes cobrarlo. " +
                 "No hace falta código de barras ni nada más."
         },
+        vacioBusquedaPista =
+            "Fíjate cómo se escribe, o agrégalo si todavía no está.",
+        // Feria no nombra código de barras: en el puesto no hay.
+        pieFormulario = if (feria) {
+            "Con el nombre y el precio alcanza."
+        } else {
+            "Con el nombre y el precio alcanza. No hace falta código de barras."
+        },
+        esFeria = feria,
     )
 }
+
+/**
+ * Chip de confirmación al volver de guardar.
+ *
+ * Feria: "Listo: tomates" (mesa, sin jerga de sistema). Formal conserva
+ * "Guardado:" porque es el lenguaje que ya usa el resto del ERP.
+ */
+internal fun copyConfirmacionGuardado(nombre: String, feria: Boolean): String {
+    val limpio = nombre.trim()
+    return if (feria) "Listo: $limpio" else "Guardado: $limpio"
+}
+
+/** Cómo se vende, al lado del nombre: "Por kilo". */
+internal fun copyComoSeVende(unidad: String): String = "Por ${unidad.trim()}"
+
+/** Título del vacío cuando el buscador no encontró nada. */
+internal fun copyVacioBusqueda(consulta: String): String =
+    "Nada con \"${consulta.trim()}\""
+
+/** Loading de la lista: "Cargando lo que vendo" / "Cargando inventario". */
+internal fun copyCargandoLista(titulo: String): String =
+    "Cargando ${titulo.replaceFirstChar { it.lowercase() }}"
 
 /**
  * Las unidades que se ofrecen con un toque.
@@ -121,3 +185,15 @@ internal val UNIDADES_SUGERIDAS: List<String> = listOf(
     "docena",
     "caja",
 )
+
+/** Placeholder del campo unidad libre. */
+internal const val PLACEHOLDER_UNIDAD: String = "kilo, atado, bolsa…"
+
+/** Si el pack pide unidad y la dueña no la llena, no es error. */
+internal const val AYUDA_UNIDAD_OPCIONAL: String = "Opcional"
+
+/** CTA del formulario. */
+internal const val ETIQUETA_GUARDAR: String = "Guardar"
+
+/** CTA mientras el server responde. */
+internal const val ETIQUETA_GUARDANDO: String = "Guardando…"

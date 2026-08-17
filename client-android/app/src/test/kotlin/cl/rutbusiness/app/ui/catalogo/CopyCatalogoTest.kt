@@ -32,6 +32,30 @@ class CopyCatalogoTest {
         assertEquals("Cosa", copy.item)
         assertEquals("Se vende por", copy.etiquetaUnidad)
         assertTrue("feria declara el campo de unidad", copy.hayUnidad)
+        assertTrue(copy.esFeria)
+    }
+
+    /**
+     * El chrome de la lista se lee como mesa del puesto, no como inventario.
+     *
+     * Subtítulo, buscador y chip de confirmación salían hardcodeados en
+     * [CatalogoScreen] con voz de farmacia; en feria tienen que hablar del
+     * día y de "cosa".
+     */
+    @Test
+    fun `en feria el chrome de la lista es de mesa`() {
+        val copy = copyCatalogo(PACK_FERIA)
+
+        assertEquals("Lo que se vende hoy", copy.subtitulo)
+        assertEquals("Buscar cosa", copy.etiquetaBuscar)
+        assertEquals("Tomate, cilantro, palta…", copy.placeholderBuscar)
+        assertEquals("Con el precio ya lo cobrás", copy.subtituloAlta)
+        assertEquals("Con el nombre y el precio alcanza.", copy.pieFormulario)
+        assertFalse(
+            "feria no nombra código de barras en el form: era \"${copy.pieFormulario}\"",
+            copy.pieFormulario.contains("código de barras"),
+        )
+        assertEquals("Listo: tomates", copyConfirmacionGuardado("tomates", feria = true))
     }
 
     /**
@@ -61,6 +85,31 @@ class CopyCatalogoTest {
             "farmacia no declara `unidad`: el formulario no puede inventarle un campo",
             copy.hayUnidad,
         )
+        assertFalse(copy.esFeria)
+    }
+
+    /** Retail formal conserva la voz de cobro / inventario, no la de mesa. */
+    @Test
+    fun `en farmacia el chrome sigue siendo de inventario`() {
+        val copy = copyCatalogo(PACK_FARMACIA)
+
+        assertEquals("Lo que puedes cobrar", copy.subtitulo)
+        assertEquals("Buscar producto", copy.etiquetaBuscar)
+        assertEquals("Nombre", copy.placeholderBuscar)
+        assertEquals("Con esto ya lo puedes cobrar", copy.subtituloAlta)
+        assertTrue(copy.pieFormulario.contains("código de barras"))
+        assertEquals(
+            "Guardado: Paracetamol",
+            copyConfirmacionGuardado("Paracetamol", feria = false),
+        )
+    }
+
+    @Test
+    fun `helpers de lista no inventan plata ni jerga`() {
+        assertEquals("Por kilo", copyComoSeVende("kilo"))
+        assertEquals("Nada con \"tomate\"", copyVacioBusqueda("  tomate  "))
+        assertEquals("Cargando lo que vendo", copyCargandoLista("Lo que vendo"))
+        assertEquals("Cargando inventario", copyCargandoLista("Inventario"))
     }
 
     /**
