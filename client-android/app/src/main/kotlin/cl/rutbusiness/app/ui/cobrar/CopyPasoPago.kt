@@ -58,6 +58,13 @@ internal fun copyCtaPago(
 ): String = when {
     cobrando && medio == MedioDePago.Fiado ->
         if (feria) "Anotando fiado…" else "Anotando fiado..."
+    // Sin señal no hay cobro que mandar: lo que pasa al tocar el botón es
+    // que la venta se guarda en el teléfono para salir sola después. Decir
+    // "Cobrando" en ese instante promete un viaje a la red que no ocurre;
+    // aunque el tramo dura milisegundos, es la misma mentira chica que el
+    // resto de esta pantalla evita.
+    cobrando && !hayConexion ->
+        if (feria) "Anotando venta…" else "Guardando venta…"
     cobrando ->
         if (feria) "Cobrando…" else "Cobrando..."
     !hayConexion ->

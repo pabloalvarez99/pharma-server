@@ -82,6 +82,11 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                                 null
                             },
                             mostrarSubtotal = vm.hayConexion,
+                            // Con el cobro en vuelo el +/- queda mudo: tocarlo cambia
+                            // el carrito que el server ya está procesando y, de paso,
+                            // invalida la clave de idempotencia justo cuando un
+                            // reintento la necesita intacta.
+                            habilitado = !vm.cobrando,
                             onMenos = { vm.cambiarCantidad(item.productoId, item.cantidad - 1) },
                             onMas = { vm.cambiarCantidad(item.productoId, item.cantidad + 1) },
                         )
@@ -142,7 +147,13 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                         // propósito que quede a la vista y no que desaparezca:
                         // la dueña sabe que el fiado existe, y un botón que se
                         // esfumó la deja buscándolo. Abajo dice por qué no.
-                        onClick = if (bloqueado) null else ({ vm.cambiarMedio(opcion) }),
+                        //
+                        // `vm.cobrando` se suma al mismo candado: cambiar de
+                        // medio mientras la venta ya salió hacia el server deja
+                        // la pantalla diciendo una cosa y el cobro haciendo
+                        // otra, y de paso invalida la clave de idempotencia de
+                        // un cobro que todavía no supimos si llegó.
+                        onClick = if (bloqueado || vm.cobrando) null else ({ vm.cambiarMedio(opcion) }),
                     )
                 }
             }
@@ -169,6 +180,10 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                     supportingText = copyAyudaVuelto(feria),
                     numeric = true,
                     keyboardType = KeyboardType.Number,
+                    // Mismo candado que el medio de pago: el vuelto que calcula
+                    // el server es sobre el monto que viajó, no sobre el que la
+                    // cajera siga escribiendo mientras el cobro va en camino.
+                    enabled = !vm.cobrando,
                 )
             }
 
@@ -177,6 +192,7 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                     clientes = vm.clientes,
                     elegido = vm.cliente,
                     feria = feria,
+                    habilitado = !vm.cobrando,
                     onElegir = vm::elegirCliente,
                 )
             }
@@ -249,6 +265,7 @@ private fun FilaDeCarrito(
     precioUnitario: String,
     subtotal: String?,
     mostrarSubtotal: Boolean,
+    habilitado: Boolean,
     onMenos: () -> Unit,
     onMas: () -> Unit,
 ) {
@@ -304,6 +321,7 @@ private fun FilaDeCarrito(
                 label = "−",
                 onClick = onMenos,
                 variant = RbButtonVariant.Secondary,
+                enabled = habilitado,
                 modifier = Modifier.weight(1f),
                 fillWidth = true,
             )
@@ -318,6 +336,7 @@ private fun FilaDeCarrito(
                 label = "+",
                 onClick = onMas,
                 variant = RbButtonVariant.Secondary,
+                enabled = habilitado,
                 modifier = Modifier.weight(1f),
                 fillWidth = true,
             )
@@ -330,6 +349,7 @@ private fun SelectorDeCliente(
     clientes: List<ClienteDto>,
     elegido: ClienteDto?,
     feria: Boolean,
+    habilitado: Boolean,
     onElegir: (ClienteDto?) -> Unit,
 ) {
     if (clientes.isEmpty()) {
@@ -360,7 +380,11 @@ private fun SelectorDeCliente(
                 label = cliente.name,
                 tone = if (elegido?.id == cliente.id) RbChipTone.Brand else RbChipTone.Neutral,
                 selected = elegido?.id == cliente.id,
-                onClick = { onElegir(if (elegido?.id == cliente.id) null else cliente) },
+                onClick = if (!habilitado) {
+                    null
+                } else {
+                    { onElegir(if (elegido?.id == cliente.id) null else cliente) }
+                },
             )
         }
     }
