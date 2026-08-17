@@ -1,6 +1,12 @@
 package cl.rutbusiness.app.ui.nav
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -42,6 +48,7 @@ import cl.rutbusiness.core.backup.prepararRespaldoDesdeCola
 import cl.rutbusiness.core.backup.restaurarDesdeTextos
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.session.SessionRepository
+import cl.rutbusiness.ui.theme.RbTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -102,6 +109,11 @@ internal fun ContenedorDeDestinos(
     var destino by rememberSaveable { mutableStateOf(inicial) }
     val estados = rememberSaveableStateHolder()
     val alcance = rememberCoroutineScope()
+    // Leído una vez acá y capturado por el lambda de `transitionSpec` más
+    // abajo: ese lambda no es `@Composable`, así que el spec tiene que llegar
+    // ya resuelto (con "reducir animaciones" ya aplicado) en vez de leerse
+    // ahí adentro.
+    val motion = RbTheme.motion
 
     // El estado de la conexión y la cola de ventas viven arriba de las
     // pestañas porque no son de ninguna: la dueña tiene que ver "sin conexión"
@@ -465,12 +477,46 @@ internal fun ContenedorDeDestinos(
                     onCerrar = { viendoCatalogo = false },
                 )
             } else {
-                CompositionLocalProvider(
-                    LocalAbrirCatalogo provides abrirCatalogo,
-                    LocalIrAlAgente provides irAlAgente,
-                ) {
-                    estados.SaveableStateProvider(destino.name) {
-                        contenido(destino)
+                // El cambio entre pestañas sigue el orden de la barra —Hablar,
+                // Vender, Tu día ([Destino] declara ese orden y
+                // `BarraDeNavegacion` lo recorre tal cual—, así que la
+                // dirección del deslizamiento puede seguir el mismo orden: ir
+                // "hacia adelante" trae el contenido nuevo desde la derecha,
+                // volver lo trae desde la izquierda. Es la misma gramática
+                // espacial de un carrusel, y por eso se siente correcta sin
+                // tener que aprenderla.
+                //
+                // Sólo `slideInHorizontally`/`fadeIn`: traslación y alfa, las
+                // dos propiedades que el compositor anima sin pedirle al
+                // layout que recalcule nada. `using null` apaga la
+                // interpolación de tamaño porque las tres pestañas ya llenan
+                // la misma caja (`fillMaxSize` de acá abajo) — no hay tamaño
+                // que animar, y no pedirlo es lo que mantiene esta transición
+                // adentro del presupuesto "sólo lo que la GPU regala".
+                AnimatedContent(
+                    targetState = destino,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val avanza = targetState.ordinal > initialState.ordinal
+                        val entra = slideInHorizontally(
+                            animationSpec = motion.screenEnter(),
+                        ) { ancho -> if (avanza) ancho else -ancho } +
+                            fadeIn(animationSpec = motion.screenEnter())
+                        val sale = slideOutHorizontally(
+                            animationSpec = motion.screenExit(),
+                        ) { ancho -> if (avanza) -ancho else ancho } +
+                            fadeOut(animationSpec = motion.screenExit())
+                        entra.togetherWith(sale).using(null)
+                    },
+                    label = "ContenedorDeDestinos",
+                ) { destinoAnimado ->
+                    CompositionLocalProvider(
+                        LocalAbrirCatalogo provides abrirCatalogo,
+                        LocalIrAlAgente provides irAlAgente,
+                    ) {
+                        estados.SaveableStateProvider(destinoAnimado.name) {
+                            contenido(destinoAnimado)
+                        }
                     }
                 }
             }
