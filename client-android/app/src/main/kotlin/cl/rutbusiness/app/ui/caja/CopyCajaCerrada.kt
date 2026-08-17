@@ -39,13 +39,21 @@ import cl.rutbusiness.app.ui.resumen.DiaUtc
  * aviso que podría estar mal.
  */
 internal fun cerroOtroDia(cerradaEnDelServidor: String?, ahoraEnMilis: Long): Boolean {
-    val cerradaEn = cerradaEnDelServidor?.trim().orEmpty()
-    if (cerradaEn.length < 10) return false
+    val diaDelCierre = cerradaEnDelServidor?.trim().orEmpty().take(10)
+    if (!DIA_ISO.matches(diaDelCierre)) return false
 
-    val diaDelCierre = cerradaEn.take(10)
     val diaDeHoy = DiaUtc.rfc3339(ahoraEnMilis).take(10)
     return diaDelCierre != diaDeHoy
 }
+
+/**
+ * `YYYY-MM-DD`, el prefijo de un `closed_at` RFC 3339.
+ *
+ * Se verifica la forma y no sólo el largo: cualquier texto de 10 caracteres
+ * que no sea una fecha difiere del día de hoy, y sin este chequeo el aviso de
+ * "este cierre es de otro día" aparecía por un dato roto del server.
+ */
+private val DIA_ISO = Regex("""\d{4}-\d{2}-\d{2}""")
 
 /**
  * Título del aviso cuando el cierre mostrado no es el de hoy.
