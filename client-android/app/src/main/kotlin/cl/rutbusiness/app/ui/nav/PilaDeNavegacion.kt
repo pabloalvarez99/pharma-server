@@ -23,8 +23,8 @@ import androidx.compose.runtime.setValue
  *
  * Dónde entra cada pantalla nueva de las olas 29 a 33 (una línea por
  * pantalla, para no tener que releer el encargo cada vez):
- * - Historial de ventas (ola 29): entrada nueva en el grupo "todos los días"
- *   de `ListaDelMenu`, empuja `Pantalla.HistorialVentas`.
+ * - Historial de ventas (ola 29): hecho — entrada en el grupo "Lo que usas
+ *   seguido" de `ListaDelMenu`, empuja `Pantalla.HistorialVentas`.
  * - Devoluciones (ola 29): entrada nueva en el grupo "todos los días" de
  *   `ListaDelMenu` (pasa en el puesto, no una vez al mes), empuja
  *   `Pantalla.Devoluciones`.
@@ -52,9 +52,11 @@ internal sealed class Pantalla(internal val clave: String) {
     internal object Menu : Pantalla("menu")
     internal object Impresora : Pantalla("impresora")
     internal object Rubro : Pantalla("rubro")
+    internal object HistorialVentas : Pantalla("historial-ventas")
 
     internal companion object {
-        internal val todas: List<Pantalla> = listOf(Resumen, Caja, Fiado, Menu, Impresora, Rubro)
+        internal val todas: List<Pantalla>
+            get() = listOf(Resumen, Caja, Fiado, Menu, Impresora, Rubro, HistorialVentas)
 
         internal fun porClave(clave: String): Pantalla =
             todas.first { it.clave == clave }

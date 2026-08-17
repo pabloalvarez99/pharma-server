@@ -12,6 +12,7 @@ import cl.rutbusiness.app.ui.menu.MenuDelPuestoRoute
 import cl.rutbusiness.app.ui.menu.PantallaDeCambiarRubro
 import cl.rutbusiness.app.ui.menu.PantallaDeImpresoraDelMenu
 import cl.rutbusiness.app.ui.resumen.ResumenRoute
+import cl.rutbusiness.app.ui.ventas.VentasRoute
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 
@@ -88,10 +89,13 @@ internal fun TuDiaRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) 
             onAbrirCaja = { pila.ir(Pantalla.Caja) },
             onAbrirImpresora = { pila.ir(Pantalla.Impresora) },
             onAbrirRubro = { pila.ir(Pantalla.Rubro) },
+            onAbrirHistorialVentas = { pila.ir(Pantalla.HistorialVentas) },
         )
 
         Pantalla.Impresora -> PantallaDeImpresoraDelMenu(onVolver = volver)
 
         Pantalla.Rubro -> PantallaDeCambiarRubro(sesion = sesion, onVolver = volver)
+
+        Pantalla.HistorialVentas -> VentasRoute(sesion = sesion, estado = estado, onVolver = volver)
     }
 }

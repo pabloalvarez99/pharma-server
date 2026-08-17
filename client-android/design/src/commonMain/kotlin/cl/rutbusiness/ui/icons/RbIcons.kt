@@ -426,6 +426,32 @@ object RbIcons {
     }
 
     /**
+     * Historial — ola 29, "lo que vendiste". A clock face with a
+     * counter-clockwise sweep hand, the standard "past/history" reading. Only
+     * one style: a history glyph does not gain a meaningful filled reading
+     * (same call as [buscar]).
+     */
+    val historial: ImageVector = vector("RbIcons.historial") {
+        strokePath {
+            circle(12f, 12f, 8.5f)
+            moveTo(12f, 7.5f); lineTo(12f, 12f); lineTo(15.5f, 14f)
+        }
+    }
+
+    /**
+     * Deshacer — ola 29, "me equivoqué". A curved arrow sweeping back to the
+     * left, the standard "undo" reading. Only one style, same reasoning as
+     * [historial].
+     */
+    val deshacer: ImageVector = vector("RbIcons.deshacer") {
+        strokePath {
+            moveTo(7f, 8f); lineTo(4f, 8f); lineTo(4f, 5f)
+            moveTo(4f, 8f); quadTo(9f, 3f, 15f, 6f); quadTo(21f, 9f, 18f, 15f)
+            quadTo(15f, 21f, 9f, 18f)
+        }
+    }
+
+    /**
      * Every icon this file declares, keyed by its property name.
      *
      * `RbIconsTest` walks this object's public `ImageVector`-returning
@@ -467,6 +493,8 @@ object RbIcons {
         "sinConexion" to sinConexion,
         "impresora" to impresora,
         "escaner" to escaner,
+        "historial" to historial,
+        "deshacer" to deshacer,
     )
 }
 
