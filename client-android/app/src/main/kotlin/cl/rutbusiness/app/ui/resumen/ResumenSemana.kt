@@ -11,9 +11,14 @@ import kotlin.math.pow
  * reescribe acá. Un día sin fila en `sales-daily` se completa con `"0"`: no
  * hay fila para un día sin ventas, no un hueco en el gráfico (ver
  * [armarSemana]).
+ *
+ * Público, a diferencia del resto de este archivo: viaja adentro de
+ * [ResumenGuardado], que es el snapshot offline y es público. Las funciones
+ * que lo arman siguen siendo `internal` — lo que sale del módulo es el dato,
+ * nunca la manera de calcularlo.
  */
 @Serializable
-internal data class DiaDeLaSemana(
+data class DiaDeLaSemana(
     val fecha: String,
     val diaDeLaSemana: Int,
     val revenue: String,

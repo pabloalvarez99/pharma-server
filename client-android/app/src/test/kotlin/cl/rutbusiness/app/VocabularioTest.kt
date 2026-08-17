@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Barrido GLOBAL de vocabulario sobre `app/src/main/kotlin/**`, no archivo por
+ * Barrido GLOBAL de vocabulario sobre todo `app/src/main/kotlin`, no archivo por
  * archivo. Existe porque cada `Copy*.kt` tiene su propio test de frases fijas
  * y palabras prohibidas, pero eso deja afuera cualquier string de cara a la
  * dueña que viva en otro lado: un mapa de etiquetas, un `when` con literales,
@@ -17,11 +17,12 @@ import org.junit.Test
  *
  * Se extraen los literales string de cada `.kt` con un mini-lexer (no regex
  * sobre el archivo entero) que sigue el código carácter por carácter y separa
- * comentarios (`//`, `/* */`, KDoc) de literales reales. Esto es a propósito:
- * KDoc en este mismo repo explica en español, con las palabras prohibidas
- * adentro, por qué están prohibidas (`CopyMenu.kt`: `/** En feria no se dice
- * "caja" ni "arqueo" */`) — si se barriera el archivo como texto plano, el
- * comentario que EXPLICA la regla haría fallar el test que la hace cumplir.
+ * comentarios (de línea, de bloque, KDoc) de literales reales. Esto es a
+ * propósito: KDoc en este mismo repo explica en español, con las palabras
+ * prohibidas adentro, por qué están prohibidas — el KDoc de `CopyMenu.kt`
+ * dice que en feria no se usan las palabras "caja" ni "arqueo". Si se
+ * barriera el archivo como texto plano, el comentario que EXPLICA la regla
+ * haría fallar el test que la hace cumplir.
  * Solo importan los literales string reales.
  *
  * De los literales extraídos, se descarta como "clave de máquina" (y no se
@@ -156,8 +157,9 @@ class VocabularioTest {
     /**
      * Mini-lexer: separa comentarios de literales string. No es un parser de
      * Kotlin completo (no entiende raw strings con `$` escapado de forma
-     * especial, por ejemplo), pero sí lo esencial: `//`, `/* */` no son
-     * texto de usuario, y `"..."` / `"""..."""` sí pueden serlo.
+     * especial, por ejemplo), pero sí lo esencial: los comentarios de línea
+     * y de bloque no son texto de usuario, y `"..."` / `"""..."""` sí pueden
+     * serlo.
      */
     private fun literalesDe(codigo: String): List<String> {
         val literales = mutableListOf<String>()
@@ -208,10 +210,24 @@ class VocabularioTest {
     /** Ver KDoc de la clase: clave de máquina = ASCII, sin mayúscula, sin espacio. */
     private fun esClaveDeMaquina(literal: String): Boolean {
         if (literal.isBlank()) return true
+        if (esRutaDelServer(literal)) return true
         if (' ' in literal) return false
         if (literal.any { it.isUpperCase() }) return false
         return literal.all { it.code < 128 }
     }
+
+    /**
+     * Una ruta del server no es texto de cara a la dueña, aunque tenga
+     * mayúsculas por el template (`"${'$'}{api.baseUrl}/api/v1/…"`) y aunque
+     * el último segmento sea una palabra prohibida.
+     *
+     * `POST /api/v1/cash-sessions/{id}/arqueo` es el nombre del endpoint: lo
+     * eligió el server y cambiarlo acá rompe la llamada sin cambiar una sola
+     * palabra de lo que se lee en la pantalla. La copia de esa misma pantalla
+     * sí se revisa — vive en `CopyCaja.kt` y en feria dice "contar la plata
+     * del puesto".
+     */
+    private fun esRutaDelServer(literal: String): Boolean = "/api/" in literal
 
     private fun archivosFuenteApp(): List<File> =
         raizFuentesApp().walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
@@ -312,5 +328,20 @@ class VocabularioTest {
         val literales = literalesDe(codigoSinFeria).filterNot(::esClaveDeMaquina)
         assertTrue(literales.contains("Stock"))
         assertTrue("stock" !in literales)
+    }
+
+    /**
+     * La ruta del endpoint termina en `/arqueo` y el barrido no debe verla: es
+     * el nombre que eligió el server, no algo que alguien lea. Sin esta regla
+     * el test pedía renombrar un endpoint para arreglar un problema de copia.
+     */
+    @Test
+    fun `la ruta de un endpoint no cuenta como texto de cara a la duena`() {
+        val ruta = "\${api.baseUrl}/api/v1/cash-sessions/\$sesionId/arqueo"
+        assertTrue("una ruta del server no es copia", esClaveDeMaquina(ruta))
+        assertTrue(
+            "pero una frase con la palabra prohibida sí lo es",
+            !esClaveDeMaquina("Hacer el arqueo de caja"),
+        )
     }
 }
