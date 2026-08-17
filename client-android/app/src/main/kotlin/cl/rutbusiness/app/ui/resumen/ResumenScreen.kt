@@ -150,14 +150,17 @@ private fun ResumenScreen(
                 contentPadding = PaddingValues(dimens.space3),
                 verticalArrangement = Arrangement.spacedBy(dimens.space4),
             ) {
-                // Feria (ADR-0022): Hoy + deudas primero. Caja/FEFO son
-                // retail formal y empujan el fiado fuera del pliegue.
-                item("ventas") { VendidoHoy(vm) }
-                item("fiado") { TeDeben(vm, onIrAlFiado) }
-                if (!feria) {
-                    item("caja") { EnCaja(vm, onIrALaCaja) }
-                    item("faltantes") { SePorAcabar(vm) }
-                    item("vencimientos") { PorVencer(vm) }
+                // El orden es [ordenDeBloquesHoy]: cuánto entró, cuánto le
+                // deben y —solo en retail formal— qué falta cerrar. Fijado ahí
+                // y no acá para que un test lo pueda verificar sin Compose.
+                ordenDeBloquesHoy(feria).forEach { bloque ->
+                    when (bloque) {
+                        "ventas" -> item("ventas") { VendidoHoy(vm) }
+                        "fiado" -> item("fiado") { TeDeben(vm, onIrAlFiado) }
+                        "caja" -> item("caja") { EnCaja(vm, onIrALaCaja) }
+                        "faltantes" -> item("faltantes") { SePorAcabar(vm) }
+                        "vencimientos" -> item("vencimientos") { PorVencer(vm) }
+                    }
                 }
             }
         }
@@ -445,9 +448,7 @@ private fun SePorAcabar(vm: ResumenViewModel) {
     RbCard(title = "Se está por acabar") {
         if (vm.cuantosConStockBajo == 0 && vm.stockBajo.isEmpty()) {
             Text(
-                text = "No se está acabando nada. Cuando a un producto le queden " +
-                    "${ResumenApi.UMBRAL_STOCK_BAJO} o menos, aparece acá para que lo encargues " +
-                    "antes de quedarte sin.",
+                text = vacioSePorAcabar(ResumenApi.UMBRAL_STOCK_BAJO),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -455,11 +456,7 @@ private fun SePorAcabar(vm: ResumenViewModel) {
         }
 
         Text(
-            text = if (vm.cuantosConStockBajo == 1) {
-                "1 producto se está acabando."
-            } else {
-                "${vm.cuantosConStockBajo} productos se están acabando."
-            },
+            text = tituloSePorAcabar(vm.cuantosConStockBajo),
             style = RbTheme.typography.bodyStrong,
             color = colors.textPrimary,
         )
@@ -473,8 +470,7 @@ private fun SePorAcabar(vm: ResumenViewModel) {
 
         if (vm.cuantosConStockBajo > vm.stockBajo.size) {
             Text(
-                text = "Y ${vm.cuantosConStockBajo - vm.stockBajo.size} más. Pídeselos al " +
-                    "agente: «¿qué se está por acabar?».",
+                text = masSePorAcabar(vm.cuantosConStockBajo - vm.stockBajo.size),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
@@ -492,9 +488,7 @@ private fun SePorAcabar(vm: ResumenViewModel) {
 @Composable
 private fun FilaDeProducto(producto: ProductDto) {
     Text(
-        text = "· ${producto.name} — ${
-            if (producto.stock <= 0) "sin stock" else "quedan ${producto.stock}"
-        }",
+        text = filaSePorAcabar(producto.name, producto.stock),
         style = RbTheme.typography.body,
         color = RbTheme.colors.textPrimary,
     )
@@ -508,8 +502,7 @@ private fun PorVencer(vm: ResumenViewModel) {
     RbCard(title = "Se está por vencer") {
         if (vm.cuantosPorVencer == 0 && vm.porVencer.isEmpty()) {
             Text(
-                text = "Nada se vence en los próximos ${ResumenApi.DIAS_DE_VENCIMIENTO} días. " +
-                    "Cuando algo se acerque a la fecha, aparece acá con cuántos días le quedan.",
+                text = vacioPorVencer(ResumenApi.DIAS_DE_VENCIMIENTO),
                 style = RbTheme.typography.body,
                 color = colors.textSecondary,
             )
@@ -517,11 +510,7 @@ private fun PorVencer(vm: ResumenViewModel) {
         }
 
         Text(
-            text = if (vm.cuantosPorVencer == 1) {
-                "1 lote se vence pronto."
-            } else {
-                "${vm.cuantosPorVencer} lotes se vencen pronto."
-            },
+            text = tituloPorVencer(vm.cuantosPorVencer),
             style = RbTheme.typography.bodyStrong,
             color = colors.textPrimary,
         )
@@ -532,7 +521,10 @@ private fun PorVencer(vm: ResumenViewModel) {
         ) {
             vm.porVencer.take(ResumenApi.MAXIMO_EN_LISTA).forEach { lote ->
                 Text(
-                    text = "· ${lote.producto} — ${plazoDeVencimiento(lote)}",
+                    text = filaPorVencer(
+                        producto = lote.producto,
+                        plazo = plazoDeVencimiento(lote.diasParaVencer, lote.expired),
+                    ),
                     style = RbTheme.typography.body,
                     color = colors.textPrimary,
                 )
@@ -542,20 +534,12 @@ private fun PorVencer(vm: ResumenViewModel) {
         val listados = minOf(vm.porVencer.size, ResumenApi.MAXIMO_EN_LISTA)
         if (vm.cuantosPorVencer > listados) {
             Text(
-                text = "Y ${vm.cuantosPorVencer - listados} más.",
+                text = masPorVencer(vm.cuantosPorVencer - listados),
                 style = RbTheme.typography.support,
                 color = colors.textSecondary,
             )
         }
     }
-}
-
-/** Cuánto le queda a un lote, dicho como lo diría una persona. */
-private fun plazoDeVencimiento(lote: LotePorVencerDto): String = when {
-    lote.expired -> "ya vencido"
-    lote.diasParaVencer <= 0L -> "vence hoy"
-    lote.diasParaVencer == 1L -> "vence mañana"
-    else -> "le quedan ${lote.diasParaVencer} días"
 }
 
 /**

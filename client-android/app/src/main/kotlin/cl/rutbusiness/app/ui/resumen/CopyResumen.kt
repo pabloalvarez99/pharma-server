@@ -157,3 +157,61 @@ internal fun errorEnCajaHoy(feria: Boolean): String =
 
 internal fun ctaCajaHoy(sinCajaAbierta: Boolean): String =
     if (sinCajaAbierta) "Abrir la caja" else "Ver la caja"
+
+// --- orden de las tarjetas ---------------------------------------------------
+
+/**
+ * Qué tarjeta va primero en «Hoy», de mayor a menor importancia para la dueña.
+ *
+ * Extraído a función pura para que el orden quede fijado por un test y no
+ * dependa de leer bien el `LazyColumn`: cuánto entró, cuánto le deben, y —solo
+ * en retail formal— qué falta cerrar (caja, stock, vencimientos). En feria no
+ * hay tercer bloque: no hay caja que cuadrar ni FEFO que mirar (ADR-0022), así
+ * que la lista termina en el fiado.
+ */
+internal fun ordenDeBloquesHoy(feria: Boolean): List<String> =
+    if (feria) listOf("ventas", "fiado") else listOf("ventas", "fiado", "caja", "faltantes", "vencimientos")
+
+// --- se está por acabar (retail formal; oculta en feria) --------------------
+
+/** Vacío: nada bajo el umbral todavía. */
+internal fun vacioSePorAcabar(umbral: Int): String =
+    "No se está acabando nada. Cuando a un producto le queden $umbral o menos, " +
+        "aparece acá para que lo encargues antes de quedarte sin."
+
+/** Cuántos productos están bajo el umbral. */
+internal fun tituloSePorAcabar(cuantos: Int): String =
+    if (cuantos == 1) "1 producto se está acabando." else "$cuantos productos se están acabando."
+
+/** Una fila de la lista corta: nombre y cuánto queda. */
+internal fun filaSePorAcabar(nombre: String, stock: Long): String =
+    "· $nombre — ${if (stock <= 0) "sin stock" else "quedan $stock"}"
+
+/** Cuando hay más productos bajos de los que se listaron. */
+internal fun masSePorAcabar(restantes: Int): String =
+    "Y $restantes más. Pídeselos al agente: «¿qué se está por acabar?»."
+
+// --- se está por vencer (retail formal; oculta en feria) --------------------
+
+/** Vacío: nada se vence en la ventana de días que mira el server. */
+internal fun vacioPorVencer(dias: Int): String =
+    "Nada se vence en los próximos $dias días. Cuando algo se acerque a la fecha, " +
+        "aparece acá con cuántos días le quedan."
+
+/** Cuántos lotes se vencen pronto. */
+internal fun tituloPorVencer(cuantos: Int): String =
+    if (cuantos == 1) "1 lote se vence pronto." else "$cuantos lotes se vencen pronto."
+
+/** Una fila de la lista corta: producto y plazo. */
+internal fun filaPorVencer(producto: String, plazo: String): String = "· $producto — $plazo"
+
+/** Cuando hay más lotes de los que se listaron. */
+internal fun masPorVencer(restantes: Int): String = "Y $restantes más."
+
+/** Cuánto le queda a un lote, dicho como lo diría una persona y no una fecha ISO. */
+internal fun plazoDeVencimiento(diasParaVencer: Long, expired: Boolean): String = when {
+    expired -> "ya vencido"
+    diasParaVencer <= 0L -> "vence hoy"
+    diasParaVencer == 1L -> "vence mañana"
+    else -> "le quedan $diasParaVencer días"
+}
