@@ -10,9 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -35,10 +33,12 @@ import cl.rutbusiness.ui.components.RbButtonVariant
 import cl.rutbusiness.ui.components.RbCard
 import cl.rutbusiness.ui.components.RbChip
 import cl.rutbusiness.ui.components.RbChipTone
+import cl.rutbusiness.ui.components.RbEmptyState
 import cl.rutbusiness.ui.components.RbErrorState
 import cl.rutbusiness.ui.components.RbLoadingState
 import cl.rutbusiness.ui.components.RbSkeletonLines
 import cl.rutbusiness.ui.components.RbTopBar
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbHeading
 
@@ -290,9 +290,17 @@ internal fun TarjetaDelDia(
  * "Hoy", antes de la primera venta del día.
  *
  * Un cuaderno en blanco tampoco dice nada, y sin embargo la dueña sabe qué hacer
- * con él: anotar. Misma tarjeta del día, con aire: un ejemplo hablado y el
- * botón que lleva a decirlo. Sin asset de ilustración (pesa en el APK del
- * teléfono viejo); el vacío se resuelve con tipografía y espacio.
+ * con él: anotar. Las cuatro partes de un vacío producido — la marca de
+ * [RbIcons.resumenContorno] (antes esta pantalla no tenía ninguna), el título,
+ * la frase de [pistaHoySinVentas] que ya enseña tanto el ejemplo como la
+ * ganancia ("acá vas a ver cuánto llevas, sin sumar a mano"), y el botón que
+ * lleva a decirlo. Sin asset de ilustración (pesa en el APK del teléfono
+ * viejo); el vacío se resuelve con marca, tipografía y espacio.
+ *
+ * Delegado en [RbEmptyState] y sin [RbCard] alrededor: el card ya aporta su
+ * propio `padding`, y sumarle el del vacío encima duplicaba el aire en vez de
+ * ocuparlo con algo. La tarjeta blanca lisa sin marca era justo el "tarjeta
+ * arriba, resto en blanco liso" que señaló la auditoría de capturas.
  *
  * Sin [onHablarleAlAgente] el botón no se dibuja. La frase sigue enseñando el
  * paso, y en feria el agente está a un toque en la barra de abajo; un botón que
@@ -300,38 +308,13 @@ internal fun TarjetaDelDia(
  */
 @Composable
 private fun HoySinVentas(onHablarleAlAgente: (() -> Unit)?) {
-    val colors = RbTheme.colors
-    val dimens = RbTheme.dimens
-
-    RbCard {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = dimens.space4),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(dimens.space3),
-        ) {
-            Text(
-                text = tituloHoySinVentas(),
-                style = RbTheme.typography.heading,
-                color = colors.textPrimary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.rbHeading(),
-            )
-            Text(
-                text = pistaHoySinVentas(),
-                style = RbTheme.typography.body,
-                color = colors.textSecondary,
-                textAlign = TextAlign.Center,
-            )
-            if (onHablarleAlAgente != null) {
-                RbButton(
-                    label = ctaHablarleAlAgenteHoy(),
-                    onClick = onHablarleAlAgente,
-                )
-            }
-        }
-    }
+    RbEmptyState(
+        title = tituloHoySinVentas(),
+        icon = RbIcons.resumenContorno,
+        hint = pistaHoySinVentas(),
+        actionLabel = onHablarleAlAgente?.let { ctaHablarleAlAgenteHoy() },
+        onAction = onHablarleAlAgente,
+    )
 }
 
 // --- 3: cuánta plata hay en caja -------------------------------------------

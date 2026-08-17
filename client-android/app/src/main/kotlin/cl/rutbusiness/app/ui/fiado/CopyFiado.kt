@@ -31,6 +31,19 @@ internal fun cuantosTeDeben(cuantos: Int): String =
 internal fun tituloVacioDeuda(feria: Boolean): String =
     if (feria) "Nadie te debe ahora" else "Nadie te debe plata"
 
+/**
+ * El «para qué» del vacío: por qué fiar por el agente en vez de fiarlo de
+ * memoria. Separado de [pistaVacioDeuda], que enseña el cómo — la auditoría
+ * de la ola 27 encontró vacíos que sólo explicaban el paso técnico y nunca la
+ * ganancia de hacerlo.
+ */
+internal fun beneficioVacioDeuda(feria: Boolean): String =
+    if (feria) {
+        "Así no se te olvida quién te quedó debiendo, aunque pasen los días."
+    } else {
+        "Así sabes quién te debe y cuánto, sin tener que llevar la cuenta de memoria."
+    }
+
 internal fun pistaVacioDeuda(feria: Boolean): String =
     if (feria) {
         "Dile al agente: «$EJEMPLO_FIADO_FERIA». Queda acá hasta que te pague."
@@ -229,6 +242,7 @@ internal fun todoCopyFeriaUsuario(): List<String> = listOf(
     cuantosTeDeben(1),
     cuantosTeDeben(3),
     tituloVacioDeuda(feria = true),
+    beneficioVacioDeuda(feria = true),
     pistaVacioDeuda(feria = true),
     ctaHablarleAlAgente(),
     vacioBusquedaTitulo(),
