@@ -1,6 +1,5 @@
 package cl.rutbusiness.app.ui.nav
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,19 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Fill
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -38,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import cl.rutbusiness.ui.icons.RbIcons
 import cl.rutbusiness.ui.theme.RbTheme
 import cl.rutbusiness.ui.theme.rbClickable
 import cl.rutbusiness.ui.theme.rbTouchTarget
@@ -114,9 +109,10 @@ enum class Destino {
  *   verde igual ve cuál está elegida.
  * - **La barra no tiene alto fijo.** Al 200% la etiqueta ocupa dos líneas y la
  *   barra crece; 56dp es el piso, no la medida.
- * - Los íconos se dibujan a mano y se miden contra la tipografía, así que
- *   **crecen con la escala de letra** como el resto. Un vector en `dp` se
- *   quedaría chico justo para quien subió la letra porque ve poco.
+ * - Los íconos (`RbIcons`, `:design`) se miden contra la tipografía y no en
+ *   `dp` fijo, así que **crecen con la escala de letra** como el resto. Un
+ *   vector medido en `dp` se quedaría chico justo para quien subió la letra
+ *   porque ve poco.
  *
  * Está en `app/` y no en `:design` a propósito: la barra conoce los tres
  * destinos de **este** producto, y el design system no debería.
@@ -254,18 +250,22 @@ private fun Pestana(
 }
 
 /**
- * Los tres pictogramas, dibujados y no importados.
+ * Los tres pictogramas de la barra, tomados de `RbIcons` (`:design`) en vez de
+ * dibujados a mano acá.
  *
- * Sin dependencia de íconos: `material-icons-extended` pesa megas en un aparato
- * que no los tiene, y traer tres glifos no justifica la librería entera.
- * Formas gruesas y simples, que es lo único que se lee en un panel barato a la
- * luz del día — regla del piso de hardware contra los trazos finos.
+ * La razón detrás del `Canvas` original seguía siendo válida —
+ * `material-icons-extended` pesa megas en un aparato barato para tres
+ * glifos— pero la conclusión no: la salida es un set propio de `ImageVector`,
+ * que pesa kilobytes de bytecode y nada en tiempo de ejecución, no dibujar
+ * primitivas por pantalla. `RbIcons` es ese set.
  *
  * Decorativos para el lector de pantalla: el nombre ya lo dice la etiqueta de
  * abajo, y anunciarlo dos veces es ruido.
  *
  * [relleno]: la pestaña elegida va llena (no sólo contorno) para que se vea
- * sin depender del color de marca.
+ * sin depender del color de marca — las tres pestañas tienen las dos
+ * variantes en `RbIcons`, Resumen incluido (el `Canvas` original la dejaba
+ * siempre sólida, rompiendo esta regla para esa pestaña sola).
  */
 @Composable
 private fun IconoDestino(
@@ -274,80 +274,20 @@ private fun IconoDestino(
     tamano: Dp,
     relleno: Boolean,
 ) {
-    Canvas(
+    Icon(
+        imageVector = destino.imageVector(relleno),
+        contentDescription = null,
+        tint = color,
         modifier = Modifier
             .size(tamano)
             .clearAndSetSemantics { },
-    ) {
-        when (destino) {
-            Destino.Agente -> dibujarGlobo(color, relleno)
-            Destino.Cobrar -> dibujarBillete(color, relleno)
-            Destino.Resumen -> dibujarBarras(color)
-        }
-    }
-}
-
-/** Grosor de trazo proporcional al ícono, con un piso para que no desaparezca. */
-private fun DrawScope.trazo(): Stroke =
-    Stroke(width = (size.minDimension / 9f).coerceAtLeast(2.dp.toPx()))
-
-/** Hablarle al negocio: un globo de diálogo. */
-private fun DrawScope.dibujarGlobo(color: Color, relleno: Boolean) {
-    val alto = size.height * 0.72f
-    val estilo = if (relleno) Fill else trazo()
-    drawRoundRect(
-        color = color,
-        topLeft = Offset.Zero,
-        size = Size(size.width, alto),
-        cornerRadius = CornerRadius(alto * 0.30f),
-        style = estilo,
-    )
-    // La cola, llena: un triángulo con contorno a este tamaño se ve sucio.
-    drawPath(
-        path = Path().apply {
-            moveTo(size.width * 0.26f, alto * 0.92f)
-            lineTo(size.width * 0.26f, size.height)
-            lineTo(size.width * 0.54f, alto * 0.92f)
-            close()
-        },
-        color = color,
     )
 }
 
-/** Cobrar / Vender: un billete. */
-private fun DrawScope.dibujarBillete(color: Color, relleno: Boolean) {
-    val alto = size.height * 0.64f
-    val arriba = (size.height - alto) / 2f
-    val estilo = if (relleno) Fill else trazo()
-    drawRoundRect(
-        color = color,
-        topLeft = Offset(0f, arriba),
-        size = Size(size.width, alto),
-        cornerRadius = CornerRadius(alto * 0.24f),
-        style = estilo,
-    )
-    // El círculo del billete: en relleno se dibuja en el color de la pastilla
-    // no se ve — se omite y el billete lleno basta; en contorno sí se traza.
-    if (!relleno) {
-        drawCircle(
-            color = color,
-            radius = alto * 0.20f,
-            center = Offset(size.width / 2f, arriba + alto / 2f),
-            style = trazo(),
-        )
-    }
-}
-
-/** El resumen del día: tres barras que suben (siempre llenas: son sólidos). */
-private fun DrawScope.dibujarBarras(color: Color) {
-    val ancho = size.width / 5f
-    listOf(0.45f, 0.72f, 1.0f).forEachIndexed { indice, fraccion ->
-        val alto = size.height * fraccion * 0.92f
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(ancho * (0.5f + indice * 1.6f), size.height - alto),
-            size = Size(ancho, alto),
-            cornerRadius = CornerRadius(ancho * 0.35f),
-        )
-    }
+/** El vector de `RbIcons` para cada destino, en su variante de contorno o de
+ *  relleno según si la pestaña está elegida. */
+private fun Destino.imageVector(relleno: Boolean): ImageVector = when (this) {
+    Destino.Agente -> if (relleno) RbIcons.agenteRelleno else RbIcons.agenteContorno
+    Destino.Cobrar -> if (relleno) RbIcons.cobrarRelleno else RbIcons.cobrarContorno
+    Destino.Resumen -> if (relleno) RbIcons.resumenRelleno else RbIcons.resumenContorno
 }
