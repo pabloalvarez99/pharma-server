@@ -191,7 +191,9 @@ class NombreDelProductoTest {
         }
         compose.waitForIdle()
 
-        compose.onNodeWithText("Compartir a una nota", substring = true)
+        // Ola 20 acortó el label a "Guardar en Notas" (ADR-0022, sin jerga);
+        // la acción de compartir sigue siendo la misma.
+        compose.onNodeWithText("Guardar en Notas", substring = true)
             .performScrollTo()
             .performClick()
         compose.waitForIdle()
