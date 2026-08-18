@@ -65,7 +65,11 @@ internal fun gruposDeAyuda(pack: RubroPack): List<GrupoAyuda> {
             "Libro de controlados",
             "Recetas del mes",
             "Órdenes de compra pendientes",
-            "Proveedores",
+            // "Proveedores" a secas parsea igual (`intent.rs:941`), pero un chip
+            // de una palabra no se lee como algo que se le pueda *decir* al
+            // agente: se lee como el nombre de una sección. La forma larga está
+            // en los tests del parser (`intent.rs:942`) y enseña el tono.
+            "Lista de proveedores",
         ),
     )
 
