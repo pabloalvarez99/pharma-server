@@ -18,6 +18,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import cl.rutbusiness.app.ui.entrada.LocalEntrada
+import cl.rutbusiness.app.ui.gastos.CopyGastos
 import cl.rutbusiness.app.ui.impresora.EstadoDeImpresion
 import cl.rutbusiness.app.ui.impresora.TarjetaDeReimpresion
 import cl.rutbusiness.app.ui.impresora.impresoraViewModel
@@ -75,6 +76,7 @@ import kotlinx.coroutines.launch
  * @param onAbrirImpresora empuja `Pantalla.Impresora`.
  * @param onAbrirRubro empuja `Pantalla.Rubro`.
  * @param onAbrirHistorialVentas empuja `Pantalla.HistorialVentas` (ola 29).
+ * @param onAbrirGastos empuja `Pantalla.Gastos` (ola 30).
  */
 @Composable
 fun MenuDelPuestoRoute(
@@ -83,6 +85,7 @@ fun MenuDelPuestoRoute(
     onAbrirImpresora: () -> Unit,
     onAbrirRubro: () -> Unit,
     onAbrirHistorialVentas: () -> Unit,
+    onAbrirGastos: () -> Unit,
 ) {
     ListaDelMenu(
         onVolver = onVolver,
@@ -90,6 +93,7 @@ fun MenuDelPuestoRoute(
         onAbrirImpresora = onAbrirImpresora,
         onAbrirRubro = onAbrirRubro,
         onAbrirHistorialVentas = onAbrirHistorialVentas,
+        onAbrirGastos = onAbrirGastos,
     )
 }
 
@@ -108,7 +112,7 @@ fun MenuDelPuestoRoute(
  * - Historial de ventas (ola 29): [Diario].
  * - Devoluciones (ola 29): [Diario] — pasa en el puesto, no una vez al mes.
  * - Márgenes (ola 31): [Mensual] — se revisa, no se anota en el momento.
- * - Gastos (ola 32): [Diario] — se anota cada vez que sale plata.
+ * - Gastos (ola 30, adelantada de la 32): [Diario] — se anota cada vez que sale plata.
  * - Respaldo (ola 33): [Mensual].
  * - Fiado por persona (ola 30) no entra acá: cuelga de [Pantalla.Fiado], no
  *   de este menú (ver KDoc de `Pantalla`).
@@ -148,6 +152,7 @@ private fun ListaDelMenu(
     onAbrirImpresora: () -> Unit,
     onAbrirRubro: () -> Unit,
     onAbrirHistorialVentas: () -> Unit,
+    onAbrirGastos: () -> Unit,
 ) {
     val dimens = RbTheme.dimens
     val feria = esFeria()
@@ -170,6 +175,14 @@ private fun ListaDelMenu(
                     subtituloEntradaHistorial(feria),
                     GrupoDeMenu.Diario,
                     onAbrirHistorialVentas,
+                ),
+            )
+            add(
+                EntradaDeMenu(
+                    CopyGastos.titulo(feria),
+                    CopyGastos.subtitulo(feria),
+                    GrupoDeMenu.Diario,
+                    onAbrirGastos,
                 ),
             )
             if (pack.features.printer) {

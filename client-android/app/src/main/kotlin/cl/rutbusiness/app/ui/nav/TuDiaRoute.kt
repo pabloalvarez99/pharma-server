@@ -8,6 +8,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import cl.rutbusiness.app.ui.caja.CajaRoute
 import cl.rutbusiness.app.ui.fiado.FiadoRoute
+import cl.rutbusiness.app.ui.gastos.GastosRoute
 import cl.rutbusiness.app.ui.menu.MenuDelPuestoRoute
 import cl.rutbusiness.app.ui.menu.PantallaDeCambiarRubro
 import cl.rutbusiness.app.ui.menu.PantallaDeImpresoraDelMenu
@@ -90,6 +91,7 @@ internal fun TuDiaRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) 
             onAbrirImpresora = { pila.ir(Pantalla.Impresora) },
             onAbrirRubro = { pila.ir(Pantalla.Rubro) },
             onAbrirHistorialVentas = { pila.ir(Pantalla.HistorialVentas) },
+            onAbrirGastos = { pila.ir(Pantalla.Gastos) },
         )
 
         Pantalla.Impresora -> PantallaDeImpresoraDelMenu(onVolver = volver)
@@ -97,5 +99,7 @@ internal fun TuDiaRoute(sesion: SessionRepository, estado: EstadoSesion.Activa) 
         Pantalla.Rubro -> PantallaDeCambiarRubro(sesion = sesion, onVolver = volver)
 
         Pantalla.HistorialVentas -> VentasRoute(sesion = sesion, estado = estado, onVolver = volver)
+
+        Pantalla.Gastos -> GastosRoute(sesion = sesion, estado = estado, onVolver = volver)
     }
 }
