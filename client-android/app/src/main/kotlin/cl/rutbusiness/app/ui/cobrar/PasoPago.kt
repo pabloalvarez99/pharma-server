@@ -64,6 +64,7 @@ fun PasoPago(vm: CobrarViewModel, modifier: Modifier = Modifier) {
                 // manda a sumar cosas; el CTA queda deshabilitado por el VM.
                 RbEmptyState(
                     title = copyCarritoVacioTitulo(feria),
+                    benefit = copyCarritoVacioBeneficio(feria),
                     hint = copyCarritoVacioPista(feria),
                 )
             } else {
@@ -364,6 +365,7 @@ private fun SelectorDeCliente(
         // el cliente al agente.
         RbEmptyState(
             title = copyClientesVaciosTitulo(feria),
+            benefit = copyClientesVaciosBeneficio(feria),
             hint = copyClientesVaciosPista(feria),
         )
         return

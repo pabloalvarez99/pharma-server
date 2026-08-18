@@ -167,3 +167,28 @@ internal fun pistaBusquedaVacia(
         "Revisa cómo se escribe, o prueba con una palabra más corta."
     }
 }
+
+/** Por qué no se puede fiar sin conexión. */
+internal fun copyMotivoNoUsarFiado(feria: Boolean): String =
+    if (feria) {
+        "Sin señal no se puede fiar: hay que revisar cuánto debe el cliente primero."
+    } else {
+        "Sin conexión no se puede fiar: hay que revisar la cuenta del cliente en el sistema."
+    }
+
+/** Por qué no se puede cobrar por transferencia sin conexión. */
+internal fun copyMotivoNoUsarTransferencia(feria: Boolean): String =
+    "Sin ${if (feria) "señal" else "conexión"} no se puede cobrar por transferencia: " +
+        "no hay cómo confirmar que llegó."
+
+/** Título cuando la búsqueda no trae filas y hay algo escrito. */
+internal fun tituloBusquedaSinResultados(consulta: String): String =
+    "Nada con \"${consulta.trim()}\""
+
+/** Para qué sirve seguir, cuando la búsqueda con texto no trae filas. */
+internal fun beneficioBusquedaVacia(feria: Boolean): String =
+    if (feria) {
+        "Igual queda anotado en tu día, aunque no esté en la lista."
+    } else {
+        "Así no pierdes la venta mientras cargas el producto."
+    }

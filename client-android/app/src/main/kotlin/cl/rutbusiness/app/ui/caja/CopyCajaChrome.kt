@@ -1,5 +1,7 @@
 package cl.rutbusiness.app.ui.caja
 
+import cl.rutbusiness.ui.components.RbErrorCopy
+
 /**
  * Copy del chrome de Caja (top bar + empty offline + carga).
  *
@@ -17,6 +19,35 @@ package cl.rutbusiness.app.ui.caja
 internal fun labelActualizarCaja(feria: Boolean): String =
     if (feria) "Mirar de nuevo" else "Actualizar"
 
+/** Nombre corto del bulto de plata, para armar frases genéricas. */
+internal fun nombreDeCaja(feria: Boolean): String = if (feria) "el puesto" else "la caja"
+
+/** 409 al abrir: ya hay una sesión abierta en otro lado. */
+internal fun copyYaAbierta(feria: Boolean): RbErrorCopy = RbErrorCopy(
+    title = if (feria) "Ya tienes el puesto abierto" else "Ya tienes una caja abierta",
+    message = if (feria) {
+        "Aparece tu puesto sin cerrar, capaz de ayer o de otro teléfono. " +
+            "Toca «Actualizar» para verlo: desde ahí lo puedes cerrar y abrir el de hoy."
+    } else {
+        "Aparece una caja tuya sin cerrar, capaz de ayer o de otro teléfono. " +
+            "Toca «Actualizar» para verla: desde ahí la puedes cerrar y abrir la de hoy."
+    },
+    retryLabel = null,
+)
+
+/** 409 al cerrar: ya la cerraron desde otro lado. */
+internal fun copyYaCerrada(feria: Boolean): RbErrorCopy = RbErrorCopy(
+    title = if (feria) "Este puesto ya estaba cerrado" else "Esta caja ya estaba cerrada",
+    message = if (feria) {
+        "Alguien lo cerró antes, o se cerró en otro teléfono. Toca " +
+            "«Actualizar» para ver cómo quedó."
+    } else {
+        "Alguien la cerró antes, o se cerró en otro teléfono. Toca " +
+            "«Actualizar» para ver cómo quedó."
+    },
+    retryLabel = null,
+)
+
 /** Primera carga del estado de caja / puesto. */
 internal fun cargandoCaja(feria: Boolean): String =
     if (feria) "Abriendo el puesto..." else "Viendo cómo está la caja..."
@@ -30,6 +61,7 @@ internal fun cargandoCaja(feria: Boolean): String =
  */
 internal data class CopyCajaSinConexion(
     val titulo: String,
+    val beneficio: String,
     val hint: String,
     val accion: String,
 )
@@ -38,6 +70,8 @@ internal fun copyCajaSinConexion(feria: Boolean): CopyCajaSinConexion =
     if (feria) {
         CopyCajaSinConexion(
             titulo = "Sin señal no se cierra el día",
+            beneficio = "Así el cierre calza exacto con lo que vendiste, sin plata que " +
+                "no cuadra.",
             hint = "La plata del puesto la confirma el cobro, no el teléfono. " +
                 "Sigue vendiendo en efectivo; cuando vuelva la red cierras el día.",
             accion = "Volver",
@@ -45,6 +79,8 @@ internal fun copyCajaSinConexion(feria: Boolean): CopyCajaSinConexion =
     } else {
         CopyCajaSinConexion(
             titulo = "La caja necesita el sistema prendido",
+            beneficio = "Así el cierre de caja calza exacto con las ventas del día, sin " +
+                "diferencias que no puedas explicar.",
             hint = "Sin conexión no se puede abrir la caja, anotar retiros ni cerrar con " +
                 "arqueo: lo que debería haber en el cajón lo calcula el sistema del " +
                 "negocio sumando las ventas del día, y desde el teléfono no hay contra " +

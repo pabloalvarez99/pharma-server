@@ -180,4 +180,28 @@ class CopyPasoPagoTest {
         assertEquals("A cobrar", copyEtiquetaTotal(feria = true))
         assertEquals("Total", copyEtiquetaTotal(feria = false))
     }
+
+    @Test
+    fun `beneficio de carrito vacio distingue feria de retail`() {
+        assertEquals(
+            "Así el monto que ves siempre es el que se cobra, sin sorpresas al pagar.",
+            copyCarritoVacioBeneficio(feria = true),
+        )
+        assertEquals(
+            "Así el total que ves siempre es el que se cobra, sin diferencias al pagar.",
+            copyCarritoVacioBeneficio(feria = false),
+        )
+    }
+
+    @Test
+    fun `beneficio de clientes vacios distingue feria de retail`() {
+        assertEquals(
+            "Así el fiado queda anotado a nombre de alguien, no perdido en el aire.",
+            copyClientesVaciosBeneficio(feria = true),
+        )
+        assertEquals(
+            "Así el fiado queda en la cuenta de la persona correcta.",
+            copyClientesVaciosBeneficio(feria = false),
+        )
+    }
 }

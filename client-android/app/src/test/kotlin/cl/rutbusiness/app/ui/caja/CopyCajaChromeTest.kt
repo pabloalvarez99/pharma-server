@@ -63,6 +63,48 @@ class CopyCajaChromeTest {
     }
 
     @Test
+    fun `sin conexion trae beneficio en feria y retail`() {
+        assertEquals(
+            "Así el cierre calza exacto con lo que vendiste, sin plata que no cuadra.",
+            copyCajaSinConexion(feria = true).beneficio,
+        )
+        assertEquals(
+            "Así el cierre de caja calza exacto con las ventas del día, sin " +
+                "diferencias que no puedas explicar.",
+            copyCajaSinConexion(feria = false).beneficio,
+        )
+        assertSinJergaFeria("beneficio feria", copyCajaSinConexion(feria = true).beneficio)
+    }
+
+    @Test
+    fun `409 al abrir distingue puesto de caja`() {
+        val feria = copyYaAbierta(feria = true)
+        assertEquals("Ya tienes el puesto abierto", feria.title)
+        assertTrue(feria.message.contains("puesto"))
+        assertSinJergaFeria("409 apertura feria", "${feria.title} | ${feria.message}")
+
+        val retail = copyYaAbierta(feria = false)
+        assertEquals("Ya tienes una caja abierta", retail.title)
+        assertTrue(retail.message.contains("caja"))
+    }
+
+    @Test
+    fun `409 al cerrar distingue puesto de caja`() {
+        val feria = copyYaCerrada(feria = true)
+        assertEquals("Este puesto ya estaba cerrado", feria.title)
+        assertSinJergaFeria("409 cierre feria", "${feria.title} | ${feria.message}")
+
+        val retail = copyYaCerrada(feria = false)
+        assertEquals("Esta caja ya estaba cerrada", retail.title)
+    }
+
+    @Test
+    fun `nombre de caja distingue puesto de caja`() {
+        assertEquals("el puesto", nombreDeCaja(feria = true))
+        assertEquals("la caja", nombreDeCaja(feria = false))
+    }
+
+    @Test
     fun `actualizar en feria es mirar de nuevo como Hoy`() {
         assertEquals("Mirar de nuevo", labelActualizarCaja(feria = true))
         assertEquals("Actualizar", labelActualizarCaja(feria = false))

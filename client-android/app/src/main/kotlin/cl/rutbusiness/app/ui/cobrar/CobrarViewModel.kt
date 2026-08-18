@@ -899,10 +899,8 @@ class CobrarViewModel(
     fun motivoParaNoUsar(opcion: MedioDePago): String? = when {
         hayConexion -> null
         opcion == MedioDePago.Efectivo -> null
-        opcion == MedioDePago.Fiado ->
-            "Sin conexión no se puede fiar: hay que revisar la cuenta del cliente en el sistema."
-        else ->
-            "Sin conexión no se puede cobrar por transferencia: no hay cómo confirmar que llegó."
+        opcion == MedioDePago.Fiado -> copyMotivoNoUsarFiado(esFeria)
+        else -> copyMotivoNoUsarTransferencia(esFeria)
     }
 
     /** `null` = se puede cobrar. Si no, el motivo, ya escrito para mostrar. */

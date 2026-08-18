@@ -118,7 +118,10 @@ private fun CaminoDeRubro(
             .clip(shape)
             .background(if (primario) colors.surfaceRaised else colors.surface)
             .border(
-                width = if (primario) dimens.focusRing else dimens.border,
+                // dimens.focusRing es el anillo de foco (teclado/D-pad/accesibilidad):
+                // no sirve para énfasis decorativo, o el foco real se confundiría con
+                // esto. No hay token de "borde fuerte" en el tema; se usa el normal.
+                width = dimens.border,
                 color = if (primario) colors.outlineStrong else colors.outline,
                 shape = shape,
             )
