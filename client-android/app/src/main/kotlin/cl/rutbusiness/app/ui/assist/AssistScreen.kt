@@ -70,11 +70,16 @@ fun AssistScreen(
     val motion = RbTheme.motion
     val lista = rememberLazyListState()
 
-    // La Screen lee esFeria(); el VM no puede tocar CompositionLocal.
+    // La Screen lee esFeria() y packActual(); el VM no puede tocar CompositionLocal.
     val feria = esFeria()
+    val pack = packActual()
     val chrome = remember(feria) { copyAssistChrome(feria) }
+    val chromeAyuda = remember(feria) { copyAyuda(feria) }
     LaunchedEffect(feria) {
         if (feria) vm.modoFeria(true)
+    }
+    LaunchedEffect(pack) {
+        vm.actualizarPack(pack)
     }
 
     // Al llegar un mensaje nuevo, se baja hasta el final. Sin esto la dueña
@@ -92,6 +97,20 @@ fun AssistScreen(
 
     val abrirLoQueVendo = abrirCatalogo()
     val copyDelCatalogo = copyCatalogo(packActual())
+
+    if (vm.ayudaAbierta) {
+        PantallaAyuda(
+            chrome = chromeAyuda,
+            grupos = remember(pack) { gruposDeAyuda(pack) },
+            onElegir = { frase ->
+                vm.cerrarAyuda()
+                vm.preguntar(frase)
+            },
+            onCerrar = vm::cerrarAyuda,
+            modifier = modifier,
+        )
+        return
+    }
 
     Column(
         modifier = modifier
@@ -133,7 +152,14 @@ fun AssistScreen(
             verticalArrangement = Arrangement.spacedBy(dimens.space3),
         ) {
             if (vm.recienEmpezando) {
-                item { Bienvenida(chrome = chrome, onElegir = vm::preguntar) }
+                item {
+                    Bienvenida(
+                        chrome = chrome,
+                        chromeAyuda = chromeAyuda,
+                        onElegir = vm::preguntar,
+                        onVerTodo = vm::abrirAyuda,
+                    )
+                }
             }
 
             items(
@@ -144,11 +170,22 @@ fun AssistScreen(
                     vm = vm,
                     mensaje = vm.mensajes[indice],
                     reintentar = chrome.reintentar,
+                    chromeAyuda = chromeAyuda,
+                    onVerTodo = vm::abrirAyuda,
                 )
             }
 
             if (vm.pensando) {
                 item { RbLoadingState(label = chrome.pensando) }
+            }
+
+            if (!vm.pensando && vm.sugerenciasSiguientes.isNotEmpty()) {
+                item {
+                    SugerenciasSiguientes(
+                        sugerencias = vm.sugerenciasSiguientes,
+                        onElegir = vm::preguntar,
+                    )
+                }
             }
         }
 
@@ -181,11 +218,28 @@ private fun MensajeEnLista(
     vm: AssistViewModel,
     mensaje: Mensaje,
     reintentar: String,
+    chromeAyuda: CopyAyuda,
+    onVerTodo: () -> Unit,
 ) {
     when (mensaje) {
         is Mensaje.Mia -> Burbuja(texto = mensaje.texto, mia = true)
 
-        is Mensaje.DelAgente -> Burbuja(texto = mensaje.texto, mia = false)
+        is Mensaje.DelAgente -> {
+            Column(verticalArrangement = Arrangement.spacedBy(RbTheme.dimens.space2)) {
+                Burbuja(texto = mensaje.texto, mia = false)
+                // Callejón sin salida (paso 4 del encargo): el server no entendió.
+                // Nunca un texto muerto — siempre algo tocable, y siempre la
+                // salida a la lista completa.
+                if (mensaje.noEntendido) {
+                    NoEntendido(
+                        chromeAyuda = chromeAyuda,
+                        sugerencias = vm.sugerenciasCuandoNoEntiende(),
+                        onElegir = vm::preguntar,
+                        onVerTodo = onVerTodo,
+                    )
+                }
+            }
+        }
 
         is Mensaje.Propuesta -> TarjetaPropuesta(
             mensaje = mensaje,
@@ -306,7 +360,9 @@ private fun Problema(
 @Composable
 private fun Bienvenida(
     chrome: CopyAssistChrome,
+    chromeAyuda: CopyAyuda,
     onElegir: (String) -> Unit,
+    onVerTodo: () -> Unit,
 ) {
     val dimens = RbTheme.dimens
     val colors = RbTheme.colors
@@ -356,6 +412,147 @@ private fun Bienvenida(
                         tone = RbChipTone.Brand,
                         onClick = { onElegir(sugerencia) },
                     )
+                }
+            }
+
+            // Salida a la lista completa (paso 3 del encargo): los cinco chips
+            // de arriba enseñan el tono, pero el agente entiende mucho más que
+            // eso y hoy no hay dónde verlo.
+            RbButton(
+                label = chromeAyuda.verTodo,
+                onClick = onVerTodo,
+                variant = RbButtonVariant.Secondary,
+            )
+        }
+    }
+}
+
+/**
+ * Qué ofrecer justo después de un turno — "acaba de vender", "acaba de
+ * fiar" — para que las cuatro capacidades nuevas de la ola 29 tengan un
+ * lugar donde aparecer más allá de la bienvenida (que solo se ve una vez).
+ */
+@Composable
+private fun SugerenciasSiguientes(
+    sugerencias: List<String>,
+    onElegir: (String) -> Unit,
+) {
+    if (sugerencias.isEmpty()) return
+    RbChipRow {
+        sugerencias.forEach { sugerencia ->
+            RbChip(
+                label = sugerencia,
+                tone = RbChipTone.Brand,
+                onClick = { onElegir(sugerencia) },
+            )
+        }
+    }
+}
+
+/**
+ * El callejón sin salida (paso 4 del encargo): el server no entendió la
+ * pregunta. Nunca un texto muerto — sugerencias tocables, y siempre la
+ * salida a la lista completa. Sin corrección automática ("quisiste decir…"):
+ * eso necesita lógica del server que hoy no existe, y ofrecer opciones
+ * tocables alcanza sin inventar nada.
+ */
+@Composable
+private fun NoEntendido(
+    chromeAyuda: CopyAyuda,
+    sugerencias: List<String>,
+    onElegir: (String) -> Unit,
+    onVerTodo: () -> Unit,
+) {
+    val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+    val shapes = RbTheme.shapes
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shapes.card)
+            .background(colors.surface)
+            .border(dimens.border, colors.outlineStrong, shapes.card)
+            .padding(dimens.space3),
+        verticalArrangement = Arrangement.spacedBy(dimens.space2),
+    ) {
+        if (sugerencias.isNotEmpty()) {
+            RbChipRow {
+                sugerencias.forEach { sugerencia ->
+                    RbChip(
+                        label = sugerencia,
+                        tone = RbChipTone.Brand,
+                        onClick = { onElegir(sugerencia) },
+                    )
+                }
+            }
+        }
+        RbButton(
+            label = chromeAyuda.cuandoNoEntiendeVerTodo,
+            onClick = onVerTodo,
+            variant = RbButtonVariant.Secondary,
+        )
+    }
+}
+
+/**
+ * La lista completa de lo que el agente entiende (paso 3 del encargo),
+ * agrupada por lo que la dueña está tratando de hacer — nunca por módulo del
+ * sistema. Vive adentro de esta misma pantalla, como un paso más, igual que
+ * [TarjetaPropuesta] muestra su confirmación sin navegar a otra pantalla.
+ */
+@Composable
+private fun PantallaAyuda(
+    chrome: CopyAyuda,
+    grupos: List<GrupoAyuda>,
+    onElegir: (String) -> Unit,
+    onCerrar: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dimens = RbTheme.dimens
+    val colors = RbTheme.colors
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.background),
+    ) {
+        RbTopBar(
+            title = chrome.titulo,
+            actions = {
+                RbButton(
+                    label = chrome.cerrar,
+                    onClick = onCerrar,
+                    variant = RbButtonVariant.Secondary,
+                )
+            },
+        )
+
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = dimens.space3),
+            contentPadding = PaddingValues(vertical = dimens.space4),
+            verticalArrangement = Arrangement.spacedBy(dimens.space4),
+        ) {
+            items(count = grupos.size, key = { grupos[it].titulo }) { indice ->
+                val grupo = grupos[indice]
+                Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+                    Text(
+                        text = grupo.titulo,
+                        style = RbTheme.typography.label,
+                        color = colors.brandText,
+                    )
+                    RbChipRow {
+                        grupo.frases.forEach { frase ->
+                            RbChip(
+                                label = frase,
+                                tone = RbChipTone.Brand,
+                                onClick = { onElegir(frase) },
+                            )
+                        }
+                    }
                 }
             }
         }

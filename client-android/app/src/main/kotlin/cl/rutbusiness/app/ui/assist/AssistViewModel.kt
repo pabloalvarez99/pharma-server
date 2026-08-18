@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import cl.rutbusiness.app.ui.common.aCopy
 import cl.rutbusiness.core.error.AppError
 import cl.rutbusiness.core.net.Resultado
+import cl.rutbusiness.core.rubro.RubroPack
 import cl.rutbusiness.core.session.SessionRepository
 import kotlinx.coroutines.launch
 
@@ -20,7 +21,14 @@ sealed interface Mensaje {
     data class Mia(override val id: Long, val texto: String) : Mensaje
 
     /** Una respuesta de lectura del agente. */
-    data class DelAgente(override val id: Long, val texto: String) : Mensaje
+    /**
+     * [noEntendido] es true cuando el server contestó `intent: "desconocido"`:
+     * la pregunta no calzó con nada. Ese es el momento más importante de todo
+     * el producto (encargo ola 30, paso 4) — es cuando la dueña decide si la
+     * app le sirve o no — así que la pantalla lo marca para ofrecer algo
+     * tocable en vez de dejarla frente a un texto sin salida.
+     */
+    data class DelAgente(override val id: Long, val texto: String, val noEntendido: Boolean = false) : Mensaje
 
     /**
      * El agente quiere escribir algo y espera confirmación.
@@ -142,6 +150,54 @@ class AssistViewModel(
     val titulo: String
         get() = tituloAgente(nombreDelPuesto, esFeria)
 
+    /** Rubro activo, para las sugerencias contextuales (ver [AssistSugerenciasContexto]). */
+    var pack by mutableStateOf<RubroPack?>(null)
+        private set
+
+    /** Etiqueta (`Action::label()`) de la última propuesta confirmada con éxito. */
+    private var ultimaAccionConfirmada by mutableStateOf<String?>(null)
+
+    /** Preguntas ya mandadas en esta conversación: no repetirlas como sugerencia. */
+    private val sugerenciasUsadas = mutableSetOf<String>()
+
+    /** True mientras se muestra la lista completa de qué se le puede preguntar. */
+    var ayudaAbierta by mutableStateOf(false)
+        private set
+
+    /**
+     * Qué ofrecer justo después del último turno — vacío mientras no haya
+     * nada contextual que decir (recién empezando ya lo cubre la bienvenida).
+     */
+    val sugerenciasSiguientes: List<String>
+        get() {
+            val p = pack ?: return emptyList()
+            if (mensajes.isEmpty() || ultimaAccionConfirmada == null) return emptyList()
+            return AssistSugerenciasContexto.para(
+                pack = p,
+                recienEmpezando = false,
+                ultimaAccionConfirmada = ultimaAccionConfirmada,
+                yaUsadas = sugerenciasUsadas,
+            )
+        }
+
+    /** Qué ofrecer justo debajo de un "no te entendí" (paso 4 del encargo). */
+    fun sugerenciasCuandoNoEntiende(): List<String> {
+        val p = pack ?: return emptyList()
+        return AssistSugerenciasContexto.cuandoNoEntiende(
+            pack = p,
+            ultimaAccionConfirmada = ultimaAccionConfirmada,
+            yaUsadas = sugerenciasUsadas,
+        )
+    }
+
+    fun abrirAyuda() {
+        ayudaAbierta = true
+    }
+
+    fun cerrarAyuda() {
+        ayudaAbierta = false
+    }
+
     init {
         viewModelScope.launch {
             nombreDelPuesto = sesion.nombreDelPuesto()
@@ -154,6 +210,11 @@ class AssistViewModel(
      */
     fun modoFeria(v: Boolean = true) {
         esFeria = v
+    }
+
+    /** Baja el rubro activo desde la Screen, igual que [modoFeria]. */
+    fun actualizarPack(p: RubroPack) {
+        pack = p
     }
 
     fun escribir(texto: String) {
@@ -173,6 +234,7 @@ class AssistViewModel(
         if (limpia.isEmpty() || pensando) return
 
         mensajes += Mensaje.Mia(nuevoId(), limpia)
+        sugerenciasUsadas += limpia
         pensando = true
 
         viewModelScope.launch {
@@ -200,7 +262,11 @@ class AssistViewModel(
                             estado = EstadoPropuesta.Esperando,
                         )
                     } else {
-                        Mensaje.DelAgente(nuevoId(), r.valor.text)
+                        Mensaje.DelAgente(
+                            id = nuevoId(),
+                            texto = r.valor.text,
+                            noEntendido = r.valor.intent == "desconocido",
+                        )
                     }
                 }
 
@@ -264,8 +330,11 @@ class AssistViewModel(
                 // como si el agente hubiera contestado dos veces —o peor, como
                 // si hubiera registrado el gasto dos veces, que es exactamente
                 // el susto que esta pantalla existe para evitar.
-                is Resultado.Ok -> reemplazar(mensajeId) {
-                    it.copy(estado = EstadoPropuesta.Hecha(r.valor.text))
+                is Resultado.Ok -> {
+                    ultimaAccionConfirmada = mensaje.propuesta.name
+                    reemplazar(mensajeId) {
+                        it.copy(estado = EstadoPropuesta.Hecha(r.valor.text))
+                    }
                 }
 
                 is Resultado.Falla -> reemplazar(mensajeId) {
