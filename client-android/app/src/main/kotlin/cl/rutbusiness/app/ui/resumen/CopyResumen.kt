@@ -146,6 +146,15 @@ internal fun descripcionSemana(mejorDiaFrase: String?, mejorDiaMontoFormateado: 
 internal fun mejorDiaFrase(nombreDia: String, esHoy: Boolean): String =
     if (esHoy) "hoy" else "el $nombreDia"
 
+// --- lo que más vendes (bajo la semana) --------------------------------------
+
+/**
+ * Título del bloque. Sin «producto», «SKU», «ítem», «catálogo», «ranking»,
+ * «top» ni «stock»: en feria se dice «lo que más vendes», no jerga de
+ * inventario — y la misma frase le sirve a retail formal.
+ */
+internal fun tituloMasVendes(): String = "Lo que más vendes este mes"
+
 // --- vacío del día (feria, antes de la primera venta) -----------------------
 
 internal fun tituloHoySinVentas(): String = "Todavía no vendiste nada hoy"
@@ -228,9 +237,9 @@ internal fun ctaCajaHoy(sinCajaAbierta: Boolean): String =
  */
 internal fun ordenDeBloquesHoy(feria: Boolean): List<String> =
     if (feria) {
-        listOf("ventas", "semana", "fiado")
+        listOf("ventas", "semana", "masvendo", "fiado")
     } else {
-        listOf("ventas", "semana", "fiado", "caja", "faltantes", "vencimientos")
+        listOf("ventas", "semana", "masvendo", "fiado", "caja", "faltantes", "vencimientos")
     }
 
 // --- se está por acabar (retail formal; oculta en feria) --------------------

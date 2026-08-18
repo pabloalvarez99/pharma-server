@@ -99,6 +99,31 @@ class DiaUtcTest {
         assertEquals(listOf(4, 5, 6, 0, 1, 2, 3), dias.map { it.diaDeLaSemana })
     }
 
+    @Test
+    fun `el rango del mes empieza el primero del mes e incluye hoy completo`() {
+        val (desde, hasta) = DiaUtc.rangoDelMes(jueves)
+        assertEquals("2026-08-01T00:00:00Z", desde)
+        // A diferencia de la semana, el mes sí incluye hoy: el cierre es el
+        // instante exacto que se pidió, no el fin de ayer.
+        assertEquals(DiaUtc.rfc3339(jueves), hasta)
+    }
+
+    @Test
+    fun `el rango del mes cruza a enero del anio siguiente`() {
+        // 2027-01-01T00:00:00Z
+        val anioNuevo = 1_798_761_600_000L
+        val (desde, _) = DiaUtc.rangoDelMes(anioNuevo)
+        assertEquals("2027-01-01T00:00:00Z", desde)
+    }
+
+    @Test
+    fun `el rango del mes en un bisiesto de febrero empieza el 1 de febrero`() {
+        // 2028-02-15T00:00:00Z
+        val febreroBisiesto = 1_834_012_800_000L
+        val (desde, _) = DiaUtc.rangoDelMes(febreroBisiesto)
+        assertEquals("2028-02-01T00:00:00Z", desde)
+    }
+
     /** La época misma, como control de que el origen del cálculo está bien. */
     @Test
     fun `el cero de la epoca es el primero de enero de 1970`() {

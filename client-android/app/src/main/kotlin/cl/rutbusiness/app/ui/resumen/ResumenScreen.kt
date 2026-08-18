@@ -1,11 +1,14 @@
 package cl.rutbusiness.app.ui.resumen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Text
@@ -13,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -26,6 +31,7 @@ import cl.rutbusiness.core.api.models.ProductDto
 import cl.rutbusiness.core.money.Dinero
 import cl.rutbusiness.core.offline.Fechado
 import cl.rutbusiness.core.money.Moneda
+import cl.rutbusiness.core.reports.TopProductoDto
 import cl.rutbusiness.core.session.EstadoSesion
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbAmount
@@ -183,6 +189,7 @@ private fun ResumenScreen(
                     when (bloque) {
                         "ventas" -> item("ventas") { VendidoHoy(vm) }
                         "semana" -> item("semana") { ComoVaLaSemana(vm) }
+                        "masvendo" -> item("masvendo") { LoMasQueVendes(vm) }
                         "fiado" -> item("fiado") { TeDeben(vm, onIrAlFiado) }
                         "caja" -> item("caja") { EnCaja(vm, onIrALaCaja) }
                         "faltantes" -> item("faltantes") { SePorAcabar(vm) }
@@ -391,6 +398,77 @@ private fun ComoVaLaSemana(vm: ResumenViewModel) {
         )
 
         RbChart(datos = datos, descripcion = descripcion)
+    }
+}
+
+// --- 2b: lo que más vendes en el mes -----------------------------------------
+
+/**
+ * "¿Qué es lo que más vendo?", bajo el gráfico de la semana.
+ *
+ * Sin lista o con la lista vacía el bloque **no se dibuja** — ni vacío ni con
+ * un guion: ver PASO 4 del encargo. Un mes recién empezado sin ventas
+ * todavía no tiene nada que decir acá que la tarjeta del día no diga ya.
+ */
+@Composable
+private fun LoMasQueVendes(vm: ResumenViewModel) {
+    val productos = vm.masVendes
+    if (productos.isEmpty()) return
+
+    val dimens = RbTheme.dimens
+    val nombres = nombresOrdenados(productos)
+
+    RbCard(
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = descripcionMasVendes(nombres)
+        },
+        title = tituloMasVendes(),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(dimens.space2)) {
+            productos.forEach { producto -> FilaDeMasVendes(vm.moneda, producto) }
+        }
+    }
+}
+
+@Composable
+private fun FilaDeMasVendes(moneda: Moneda, producto: TopProductoDto) {
+    val colors = RbTheme.colors
+    val dimens = RbTheme.dimens
+
+    Column(verticalArrangement = Arrangement.spacedBy(dimens.space1)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = producto.productName,
+                style = RbTheme.typography.body,
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = moneda.formatear(producto.revenue),
+                style = RbTheme.typography.bodyStrong,
+                color = colors.textPrimary,
+            )
+        }
+
+        val fraccion = fraccionDeBarra(producto.revenuePct)
+        if (fraccion > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(dimens.space1)
+                    .background(colors.surfaceVariant),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraccion)
+                        .height(dimens.space1)
+                        .background(colors.brandFill),
+                )
+            }
+        }
     }
 }
 

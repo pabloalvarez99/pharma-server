@@ -94,6 +94,37 @@ internal object DiaUtc {
         }
     }
 
+    /**
+     * `[desde, hasta]` cubriendo el **mes corriente**, desde su primer día
+     * hasta este instante — a diferencia de [rangoDeSemana], hoy sí entra
+     * completo (a medias) en este rango: no hay un agregado separado que
+     * traiga el total del mes como sí lo hay para "hoy", así que el día de
+     * hoy tiene que venir incluido en la respuesta del server.
+     */
+    fun rangoDelMes(ahora: Long): Pair<String, String> =
+        rfc3339(comienzoDelMes(ahora)) to rfc3339(ahora)
+
+    /** Medianoche UTC del primer día del mes en que cae [ahora]. */
+    private fun comienzoDelMes(ahora: Long): Long {
+        val dias = pisoDivision(ahora, MILIS_POR_DIA)
+        val (anio, mes, _) = fechaCivil(dias)
+        return diasDesdeCivil(anio, mes, 1L) * MILIS_POR_DIA
+    }
+
+    /**
+     * Inversa de [fechaCivil]: `(año, mes, día)` a días de época. Mismo
+     * algoritmo de Howard Hinnant (`days_from_civil`), para que ida y vuelta
+     * calcen exacto en cualquier fecha del calendario proléptico.
+     */
+    private fun diasDesdeCivil(anio: Long, mes: Long, dia: Long): Long {
+        val y = if (mes <= 2L) anio - 1L else anio
+        val era = pisoDivision(if (y >= 0L) y else y - 399L, 400L)
+        val anioDeLaEra = y - era * 400L
+        val diaDelAnio = (153L * (if (mes > 2L) mes - 3L else mes + 9L) + 2L) / 5L + dia - 1L
+        val diaDeLaEra = anioDeLaEra * 365L + anioDeLaEra / 4L - anioDeLaEra / 100L + diaDelAnio
+        return era * 146_097L + diaDeLaEra - 719_468L
+    }
+
     /** `2026-08-05T00:00:00Z`, que es lo que `DateTime<Utc>` sabe leer. */
     fun rfc3339(milisDeEpoca: Long): String {
         val dias = pisoDivision(milisDeEpoca, MILIS_POR_DIA)
