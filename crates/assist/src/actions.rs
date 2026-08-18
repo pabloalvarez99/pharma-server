@@ -40,8 +40,8 @@ use db::Db;
 use domain::settings;
 use domain::DomainResult;
 
-use crate::money::Money;
 use crate::intent::normalize;
+use crate::money::Money;
 
 /// How long a `confirm_token` stays valid after it is issued. Short by design:
 /// a proposal is a "do you want me to do X?" prompt, not a durable grant.
@@ -84,12 +84,18 @@ pub enum Action {
         email: Option<String>,
     },
     /// Quick-create a product with just a name and price — reuses
-    /// `domain::catalog::create_product` (slug auto-generated, no category, no
-    /// cost). The owner refines the rest in the catalog screen later.
+    /// `domain::catalog::create_product` (slug auto-generated, no category).
+    /// `cost` is OPTIONAL: the agent is the main door products get created
+    /// through, and for a long time nobody filled `cost_price` because there
+    /// was nowhere to say it out loud — the margin could never be computed.
+    /// When the owner says it, it goes straight into `cost_price`; when she
+    /// doesn't, this stays `None` exactly like before and she refines the
+    /// rest in the catalog screen later.
     CrearProductoRapido {
         name: String,
         price: Decimal,
         stock: i64,
+        cost: Option<Decimal>,
     },
     /// Reprice a single existing product — reuses
     /// `domain::catalog::update_product`. `product_id` + `old_price` are
@@ -208,6 +214,43 @@ pub enum Action {
         debt_before: Decimal,
         warnings: Vec<String>,
     },
+    /// Undo the tenant's most recent completed sale — reuses
+    /// `domain::sales::service::create_refund`. The order and its lines are
+    /// resolved server-side at propose time (see [`build`]): the tenant's
+    /// latest `completed` order, by `created_at` descending. Nothing about the
+    /// refund is recomputed here — money and quantities are copied verbatim
+    /// from the sale.
+    DevolverVenta {
+        order: String,
+        /// es-CL description of the sale being undone, for the confirmation
+        /// prose (see [`build`]).
+        order_label: String,
+        total: Decimal,
+        items: Vec<DevolucionLinea>,
+        /// Whether undoing this sale pulls cash out of the register — true
+        /// only when the original sale was paid `pos_cash`. Decides
+        /// `NewDevolucion::metodo_reembolso` at execute time: a `pos_fiado`
+        /// sale reverses the customer's ledger instead (no cash moves), and a
+        /// card sale touches neither (that refund goes back through the
+        /// processor).
+        cash: bool,
+    },
+    /// Overwrite a product's cost — reuses
+    /// `domain::catalog::service::update_product` with a patch that touches
+    /// ONLY `cost_price`; the sale price and everything else are left alone.
+    ///
+    /// This SETS the cost the owner says out loud; it does NOT record a
+    /// purchase. Receiving a purchase order ([`Action::RecibirOrdenCompra`])
+    /// recomputes the weighted-average cost from what was actually bought —
+    /// a different, deliberate path. The two are kept apart on purpose: a
+    /// spoken "me cuesta 800" should never silently overwrite a WAC the
+    /// business built from real purchases.
+    AjustarCosto {
+        product_id: String,
+        product_name: String,
+        old_cost: Option<Decimal>,
+        new_cost: Decimal,
+    },
 }
 
 /// One resolved sale line. `unit_price` is the CATALOG price read at propose
@@ -217,6 +260,18 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VentaLinea {
     pub product_id: String,
+    pub product_name: String,
+    pub quantity: i64,
+    pub unit_price: Decimal,
+}
+
+/// One refund line, copied verbatim from the original order's items — never
+/// recomputed. `product_id` is `None` only for a free-text (off-catalog) sale
+/// line, in which case [`execute`] refunds it without a restock (a stock
+/// movement needs a product).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevolucionLinea {
+    pub product_id: Option<String>,
     pub product_name: String,
     pub quantity: i64,
     pub unit_price: Decimal,
@@ -241,6 +296,8 @@ impl Action {
             Action::RegistrarAbono { .. } => "registrar_abono",
             Action::Vender { .. } => "vender",
             Action::FiarVenta { .. } => "fiar_venta",
+            Action::DevolverVenta { .. } => "devolver_venta",
+            Action::AjustarCosto { .. } => "ajustar_costo",
         }
     }
 
@@ -276,13 +333,26 @@ impl Action {
                 Some(r) => format!("Registrar al cliente «{name}» (RUT {r})."),
                 None => format!("Registrar al cliente «{name}»."),
             },
-            Action::CrearProductoRapido { name, price, stock } => format!(
-                "Crear el producto «{}» a {} ({} {} de stock inicial).",
+            Action::CrearProductoRapido {
                 name,
-                m.fmt(*price),
+                price,
                 stock,
-                if *stock == 1 { "unidad" } else { "unidades" },
-            ),
+                cost,
+            } => {
+                let base = format!(
+                    "Crear el producto «{}» a {} ({} {} de stock inicial).",
+                    name,
+                    m.fmt(*price),
+                    stock,
+                    if *stock == 1 { "unidad" } else { "unidades" },
+                );
+                match cost {
+                    Some(c) => format!("{base} Costo: {}.", m.fmt(*c)),
+                    // Corta a propósito: sin costo no se puede calcular el
+                    // margen, pero un párrafo de advertencia acá es ruido.
+                    None => format!("{base} Sin costo, no vas a saber cuánto ganas con esto."),
+                }
+            }
             Action::AjustarPrecio {
                 product_name,
                 old_price,
@@ -404,6 +474,41 @@ impl Action {
                 s.push_str(&warnings_text(warnings));
                 s
             }
+            Action::DevolverVenta {
+                order_label,
+                total,
+                items,
+                ..
+            } => {
+                let mut s = format!(
+                    "Deshacer {}:\n{}\n",
+                    order_label,
+                    devolucion_lineas_text(items, m)
+                );
+                s.push_str(&format!(
+                    "Vuelven {} y la mercadería queda otra vez en stock.",
+                    m.fmt(*total),
+                ));
+                s
+            }
+            Action::AjustarCosto {
+                product_name,
+                old_cost,
+                new_cost,
+                ..
+            } => match old_cost {
+                Some(old) => format!(
+                    "Cambiar el costo de {} de {} a {}.",
+                    product_name,
+                    m.fmt(*old),
+                    m.fmt(*new_cost),
+                ),
+                None => format!(
+                    "Fijar el costo de {} en {} (no tenía costo cargado).",
+                    product_name,
+                    m.fmt(*new_cost),
+                ),
+            },
         }
     }
 
@@ -448,10 +553,16 @@ impl Action {
                 "phone": phone,
                 "email": email,
             }),
-            Action::CrearProductoRapido { name, price, stock } => serde_json::json!({
+            Action::CrearProductoRapido {
+                name,
+                price,
+                stock,
+                cost,
+            } => serde_json::json!({
                 "name": name,
                 "price": price.to_string(),
                 "stock": stock,
+                "cost": cost.map(|c| c.to_string()),
             }),
             Action::AjustarPrecio {
                 product_id,
@@ -573,6 +684,30 @@ impl Action {
                 "debt_before": debt_before.to_string(),
                 "warnings": warnings,
             }),
+            Action::DevolverVenta {
+                order,
+                order_label,
+                total,
+                items,
+                cash,
+            } => serde_json::json!({
+                "order": order,
+                "order_label": order_label,
+                "total": total.to_string(),
+                "items": devolucion_lineas_json(items),
+                "cash": cash,
+            }),
+            Action::AjustarCosto {
+                product_id,
+                product_name,
+                old_cost,
+                new_cost,
+            } => serde_json::json!({
+                "product_id": product_id,
+                "product_name": product_name,
+                "old_cost": old_cost.map(|c| c.to_string()),
+                "new_cost": new_cost.to_string(),
+            }),
         }
     }
 }
@@ -601,6 +736,43 @@ fn venta_lineas_text(lines: &[VentaLinea], m: &Money) -> String {
 fn venta_lineas_json(lines: &[VentaLinea]) -> serde_json::Value {
     serde_json::Value::Array(
         lines
+            .iter()
+            .map(|l| {
+                serde_json::json!({
+                    "product_id": l.product_id,
+                    "product_name": l.product_name,
+                    "quantity": l.quantity,
+                    "unit_price": l.unit_price.to_string(),
+                    "line_total": domain::invariants::line_total(l.unit_price, l.quantity)
+                        .to_string(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// One "- 2 × Paracetamol 500 mg a $990 c/u = $1.980" per refund line, same
+/// shape as [`venta_lineas_text`] — the money is the sale's, not recomputed.
+fn devolucion_lineas_text(items: &[DevolucionLinea], m: &Money) -> String {
+    items
+        .iter()
+        .map(|l| {
+            format!(
+                "- {} × {} a {} c/u = {}",
+                l.quantity,
+                l.product_name,
+                m.fmt(l.unit_price),
+                m.fmt(domain::invariants::line_total(l.unit_price, l.quantity)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Structured echo of the refund lines, mirroring [`venta_lineas_json`].
+fn devolucion_lineas_json(items: &[DevolucionLinea]) -> serde_json::Value {
+    serde_json::Value::Array(
+        items
             .iter()
             .map(|l| {
                 serde_json::json!({
@@ -821,11 +993,14 @@ pub enum ActionParse {
         phone: Option<String>,
         email: Option<String>,
     },
-    /// A "crear producto" request (name + price, optional initial stock).
+    /// A "crear producto" request (name + price, optional initial stock and
+    /// cost). `cost` is `None` when the owner never said it — see
+    /// [`Action::CrearProductoRapido`].
     Producto {
         name: String,
         price: Decimal,
         stock: i64,
+        cost: Option<Decimal>,
     },
     /// An "ajustar precio" request; `product_name` still needs DB resolution
     /// into a record id + current price (see [`build`]).
@@ -833,6 +1008,16 @@ pub enum ActionParse {
         product_name: String,
         new_price: Decimal,
     },
+    /// An "ajustar costo" request; `product_name` still needs DB resolution
+    /// into a record id + current cost (see [`build`]).
+    AjusteCosto {
+        product_name: String,
+        new_cost: Decimal,
+    },
+    /// A "devuelve/anula la última venta" request. Everything is resolved
+    /// server-side against the tenant's latest completed sale (see
+    /// [`build`]) — there is nothing left to parse out of the text.
+    Devolucion,
     /// A "cerrar caja" request: the operator counted `counted` pesos. The open
     /// session + expected cash are resolved server-side (see [`build`]).
     CierreCaja { counted: Decimal },
@@ -937,6 +1122,13 @@ const PRICE_VERBS: &[&str] = &[
     "dejar ",
 ];
 
+/// Refund/undo-sale cues: imperative "devuelve"/"anula"/"deshaz" forms and the
+/// everyday "me equivoqué". Always checked together with the word "venta" (see
+/// [`parse_action`]) so a bare "me equivoqué" (no sale in sight) is left alone.
+const DEVOLUCION_CUES: &[&str] = &[
+    "devuelv", "devolver", "anula", "anular", "deshac", "equivoqu",
+];
+
 /// Parse a question into a write [`ActionParse`]. Purely textual and
 /// conservative: anything it cannot confidently turn into a whitelisted action
 /// stays [`ActionParse::NotAnAction`] (→ read path) or becomes
@@ -973,6 +1165,58 @@ pub fn parse_action(question: &str) -> ActionParse {
         && !q.starts_with("cual")
     {
         return parse_cancela(&q);
+    }
+
+    // Undo a sale (refund): "devuelve la última venta", "anula la última
+    // venta", "me equivoqué en la última venta", "devuélvele la plata a la
+    // última venta". Gated on a refund cue + the word "venta" so it never
+    // steals "anula la orden de compra" (already claimed above) or the
+    // sale-creation branch right below.
+    if DEVOLUCION_CUES.iter().any(|c| q.contains(c))
+        && q.contains("venta")
+        && ![
+            "que ", "cuanto", "cual", "quien", "cuando", "donde", "como ",
+        ]
+        .iter()
+        .any(|p| q.starts_with(p))
+    {
+        return ActionParse::Devolucion;
+    }
+
+    // Quick product WITH an embedded cost clause, BEFORE the sale/cost
+    // branches below: "agrega tomate a 1200 que me cuesta 800" carries the
+    // cost cue " me cuesta " and "crea tomate, lo vendo a 1200 y me sale
+    // 800" carries a sale verb ("vendo") — both would otherwise be stolen
+    // by `parse_venta`/`parse_costo`. Gated narrowly on `has_create` AND one
+    // of [`extract_cost_clause`]'s own conjunction cues, so it never reaches
+    // further than that specific "create with cost" phrasing; a bare "vende
+    // 2 tomates" or "el tomate cuesta 800" (no create verb) is untouched.
+    if has_create
+        && [
+            " que me cuesta",
+            " que cuesta",
+            " y me sale",
+            " me sale",
+            " me cuesta",
+        ]
+        .iter()
+        .any(|c| q.contains(c))
+    {
+        if let Some(parsed) = parse_producto_sin_palabra(&q) {
+            return parsed;
+        }
+    }
+
+    // Cost adjustment BEFORE the sale branch: "me cobran 800 el tomate" has
+    // no create verb (so the block above doesn't fire) but "cobran" fuzzy-
+    // matches `COBRO_VERBS`, which `parse_venta` would otherwise read as
+    // "charge Juan 800 for tomato." Cost cues are specific enough (COSTO_CUES)
+    // that checking them first here is safe; `parse_costo` still carries its
+    // own question-word guard so a read question is never swallowed.
+    if COSTO_CUES.iter().any(|c| q.contains(c)) || q.contains("cobran") {
+        if let Some(parsed) = parse_costo(&q) {
+            return parsed;
+        }
     }
 
     // THE SALE — the counter's central act, so it is tested early. Like
@@ -1048,6 +1292,14 @@ pub fn parse_action(question: &str) -> ActionParse {
         return parse_ajuste(&q);
     }
 
+    // Cost adjustment: how a feriante actually talks about what something
+    // costs her — "el tomate me cuesta 800", "compré el tomate a 800", "el
+    // costo del tomate es 800". Gated on its own cue table so it never
+    // collides with the sale price ("cuesta"/"sale" never means "vende por").
+    if let Some(parsed) = parse_costo(&q) {
+        return parsed;
+    }
+
     // Expense: needs a create verb AND the word "gasto" so we don't steal the
     // read intent ("gastos del mes", "cuánto gasté").
     if has_create && q.contains("gasto") {
@@ -1078,6 +1330,14 @@ pub fn parse_action(question: &str) -> ActionParse {
     // Quick product: create verb + "producto".
     if has_create && q.contains("producto") {
         return parse_producto(&q);
+    }
+
+    // Quick product WITHOUT the word "producto" — see
+    // [`parse_producto_sin_palabra`].
+    if has_create {
+        if let Some(parsed) = parse_producto_sin_palabra(&q) {
+            return parsed;
+        }
     }
 
     ActionParse::NotAnAction
@@ -1275,6 +1535,36 @@ fn parse_cliente(q: &str) -> ActionParse {
     }
 }
 
+/// Trailing cost clause on a quick-product request: "que me cuesta 800", "que
+/// cuesta 800", "y me sale 800", "me sale 800", "me cuesta 800". Longest /
+/// connector-bearing forms first so "y me sale" is not cut at "me sale" and
+/// leave a dangling "y" on the head. Returns the text BEFORE the clause
+/// (unchanged when no clause matches) and the cost, if any.
+fn extract_cost_clause(s: &str) -> (&str, Option<Decimal>) {
+    const CLAUSES: &[&str] = &[
+        " que me cuesta ",
+        " que cuesta ",
+        " y me sale ",
+        " me sale ",
+        " me cuesta ",
+    ];
+    for cue in CLAUSES {
+        if let Some(p) = s.find(cue) {
+            if let Some(cost) = extract_amount(&s[p + cue.len()..]) {
+                return (&s[..p], Some(cost));
+            }
+        }
+    }
+    (s, None)
+}
+
+/// Drop a trailing spoken-filler clause after a comma ("tomate, lo vendo" →
+/// "tomate"), then the usual price connectors, then title-case.
+fn clean_producto_name(name_raw: &str) -> String {
+    let head = name_raw.split(',').next().unwrap_or(name_raw);
+    titlecase(&trim_price_connectors(head))
+}
+
 fn parse_producto(q: &str) -> ActionParse {
     let hint = ActionParse::Incomplete(
         "Para crear un producto dime nombre y precio. Por ejemplo: «crea un producto \
@@ -1290,6 +1580,9 @@ fn parse_producto(q: &str) -> ActionParse {
             rest = s.trim();
         }
     }
+    // Optional cost clause ("... que me cuesta 800") — stripped BEFORE price
+    // detection so "cuesta"/"sale" never gets read as the sale price.
+    let (rest, cost) = extract_cost_clause(rest);
     // Optional initial stock ("... stock 20").
     let stock = token_after(rest, &[" stock ", " unidades "])
         .and_then(|t| t.parse::<i64>().ok())
@@ -1307,11 +1600,57 @@ fn parse_producto(q: &str) -> ActionParse {
     let Some(price) = price else {
         return hint;
     };
-    let name = titlecase(&trim_price_connectors(name_raw));
+    let name = clean_producto_name(name_raw);
     if name.is_empty() {
         return hint;
     }
-    ActionParse::Producto { name, price, stock }
+    ActionParse::Producto {
+        name,
+        price,
+        stock,
+        cost,
+    }
+}
+
+/// Quick product create WITHOUT the word "producto": "agrega tomate a 1200",
+/// "crea tomate, lo vendo a 1200 y me sale 800". Last-resort fallback: every
+/// more specific create branch (gasto/proveedor/cliente/the word-bearing
+/// [`parse_producto`]) has ALREADY had first refusal by the time
+/// [`parse_action`] reaches this, so a bare create verb + a price can only
+/// land here. Unlike [`parse_producto`] this returns `None` — not
+/// `Incomplete` — when it can't find a price, so a create verb aimed at
+/// something else entirely (no price anywhere in sight) still falls through
+/// to [`ActionParse::NotAnAction`] instead of robbing the read agent.
+fn parse_producto_sin_palabra(q: &str) -> Option<ActionParse> {
+    let verb_end = CREATE_VERBS
+        .iter()
+        .find_map(|v| q.find(v).map(|p| p + v.len()))?;
+    let rest = q[verb_end..].trim();
+    let (rest, cost) = extract_cost_clause(rest);
+    let (name_raw, price) = if let Some(p) = rest.find('$') {
+        (&rest[..p], parse_money(&digits_after(&rest[p + 1..])))
+    } else if let Some(p) = rest.find(" precio ") {
+        let tail = rest[p + " precio ".len()..].trim_start();
+        (&rest[..p], parse_money(&digits_after(tail)))
+    } else if let Some(p) = rest.rfind(" a ") {
+        (
+            &rest[..p],
+            parse_money(&digits_after(rest[p + 3..].trim_start())),
+        )
+    } else {
+        return None;
+    };
+    let price = price?;
+    let name = clean_producto_name(name_raw);
+    if name.is_empty() {
+        return None;
+    }
+    Some(ActionParse::Producto {
+        name,
+        price,
+        stock: 0,
+        cost,
+    })
 }
 
 /// Try to read a stock-adjust command. Returns `None` (→ read path) unless the
@@ -1583,6 +1922,151 @@ fn parse_ajuste(q: &str) -> ActionParse {
     }
 }
 
+/// Cue phrases a feriante actually uses to say what something costs HER —
+/// distinct from [`PRICE_VERBS`]/"precio", which is what she charges. Longest
+/// first so " que me cuesta " (used by [`parse_producto`]'s cost clause too)
+/// never gets shadowed by the shorter " cuesta ".
+const COSTO_CUES: &[&str] = &[
+    " me cuesta ",
+    " me cuesta",
+    " cuesta ",
+    " me sale ",
+    " sale ",
+];
+
+/// Parse an "ajustar costo" request. Forms covered: "el tomate me cuesta 800",
+/// "el kilo de tomate me sale 800", "compré el tomate a 800", "me cobran 800
+/// el tomate", "el costo del tomate es 800". Returns `None` (→ other write
+/// branches / read path) when none of the cost cues match at all; a matched
+/// cue with a field still missing becomes `Some(Incomplete(..))` with a
+/// worked example, never a bare "no entendí".
+fn parse_costo(q: &str) -> Option<ActionParse> {
+    // A question is never a write — "¿cuánto cuesta el tomate?" is the read
+    // agent's, not this branch's, even though it shares the word "cuesta".
+    if [
+        "que ", "cuanto", "cual", "quien", "cuando", "donde", "como ",
+    ]
+    .iter()
+    .any(|p| q.starts_with(p))
+    {
+        return None;
+    }
+    let hint = ActionParse::Incomplete(
+        "Para cambiar un costo dime el producto y cuánto te cuesta. Por ejemplo: «el tomate \
+         me cuesta 800» o «el costo del tomate es 800»."
+            .into(),
+    );
+
+    // "el costo de/del <producto> es <monto>"
+    if let Some((_, after)) = q
+        .split_once("costo de ")
+        .or_else(|| q.split_once("costo del "))
+    {
+        return Some(match after.split_once(" es ") {
+            Some((prod_part, price_part)) => {
+                match (clean_costo_name(prod_part), extract_amount(price_part)) {
+                    (product_name, Some(new_cost)) if !product_name.is_empty() => {
+                        ActionParse::AjusteCosto {
+                            product_name,
+                            new_cost,
+                        }
+                    }
+                    _ => hint,
+                }
+            }
+            None => hint,
+        });
+    }
+
+    // "me cobran <monto> el <producto>" — amount comes BEFORE the product.
+    if let Some((_, after)) = q.split_once("me cobran ") {
+        let digits_end = after
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(after.len());
+        return Some(
+            match (
+                parse_money(&after[..digits_end]),
+                clean_costo_name(&after[digits_end..]),
+            ) {
+                (Some(new_cost), product_name) if !product_name.is_empty() => {
+                    ActionParse::AjusteCosto {
+                        product_name,
+                        new_cost,
+                    }
+                }
+                _ => hint,
+            },
+        );
+    }
+
+    // "<producto> me cuesta <monto>" / "<producto> me sale <monto>" / "el
+    // kilo de <producto> me sale <monto>".
+    for cue in COSTO_CUES {
+        if let Some(pos) = q.find(cue) {
+            let product_name = clean_costo_name(&q[..pos]);
+            let new_cost = extract_amount(&q[pos + cue.len()..]);
+            return Some(match (product_name, new_cost) {
+                (product_name, Some(new_cost)) if !product_name.is_empty() => {
+                    ActionParse::AjusteCosto {
+                        product_name,
+                        new_cost,
+                    }
+                }
+                _ => hint,
+            });
+        }
+    }
+
+    // "compré el <producto> a <monto>"
+    if let Some((_, after)) = q.split_once("compre ") {
+        return Some(match after.rfind(" a ") {
+            Some(p) => {
+                match (
+                    clean_costo_name(&after[..p]),
+                    extract_amount(&after[p + 3..]),
+                ) {
+                    (product_name, Some(new_cost)) if !product_name.is_empty() => {
+                        ActionParse::AjusteCosto {
+                            product_name,
+                            new_cost,
+                        }
+                    }
+                    _ => hint,
+                }
+            }
+            None => hint,
+        });
+    }
+
+    None
+}
+
+/// Strip a leading article/measure-unit lead off a captured cost product name
+/// ("el kilo de tomate" → "tomate"), then trailing punctuation. Longest leads
+/// first so "el kilo de " is consumed whole rather than stopping at "el ".
+fn clean_costo_name(s: &str) -> String {
+    let mut t = s.trim();
+    for lead in [
+        "el kilo de ",
+        "el kg de ",
+        "un kilo de ",
+        "la caja de ",
+        "el paquete de ",
+        "el ",
+        "la ",
+        "los ",
+        "las ",
+        "un ",
+        "una ",
+    ] {
+        if let Some(x) = t.strip_prefix(lead) {
+            t = x.trim();
+            break;
+        }
+    }
+    strip_trailing_punct(t).trim().to_string()
+}
+
 /// True when `q` carries a word-initial "abon*" cue (abona / abónale / abono /
 /// abonar / abonó). Word-initial on purpose: "jabón" contains "abon" and must
 /// never be read as a fiado payment.
@@ -1758,7 +2242,9 @@ const VENTA_VERBS: &[&str] = &[
 /// Imperative "chárgaselo a X" forms. Apart from [`VENTA_VERBS`] because
 /// "cobrar" is also the READ vocabulary of PorCobrar ("cuentas por cobrar"),
 /// which [`parse_venta`] refuses outright.
-const COBRO_VERBS: &[&str] = &["cobra", "cobrale", "cobrame", "cobrales", "cobrar", "cobrarle"];
+const COBRO_VERBS: &[&str] = &[
+    "cobra", "cobrale", "cobrame", "cobrales", "cobrar", "cobrarle",
+];
 
 /// Imperative forms of "fiar" that can ANCHOR a sale ("fíale 1 alcohol gel a
 /// Juan"). The adjective forms ("fiado"/"fiada") are deliberately absent: they
@@ -1770,8 +2256,19 @@ const FIAR_VERBS: &[&str] = &[
 
 /// Honorifics that mark the tail of a sale as a PERSON, not more product.
 const VENTA_HONORIFICS: &[&str] = &[
-    "senora ", "senor ", "sra ", "sr ", "srta ", "senorita ", "don ", "dona ", "cliente ",
-    "clienta ", "caballero ", "la senora ", "el senor ",
+    "senora ",
+    "senor ",
+    "sra ",
+    "sr ",
+    "srta ",
+    "senorita ",
+    "don ",
+    "dona ",
+    "cliente ",
+    "clienta ",
+    "caballero ",
+    "la senora ",
+    "el senor ",
 ];
 
 /// Connectors that can introduce the buyer at the tail of a sale request.
@@ -1902,7 +2399,9 @@ fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
         return None;
     }
     // Need a "debe" token (not "debemos" stock talk) and a money amount.
-    let has_debe = q.split(|c: char| !c.is_alphanumeric()).any(|w| w == "debe" || w == "deben");
+    let has_debe = q
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| w == "debe" || w == "deben");
     if !has_debe {
         return None;
     }
@@ -1934,7 +2433,11 @@ fn parse_deuda_feria_nudge(q: &str, raw: &str) -> Option<ActionParse> {
         if cleaned.is_empty() || cleaned.chars().all(|c| c.is_ascii_digit()) {
             // "me debe 5000 don juan" — tail after money.
             if let Some(idx) = raw.to_lowercase().find("debe") {
-                let tail = raw[idx..].split_whitespace().skip(2).collect::<Vec<_>>().join(" ");
+                let tail = raw[idx..]
+                    .split_whitespace()
+                    .skip(2)
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 let t = clean_abono_name(&tail);
                 if t.is_empty() {
                     return Some(ActionParse::Incomplete(
@@ -2084,11 +2587,7 @@ fn split_venta_customer(region: &str, raw: &str, fiado: bool) -> (String, Option
 fn word_is_capitalized_in(raw: &str, word: &str) -> bool {
     raw.split_whitespace().any(|w| {
         let stripped = strip_trailing_punct(w);
-        normalize(stripped) == word
-            && stripped
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
+        normalize(stripped) == word && stripped.chars().next().is_some_and(|c| c.is_uppercase())
     })
 }
 
@@ -2244,16 +2743,24 @@ fn clean_venta_product(s: &str) -> String {
 /// word and a stock movement.
 fn parse_venta(q: &str, raw: &str) -> Option<ActionParse> {
     // A question is never a sale.
-    if ["que ", "cuanto", "cual", "quien", "cuando", "donde", "como "]
-        .iter()
-        .any(|p| q.starts_with(p))
+    if [
+        "que ", "cuanto", "cual", "quien", "cuando", "donde", "como ",
+    ]
+    .iter()
+    .any(|p| q.starts_with(p))
     {
         return None;
     }
     // The fiado LEDGER reads share the vocabulary but never carry an order.
-    if ["por cobrar", "me deben", "me debe", "quien debe", "cuentas por"]
-        .iter()
-        .any(|w| q.contains(w))
+    if [
+        "por cobrar",
+        "me deben",
+        "me debe",
+        "quien debe",
+        "cuentas por",
+    ]
+    .iter()
+    .any(|w| q.contains(w))
     {
         return None;
     }
@@ -2629,13 +3136,17 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
             phone,
             email,
         })),
-        ActionParse::Producto { name, price, stock } => {
-            Ok(BuildOutcome::Ready(Action::CrearProductoRapido {
-                name,
-                price,
-                stock,
-            }))
-        }
+        ActionParse::Producto {
+            name,
+            price,
+            stock,
+            cost,
+        } => Ok(BuildOutcome::Ready(Action::CrearProductoRapido {
+            name,
+            price,
+            stock,
+            cost,
+        })),
         ActionParse::AjustePrecio {
             product_name,
             new_price,
@@ -2663,6 +3174,35 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
                 product_name: p.name.clone(),
                 old_price: p.price,
                 new_price,
+            }))
+        }
+        ActionParse::AjusteCosto {
+            product_name,
+            new_cost,
+        } => {
+            use domain::catalog::model::ProductFilters;
+            use domain::catalog::service as catalog;
+            let products = catalog::list_products(
+                db,
+                tenant,
+                ProductFilters {
+                    search: Some(product_name.clone()),
+                    limit: Some(5),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            let Some(p) = pick_product(&products, &product_name) else {
+                return Ok(BuildOutcome::Reject(format!(
+                    "No encontré ningún producto que coincida con «{product_name}». \
+                     Revisa el nombre o créalo primero."
+                )));
+            };
+            Ok(BuildOutcome::Ready(Action::AjustarCosto {
+                product_id: p.id.clone(),
+                product_name: p.name.clone(),
+                old_cost: p.cost_price,
+                new_cost,
             }))
         }
         ActionParse::CierreCaja { counted } => {
@@ -2951,7 +3491,88 @@ pub async fn build(db: &Db, tenant: &Thing, parsed: ActionParse) -> DomainResult
             customer_name,
             fiado,
         } => build_venta(db, tenant, &lines, customer_name.as_deref(), fiado).await,
+        ActionParse::Devolucion => build_devolucion(db, tenant).await,
     }
+}
+
+/// Resolve a "devuelve la última venta" request against the tenant's actual
+/// latest order — never a specific one named in the text, that shape is not
+/// supported (yet). Order by `created_at` descending, `limit 1`, no status
+/// filter: the status is inspected AFTER the fetch so a `refunded` last sale
+/// gets its own message instead of silently vanishing behind a filter.
+async fn build_devolucion(db: &Db, tenant: &Thing) -> DomainResult<BuildOutcome> {
+    use domain::sales::model::OrderFilters;
+    use domain::sales::service as sales;
+    let Some(order) = sales::list_orders(
+        db,
+        tenant,
+        OrderFilters {
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .await?
+    .into_iter()
+    .next() else {
+        return Ok(BuildOutcome::Reject(
+            "No encontré ninguna venta para devolver. Vende algo primero y después dime \
+             «devuelve la última venta»."
+                .into(),
+        ));
+    };
+    if order.status == "refunded" {
+        return Ok(BuildOutcome::Reject(
+            "La última venta ya fue devuelta; no hay nada más que deshacer.".into(),
+        ));
+    }
+    if order.status != "completed" {
+        return Ok(BuildOutcome::Reject(format!(
+            "La última venta está en estado «{}», no se puede devolver desde acá.",
+            order.status
+        )));
+    }
+    let (_order, items) = sales::get_order(db, tenant, &order.id).await?;
+    if items.is_empty() {
+        return Ok(BuildOutcome::Reject(
+            "La última venta no tiene líneas para devolver.".into(),
+        ));
+    }
+    let lines: Vec<DevolucionLinea> = items
+        .iter()
+        .map(|it| DevolucionLinea {
+            product_id: it.product.clone(),
+            product_name: it.product_name.clone(),
+            quantity: it.quantity,
+            unit_price: it.unit_price,
+        })
+        .collect();
+    let order_label = match &order.customer_name {
+        Some(c) => format!(
+            "la venta a {c} ({} {})",
+            lines.len(),
+            if lines.len() == 1 {
+                "producto"
+            } else {
+                "productos"
+            },
+        ),
+        None => format!(
+            "la última venta ({} {})",
+            lines.len(),
+            if lines.len() == 1 {
+                "producto"
+            } else {
+                "productos"
+            },
+        ),
+    };
+    Ok(BuildOutcome::Ready(Action::DevolverVenta {
+        order: order.id.clone(),
+        order_label,
+        total: order.total,
+        items: lines,
+        cash: order.payment_method == "pos_cash",
+    }))
 }
 
 /// Resolve a spoken sale into a ready [`Action::Vender`] / [`Action::FiarVenta`]
@@ -3135,9 +3756,8 @@ async fn build_venta(
     // Money: the domain's own canonical formulas — the very ones `post_sale`
     // applies to these same frozen lines — so the confirmation prompt and the
     // till can never quote two different totals. `assist` does no arithmetic.
-    let subtotal = domain::invariants::order_subtotal(
-        lines.iter().map(|l| (l.unit_price, l.quantity)),
-    );
+    let subtotal =
+        domain::invariants::order_subtotal(lines.iter().map(|l| (l.unit_price, l.quantity)));
     let total = domain::invariants::order_total(subtotal, Decimal::ZERO);
     let warnings = interaction_warnings(&ingredients);
 
@@ -3410,7 +4030,12 @@ pub async fn execute(
                 }),
             }
         }
-        Action::CrearProductoRapido { name, price, stock } => {
+        Action::CrearProductoRapido {
+            name,
+            price,
+            stock,
+            cost,
+        } => {
             use domain::catalog::model::NewProduct;
             use domain::catalog::service as catalog;
             let dto = catalog::create_product(
@@ -3421,7 +4046,7 @@ pub async fn execute(
                     slug: None,
                     description: None,
                     price,
-                    cost_price: None,
+                    cost_price: cost,
                     stock,
                     category: None,
                     image_url: None,
@@ -3439,12 +4064,21 @@ pub async fn execute(
             .await?;
             ActionOutcome {
                 action: label,
-                text: format!("Producto «{}» creado a {}.", dto.name, m.fmt(dto.price)),
+                text: match dto.cost_price {
+                    Some(c) => format!(
+                        "Producto «{}» creado a {} (costo {}).",
+                        dto.name,
+                        m.fmt(dto.price),
+                        m.fmt(c),
+                    ),
+                    None => format!("Producto «{}» creado a {}.", dto.name, m.fmt(dto.price)),
+                },
                 data: serde_json::json!({
                     "id": dto.id,
                     "name": dto.name,
                     "price": dto.price.to_string(),
                     "stock": dto.stock,
+                    "cost_price": dto.cost_price.map(|c| c.to_string()),
                 }),
             }
         }
@@ -3849,6 +4483,102 @@ pub async fn execute(
                 }),
             }
         }
+        Action::DevolverVenta {
+            order,
+            order_label: _,
+            total: _,
+            items,
+            cash,
+        } => {
+            use domain::sales::model::{NewDevolucion, NewDevolucionItem};
+            use domain::sales::service as sales;
+            let resp = sales::create_refund(
+                db,
+                tenant,
+                actor,
+                NewDevolucion {
+                    order: Some(order),
+                    tipo: "venta".into(),
+                    // Nunca vacío — `create_refund` lo rechaza con 400. La
+                    // dueña no dicta un motivo por voz; éste describe el
+                    // origen para quien lea el libro después.
+                    motivo: "La venta se deshizo desde el agente.".into(),
+                    notas: None,
+                    items: items
+                        .iter()
+                        .map(|l| NewDevolucionItem {
+                            product: l.product_id.clone(),
+                            product_name: l.product_name.clone(),
+                            quantity: l.quantity,
+                            unit_price: l.unit_price,
+                            // Sólo repone cuando la línea tiene producto
+                            // catalogado: un movimiento de stock necesita uno.
+                            restock: l.product_id.is_some(),
+                        })
+                        .collect(),
+                    metodo_reembolso: if cash { Some("efectivo".into()) } else { None },
+                },
+            )
+            .await?;
+            let total_devuelto = resp.devolucion.total_devuelto;
+            let mut text = format!(
+                "Venta deshecha: {}. Vuelven {} y la mercadería quedó otra vez en stock.",
+                venta_detalle_devolucion(&items),
+                m.fmt(total_devuelto),
+            );
+            if resp.order_marked_refunded {
+                text.push_str(" La venta quedó marcada como devuelta.");
+            }
+            ActionOutcome {
+                action: label,
+                text,
+                data: serde_json::json!({
+                    "id": resp.devolucion.id,
+                    "order": resp.devolucion.order,
+                    "total_devuelto": total_devuelto.to_string(),
+                    "order_marked_refunded": resp.order_marked_refunded,
+                    "stock_movements": resp.stock_movements,
+                }),
+            }
+        }
+        Action::AjustarCosto {
+            product_id,
+            product_name: _,
+            old_cost,
+            new_cost,
+        } => {
+            use domain::catalog::model::UpdateProduct;
+            use domain::catalog::service as catalog;
+            let dto = catalog::update_product(
+                db,
+                tenant,
+                &product_id,
+                UpdateProduct {
+                    cost_price: Some(new_cost),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            let new_cost_shown = dto.cost_price.unwrap_or(new_cost);
+            ActionOutcome {
+                action: label,
+                text: match old_cost {
+                    Some(old) => format!(
+                        "Costo de {} actualizado: de {} a {}.",
+                        dto.name,
+                        m.fmt(old),
+                        m.fmt(new_cost_shown),
+                    ),
+                    None => format!("Costo de {} fijado en {}.", dto.name, m.fmt(new_cost_shown),),
+                },
+                data: serde_json::json!({
+                    "id": dto.id,
+                    "name": dto.name,
+                    "old_cost": old_cost.map(|c| c.to_string()),
+                    "new_cost": new_cost_shown.to_string(),
+                }),
+            }
+        }
     };
 
     write_audit(db, tenant, actor, label).await?;
@@ -3903,6 +4633,15 @@ async fn post_venta(
 /// sale already happened (the multi-line breakdown belongs to the confirmation).
 fn venta_detalle(lines: &[VentaLinea]) -> String {
     lines
+        .iter()
+        .map(|l| format!("{} × {}", l.quantity, l.product_name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Same inline form as [`venta_detalle`], for a refund's lines.
+fn venta_detalle_devolucion(items: &[DevolucionLinea]) -> String {
+    items
         .iter()
         .map(|l| format!("{} × {}", l.quantity, l.product_name))
         .collect::<Vec<_>>()
@@ -4415,10 +5154,16 @@ mod tests {
     #[test]
     fn parse_producto_with_dollar_price() {
         match parse_action("crea un producto Aspirina a $1000") {
-            ActionParse::Producto { name, price, stock } => {
+            ActionParse::Producto {
+                name,
+                price,
+                stock,
+                cost,
+            } => {
                 assert_eq!(name, "Aspirina");
                 assert_eq!(price, dec("1000"));
                 assert_eq!(stock, 0);
+                assert_eq!(cost, None);
             }
             other => panic!("expected Producto, got {other:?}"),
         }
@@ -4427,13 +5172,78 @@ mod tests {
     #[test]
     fn parse_producto_with_precio_word_and_stock() {
         match parse_action("agrega producto Coca Cola precio 1500 stock 20") {
-            ActionParse::Producto { name, price, stock } => {
+            ActionParse::Producto {
+                name,
+                price,
+                stock,
+                cost,
+            } => {
                 assert_eq!(name, "Coca Cola");
                 assert_eq!(price, dec("1500"));
                 assert_eq!(stock, 20);
+                assert_eq!(cost, None);
             }
             other => panic!("expected Producto, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_producto_sin_palabra_cost_none() {
+        // No regression: the bare "agrega <nombre> a <precio>" form (no
+        // "producto" word, no cost clause) still creates the product, with
+        // cost = None, exactly like every other create phrase.
+        match parse_action("agrega tomate a 1200") {
+            ActionParse::Producto {
+                name,
+                price,
+                stock,
+                cost,
+            } => {
+                assert_eq!(name, "Tomate");
+                assert_eq!(price, dec("1200"));
+                assert_eq!(stock, 0);
+                assert_eq!(cost, None);
+            }
+            other => panic!("expected Producto, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_producto_sin_palabra_with_cost() {
+        match parse_action("agrega tomate a 1200 que me cuesta 800") {
+            ActionParse::Producto {
+                name, price, cost, ..
+            } => {
+                assert_eq!(name, "Tomate");
+                assert_eq!(price, dec("1200"));
+                assert_eq!(cost, Some(dec("800")));
+            }
+            other => panic!("expected Producto, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_producto_sin_palabra_alt_phrasing_with_cost() {
+        match parse_action("crea tomate, lo vendo a 1200 y me sale 800") {
+            ActionParse::Producto {
+                name, price, cost, ..
+            } => {
+                assert_eq!(name, "Tomate");
+                assert_eq!(price, dec("1200"));
+                assert_eq!(cost, Some(dec("800")));
+            }
+            other => panic!("expected Producto, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_producto_sin_palabra_never_steals_unrelated_create() {
+        // A create verb with no price anywhere must stay NotAnAction — never
+        // rob the read agent's questions or misfire as a product create.
+        assert_eq!(
+            parse_action("agrega 40 de paracetamol"),
+            ActionParse::NotAnAction
+        );
     }
 
     #[test]
@@ -4492,6 +5302,102 @@ mod tests {
             parse_action("cuánto cuesta el ibuprofeno"),
             ActionParse::NotAnAction
         );
+    }
+
+    #[test]
+    fn parse_devolucion_en_todas_sus_formas() {
+        for q in [
+            "devuelve la última venta",
+            "anula la última venta",
+            "me equivoqué en la última venta",
+            "devuélvele la plata a la última venta",
+        ] {
+            assert_eq!(parse_action(q), ActionParse::Devolucion, "phrase: {q}");
+        }
+    }
+
+    #[test]
+    fn parse_costo_en_todas_sus_formas() {
+        for q in [
+            "el tomate me cuesta 800",
+            "el kilo de tomate me sale 800",
+            "compré el tomate a 800",
+            "me cobran 800 el tomate",
+            "el costo del tomate es 800",
+        ] {
+            match parse_action(q) {
+                ActionParse::AjusteCosto {
+                    product_name,
+                    new_cost,
+                } => {
+                    assert_eq!(product_name, "tomate", "phrase: {q}");
+                    assert_eq!(new_cost, dec("800"), "phrase: {q}");
+                }
+                other => panic!("phrase {q}: expected AjusteCosto, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_costo_ambiguo_rechaza_con_ejemplo() {
+        // "el tomate cuesta" with no number: incomplete, and the rejection
+        // must carry a worked example, never a bare "no entendí".
+        match parse_action("el tomate me cuesta") {
+            ActionParse::Incomplete(msg) => {
+                assert!(
+                    msg.contains("Por ejemplo") || msg.contains("por ejemplo"),
+                    "message must contain a worked example, got: {msg}"
+                );
+            }
+            other => panic!("expected Incomplete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_costo_question_is_not_an_action() {
+        // "¿cuánto cuesta el tomate?" is a read question (PrecioProducto),
+        // never the write action AjusteCosto — the classic mistake here.
+        assert_eq!(
+            parse_action("cuánto cuesta el tomate"),
+            ActionParse::NotAnAction
+        );
+    }
+
+    #[test]
+    fn summary_de_devolucion_nombra_plata_y_mercaderia() {
+        let m = Money::from(domain::money::Currency::from_code_or_default(Some("EUR")));
+        let action = Action::DevolverVenta {
+            order: "order:1".to_string(),
+            order_label: "venta de Juan".to_string(),
+            total: dec("15.50"),
+            items: vec![DevolucionLinea {
+                product_id: Some("product:1".to_string()),
+                product_name: "Tomate".to_string(),
+                quantity: 2,
+                unit_price: dec("7.75"),
+            }],
+            cash: true,
+        };
+        let text = action.summary(&m);
+        assert!(
+            text.contains("15,50") || text.contains("15.50"),
+            "got: {text}"
+        );
+        assert!(text.contains("Tomate"), "got: {text}");
+    }
+
+    #[test]
+    fn summary_de_ajuste_costo_muestra_anterior_y_nuevo() {
+        let m = Money::from(domain::money::Currency::from_code_or_default(Some("CLP")));
+        let action = Action::AjustarCosto {
+            product_id: "product:1".to_string(),
+            product_name: "Tomate".to_string(),
+            old_cost: Some(dec("600")),
+            new_cost: dec("800"),
+        };
+        let text = action.summary(&m);
+        assert!(text.contains("600"), "must show old cost, got: {text}");
+        assert!(text.contains("800"), "must show new cost, got: {text}");
     }
 
     #[test]
@@ -4577,7 +5483,8 @@ mod tests {
         };
         assert_eq!(a.label(), "registrar_abono");
         assert!(
-            a.summary(&Money::default()).contains("Registrar un abono de"),
+            a.summary(&Money::default())
+                .contains("Registrar un abono de"),
             "got {}",
             a.summary(&Money::default())
         );
@@ -4712,7 +5619,10 @@ mod tests {
             assert!(!fiado, "q={q}");
         }
         // Sin cantidad = uno.
-        assert_eq!(venta("vendeme paracetamol").0, vec![linea("paracetamol", 1)]);
+        assert_eq!(
+            venta("vendeme paracetamol").0,
+            vec![linea("paracetamol", 1)]
+        );
     }
 
     #[test]

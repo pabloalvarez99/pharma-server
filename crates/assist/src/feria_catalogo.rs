@@ -22,14 +22,7 @@ pub async fn asegurar_cosa_feria(
 pub fn precio_dicho(raw_linea: &str) -> Option<Decimal> {
     let lower = raw_linea.to_lowercase();
     // Orden: variantes con `$` primero para que ` a $` gane sobre ` a `.
-    const CUES: &[&str] = &[
-        " a $",
-        " a ",
-        " por $",
-        " por ",
-        " precio $",
-        " precio ",
-    ];
+    const CUES: &[&str] = &[" a $", " a ", " por $", " por ", " precio $", " precio "];
 
     let mut best: Option<(usize, usize)> = None; // (start_of_amount, cue_end)
     for cue in CUES {
@@ -38,10 +31,10 @@ pub fn precio_dicho(raw_linea: &str) -> Option<Decimal> {
             let pos = from + rel;
             let amount_at = pos + cue.len();
             // Prefer the rightmost cue so "x a y por 1500" takes the price tail.
-            if best.map(|(a, _)| amount_at > a).unwrap_or(true) {
-                if parse_monto_from(&raw_linea[amount_at..]).is_some() {
-                    best = Some((amount_at, amount_at));
-                }
+            if best.map(|(a, _)| amount_at > a).unwrap_or(true)
+                && parse_monto_from(&raw_linea[amount_at..]).is_some()
+            {
+                best = Some((amount_at, amount_at));
             }
             from = pos + 1;
         }
@@ -53,14 +46,7 @@ pub fn precio_dicho(raw_linea: &str) -> Option<Decimal> {
 /// Quita la cola de precio (« a 2000», « a $2.000») del nombre del producto.
 pub fn sin_precio_cola(name: &str) -> String {
     let lower = name.to_lowercase();
-    const CUES: &[&str] = &[
-        " a $",
-        " a ",
-        " por $",
-        " por ",
-        " precio $",
-        " precio ",
-    ];
+    const CUES: &[&str] = &[" a $", " a ", " por $", " por ", " precio $", " precio "];
     let mut cut_at: Option<usize> = None;
     for cue in CUES {
         let mut from = 0;
