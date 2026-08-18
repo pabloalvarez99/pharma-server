@@ -91,6 +91,10 @@ class PilaDeNavegacionTest {
                             label = "Ir al historial desde el menu",
                             onClick = { pila.ir(Pantalla.HistorialVentas) },
                         )
+                        RbButton(
+                            label = "Ir a gastos desde el menu",
+                            onClick = { pila.ir(Pantalla.Gastos) },
+                        )
                         RbButton(label = "Volver del menu", onClick = volver)
                     }
 
@@ -101,6 +105,11 @@ class PilaDeNavegacionTest {
                     Pantalla.HistorialVentas -> {
                         Text("Historial")
                         RbButton(label = "Volver del historial", onClick = volver)
+                    }
+
+                    Pantalla.Gastos -> {
+                        Text("Gastos")
+                        RbButton(label = "Volver de gastos", onClick = volver)
                     }
                 }
             }
@@ -212,5 +221,28 @@ class PilaDeNavegacionTest {
     fun `pantalla se restaura desde su clave string`() {
         val restaurada = Pantalla.porClave(Pantalla.HistorialVentas.clave)
         assertEquals(Pantalla.HistorialVentas, restaurada)
+    }
+
+    /** Ola 30: empuja `Pantalla.Gastos` desde el menú y vuelve a la raíz. */
+    @Test
+    fun `gastos se empuja desde el menu y vuelve a la raiz`() {
+        montar()
+
+        compose.onNodeWithText("Ir al menu desde resumen").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Ir a gastos desde el menu").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Gastos").assertIsDisplayed()
+
+        compose.onNodeWithText("Volver de gastos").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Menu").assertIsDisplayed()
+    }
+
+    /** `Pantalla.Gastos` se restaura desde su clave `String`. */
+    @Test
+    fun `pantalla de gastos se restaura desde su clave string`() {
+        val restaurada = Pantalla.porClave(Pantalla.Gastos.clave)
+        assertEquals(Pantalla.Gastos, restaurada)
     }
 }

@@ -33,7 +33,8 @@ import androidx.compose.runtime.setValue
  *   adentro de [Fiado] con el id de la persona, ej. `Pantalla.FiadoPersona`.
  * - Márgenes (ola 31): entrada nueva en el grupo "una vez al mes" de
  *   `ListaDelMenu`, empuja `Pantalla.Margenes`.
- * - Gastos (ola 32): entrada nueva en el grupo "todos los días" de
+ * - Gastos (ola 30, adelantada de la 32 — sin gastos la ganancia es
+ *   ficción): hecho — entrada nueva en el grupo "todos los días" de
  *   `ListaDelMenu` (se anota cada vez que sale plata), empuja
  *   `Pantalla.Gastos`.
  * - Respaldo (ola 33): entrada nueva en el grupo "una vez al mes" de
@@ -53,10 +54,11 @@ internal sealed class Pantalla(internal val clave: String) {
     internal object Impresora : Pantalla("impresora")
     internal object Rubro : Pantalla("rubro")
     internal object HistorialVentas : Pantalla("historial-ventas")
+    internal object Gastos : Pantalla("gastos")
 
     internal companion object {
         internal val todas: List<Pantalla>
-            get() = listOf(Resumen, Caja, Fiado, Menu, Impresora, Rubro, HistorialVentas)
+            get() = listOf(Resumen, Caja, Fiado, Menu, Impresora, Rubro, HistorialVentas, Gastos)
 
         internal fun porClave(clave: String): Pantalla =
             todas.first { it.clave == clave }
