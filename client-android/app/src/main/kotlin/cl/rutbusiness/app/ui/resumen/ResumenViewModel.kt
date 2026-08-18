@@ -14,6 +14,8 @@ import cl.rutbusiness.core.money.Moneda
 import cl.rutbusiness.core.money.MonedaRepository
 import cl.rutbusiness.core.net.Resultado
 import cl.rutbusiness.core.offline.ClaveDeCache
+import cl.rutbusiness.core.reports.ReportsApi
+import cl.rutbusiness.core.reports.TopProductoDto
 import cl.rutbusiness.core.session.SessionRepository
 import cl.rutbusiness.ui.components.RbErrorCopy
 import kotlinx.coroutines.async
@@ -51,6 +53,12 @@ data class ResumenGuardado(
      * necesita mirar el teléfono guardado — ver [ResumenViewModel.guardar].
      */
     val ventasSemana: List<DiaDeLaSemana> = emptyList(),
+    /**
+     * Lo que más se vendió en el mes, para "Lo que más vendes". Falla sola:
+     * si el reporte no cargó, la lista queda vacía y el bloque simplemente no
+     * se dibuja — nunca tumba el resto del snapshot.
+     */
+    val masVendes: List<TopProductoDto> = emptyList(),
     val enCaja: String?,
     val nombreDeCaja: String?,
     val sinCajaAbierta: Boolean,
@@ -134,6 +142,17 @@ class ResumenViewModel(
     var ventasSemana by mutableStateOf<List<DiaDeLaSemana>?>(null)
         private set
 
+    // --- 2b. lo que más vendes en el mes -------------------------------------
+
+    /**
+     * Los productos que más venden este mes, ya en el orden del server
+     * (limitados a [LIMITE_MAS_VENDES]). Vacía si el reporte no cargó o si
+     * todavía no hay ventas en el mes — en los dos casos el bloque no se
+     * dibuja, nunca a medias.
+     */
+    var masVendes by mutableStateOf<List<TopProductoDto>>(emptyList())
+        private set
+
     // --- 3. cuánta plata hay en caja ----------------------------------------
 
     /** Lo que el arqueo dice que debería haber en el cajón. */
@@ -191,7 +210,9 @@ class ResumenViewModel(
             moneda = MonedaRepository(api).resolver()
 
             val resumen = ResumenApi(api)
+            val reportes = ReportsApi(api)
             val (desdeSemana, hastaSemana) = DiaUtc.rangoDeSemana(ahora())
+            val (desdeMes, hastaMes) = DiaUtc.rangoDelMes(ahora())
 
             // Todo en paralelo. `async` sale a la red apenas se crea, así que
             // esperarlos en orden más abajo no los serializa: la pantalla tarda
@@ -207,6 +228,9 @@ class ResumenViewModel(
             val caja = async { cargarCaja(resumen) }
             val vencimientos = async { resumen.porVencer() }
             val faltantes = async { resumen.stockBajo() }
+            val topProductos = async {
+                reportes.topProductos(desde = desdeMes, hasta = hastaMes, limite = LIMITE_MAS_VENDES)
+            }
 
             when (val r = agregado.await()) {
                 is Resultado.Ok -> {
@@ -235,6 +259,7 @@ class ResumenViewModel(
             porCobrar = (deuda.await() as? Resultado.Ok)?.valor
             stockBajo = (faltantes.await() as? Resultado.Ok)?.valor.orEmpty()
             porVencer = (vencimientos.await() as? Resultado.Ok)?.valor.orEmpty()
+            masVendes = (topProductos.await() as? Resultado.Ok)?.valor.orEmpty()
             // La caja también se espera antes de apagar el spinner: si no, el
             // bloque alcanzaría a decir "no hay caja abierta" y se corregiría
             // solo un segundo después, que es la clase de parpadeo que hace
@@ -264,6 +289,7 @@ class ResumenViewModel(
                 ventasDeAyer = ventasDeAyer,
                 comparacion = comparacion.name,
                 ventasSemana = ventasSemana.orEmpty(),
+                masVendes = masVendes,
                 enCaja = enCaja,
                 nombreDeCaja = nombreDeCaja,
                 sinCajaAbierta = sinCajaAbierta,
@@ -290,6 +316,7 @@ class ResumenViewModel(
         comparacion = Comparacion.entries.firstOrNull { it.name == datos.comparacion }
             ?: Comparacion.SinDatoDeAyer
         ventasSemana = datos.ventasSemana.ifEmpty { null }
+        masVendes = datos.masVendes
         enCaja = datos.enCaja
         nombreDeCaja = datos.nombreDeCaja
         sinCajaAbierta = datos.sinCajaAbierta
@@ -353,5 +380,10 @@ class ResumenViewModel(
         }
 
         ventasSemana = armarSemana(diasEsqueleto, filas, ventasDeHoy.revenue)
+    }
+
+    companion object {
+        /** Cinco filas es lo que se lee de un vistazo — ver el encargo del bloque. */
+        const val LIMITE_MAS_VENDES = 5
     }
 }

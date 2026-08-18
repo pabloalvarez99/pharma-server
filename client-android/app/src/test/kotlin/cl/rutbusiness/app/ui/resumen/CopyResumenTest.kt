@@ -156,9 +156,9 @@ class CopyResumenTest {
 
     @Test
     fun `el orden de las tarjetas pone plata entrada y deuda antes que el cierre`() {
-        assertEquals(listOf("ventas", "semana", "fiado"), ordenDeBloquesHoy(feria = true))
+        assertEquals(listOf("ventas", "semana", "masvendo", "fiado"), ordenDeBloquesHoy(feria = true))
         assertEquals(
-            listOf("ventas", "semana", "fiado", "caja", "faltantes", "vencimientos"),
+            listOf("ventas", "semana", "masvendo", "fiado", "caja", "faltantes", "vencimientos"),
             ordenDeBloquesHoy(feria = false),
         )
     }
@@ -273,5 +273,45 @@ class CopyResumenTest {
         descripcionSemana("el sábado", "$12.000"),
         mejorDiaFrase("sábado", esHoy = false),
         mejorDiaFrase("jueves", esHoy = true),
+        tituloMasVendes(),
+        descripcionMasVendes(listOf("tomates", "cilantro")),
     ) + (0..6).map { letraDiaSemana(it) } + (0..6).map { nombreDiaSemana(it) }
+
+    /** ADR-0022 vía el encargo de este bloque: nada de jerga de inventario. */
+    private val palabrasProhibidasMasVendes = listOf(
+        "producto",
+        "sku",
+        "ítem",
+        "item",
+        "catálogo",
+        "catalogo",
+        "ranking",
+        " top ",
+        "stock",
+    )
+
+    @Test
+    fun `lo mas vendes no usa jerga de inventario`() {
+        val copies = listOf(
+            tituloMasVendes(),
+            descripcionMasVendes(listOf("Tomates", "Cilantro", "Perejil")),
+        )
+        for (copy in copies) {
+            val bajo = " ${copy.lowercase()} "
+            for (palabra in palabrasProhibidasMasVendes) {
+                assertFalse(
+                    "«Lo que más vendes» no puede decir «$palabra»: «$copy»",
+                    bajo.contains(palabra),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `la descripcion de lo mas vendes dice el orden, nunca un total sumado`() {
+        val descripcion = descripcionMasVendes(listOf("tomates", "cilantro", "perejil"))
+        assertEquals("Lo que más vendes este mes: tomates primero, después cilantro, después perejil.", descripcion)
+        assertFalse(descripcion.contains("$"))
+        assertTrue(descripcionMasVendes(emptyList()).isEmpty())
+    }
 }
