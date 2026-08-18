@@ -188,6 +188,8 @@ internal fun BuscarContenido(
     onCargarLoQueVendo: (() -> Unit)? = null,
     etiquetaCargar: String = "Agregar lo que vendo",
     tituloSinCatalogo: String = "Todavía no hay productos",
+    beneficioSinCatalogo: String = "Así cobras en dos toques la próxima vez, sin " +
+        "escribir el precio a mano.",
     pistaSinCatalogo: String = "Agrega lo que vendes con su precio y ya puedes cobrarlo.",
     /** Abre el cobro rápido. `null` lo deja fuera de la pantalla. */
     onMontoSuelto: (() -> Unit)? = null,
@@ -305,7 +307,12 @@ internal fun BuscarContenido(
                     title = if (consulta.isBlank()) {
                         tituloSinCatalogo
                     } else {
-                        "Nada con \"${consulta.trim()}\""
+                        tituloBusquedaSinResultados(consulta)
+                    },
+                    benefit = if (consulta.isBlank()) {
+                        beneficioSinCatalogo
+                    } else {
+                        beneficioBusquedaVacia(feria)
                     },
                     hint = if (consulta.isBlank()) {
                         pistaSinCatalogo

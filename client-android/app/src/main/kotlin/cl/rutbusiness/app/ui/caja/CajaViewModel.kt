@@ -486,12 +486,7 @@ class CajaViewModel(
      * existe.
      */
     private fun copyDeAperturaFallida(error: AppError): RbErrorCopy = when {
-        error is AppError.ErrorDelServidor && error.status == 409 -> RbErrorCopy(
-            title = "Ya tienes una caja abierta",
-            message = "Aparece una caja tuya sin cerrar, capaz de ayer o de otro teléfono. " +
-                "Toca «Actualizar» para verla: desde ahí la puedes cerrar y abrir la de hoy.",
-            retryLabel = null,
-        )
+        error is AppError.ErrorDelServidor && error.status == 409 -> copyYaAbierta(esFeria)
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
             title = if (esFeria) "No pudimos abrir el puesto" else "No pudimos abrir la caja",
@@ -499,7 +494,7 @@ class CajaViewModel(
             retryLabel = "Reintentar",
         )
 
-        else -> error.aCopy("la caja")
+        else -> error.aCopy(nombreDeCaja(esFeria))
     }
 
     /**
@@ -522,12 +517,7 @@ class CajaViewModel(
     }
 
     private fun copyDeCierreFallido(error: AppError): RbErrorCopy = when {
-        error is AppError.ErrorDelServidor && error.status == 409 -> RbErrorCopy(
-            title = "Esta caja ya estaba cerrada",
-            message = "Alguien la cerró antes, o se cerró en otro teléfono. Toca " +
-                "«Actualizar» para ver cómo quedó.",
-            retryLabel = null,
-        )
+        error is AppError.ErrorDelServidor && error.status == 409 -> copyYaCerrada(esFeria)
 
         error is AppError.ServidorNoResponde -> RbErrorCopy(
             title = if (esFeria) "No pudimos cerrar el día" else "No pudimos cerrar la caja",
@@ -535,7 +525,7 @@ class CajaViewModel(
             retryLabel = "Reintentar",
         )
 
-        else -> error.aCopy("el cierre de caja")
+        else -> error.aCopy(if (esFeria) "el cierre del día" else "el cierre de caja")
     }
 
     private companion object {

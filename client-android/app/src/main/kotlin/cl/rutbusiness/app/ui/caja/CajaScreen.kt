@@ -116,6 +116,7 @@ private fun CajaScreen(vm: CajaViewModel, onVolver: () -> Unit) {
             // entrar, no al final del contado con la plata arriba del puesto.
             !vm.hayConexion -> RbEmptyState(
                 title = sinConexion.titulo,
+                benefit = sinConexion.beneficio,
                 hint = sinConexion.hint,
                 actionLabel = sinConexion.accion,
                 onAction = onVolver,

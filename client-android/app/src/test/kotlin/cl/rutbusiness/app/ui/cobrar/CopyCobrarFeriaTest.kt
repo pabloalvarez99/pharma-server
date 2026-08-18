@@ -212,4 +212,37 @@ class CopyCobrarFeriaTest {
         assertTrue(feria.contains("señal", ignoreCase = true))
         assertFalse(feria.contains("sistema", ignoreCase = true))
     }
+
+    @Test
+    fun `titulo de busqueda sin resultados cita la consulta`() {
+        assertEquals("Nada con \"tomate\"", tituloBusquedaSinResultados(" tomate "))
+    }
+
+    @Test
+    fun `beneficio de busqueda vacia distingue feria de retail`() {
+        assertEquals(
+            "Igual queda anotado en tu día, aunque no esté en la lista.",
+            beneficioBusquedaVacia(feria = true),
+        )
+        assertEquals(
+            "Así no pierdes la venta mientras cargas el producto.",
+            beneficioBusquedaVacia(feria = false),
+        )
+    }
+
+    @Test
+    fun `motivo para no fiar sin conexion distingue feria de retail`() {
+        assertEquals(
+            "Sin señal no se puede fiar: hay que revisar cuánto debe el cliente primero.",
+            copyMotivoNoUsarFiado(feria = true),
+        )
+        assertFalse(copyMotivoNoUsarFiado(feria = true).contains("sistema", ignoreCase = true))
+        assertTrue(copyMotivoNoUsarFiado(feria = false).contains("sistema", ignoreCase = true))
+    }
+
+    @Test
+    fun `motivo para no usar transferencia sin conexion distingue feria de retail`() {
+        assertTrue(copyMotivoNoUsarTransferencia(feria = true).startsWith("Sin señal"))
+        assertTrue(copyMotivoNoUsarTransferencia(feria = false).startsWith("Sin conexión"))
+    }
 }
