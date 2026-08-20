@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="es" data-theme="rb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisión del trabajo de Grok — RutBusiness</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css" rel="stylesheet" type="text/css" />
+<style>
+  /* Paleta tomada de client-android/design/.../RbColors.kt (RbDarkColors),
+     que es el design system real de la app. */
+  :root {
+    --rb-bg:#0B0F16; --rb-surface:#121826; --rb-surface2:#161D2D; --rb-raise:#1B2335;
+    --rb-outline:#2A3550; --rb-outline-strong:#5C6D8F;
+    --rb-txt:#EEF2F9; --rb-txt2:#A8B3C7; --rb-txt3:#828FA8;
+    --rb-brand:#19D39A; --rb-brand-container:#133639;
+    --rb-danger:#FF8F99; --rb-danger-container:#2D1524;
+    --rb-warn:#F5B53D; --rb-info:#6BB2FF;
+  }
+  html,body{background:var(--rb-bg);color:var(--rb-txt);}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+       -webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .card-rb{background:var(--rb-surface);border:1px solid var(--rb-outline);border-radius:14px;}
+  .card-rb--raise{background:var(--rb-raise);}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+  .grid-safe{display:grid;min-width:0;}
+  .grid-safe > *{min-width:0;}
+  .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  table{width:100%;border-collapse:collapse;}
+  th,td{text-align:left;padding:.65rem .8rem;border-bottom:1px solid var(--rb-outline);vertical-align:top;}
+  th{color:var(--rb-txt3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;}
+  td{font-size:.87rem;color:var(--rb-txt2);}
+  td strong{color:var(--rb-txt);font-weight:600;}
+  .pill{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;border-radius:999px;
+        font-size:.72rem;font-weight:600;white-space:nowrap;}
+  .pill-ok{background:var(--rb-brand-container);color:var(--rb-brand);}
+  .pill-bad{background:var(--rb-danger-container);color:var(--rb-danger);}
+  .pill-warn{background:#3a2c0d;color:var(--rb-warn);}
+  .pill-info{background:#12233b;color:var(--rb-info);}
+  .rule{height:1px;background:var(--rb-outline);border:0;}
+  .kbd-path{font-family:ui-monospace,monospace;font-size:.78rem;color:var(--rb-txt3);
+            word-break:break-all;overflow-wrap:anywhere;}
+  .score{font-variant-numeric:tabular-nums;}
+  .bar{height:6px;border-radius:999px;background:var(--rb-outline);overflow:hidden;}
+  .bar > i{display:block;height:100%;border-radius:999px;background:var(--rb-brand);}
+  .quote{border-left:3px solid var(--rb-outline-strong);padding-left:.9rem;color:var(--rb-txt2);
+         font-style:italic;}
+  @media (max-width:640px){ th,td{padding:.5rem .55rem;font-size:.8rem;} }
+</style>
+</head>
+<body class="antialiased">
+
+<div class="mx-auto w-full max-w-[1100px] px-4 sm:px-6 py-8 sm:py-12">
+
+  <!-- ══ ENCABEZADO ══ -->
+  <header class="mb-10">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <span class="pill pill-info">Revisión de código</span>
+      <span class="pill" style="background:var(--rb-surface2);color:var(--rb-txt3)">2026-08-08</span>
+    </div>
+    <h1 class="text-3xl sm:text-[2.6rem] font-bold leading-tight tracking-tight mb-3">
+      Lo que hizo Grok mientras estabas AFK
+    </h1>
+    <p class="text-lg leading-relaxed" style="color:var(--rb-txt2);max-width:62ch">
+      15 commits en unas horas, sin supervisión, sobre el respaldo cifrado del feriante.
+      Verifiqué el código, no el reporte. Casi todo está bien —
+      <strong style="color:var(--rb-txt)">y hay un bug que costaba el respaldo entero</strong>.
+    </p>
+  </header>
+
+  <!-- ══ VEREDICTO ══ -->
+  <section class="card-rb card-rb--raise p-5 sm:p-7 mb-10">
+    <div class="grid-safe gap-6 md:grid-cols-[auto_1fr] md:items-center">
+      <div class="text-center md:text-left md:pr-7 md:border-r" style="border-color:var(--rb-outline)">
+        <div class="score text-6xl font-bold leading-none" style="color:var(--rb-brand)">8<span class="text-3xl" style="color:var(--rb-txt3)">/10</span></div>
+        <div class="mt-2 text-sm" style="color:var(--rb-txt3)">como orquestador</div>
+      </div>
+      <div>
+        <p class="text-base leading-relaxed mb-4" style="color:var(--rb-txt2)">
+          <strong style="color:var(--rb-txt)">Sí es digno.</strong> Verifica antes de actuar, corrige al que le da
+          la orden, y no esquiva los guards. En la auditoría de ramas fue mejor que yo.
+          Lo que le quita puntos no es falta de criterio: es haber despachado a producción
+          algo que su propio archivo declara «no usar en prod».
+        </p>
+        <div class="grid-safe gap-3 sm:grid-cols-3 text-sm">
+          <div><div class="text-xs mb-1" style="color:var(--rb-txt3)">Juicio</div>
+            <div class="bar"><i style="width:95%"></i></div></div>
+          <div><div class="text-xs mb-1" style="color:var(--rb-txt3)">Ejecución</div>
+            <div class="bar"><i style="width:85%"></i></div></div>
+          <div><div class="text-xs mb-1" style="color:var(--rb-txt3)">Autocontrol</div>
+            <div class="bar"><i style="width:55%;background:var(--rb-warn)"></i></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ EL BUG ══ -->
+  <section class="mb-12">
+    <div class="flex items-center gap-3 mb-4">
+      <h2 class="text-2xl font-bold tracking-tight">El bug</h2>
+      <span class="pill pill-bad">arreglado — commit 1f25f91</span>
+    </div>
+
+    <div class="card-rb p-5 sm:p-6 mb-5" style="border-color:var(--rb-danger);background:var(--rb-danger-container)">
+      <p class="text-base leading-relaxed" style="color:var(--rb-txt)">
+        La tarjeta de rescate muestra <strong>12 palabras</strong> y <strong>bloques</strong>.
+        El QR lleva solo los bloques. El campo de restauración acepta cualquiera de los dos.
+        Pero cada forma derivaba <strong>una llave distinta</strong>.
+      </p>
+      <p class="text-base leading-relaxed mt-3" style="color:var(--rb-txt2)">
+        Cifrás escribiendo las palabras, después escaneás el QR para restaurar,
+        y el respaldo no abre. Sin ningún aviso. Para un feriante que tiene el
+        negocio entero ahí, es perderlo todo.
+      </p>
+    </div>
+
+    <div class="grid-safe gap-4 md:grid-cols-2 mb-6">
+      <div class="card-rb p-5">
+        <div class="pill pill-bad mb-3">antes</div>
+        <p class="text-sm mb-3" style="color:var(--rb-txt2)">
+          El KDF corría sobre el <strong style="color:var(--rb-txt)">texto que se ve en pantalla</strong>:
+        </p>
+        <pre class="mono text-xs leading-relaxed p-3 rounded-lg scroll-x" style="background:var(--rb-bg);color:var(--rb-txt2)">Frase   → "mesa pan tomate …"
+Bloques → "AB3K-9F2Q-…"
+
+strings distintos
+      ↓
+llaves distintas</pre>
+      </div>
+      <div class="card-rb p-5">
+        <div class="pill pill-ok mb-3">ahora</div>
+        <p class="text-sm mb-3" style="color:var(--rb-txt2)">
+          Las dos formas decodifican a la <strong style="color:var(--rb-txt)">misma semilla canónica</strong>,
+          y el KDF corre sobre ella:
+        </p>
+        <pre class="mono text-xs leading-relaxed p-3 rounded-lg scroll-x" style="background:var(--rb-bg);color:var(--rb-txt2)">Frase   ↘
+          semilla 84 bits → PBKDF2
+Bloques ↗
+
+misma llave, siempre</pre>
+      </div>
+    </div>
+
+    <p class="text-sm mb-3" style="color:var(--rb-txt3)">
+      El propio archivo lo admitía, y a treinta líneas se contradecía:
+    </p>
+    <div class="card-rb p-5 mb-6">
+      <p class="quote text-sm mb-3">«el stub actual genera palabras y bloques independientes de demo —
+        <strong style="color:var(--rb-danger)">no usar en prod</strong> hasta cablear crypto»</p>
+      <p class="quote text-sm">«<strong style="color:var(--rb-warn)">Clave de producción</strong>: bytes del CSPRNG del aparato»
+        &nbsp;·&nbsp; <span class="mono text-xs">KDF_LISTO = true</span></p>
+    </div>
+
+    <div class="card-rb p-5 mb-4" style="border-color:var(--rb-outline-strong)">
+      <h3 class="text-base font-semibold mb-2">Segundo bug, del mismo origen</h3>
+      <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+        El vocabulario tenía <span class="mono">café</span> y <span class="mono">pasaje</span>
+        <strong style="color:var(--rb-txt)">repetidos</strong>. Una palabra podía venir de dos índices
+        distintos, así que decodificar la frase del cuaderno era adivinar.
+        Eran 113 palabras y el generador hacía <span class="mono">byte % 113</span>:
+        además de perder bits, 30 de las 113 salían un 50% más seguido que el resto.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ EL ARREGLO ══ -->
+  <section class="mb-12">
+    <h2 class="text-2xl font-bold tracking-tight mb-4">Lo que arreglé</h2>
+    <div class="card-rb scroll-x mb-4">
+      <table>
+        <thead><tr><th style="width:26%">Qué</th><th>Cómo quedó</th><th style="width:22%">Por qué importa</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Semilla canónica</strong></td>
+            <td>84 bits. Frase y bloques la codifican los dos, de ida y de vuelta. El KDF nunca ve texto de presentación.</td>
+            <td>Elimina la clase de error, no la mitiga</td>
+          </tr>
+          <tr>
+            <td><strong>Vocabulario</strong></td>
+            <td>128 palabras distintas (2<sup>7</sup>). 7 bits exactos por palabra, sin sesgo de módulo, sin repetidas.</td>
+            <td>La frase del cuaderno siempre reconstruye la semilla</td>
+          </tr>
+          <tr>
+            <td><strong>Bloques 8 → 5</strong></td>
+            <td>84 bits + 16 de checksum entran en 20 caracteres.</td>
+            <td>Menos que copiar a mano al sol, y el checksum ataja un bloque mal escrito al tipearlo</td>
+          </tr>
+          <tr>
+            <td><strong>Entrada tolerante</strong></td>
+            <td>Sin tildes y en mayúsculas entra igual.</td>
+            <td>Una tilde de menos no puede costar el respaldo</td>
+          </tr>
+          <tr>
+            <td><strong>Errores concretos</strong></td>
+            <td>«La palabra 7 no es de la tarjeta» en vez de «clave inválida».</td>
+            <td>Le dice qué hacer, no que falló</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card-rb p-5" style="background:var(--rb-surface2)">
+      <h3 class="text-base font-semibold mb-2">Entropía: 84 bits, no 128 — y queda documentado</h3>
+      <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+        El techo lo pone lo que una persona escribe bien a mano. Con PBKDF2 a 210.000
+        iteraciones, romperlo cuesta del orden de <span class="mono">2^101</span> hashes:
+        no es el eslabón débil. Estirar la frase a 18 palabras para llegar a 128 bits sí
+        haría que la dueña la copie mal. El comentario anterior afirmaba «misma entropía»
+        y no era cierto.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ DE PASO ══ -->
+  <section class="mb-12">
+    <div class="flex items-center gap-3 mb-4">
+      <h2 class="text-2xl font-bold tracking-tight">De paso: un test rojo en <span class="mono text-xl">main</span></h2>
+      <span class="pill pill-warn">regla 8</span>
+    </div>
+    <div class="card-rb p-5 sm:p-6">
+      <p class="text-base leading-relaxed mb-3" style="color:var(--rb-txt2)">
+        <span class="mono" style="color:var(--rb-txt)">FronteraDePlataformaTest</span> estaba fallando antes de
+        que yo tocara nada. El último commit de Grok — «compartir a notas» — metió
+        <span class="mono">import android.content.Intent</span> dentro de
+        <span class="mono">ui/</span>, que es justo lo que ese test protege para que la UI
+        compile en iOS sin tocarla.
+      </p>
+      <p class="text-base leading-relaxed" style="color:var(--rb-txt2)">
+        Ahora va detrás de la interfaz <span class="mono">CompartirTarjeta</span>, con su
+        implementación Android del otro lado de la frontera, igual que la cámara y la
+        impresora. El test de la tarjeta inyecta un doble y además afirma que lo que sale
+        de la app es el texto correcto.
+      </p>
+      <hr class="rule my-4">
+      <p class="text-sm" style="color:var(--rb-txt3)">
+        Es el dato más concreto sobre el loop autónomo: <strong style="color:var(--rb-warn)">despachó
+        un test rojo y nadie se enteró</strong>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══ LO QUE HIZO BIEN ══ -->
+  <section class="mb-12">
+    <h2 class="text-2xl font-bold tracking-tight mb-4">Lo que lo hace orquestador</h2>
+    <div class="grid-safe gap-4 sm:grid-cols-2">
+
+      <div class="card-rb p-5">
+        <div class="pill pill-ok mb-3">lo más valioso</div>
+        <h3 class="text-base font-semibold mb-2">Te corrige con evidencia</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          Le pasé «75 ramas con trabajo sin mergear». Respondió que el contador miente
+          después de un squash, hizo una segunda pasada por <em>contenido</em>
+          (<span class="mono">git diff</span>) y demostró que <span class="mono">main</span>
+          ya era superset.
+        </p>
+      </div>
+
+      <div class="card-rb p-5">
+        <div class="pill pill-ok mb-3">no complace</div>
+        <h3 class="text-base font-semibold mb-2">Mató mis dos sospechas</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          <span class="mono">csv-formula-injection</span> como bug de seguridad vivo y
+          <span class="mono">p0-erp-global</span> como trabajo duplicado. Las dos falsas,
+          con evidencia. <strong style="color:var(--rb-txt)">BUG count = 0.</strong>
+        </p>
+      </div>
+
+      <div class="card-rb p-5">
+        <div class="pill pill-ok mb-3">encontró lo que se me pasó</div>
+        <h3 class="text-base font-semibold mb-2">El agujero del <span class="mono">.gitignore</span></h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          <span class="mono">local/</span> no estaba ignorado pese a que el README decía
+          que sí. Un <span class="mono">git add .</span> mandaba
+          <span class="mono">CARGO-TOKEN.txt</span> al historial para siempre.
+        </p>
+      </div>
+
+      <div class="card-rb p-5">
+        <div class="pill pill-ok mb-3">disciplina</div>
+        <h3 class="text-base font-semibold mb-2">Respetó los guards</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          <span class="mono">git push --delete</span> bloqueado: no lo esquivó, no usó la
+          API de GitHub para rodearlo. Dejó el comando para vos. Y ante duda entre
+          MUERTA y VIVA, no borró.
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══ LOS 15 COMMITS ══ -->
+  <section class="mb-12">
+    <h2 class="text-2xl font-bold tracking-tight mb-2">Los 15 commits</h2>
+    <p class="text-sm mb-4" style="color:var(--rb-txt3)">
+      1.743 líneas agregadas · 38 archivos · sin supervisión
+    </p>
+    <div class="card-rb scroll-x">
+      <table>
+        <thead><tr><th style="width:5.5rem">commit</th><th>qué</th><th style="width:9rem">estado</th></tr></thead>
+        <tbody>
+          <tr><td class="mono text-xs">a5cf2fd</td><td>compartir tarjeta a app de notas</td><td><span class="pill pill-bad">rompió frontera</span></td></tr>
+          <tr><td class="mono text-xs">6e222d3</td><td>copiar tarjeta al portapapeles</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">e31240f</td><td>doc del QR en la tarjeta</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">d1a207f</td><td>QR escaneable vía ZXing</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">27c96db</td><td>ADR-0022 al día</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">225e123</td><td>unidades de feria: bandeja, docena, malla</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">e6565d5</td><td>runbook del lab</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">5e78aff</td><td>camino Google cableado en la UI</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">55869c9</td><td><span class="mono text-xs">AuthApi.loginConGoogle</span></td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">d866ea5</td><td>stub 501 de Google, sin secretos en repo</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">2a05552</td><td>huella visual si el QR no encodea</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">825b6bd</td><td>traer respaldo de la nube</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">47f46b9</td><td>store en memoria para el lab</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">a342f95</td><td>rehidratar la cola al restaurar</td><td><span class="pill pill-ok">ok</span></td></tr>
+          <tr><td class="mono text-xs">6b1a8c8</td><td>PBKDF2 + subir solo ciphertext</td><td><span class="pill pill-bad">llaves distintas</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══ CONDICIONES ══ -->
+  <section class="mb-12">
+    <h2 class="text-2xl font-bold tracking-tight mb-4">Dos condiciones para dejarlo de orquestador</h2>
+    <div class="grid-safe gap-4 sm:grid-cols-2">
+      <div class="card-rb p-5" style="border-color:var(--rb-warn)">
+        <div class="text-3xl font-bold mb-2" style="color:var(--rb-warn)">1</div>
+        <h3 class="text-base font-semibold mb-2">Apagar el loop de 45 minutos para plata y criptografía</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          No es un problema de Grok: es de gobernanza. Un agente construyendo sin freno
+          acumula deuda más rápido de lo que alguien la revisa. Justo lo que pasó.
+          Para trabajo aburrido, que siga.
+        </p>
+      </div>
+      <div class="card-rb p-5" style="border-color:var(--rb-warn)">
+        <div class="text-3xl font-bold mb-2" style="color:var(--rb-warn)">2</div>
+        <h3 class="text-base font-semibold mb-2">Probarlo en un teléfono de verdad</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--rb-txt2)">
+          La app nunca corrió en hardware físico. PBKDF2 a 210.000 iteraciones en un
+          aparato de 2015 con 2 núcleos puede tardar varios segundos, y está en el camino
+          crítico de «preparar respaldo». Sin medir.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VERIFICACIÓN ══ -->
+  <section class="mb-10">
+    <h2 class="text-2xl font-bold tracking-tight mb-4">Verificación</h2>
+    <div class="grid-safe gap-4 sm:grid-cols-3">
+      <div class="card-rb p-5 text-center">
+        <div class="text-3xl font-bold" style="color:var(--rb-brand)">92</div>
+        <div class="text-sm mt-1" style="color:var(--rb-txt3)"><span class="mono">:core</span> — todos verdes</div>
+      </div>
+      <div class="card-rb p-5 text-center">
+        <div class="text-3xl font-bold" style="color:var(--rb-brand)">221</div>
+        <div class="text-sm mt-1" style="color:var(--rb-txt3)"><span class="mono">:app</span> — todos verdes</div>
+      </div>
+      <div class="card-rb p-5 text-center">
+        <div class="text-3xl font-bold" style="color:var(--rb-brand)">64</div>
+        <div class="text-sm mt-1" style="color:var(--rb-txt3)">claves probadas: frase = bloques</div>
+      </div>
+    </div>
+    <p class="text-sm mt-4" style="color:var(--rb-txt2)">
+      <span class="mono">ClaveIntercambiableTest</span> prueba que un sobre cifrado con la
+      frase se abre con los bloques, que un bloque mal copiado se detecta al tipearlo, y
+      que una palabra inventada dice cuál revisar.
+      <strong style="color:var(--rb-txt)">No se migra nada</strong>: no hay un solo respaldo real todavía.
+    </p>
+  </section>
+
+  <hr class="rule mb-6">
+  <footer class="text-xs leading-relaxed" style="color:var(--rb-txt3)">
+    <p class="mb-1">Arreglo en <span class="mono">1f25f91</span>, pusheado a <span class="mono">main</span>.</p>
+    <p class="kbd-path">C:\dev\GitHub\01-product\rutbusiness\pharma-server</p>
+    <p class="mt-3">Diseño tomado del design system de la app —
+      <span class="kbd-path">client-android/design/…/RbColors.kt</span> (RbDarkColors).</p>
+  </footer>
+
+</div>
+</body>
+</html>

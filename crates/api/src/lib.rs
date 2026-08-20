@@ -147,7 +147,25 @@ fn check_jwt_secret(secret: &str, allow_insecure: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+/// Desktop / Windows service entry: runs until the process is killed.
+/// Delegates to [`run_with_shutdown`] with a future that never completes, so
+/// behavior matches the historical `axum::serve(...).await` (no graceful stop).
+pub async fn run(cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> {
+    run_with_shutdown(cfg, std::future::pending::<()>()).await
+}
+
+/// Same boot path as [`run`], but stops when `shutdown` completes.
+///
+/// Used by the embedded Android server (H5+): bind, serve, then drain on signal
+/// without aborting the host process. Callers that need the real bound port
+/// should pass `bind = "127.0.0.1:0"` and read `listener.local_addr()` via a
+/// future extension — this function logs the bound addr after bind.
+///
+/// ADITIVE: lives beside `run`; does not change the desktop binary contract.
+pub async fn run_with_shutdown(
+    mut cfg: pharma_core::config::AppConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     let allow_insecure = std::env::var("PHARMA_ALLOW_INSECURE_JWT").as_deref() == Ok("1");
     check_jwt_secret(&cfg.jwt.secret, allow_insecure)?;
 
@@ -367,7 +385,13 @@ pub async fn run(mut cfg: pharma_core::config::AppConfig) -> anyhow::Result<()> 
     let addr: SocketAddr = cfg.bind.parse()?;
     tracing::info!(%addr, "pharma-api listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    // Real address after bind (important when cfg.bind uses port 0).
+    let bound = listener.local_addr()?;
+    tracing::info!(%bound, "pharma-api bound");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+    tracing::info!("pharma-api shutdown complete");
     Ok(())
 }
 
