@@ -24,9 +24,10 @@ import {
 const ALL_RUBROS = RUBRO_CATALOG.map((r) => r.value as Rubro);
 const SERVICE_RUBROS: Rubro[] = ["belleza", "servicios"];
 
-describe("rubro catalog — the 8-card showcase grid", () => {
-  it("ships exactly the documented 8 rubros, no emoji-only fallbacks missing data", () => {
+describe("rubro catalog — the 9-card showcase grid", () => {
+  it("ships exactly the documented 9 rubros, no emoji-only fallbacks missing data", () => {
     expect(ALL_RUBROS).toEqual([
+      "feria",
       "farmacia",
       "minimarket",
       "restaurant",
@@ -101,6 +102,11 @@ describe("ambos verticales gated — pharmacy + minimarket map to a seed pack", 
       lotes: true,
       physicalStock: true,
       clinical: true,
+      agentHome: false,
+      barcode: true,
+      printer: true,
+      dte: true,
+      informalOk: false,
     });
   });
 
@@ -129,17 +135,18 @@ describe("recetas / controlados (Ley 20.000) — farmacia ONLY", () => {
   });
 });
 
-describe("boleta/factura SII — UNIVERSAL across every rubro", () => {
-  it("every rubro shows the Compliance category on + keeps boletas/facturas nav", () => {
+describe("boleta/factura SII — formal rubros; feria can formalize later", () => {
+  it("formal rubros show SII; feria day 1 keeps the compliance surfaces hidden", () => {
     for (const r of ALL_RUBROS) {
       const p = rubroPreview(r);
       const compliance = p.categories.find(
         (c) => c.label === "Boletas y facturas (SII)",
       )!;
-      expect(compliance.on, `${r} SII category`).toBe(true);
+      const hasDte = featuresForRubro(r).dte;
+      expect(compliance.on, `${r} SII category`).toBe(hasDte);
       const visible = visibleModulesForRubro(r);
-      expect(visible, `${r} boletas`).toContain("boletas");
-      expect(visible, `${r} facturas`).toContain("facturas");
+      expect(visible.includes("boletas"), `${r} boletas`).toBe(hasDte);
+      expect(visible.includes("facturas"), `${r} facturas`).toBe(hasDte);
       // Reportes + POS/caja are universal too — every CL business sells + reports.
       expect(visible).toContain("pos");
       expect(visible).toContain("reports");

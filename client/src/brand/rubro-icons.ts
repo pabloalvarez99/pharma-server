@@ -16,6 +16,9 @@
 
 /** Inner SVG markup (no wrapper) for each rubro icon id. */
 export const RUBRO_ICONS: Readonly<Record<string, string>> = {
+  // Feria — puesto con toldo (venta callejera, sin código ni impresora).
+  feria:
+    '<path d="M3 9h18l-1.2 4H4.2z"/><path d="M5 13v7h14v-7"/><path d="M3 9l2-4h14l2 4"/><line x1="7" y1="5" x2="7" y2="9"/><line x1="11" y1="5" x2="11" y2="9"/><line x1="15" y1="5" x2="15" y2="9"/><line x1="19" y1="5" x2="19" y2="9"/>',
   // Farmacia — a tilted capsule with its center seam. Reads as "medicamento".
   farmacia:
     '<g transform="rotate(-45 12 12)"><rect x="3" y="8.5" width="18" height="7" rx="3.5"/><line x1="12" y1="8.5" x2="12" y2="15.5"/></g>',

@@ -97,6 +97,11 @@ describe("featuresForRubro — per-rubro capability gate", () => {
       lotes: true,
       physicalStock: true,
       clinical: true,
+      agentHome: false,
+      barcode: true,
+      printer: true,
+      dte: true,
+      informalOk: false,
     });
   });
 
@@ -254,6 +259,11 @@ describe("activeFeatures / pack cache", () => {
       lotes: false,
       physicalStock: true,
       clinical: true,
+      agentHome: false,
+      barcode: true,
+      printer: true,
+      dte: true,
+      informalOk: false,
     });
   });
 });

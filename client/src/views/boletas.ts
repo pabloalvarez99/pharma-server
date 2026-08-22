@@ -20,7 +20,7 @@ import {
   parseSaleError,
   type Dte,
 } from "../api";
-import { clp, num } from "../format";
+import { num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { emptyState, errorState } from "./ui";
 import { dteCssKey, dteRowHtml } from "./dte-row";

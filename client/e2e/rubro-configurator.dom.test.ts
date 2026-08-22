@@ -32,6 +32,7 @@ import { renderConfiguracion } from "../src/views/configuracion";
 
 // Catalog grid order (vertical.ts RUBRO_CATALOG): used for index math (4 cols).
 const ORDER = [
+  "feria",
   "farmacia",
   "minimarket",
   "restaurant",
