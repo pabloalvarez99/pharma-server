@@ -10,7 +10,7 @@ The recurring-cycle contract lives in `docs/ops/agent-team-loop.md`.
 
 | Lane | Owner | State | Scope / result |
 |---|---|---|---|
-| Captain | paxoloop | integrated locally | Cycle consolidated in commit `c509434`; push/deploy remain separate actions. Owns this board and the current-state summary. |
+| Captain | paxoloop | pushed | Cycle consolidated in `c509434`/`8dcdd46` and pushed to `origin/main`; deployment is intentionally not automatic. Owns this board and the current-state summary. |
 | Cashier | paul | delivered | Refund settlement follows the original payment rail; tests added for pharmacy and minimarket. |
 | Stock/backend | marvin | delivered | Reject expiry without lot during receiving; regression test added. |
 | Onboarding | ye | delivered | First-run rubro selection can opt into a matching demo pack. |
