@@ -2244,9 +2244,15 @@ fn clean_venta_product(s: &str) -> String {
 /// word and a stock movement.
 fn parse_venta(q: &str, raw: &str) -> Option<ActionParse> {
     // A question is never a sale.
+    // `normalize` folds accents but intentionally keeps `¿`; strip leading
+    // Spanish opening punctuation before checking the question prefixes, or
+    // «¿cuánto vendí hoy?» can be stolen by fuzzy `vende` matching `vendi`.
+    let question_start = q.trim_start_matches(|c: char| {
+        c.is_whitespace() || c == '¿' || c == '¡'
+    });
     if ["que ", "cuanto", "cual", "quien", "cuando", "donde", "como "]
         .iter()
-        .any(|p| q.starts_with(p))
+        .any(|p| question_start.starts_with(p))
     {
         return None;
     }
@@ -4852,6 +4858,7 @@ mod tests {
     fn parse_venta_no_le_roba_preguntas_al_agente_de_lectura() {
         for q in [
             "cuánto vendí hoy",
+            "¿cuánto vendí hoy?",
             "cuánto vendí este mes",
             "cuánto se vendió ayer",
             "los más vendidos",
