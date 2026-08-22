@@ -1,0 +1,34 @@
+# RutAgentIA — STATUS BOARD
+
+Updated by the captain after each coordination cycle. Workers must keep their
+changes inside the lane declared in `.claude/agents/` and report tests plus
+blockers; this file is coordination state, not a code-change log.
+
+The recurring-cycle contract lives in `docs/ops/agent-team-loop.md`.
+
+## Current cycle
+
+| Lane | Owner | State | Scope / result |
+|---|---|---|---|
+| Captain | paxoloop | reviewing | Integrate only after diff review and available gates. Owns this board and the current-state summary. |
+| Cashier | paul | delivered | Refund settlement follows the original payment rail; tests added for pharmacy and minimarket. |
+| Stock/backend | marvin | delivered | Reject expiry without lot during receiving; regression test added. |
+| Onboarding | ye | delivered | First-run rubro selection can opt into a matching demo pack. |
+| Compliance | bob | delivered | Shared DTE row renderer escapes server-backed fields before HTML insertion. |
+| Audit/backend | lucy | delivered | Audit date ranges and table path filters are validated more strictly. |
+
+## Gates
+
+- Frontend: `cd client && npm run build && npm test`.
+- Backend: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- Current environment blocker: frontend dependencies are not installed and
+  Rustup/crates resolution cannot complete without network access.
+
+## Captain rules
+
+- Keep worker scopes disjoint; do not merge by overwriting concurrent files.
+- Preserve founder decisions and pause for release, public-source, force-push,
+  deploy, payment, or SII-credential actions.
+- Re-open a lane only with a bounded task, a named file scope, and a gate.
+- A recurring automation may wake the captain, but it must not claim that a
+  worker is active when the agent session or runner is stopped.

@@ -25,9 +25,10 @@ import {
   serverHealth,
   setupStatus,
   setupAccount,
+  seedDemo,
   type SessionInfo,
 } from "../api";
-import { RUBRO_CATALOG } from "../vertical";
+import { RUBRO_CATALOG, seedVerticalFor } from "../vertical";
 import { resolveServerConfig, validateServerUrl, connectionState } from "./first-run";
 import {
   withTimeout,
@@ -591,6 +592,14 @@ export function renderFirstRunSetup(
               <p class="field-hint">Define qué módulos se muestran (las recetas sólo en Farmacia). Lo puedes cambiar luego en Configuración.</p>
             </div>
 
+            <div class="field setup-demo-choice">
+              <label class="check-label" for="s-demo">
+                <input id="s-demo" type="checkbox" aria-describedby="s-demo-hint" />
+                <span>Quiero explorar con datos demo</span>
+              </label>
+              <p id="s-demo-hint" class="field-hint">Elige un rubro con pack demo y entra con un catálogo de ejemplo. No se activa sin tu confirmación.</p>
+            </div>
+
             <div class="field">
               <label for="s-email">Correo</label>
               <input id="s-email" type="email" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="dueno@minegocio.cl" aria-describedby="es-email" required />
@@ -618,6 +627,7 @@ export function renderFirstRunSetup(
             </details>
 
             <p id="setup-error" class="form-error" role="alert" hidden></p>
+            <p id="setup-demo-status" class="field-hint" role="status" aria-live="polite" hidden></p>
 
             <button id="setup-submit" type="submit" class="btn-primary">
               <span class="btn-pulse" aria-hidden="true"></span>
@@ -638,7 +648,25 @@ export function renderFirstRunSetup(
   const btn = root.querySelector<HTMLButtonElement>("#setup-submit")!;
   const btnLabel = btn.querySelector<HTMLSpanElement>(".btn-label")!;
   const formErr = root.querySelector<HTMLParagraphElement>("#setup-error")!;
+  const demoStatus = root.querySelector<HTMLParagraphElement>("#setup-demo-status")!;
   const q = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
+
+  const demoInput = q<HTMLInputElement>("s-demo");
+  const demoHint = q<HTMLParagraphElement>("s-demo-hint");
+  const rubroInput = q<HTMLSelectElement>("s-rubro");
+
+  function refreshDemoChoice(): void {
+    const pack = seedVerticalFor(rubroInput.value);
+    demoInput.disabled = !pack;
+    if (!pack) {
+      demoInput.checked = false;
+      demoHint.textContent =
+        "Este rubro todavía no tiene pack demo. Puedes entrar igual y luego importar tu catálogo o crear servicios/productos a mano.";
+      return;
+    }
+    demoHint.textContent =
+      "Carga un catálogo de ejemplo para explorar el POS y el dashboard. No se activa sin tu confirmación.";
+  }
 
   function fieldError(id: string, msg: string): void {
     const el = q<HTMLParagraphElement>(id);
@@ -654,6 +682,9 @@ export function renderFirstRunSetup(
     });
   }
 
+  rubroInput.addEventListener("change", refreshDemoChoice);
+  refreshDemoChoice();
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     clearErrors();
@@ -663,6 +694,8 @@ export function renderFirstRunSetup(
     const email = q<HTMLInputElement>("s-email").value.trim();
     const password = q<HTMLInputElement>("s-password").value;
     const rawServer = q<HTMLInputElement>("s-server").value;
+    const demoPack = seedVerticalFor(rubro);
+    const wantsDemo = demoInput.checked && Boolean(demoPack);
 
     let firstBad: string | null = null;
     if (!name) {
@@ -707,6 +740,21 @@ export function renderFirstRunSetup(
       // The server derives the slug from the business name — persist it so the
       // owner isn't locked out on the next launch by a wrong "principal" pre-fill.
       rememberTenant(session.tenant_slug);
+      if (wantsDemo && demoPack) {
+        btnLabel.textContent = "PREPARANDO DEMO";
+        demoStatus.hidden = false;
+        demoStatus.textContent = "Preparando un catálogo de ejemplo para tu rubro…";
+        try {
+          await seedDemo(url, demoPack, false);
+          demoStatus.textContent = "Catálogo demo listo. Entrando a tu negocio…";
+        } catch {
+          // The account is already valid: a demo seed failure must not strand a
+          // real first-run user on the setup screen. Dashboard/configuration
+          // still provide the same demo CTA after login.
+          demoStatus.textContent =
+            "Cuenta creada. No pudimos cargar el demo; podrás intentarlo desde Configuración.";
+        }
+      }
       btn.classList.remove("loading");
       btn.classList.add("ok");
       btnLabel.textContent = "LISTO";

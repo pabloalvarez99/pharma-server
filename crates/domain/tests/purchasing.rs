@@ -770,6 +770,58 @@ async fn po_receive_lines_keeps_stock_in_sync_with_batches_for_lot_tracked_produ
     assert_eq!(stock, batch_sum, "product.stock == Σ batch.stock");
 }
 
+/// A receipt must not silently discard an expiry date when the operator omits
+/// the lot code. Without this validation the request succeeds, stock moves,
+/// and the expiry metadata disappears because no batch can be created.
+#[tokio::test]
+async fn po_receive_lines_rejects_expiry_without_lot() {
+    let (db, t) = setup().await;
+    let supplier = service::create_supplier(&db, &t, new_supplier("ACME"))
+        .await
+        .unwrap();
+    let product = catalog::create_product(&db, &t, new_product("Café", "1990", Some("100")))
+        .await
+        .unwrap();
+    let po = service::create_purchase_order(
+        &db,
+        &t,
+        NewPurchaseOrder {
+            supplier: supplier.id,
+            branch: None,
+            currency: None,
+            notes: None,
+            external_ref: None,
+            items: vec![po_item(Some(&product.id), "Café", 4, "100")],
+        },
+    )
+    .await
+    .unwrap();
+    service::send_purchase_order(&db, &t, &po.id).await.unwrap();
+
+    let err = service::receive_purchase_order_lines(
+        &db,
+        &t,
+        &po.id,
+        ReceivePurchaseOrder {
+            lines: vec![ReceivePurchaseOrderLine {
+                po_line_id: po.items[0].id.clone(),
+                qty_received: 4,
+                lot: None,
+                expiry_date: Some(chrono::Utc::now() + chrono::Duration::days(90)),
+            }],
+            notes: None,
+        },
+        None,
+    )
+    .await
+    .expect_err("expiry without lot must be rejected");
+    assert_eq!(err.code(), "INVALID_INPUT");
+
+    let (stock, cost) = product_stock_cost(&db, &product.id).await;
+    assert_eq!(stock, 0);
+    assert_eq!(cost, Some(dec("100")));
+}
+
 /// The same guard must allow an all-lotted receipt across two lots on one
 /// product: `product.stock == Σ batch.stock` and FEFO can satisfy the full
 /// on-hand quantity.

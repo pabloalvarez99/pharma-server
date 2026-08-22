@@ -21,6 +21,8 @@ import {
   nextDrawerName,
   DEFAULT_RETURN_MOTIVO,
   returnMotivoLabel,
+  refundMethodForPayment,
+  refundMethodHint,
   type CartLine,
   type Sellable,
   type RefundDraftLine,
@@ -219,6 +221,24 @@ describe("journey 7 · arqueo + cierre (balanced, over, short)", () => {
     expect(d.tone).toBe("danger");
     expect(d.label).toBe("Faltante");
     expect(d.amount).toBe(1950);
+  });
+});
+
+describe("journey 7b · refund settlement stays aligned with the drawer", () => {
+  it.each([
+    ["farmacia", "pos_cash", "efectivo"],
+    ["minimarket", "pos_mixed", "efectivo"],
+    ["farmacia", "pos_card", "tarjeta"],
+    ["minimarket", "pos_transferencia", "transferencia"],
+    ["farmacia", "pos_fiado", "fiado"],
+  ])("%s %s defaults to %s", (_rubro, payment, expected) => {
+    expect(refundMethodForPayment(payment)).toBe(expected);
+  });
+
+  it("makes the cash impact explicit before closing", () => {
+    expect(refundMethodHint("efectivo")).toContain("caja abierta");
+    expect(refundMethodHint("tarjeta")).toContain("no descuenta efectivo");
+    expect(refundMethodHint("fiado")).toContain("deuda");
   });
 });
 

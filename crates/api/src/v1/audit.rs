@@ -105,6 +105,20 @@ fn parse_date(label: &str, raw: &str) -> Result<NaiveDate, ApiError> {
         .map_err(|_| ApiError::invalid(format!("Parámetro '{label}' debe ser YYYY-MM-DD.")))
 }
 
+fn validate_date_range(
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+) -> Result<(), ApiError> {
+    if let (Some(from), Some(to)) = (from, to) {
+        if from >= to {
+            return Err(ApiError::invalid(
+                "Parámetro 'from' debe ser anterior a 'to'.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Map `action=create|update|delete` to one or more HTTP methods recorded by
 /// the audit middleware. Returns `Err` for any other value (we don't silently
 /// drop unknown filters — they would yield a misleading empty result).
@@ -228,6 +242,7 @@ async fn query_audit_log(
         }
         None => None,
     };
+    validate_date_range(from_dt, to_dt)?;
 
     let user_thing: Option<Thing> = match q.user.as_deref() {
         Some(s) => Some(
@@ -254,11 +269,12 @@ async fn query_audit_log(
         conds.push("user = $user");
     }
     if q.table.is_some() {
-        // Table mapping is path-based (schema gap). Match either segment-based
-        // `/api/v1/<table>` or any path that contains `/<table>` (covers
-        // legacy non-v1 routes). Both bound to the same `$table` token.
+        // Table mapping is path-based (schema gap). Accept current and legacy
+        // API prefixes, but require a complete path segment so filtering for
+        // `product` cannot include `/products` or `/product-stats`.
         conds.push(
-            "(string::starts_with(path, $table_prefix) OR string::contains(path, $table_seg))",
+            "(path = $table_prefix OR string::starts_with(path, $table_child_prefix) \
+             OR path = $legacy_table_prefix OR string::starts_with(path, $legacy_child_prefix))",
         );
     }
     if let Some(methods) = methods {
@@ -291,7 +307,9 @@ async fn query_audit_log(
     }
     if let Some(t) = q.table.as_ref() {
         qb = qb.bind(("table_prefix", format!("/api/v1/{t}")));
-        qb = qb.bind(("table_seg", format!("/{t}")));
+        qb = qb.bind(("table_child_prefix", format!("/api/v1/{t}/")));
+        qb = qb.bind(("legacy_table_prefix", format!("/api/{t}")));
+        qb = qb.bind(("legacy_child_prefix", format!("/api/{t}/")));
     }
     if let Some(methods) = methods {
         qb = qb.bind(("method0", methods[0].to_string()));
@@ -442,5 +460,14 @@ mod tests {
     fn parse_date_rejects_garbage() {
         assert!(parse_date("from", "not-a-date").is_err());
         assert!(parse_date("from", "2026-05-23").is_ok());
+    }
+
+    #[test]
+    fn date_range_rejects_reversed_or_empty_window() {
+        let from = Utc.with_ymd_and_hms(2026, 5, 24, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 5, 24, 0, 0, 0).unwrap();
+        assert!(validate_date_range(Some(from), Some(to)).is_err());
+        assert!(validate_date_range(Some(to), Some(from - Duration::days(1))).is_err());
+        assert!(validate_date_range(Some(from), Some(from + Duration::days(1))).is_ok());
     }
 }

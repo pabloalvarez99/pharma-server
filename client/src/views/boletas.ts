@@ -20,9 +20,10 @@ import {
   parseSaleError,
   type Dte,
 } from "../api";
-import { clp, num, fechaHora } from "../format";
+import { clp, num } from "../format";
 import { tableSkeleton, asMessage, escapeHtml } from "./view-blocks";
 import { emptyState, errorState } from "./ui";
+import { dteCssKey, dteRowHtml } from "./dte-row";
 
 const LIST_LIMIT = 100;
 const LOW_FOLIOS = 50;
@@ -35,15 +36,6 @@ const ESTADOS = [
   { value: "rejected", label: "Rechazadas" },
   { value: "cancelled", label: "Anuladas" },
 ] as const;
-
-const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: "Borrador", cls: "pill" },
-  signed: { label: "Firmada", cls: "pill pill-ok" },
-  sent: { label: "Enviada SII", cls: "pill pill-warn" },
-  accepted: { label: "Aceptada", cls: "pill pill-ok" },
-  rejected: { label: "Rechazada", cls: "pill pill-danger" },
-  cancelled: { label: "Anulada", cls: "pill" },
-};
 
 export function renderBoletas(host: HTMLElement, serverUrl: string): void {
   host.innerHTML = `
@@ -159,7 +151,7 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
           <thead>
             <tr><th class="num">Folio</th><th>Fecha</th><th>Receptor</th><th class="num">Total</th><th>Estado</th><th>SII</th><th>Acciones</th></tr>
           </thead>
-          <tbody>${rows.map(rowHtml).join("")}</tbody>
+          <tbody>${rows.map((d) => dteRowHtml(d, { prefix: "bol", sendPlan: "Pro" })).join("")}</tbody>
         </table>
       `;
       rows.forEach((d) => wireRow(d));
@@ -168,38 +160,8 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
     }
   }
 
-  function rowHtml(d: Dte): string {
-    const badge = ESTADO_BADGE[d.estado] ?? { label: d.estado, cls: "pill" };
-    const sii = d.track_id !== null
-      ? `track ${d.track_id}${d.sii_glosa ? ` · ${escapeHtml(d.sii_glosa)}` : ""}`
-      : "—";
-    const k = cssKey(d.id);
-    const actions: string[] = [];
-    if (d.has_xml) {
-      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-xml-${k}" title="Descargar XML firmado">XML</button>`);
-    }
-    if (d.estado === "signed") {
-      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-send-${k}" title="Enviar al SII (requiere plan Pro)">Enviar SII</button>`);
-      actions.push(`<button class="btn-ghost-danger" id="bol-cancel-${k}" title="Anular antes de enviar">Anular</button>`);
-    }
-    if (d.estado === "sent") {
-      actions.push(`<button class="btn-ghost rb-btn ghost" id="bol-poll-${k}" title="Consultar veredicto del SII">Consultar</button>`);
-    }
-    return `
-      <tr data-dte="${escapeHtml(d.id)}">
-        <td class="num">${num(d.folio)}</td>
-        <td>${fechaHora(d.fecha_emision)}</td>
-        <td><div class="cell-main">${escapeHtml(d.razon_social_receptor)}</div><div class="muted">${escapeHtml(d.rut_receptor)}</div></td>
-        <td class="num">${clp(d.monto_total)}</td>
-        <td><span class="${badge.cls}">${badge.label}</span></td>
-        <td class="muted">${sii}</td>
-        <td class="bol-actions">${actions.join("") || "—"}</td>
-      </tr>
-    `;
-  }
-
   function wireRow(d: Dte): void {
-    const k = cssKey(d.id);
+    const k = dteCssKey(d.id);
     listEl.querySelector<HTMLButtonElement>(`#bol-xml-${k}`)?.addEventListener("click", async (ev) => {
       const btn = ev.currentTarget as HTMLButtonElement;
       btn.disabled = true;
@@ -359,11 +321,6 @@ export function renderBoletas(host: HTMLElement, serverUrl: string): void {
 
   void loadCaf();
   void loadList();
-}
-
-/** Record ids (`dte:abc`) are not valid in CSS selectors — strip to the key. */
-function cssKey(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
 function downloadXml(xml: string, filename: string): void {

@@ -567,6 +567,18 @@ pub async fn receive_purchase_order_lines(
                 "qty_received debe ser mayor a 0".into(),
             ));
         }
+        // A fecha de vencimiento sin código de lote no puede persistirse: la
+        // recepción no tendría una identidad de lote a la que asociarla y la
+        // fecha se perdería, dejando una señal de trazabilidad falsa. La
+        // regla es común a todos los rubros físicos; farmacia además conserva
+        // la exigencia existente de lote + vencimiento para FEFO.
+        let has_lot = rl.lot.as_deref().is_some_and(|l| !l.trim().is_empty());
+        if !has_lot && rl.expiry_date.is_some() {
+            return Err(DomainError::Invalid(format!(
+                "la línea {} indica expiry_date sin lote",
+                rl.po_line_id
+            )));
+        }
         let line_thing = parse_typed(&rl.po_line_id, "purchase_order_item")?;
         let item = by_id.get(rl.po_line_id.as_str()).copied().ok_or_else(|| {
             DomainError::Invalid(format!(
@@ -608,7 +620,6 @@ pub async fn receive_purchase_order_lines(
         // Guard the batch invariant: a lot-tracked product (has active
         // batches now, or gets a lot elsewhere in this receipt) cannot accept
         // a non-lotted line — that would bump product.stock without a batch.
-        let has_lot = rl.lot.as_deref().is_some_and(|l| !l.trim().is_empty());
         if !has_lot
             && (lotted_in_req.contains(pid_str)
                 || crate::inventory::repo::count_active_batches(db, tenant, &pid, branch.as_ref())

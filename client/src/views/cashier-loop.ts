@@ -388,6 +388,47 @@ export function deriveTipo(lines: RefundDraftLine[]): "total" | "parcial" {
  *  on the wire. */
 export type ReturnMotivo = "venta" | "cancelacion" | "garantia" | "error";
 
+export type RefundMethod = "efectivo" | "tarjeta" | "transferencia" | "fiado";
+
+/** Choose the safest refund rail from the original sale. Cash refunds withdraw
+ * from the open drawer; card/transfer refunds stay outside the drawer; fiado
+ * reverses the customer's debt. Unknown/legacy payment methods keep the old
+ * cash default so the cashier must still see and confirm the rail. */
+export function refundMethodForPayment(paymentMethod: string | null | undefined): RefundMethod {
+  switch ((paymentMethod ?? "").trim().toLowerCase()) {
+    case "pos_card":
+    case "card":
+      return "tarjeta";
+    case "pos_transferencia":
+    case "transferencia":
+      return "transferencia";
+    case "pos_fiado":
+    case "fiado":
+      return "fiado";
+    case "pos_cash":
+    case "pos_mixed":
+    case "cash":
+    default:
+      return "efectivo";
+  }
+}
+
+/** Short cashier-facing explanation of the selected refund rail. */
+export function refundMethodHint(method: string): string {
+  switch (method) {
+    case "efectivo":
+      return "Sale efectivo de la caja abierta y quedará reflejado en el cierre.";
+    case "fiado":
+      return "Revierte el monto devuelto de la deuda del cliente; no mueve efectivo.";
+    case "tarjeta":
+      return "El reembolso vuelve por el procesador; no descuenta efectivo de caja.";
+    case "transferencia":
+      return "El reembolso vuelve por transferencia; no descuenta efectivo de caja.";
+    default:
+      return "Revisa el método antes de confirmar la devolución.";
+  }
+}
+
 /** Default motivo for a normal POS return against a sale. */
 export const DEFAULT_RETURN_MOTIVO: ReturnMotivo = "venta";
 

@@ -26,6 +26,8 @@ import {
   validateRefund,
   DEFAULT_RETURN_MOTIVO,
   returnMotivoLabel,
+  refundMethodForPayment,
+  refundMethodHint,
   type RefundDraftLine,
 } from "./cashier-loop";
 import { bindModalKeys } from "./modal-keys";
@@ -58,6 +60,7 @@ const METODO_OPTS: { value: string; label: string }[] = [
   { value: "efectivo", label: "Efectivo" },
   { value: "tarjeta", label: "Tarjeta" },
   { value: "transferencia", label: "Transferencia" },
+  { value: "fiado", label: "Abono a cuenta (fiado)" },
 ];
 
 export function renderDevoluciones(host: HTMLElement, serverUrl: string): void {
@@ -188,6 +191,7 @@ function openRefundModal(
             <select id="dev-f-metodo" class="view-select">
               ${METODO_OPTS.map((o) => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("")}
             </select>
+            <p id="dev-f-metodo-hint" class="muted"></p>
           </div>
         </div>
         <div class="modal-field">
@@ -226,9 +230,16 @@ function openRefundModal(
   // restockControlHtml), so a refund there never tries to re-stock.
   const restockEl = modalHost.querySelector<HTMLInputElement>("#dev-f-restock");
   const metodoEl = modalHost.querySelector<HTMLSelectElement>("#dev-f-metodo")!;
+  const metodoHintEl = modalHost.querySelector<HTMLElement>("#dev-f-metodo-hint")!;
   const notasEl = modalHost.querySelector<HTMLInputElement>("#dev-f-notas")!;
   const errEl = modalHost.querySelector<HTMLElement>("#dev-f-error")!;
   const saveBtn = modalHost.querySelector<HTMLButtonElement>("#dev-f-save")!;
+
+  const refreshMetodoHint = () => {
+    metodoHintEl.textContent = refundMethodHint(metodoEl.value);
+  };
+  metodoEl.addEventListener("change", refreshMetodoHint);
+  refreshMetodoHint();
 
   modalHost.querySelector<HTMLButtonElement>("#dev-f-cancel")!.addEventListener("click", close);
   modalHost.querySelector<HTMLElement>("#dev-modal-backdrop")!.addEventListener("click", (e) => {
@@ -282,6 +293,11 @@ function openRefundModal(
     itemsHost.innerHTML = tableSkeleton(4);
     try {
       receipt = await getReceipt(serverUrl, id);
+      // Keep the refund on the same settlement rail as the source sale by
+      // default. The cashier can still override it when the real settlement
+      // differs, but the drawer-impact warning is then visible immediately.
+      metodoEl.value = refundMethodForPayment(receipt.payment_method);
+      refreshMetodoHint();
       renderItemRows(itemsHost, receipt);
       refreshTipoBadge();
       saveBtn.disabled = false;
