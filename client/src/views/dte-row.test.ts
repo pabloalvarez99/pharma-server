@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Dte } from "../api";
-import { dteRowHtml } from "./dte-row";
+import { dteCssKey, dteRowHtml } from "./dte-row";
 
 const hostile = {
   id: 'dte:<img src=x onerror="boom">',
@@ -32,5 +32,12 @@ describe("dteRowHtml · cumplimiento", () => {
     const html = dteRowHtml({ ...hostile, estado: "signed" }, { prefix: "fac", sendPlan: "Business" });
     expect(html).toMatch(/id="fac-xml-dte-/);
     expect(html).toContain("requiere plan Business");
+  });
+
+  it("usa claves DOM inyectivas y tolera estados heredados", () => {
+    expect(dteCssKey("dte:a.b")).not.toBe(dteCssKey("dte:a-b"));
+    const html = dteRowHtml({ ...hostile, estado: "__proto__" }, { prefix: "bol", sendPlan: "Pro" });
+    expect(html).toContain('class="pill"');
+    expect(html).toContain("__proto__");
   });
 });

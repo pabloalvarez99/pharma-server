@@ -2,13 +2,13 @@ import type { Dte } from "../api";
 import { clp, fechaHora, num } from "../format";
 import { escapeHtml } from "./view-blocks";
 
-const ESTADO_BADGE: Record<string, { label: string; cls: string }> = {
-  draft: { label: "Borrador", cls: "pill" },
-  signed: { label: "Firmado", cls: "pill pill-ok" },
-  sent: { label: "Enviado SII", cls: "pill pill-warn" },
-  accepted: { label: "Aceptado", cls: "pill pill-ok" },
-  rejected: { label: "Rechazado", cls: "pill pill-danger" },
-  cancelled: { label: "Anulado", cls: "pill" },
+const ESTADO_BADGE: Record<string, { feminine: string; masculine: string; cls: string }> = {
+  draft: { feminine: "Borrador", masculine: "Borrador", cls: "pill" },
+  signed: { feminine: "Firmada", masculine: "Firmado", cls: "pill pill-ok" },
+  sent: { feminine: "Enviada SII", masculine: "Enviado SII", cls: "pill pill-warn" },
+  accepted: { feminine: "Aceptada", masculine: "Aceptado", cls: "pill pill-ok" },
+  rejected: { feminine: "Rechazada", masculine: "Rechazado", cls: "pill pill-danger" },
+  cancelled: { feminine: "Anulada", masculine: "Anulado", cls: "pill" },
 };
 
 export interface DteRowOptions {
@@ -18,7 +18,12 @@ export interface DteRowOptions {
 
 /** Render one server-backed DTE row without allowing malformed fields into HTML. */
 export function dteRowHtml(d: Dte, { prefix, sendPlan }: DteRowOptions): string {
-  const badge = ESTADO_BADGE[d.estado] ?? { label: d.estado, cls: "pill" };
+  const badgeDef = Object.prototype.hasOwnProperty.call(ESTADO_BADGE, d.estado)
+    ? ESTADO_BADGE[d.estado]
+    : null;
+  const badge = badgeDef
+    ? { label: prefix === "bol" ? badgeDef.feminine : badgeDef.masculine, cls: badgeDef.cls }
+    : { label: d.estado, cls: "pill" };
   const sii = d.track_id !== null
     ? `track ${escapeHtml(String(d.track_id))}${d.sii_glosa ? ` · ${escapeHtml(d.sii_glosa)}` : ""}`
     : "—";
@@ -48,5 +53,10 @@ export function dteRowHtml(d: Dte, { prefix, sendPlan }: DteRowOptions): string 
 }
 
 export function dteCssKey(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "-");
+  // Encode each Unicode code point at a fixed width so distinct server IDs
+  // cannot collapse to the same DOM id (`a.b` vs `a-b`). The alphabet is
+  // limited to CSS-selector-safe characters.
+  return `dte-${Array.from(id)
+    .map((char) => (char.codePointAt(0) ?? 0).toString(16).padStart(6, "0"))
+    .join("-")}`;
 }
