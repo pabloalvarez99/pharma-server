@@ -125,6 +125,12 @@ pub fn run() {
             config::delete_register,
             config::run_backup,
             config::list_backups,
+            config::config_get_payment_methods,
+            config::config_set_payment_methods,
+            config::config_get_business,
+            config::config_set_business,
+            config::dte_upload_cert,
+            config::dte_upload_caf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running rutbusiness-client");
